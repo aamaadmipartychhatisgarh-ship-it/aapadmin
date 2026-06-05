@@ -6,7 +6,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import Heartbeat from "@/components/Heartbeat";
-import NotificationBell from "@/components/NotificationBell";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 async function handleSignOut() {
@@ -227,10 +226,8 @@ export default function DashboardLayout({ children }) {
             </div>
           </div>
 
-          {/* Header Right - User & Notifications */}
+          {/* Header Right - User */}
           <div className="flex items-center gap-4">
-            {(isUserAdmin || isSupervisor) && <NotificationBell />}
-
             <div className="flex items-center gap-3 pl-4">
               <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
                 <User size={20} />
