@@ -28,33 +28,13 @@ fn wait_for_server(port: u16, timeout: Duration) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Build the updater plugin. The release repo is PRIVATE, so GitHub returns 404
-    // for anonymous requests to release assets (latest.json + the installer). We
-    // attach a read-only GitHub token so the updater can fetch them. The token is
-    // injected at compile time via the UPDATER_GH_TOKEN env var (set locally and in
-    // CI). `Authorization` authorizes the API/redirect; `Accept: application/octet-stream`
-    // makes the asset endpoints return the file bytes; the API version pins behavior.
-    let updater_builder = {
-        let mut b = tauri_plugin_updater::Builder::new();
-        if let Some(token) = option_env!("UPDATER_GH_TOKEN") {
-            if !token.is_empty() {
-                b = b
-                    .header("Authorization", format!("Bearer {token}"))
-                    .expect("invalid Authorization header")
-                    .header("Accept", "application/octet-stream")
-                    .expect("invalid Accept header")
-                    .header("X-GitHub-Api-Version", "2022-11-28")
-                    .expect("invalid api-version header");
-            }
-        }
-        b.build()
-    };
-
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         // Auto-update: checks the configured endpoint (GitHub Releases) for a newer
         // signed version and installs it on user confirmation (handled in the UI).
-        .plugin(updater_builder)
+        // The release repo is PUBLIC, so release assets (latest.json + installer)
+        // are anonymously downloadable — no auth header needed.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Lets the updater relaunch the app after installing.
         .plugin(tauri_plugin_process::init())
         // Log to a file in the app's log dir in BOTH debug and release so that

@@ -11,6 +11,9 @@ name: Release desktop app
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   TAURI_SIGNING_PRIVATE_KEY           contents of aap-admin-updater.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the key's password
+#   DB_HOST DB_USER DB_PASSWORD DB_NAME DB_PORT NEXTAUTH_SECRET
+#                                       written into .env.production at build time
+#                                       (kept out of the now-public repo)
 
 on:
   push:
@@ -42,15 +45,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The DB/auth env is no longer committed (repo is public). Recreate
+      # .env.production from secrets so the bundled standalone server has creds.
+      - name: Write .env.production from secrets
+        shell: bash
+        run: |
+          cat > .env.production <<EOF
+          DB_HOST=${{ secrets.DB_HOST }}
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_PORT=${{ secrets.DB_PORT }}
+          NEXTAUTH_URL=http://127.0.0.1:3000
+          NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+          HOSTNAME=127.0.0.1
+          PORT=3000
+          EOF
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Read-only PAT baked into the app so the updater can fetch assets from
-          # the private release repo. Read at compile time via option_env! in lib.rs.
-          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "AAP Admin ${{ github.ref_name }}"
