@@ -18,30 +18,55 @@ export default function UpdateChecker() {
   const [status, setStatus] = useState("idle"); // idle | downloading | error | done
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
+  const [toast, setToast] = useState(""); // transient message for manual checks
 
   const isTauri =
     typeof window !== "undefined" && typeof window.__TAURI__ !== "undefined";
 
-  // Check for an update on mount (desktop only).
-  useEffect(() => {
-    if (!isTauri) return;
-    let cancelled = false;
-    (async () => {
+  // Core check. `manual` = triggered by the sidebar button (shows feedback
+  // even when no update / on error). Auto checks stay silent unless one is found.
+  const runCheck = useCallback(
+    async (manual) => {
+      if (!isTauri) {
+        if (manual) {
+          setToast("Updates are only available in the desktop app.");
+          setTimeout(() => setToast(""), 4000);
+        }
+        return;
+      }
       try {
+        if (manual) setToast("Checking for updates…");
         const { check } = window.__TAURI__.updater;
         const found = await check();
-        if (!cancelled && found && found.available) {
+        if (found && found.available) {
+          setToast("");
           setUpdate(found);
+        } else if (manual) {
+          setToast("You’re on the latest version.");
+          setTimeout(() => setToast(""), 4000);
         }
       } catch (e) {
-        // Network/endpoint errors are non-fatal — just skip the banner.
         console.warn("update check failed:", e);
+        if (manual) {
+          setToast("Couldn’t check for updates. Try again later.");
+          setTimeout(() => setToast(""), 4000);
+        }
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isTauri]);
+    },
+    [isTauri]
+  );
+
+  // Auto-check once on mount (silent).
+  useEffect(() => {
+    runCheck(false);
+  }, [runCheck]);
+
+  // Manual trigger: any component can dispatch window event "check-for-updates".
+  useEffect(() => {
+    const handler = () => runCheck(true);
+    window.addEventListener("check-for-updates", handler);
+    return () => window.removeEventListener("check-for-updates", handler);
+  }, [runCheck]);
 
   const install = useCallback(async () => {
     if (!update) return;
@@ -78,7 +103,30 @@ export default function UpdateChecker() {
     }
   }, [update]);
 
-  if (!isTauri || !update) return null;
+  // No update banner, but maybe a transient toast (from a manual check).
+  if (!update) {
+    if (!toast) return null;
+    return (
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          right: 16,
+          zIndex: 9999,
+          maxWidth: "calc(100vw - 32px)",
+          background: "#111827",
+          color: "#fff",
+          borderRadius: 10,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+          padding: "12px 16px",
+          fontSize: 13,
+          fontFamily: "system-ui, sans-serif",
+        }}
+      >
+        {toast}
+      </div>
+    );
+  }
 
   return (
     <div
