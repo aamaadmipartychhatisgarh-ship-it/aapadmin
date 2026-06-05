@@ -1,33 +1,39 @@
 name: Release desktop app
 
-# Builds the Windows installer and publishes a signed GitHub Release whenever
-# you push a version tag like v0.1.1. The installed app's auto-updater reads
-# the latest.json this produces and offers the update in-app.
+# AUTO-RELEASE: every push to master builds a new signed installer, auto-bumps
+# the patch version, tags it, and publishes a GitHub Release. Installed apps then
+# see the new version via the in-app updater and offer "Update available".
 #
-# To cut a release:
-#   1. Bump "version" in src-tauri/tauri.conf.json (e.g. 0.1.1)
-#   2. git commit + git tag v0.1.1 && git push --tags
+# So the workflow is simply: push code to master → every user gets the update.
+#
+# Skip a release for a given commit by putting "[skip release]" in the message.
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   TAURI_SIGNING_PRIVATE_KEY           contents of aap-admin-updater.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the key's password
 #   DB_HOST DB_USER DB_PASSWORD DB_NAME DB_PORT NEXTAUTH_SECRET
 #                                       written into .env.production at build time
-#                                       (kept out of the now-public repo)
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [master]
+
+# Don't run two releases at once; cancel older in-progress runs.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: "!contains(github.event.head_commit.message, '[skip release]') && !startsWith(github.event.head_commit.message, 'chore: release v')"
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -37,16 +43,45 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Cache Rust build artifacts so repeat builds are ~3-4 min instead of ~10.
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
 
       - name: Install dependencies
         run: npm ci
 
-      # The DB/auth env is no longer committed (repo is public). Recreate
-      # .env.production from secrets so the bundled standalone server has creds.
+      # Auto-bump the patch version in package.json + tauri.conf.json, commit it
+      # back, and compute the new tag. This is what makes "just push" = "release".
+      - name: Bump version
+        id: bump
+        shell: bash
+        run: |
+          cur=$(node -p "require('./package.json').version")
+          IFS='.' read -r MA MI PA <<< "$cur"
+          new="$MA.$MI.$((PA+1))"
+          echo "Bumping $cur -> $new"
+          # package.json
+          node -e "const f='package.json';const p=require('./'+f);p.version='$new';require('fs').writeFileSync(f, JSON.stringify(p,null,2)+'\n')"
+          # tauri.conf.json
+          node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.version='$new';require('fs').writeFileSync(f, JSON.stringify(c,null,2)+'\n')"
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "tag=v$new" >> "$GITHUB_OUTPUT"
+
+      - name: Commit version bump
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json
+          git commit -m "chore: release ${{ steps.bump.outputs.tag }}"
+          git tag ${{ steps.bump.outputs.tag }}
+          git push origin HEAD:master
+          git push origin ${{ steps.bump.outputs.tag }}
+
+      # The DB/auth env is not committed (public repo). Recreate it from secrets.
       - name: Write .env.production from secrets
         shell: bash
         run: |
@@ -69,8 +104,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "AAP Admin ${{ github.ref_name }}"
+          tagName: ${{ steps.bump.outputs.tag }}
+          releaseName: "AAP Admin ${{ steps.bump.outputs.tag }}"
           releaseBody: "Automated desktop release. The app will offer this update in-app."
           releaseDraft: false
           prerelease: false

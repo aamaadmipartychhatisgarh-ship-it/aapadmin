@@ -50,17 +50,17 @@ export default function UpdateChecker() {
         const msg = String(e?.message || e || "");
         console.warn("update check failed:", e);
         if (manual) {
-          // Some updater versions throw (instead of returning null) when the
-          // remote version is the same as the installed one. Treat the common
-          // "no newer version" signals as up-to-date, not as a failure.
+          // Some updater versions throw (instead of returning null) when there
+          // is no newer release. Treat those as up-to-date.
           const upToDate =
-            /up to date|no update|latest|could not fetch a valid release|404/i.test(msg);
+            /up to date|no update|latest|could not fetch a valid release|no release/i.test(
+              msg
+            );
+          // Otherwise surface the real error so failures are diagnosable.
           setToast(
-            upToDate
-              ? "You’re on the latest version."
-              : "Couldn’t check for updates. Try again later."
+            upToDate ? "You’re on the latest version." : `Update check error: ${msg}`
           );
-          setTimeout(() => setToast(""), 4000);
+          setTimeout(() => setToast(""), 8000);
         }
       }
     },
