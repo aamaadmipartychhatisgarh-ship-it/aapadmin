@@ -4,7 +4,7 @@ import { useSession, signOut } from "next-auth/react";
 import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Heartbeat from "@/components/Heartbeat";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
@@ -19,10 +19,20 @@ export default function DashboardLayout({ children }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
   const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
+
+  // Read the desktop app version (Tauri only).
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.__TAURI__?.app?.getVersion) {
+      window.__TAURI__.app.getVersion().then(setAppVersion).catch(() => {});
+    }
+  }, []);
 
   if (status === "loading" || status === "unauthenticated") {
     return <div className="min-h-screen bg-[#0B3A82] flex items-center justify-center text-white">Loading...</div>;
@@ -156,6 +166,12 @@ export default function DashboardLayout({ children }) {
     ];
   }
 
+  // Filter nav items for the header search bar.
+  const q = searchQuery.trim().toLowerCase();
+  const searchResults = q
+    ? navItems.filter((item) => item.name.toLowerCase().includes(q))
+    : [];
+
   return (
     <div className="h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
       <Heartbeat />
@@ -206,6 +222,11 @@ export default function DashboardLayout({ children }) {
             <LogOut size={18} />
             <span>Sign out</span>
           </button>
+          {appVersion && (
+            <div className="pt-2 text-center text-[11px] text-blue-300/70">
+              Version {appVersion}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -231,6 +252,41 @@ export default function DashboardLayout({ children }) {
               <h1 className="text-[28px] font-bold text-[#0B3A82] leading-tight">Aam Aadmi Party, Chhattisgarh</h1>
               <p className="text-[15px] text-gray-600 mt-0.5 font-medium">Honest Politics | Better Chhattisgarh</p>
             </div>
+          </div>
+
+          {/* Header Center - Search */}
+          <div className="flex-1 max-w-md mx-8 relative">
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchOpen(true)}
+              onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+              placeholder="Search pages…"
+              className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0B3A82]/30 focus:border-[#0B3A82]"
+            />
+            {searchOpen && searchQuery.trim() && (
+              <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-20 max-h-72 overflow-y-auto">
+                {searchResults.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-gray-400">No matches</div>
+                ) : (
+                  searchResults.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.href}
+                        onMouseDown={() => { router.push(item.href); setSearchQuery(""); setSearchOpen(false); }}
+                        className="flex items-center gap-3 w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <Icon size={16} className="text-[#0B3A82]" />
+                        <span>{item.name}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
 
           {/* Header Right - User */}
