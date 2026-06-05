@@ -9,7 +9,7 @@ Next.js server that runs locally and talks to your Hostinger MySQL).
 ```
 AAP Admin.exe  (Tauri / Rust shell)
    └── on launch → spawns bundled Node + Next.js standalone server  (127.0.0.1:3000)
-                      └── connects to remote MySQL  (193.203.184.146 / u321483967_aap)
+                      └── connects to remote MySQL  (configured via .env.production)
    └── webview window → loads http://127.0.0.1:3000
 ```
 
