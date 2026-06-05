@@ -42,13 +42,24 @@ export default function UpdateChecker() {
           setToast("");
           setUpdate(found);
         } else if (manual) {
+          // check() returned null/no-update → already current.
           setToast("You’re on the latest version.");
           setTimeout(() => setToast(""), 4000);
         }
       } catch (e) {
+        const msg = String(e?.message || e || "");
         console.warn("update check failed:", e);
         if (manual) {
-          setToast("Couldn’t check for updates. Try again later.");
+          // Some updater versions throw (instead of returning null) when the
+          // remote version is the same as the installed one. Treat the common
+          // "no newer version" signals as up-to-date, not as a failure.
+          const upToDate =
+            /up to date|no update|latest|could not fetch a valid release|404/i.test(msg);
+          setToast(
+            upToDate
+              ? "You’re on the latest version."
+              : "Couldn’t check for updates. Try again later."
+          );
           setTimeout(() => setToast(""), 4000);
         }
       }
