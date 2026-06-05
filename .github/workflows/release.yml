@@ -1,0 +1,57 @@
+name: Release desktop app
+
+# Builds the Windows installer and publishes a signed GitHub Release whenever
+# you push a version tag like v0.1.1. The installed app's auto-updater reads
+# the latest.json this produces and offers the update in-app.
+#
+# To cut a release:
+#   1. Bump "version" in src-tauri/tauri.conf.json (e.g. 0.1.1)
+#   2. git commit + git tag v0.1.1 && git push --tags
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           contents of aap-admin-updater.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the key's password
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "AAP Admin ${{ github.ref_name }}"
+          releaseBody: "Automated desktop release. The app will offer this update in-app."
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

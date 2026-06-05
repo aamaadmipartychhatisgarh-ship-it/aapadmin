@@ -1,0 +1,105 @@
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { isOversight } from "@/lib/permissions";
+import { getPool } from "@/lib/db";
+
+// Body: { contact_id?: number }
+// If contact_id given: claim that specific contact (must be assigned to user OR in pool with same district).
+// If omitted: claim the next available contact from caller's home_district pool.
+// Returns the claimed contact, or 409 if nothing available.
+export async function POST(req) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    if (isOversight(session)) {
+      return NextResponse.json({ message: "Only callers can claim contacts." }, { status: 403 });
+    }
+    const userId = session.user.id;
+    const body = await req.json().catch(() => ({}));
+    const explicitId = body.contact_id;
+
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // Release any stale lock the caller might still hold
+      await conn.execute(
+        `UPDATE contacts SET locked_by_user_id = NULL, locked_at = NULL
+          WHERE locked_by_user_id = ? AND locked_at < NOW() - INTERVAL 10 MINUTE`,
+        [userId]
+      );
+
+      let row;
+      if (explicitId) {
+        const [rows] = await conn.execute(
+          `SELECT * FROM contacts WHERE id = ?
+             AND is_completed = 0
+             AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
+             AND (assigned_to_user_id = ?
+                  OR (assigned_to_user_id IS NULL
+                       AND (locked_by_user_id IS NULL OR locked_by_user_id = ? OR locked_at < NOW() - INTERVAL 10 MINUTE)))
+           FOR UPDATE`,
+          [explicitId, userId, userId]
+        );
+        row = rows[0];
+      } else {
+        const [[me]] = await conn.execute(`SELECT home_district_id FROM users WHERE id = ?`, [userId]);
+        if (!me?.home_district_id) {
+          await conn.rollback();
+          return NextResponse.json({ message: "No home district set. Ask an admin to assign one." }, { status: 400 });
+        }
+        // Try caller's own assigned queue first (incl. due follow-ups), then fall back to the district pool.
+        const [assignedRows] = await conn.execute(
+          `SELECT * FROM contacts
+            WHERE is_completed = 0
+              AND assigned_to_user_id = ?
+              AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
+              AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
+            ORDER BY is_vip DESC, follow_up_date IS NOT NULL DESC, follow_up_date ASC, id ASC
+            LIMIT 1 FOR UPDATE`,
+          [userId]
+        );
+        if (assignedRows[0]) {
+          row = assignedRows[0];
+        } else {
+          const [poolRows] = await conn.execute(
+            `SELECT * FROM contacts
+              WHERE is_completed = 0
+                AND assigned_to_user_id IS NULL
+                AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
+                AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
+                AND district_id = ?
+              ORDER BY id ASC
+              LIMIT 1 FOR UPDATE`,
+            [me.home_district_id]
+          );
+          row = poolRows[0];
+        }
+      }
+
+      if (!row) {
+        await conn.rollback();
+        return NextResponse.json({ message: "No contacts available" }, { status: 409 });
+      }
+
+      await conn.execute(
+        `UPDATE contacts SET locked_by_user_id = ?, locked_at = NOW() WHERE id = ?`,
+        [userId, row.id]
+      );
+      await conn.commit();
+      return NextResponse.json({ contact: { ...row, locked_by_user_id: userId } });
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
+    }
+  } catch (err) {
+    console.error("workspace claim error:", err);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}

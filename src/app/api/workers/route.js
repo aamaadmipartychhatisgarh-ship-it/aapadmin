@@ -1,0 +1,74 @@
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
+import { query } from "@/lib/db";
+
+// GET /api/workers?search=&district_id=&assembly_id=&status=&page=&limit=
+export async function GET(req) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || !isOversight(session)) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    const { searchParams } = new URL(req.url);
+    const search = searchParams.get("search");
+    const districtId = searchParams.get("district_id");
+    const assemblyId = searchParams.get("assembly_id");
+    const status = searchParams.get("status");
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
+    const offset = (page - 1) * limit;
+
+    const where = [];
+    const params = [];
+    if (search) { where.push("(w.name LIKE ? OR w.mobile LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
+    if (districtId) { where.push("w.district_id = ?"); params.push(districtId); }
+    if (assemblyId) { where.push("w.assembly_id = ?"); params.push(assemblyId); }
+    if (status) { where.push("w.status = ?"); params.push(status); }
+    // Geographic scope from role
+    const scope = scopeFilterSync(session.user, "w");
+    if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const [[{ total }]] = await query(`SELECT COUNT(*) AS total FROM workers w ${whereSql}`, params).then((r) => [r]);
+
+    const workers = await query(
+      `SELECT w.*, ld.name AS district_name, la.name AS assembly_name
+         FROM workers w
+         LEFT JOIN locations ld ON ld.id = w.district_id
+         LEFT JOIN locations la ON la.id = w.assembly_id
+         ${whereSql}
+         ORDER BY w.activity_score DESC, w.id DESC
+         LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+
+    return NextResponse.json({ workers, total, page, limit, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    console.error("workers GET error:", err);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}
+
+export async function POST(req) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || !isAdmin(session)) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    const d = await req.json();
+    if (!d.name) return NextResponse.json({ message: "Name is required" }, { status: 400 });
+    const res = await query(
+      `INSERT INTO workers (name, mobile, address, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [d.name, d.mobile || null, d.address || null, d.district_id || null, d.assembly_id || null,
+       d.ward_id || null, d.booth_id || null, d.position || null, d.skills || null,
+       d.status === "inactive" ? "inactive" : "active", Number(d.activity_score) || 0]
+    );
+    return NextResponse.json({ id: res.insertId }, { status: 201 });
+  } catch (err) {
+    console.error("workers POST error:", err);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}

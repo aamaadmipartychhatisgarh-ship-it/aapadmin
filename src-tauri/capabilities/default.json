@@ -1,0 +1,25 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "default permissions + spawn the bundled Next.js server sidecar + navigate the window",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "shell:allow-execute",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "node-server",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    "updater:default",
+    "process:default",
+    "process:allow-restart"
+  ]
+}
