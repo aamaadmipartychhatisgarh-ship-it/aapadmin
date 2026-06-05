@@ -298,6 +298,9 @@ export default function DashboardLayout({ children }) {
 
           {/* Header Right - User */}
           <div className="flex items-center gap-4">
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold border border-green-200">
+              ✨ Updated to v0.1.4
+            </span>
             <div className="flex items-center gap-3 pl-4">
               <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
                 <User size={20} />

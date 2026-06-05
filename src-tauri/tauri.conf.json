@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "AAP Admin",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "identifier": "in.aap.chhattisgarh.admin",
   "build": {
     "frontendDist": "frontend-shell",
