@@ -21,18 +21,25 @@ export default function DashboardLayout({ children }) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState("");
+  // App version — injected at build time (works in browser AND desktop).
+  // Falls back to the Tauri app API if the env var isn't set.
+  const [appVersion, setAppVersion] = useState(
+    process.env.NEXT_PUBLIC_APP_VERSION || ""
+  );
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
 
-  // Read the desktop app version (Tauri only).
   useEffect(() => {
-    if (typeof window !== "undefined" && window.__TAURI__?.app?.getVersion) {
+    if (
+      !appVersion &&
+      typeof window !== "undefined" &&
+      window.__TAURI__?.app?.getVersion
+    ) {
       window.__TAURI__.app.getVersion().then(setAppVersion).catch(() => {});
     }
-  }, []);
+  }, [appVersion]);
 
   if (status === "loading" || status === "unauthenticated") {
     return <div className="min-h-screen bg-[#0B3A82] flex items-center justify-center text-white">Loading...</div>;
