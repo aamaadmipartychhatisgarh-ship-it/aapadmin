@@ -6,12 +6,42 @@
 // 127.0.0.1:3000, wait until it responds, then the webview window loads it.
 
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
 const SERVER_PORT: u16 = 3000;
+
+// PID of the spawned node-server sidecar (0 = none). We kill it on app exit so
+// the updater can overwrite node-server.exe (otherwise the file is locked and
+// the installer shows "Error opening file for writing").
+static SIDECAR_PID: AtomicU32 = AtomicU32::new(0);
+
+// Force-kill the sidecar process by PID (Windows: taskkill /F).
+fn kill_sidecar() {
+    let pid = SIDECAR_PID.swap(0, Ordering::SeqCst);
+    if pid != 0 {
+        log::info!("killing node-server sidecar pid {}", pid);
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .status();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .status();
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 // Block until the Next.js server is accepting TCP connections on the port,
 // or until `timeout` elapses. Returns true if it came up.
@@ -88,8 +118,12 @@ pub fn run() {
                             .env("HOSTNAME", "127.0.0.1");
 
                         match sidecar.spawn() {
-                            Ok((mut rx, _child)) => {
+                            Ok((mut rx, child)) => {
                                 log::info!("node-server sidecar spawned");
+                                // Remember the sidecar PID so we can kill it before
+                                // the updater installs (otherwise node-server.exe is
+                                // locked and the installer fails to overwrite it).
+                                SIDECAR_PID.store(child.pid(), Ordering::SeqCst);
                                 // Drain sidecar stdout/stderr into the log file.
                                 tauri::async_runtime::spawn(async move {
                                     while let Some(event) = rx.recv().await {
@@ -139,6 +173,14 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // Kill the sidecar as the app is exiting so the updater can replace
+            // node-server.exe. ExitRequested fires before the process tears down;
+            // the updater triggers an exit right before launching the installer.
+            if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
+                kill_sidecar();
+            }
+        });
 }
