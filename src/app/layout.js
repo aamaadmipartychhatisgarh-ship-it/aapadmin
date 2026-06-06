@@ -12,6 +12,12 @@ export const metadata = {
   description: "Secure admin dashboard",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export default function RootLayout({ children }) {
   return (
     <html

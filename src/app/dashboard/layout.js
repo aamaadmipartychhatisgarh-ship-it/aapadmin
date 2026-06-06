@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper } from "lucide-react";
+import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -21,6 +21,12 @@ export default function DashboardLayout({ children }) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
   // App version — injected at build time from package.json.
   const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "";
 
@@ -170,8 +176,29 @@ export default function DashboardLayout({ children }) {
     <div className="h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
       <Heartbeat />
 
-      {/* Sidebar */}
-      <aside className="w-[260px] flex-shrink-0 flex flex-col h-full bg-[#0B3A82] text-white">
+      {/* Mobile drawer overlay */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
+      {/* Sidebar — off-canvas drawer on mobile, fixed on desktop */}
+      <aside
+        className={`w-[260px] flex-shrink-0 flex flex-col h-full bg-[#0B3A82] text-white
+          fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 lg:static lg:transform-none
+          ${mobileNavOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+      >
+        {/* Close button (mobile only) */}
+        <button
+          onClick={() => setMobileNavOpen(false)}
+          className="lg:hidden absolute top-3 right-3 text-blue-200 hover:text-white p-1"
+          aria-label="Close menu"
+        >
+          <X size={22} />
+        </button>
+
         {/* Logo */}
         <div className="flex flex-col items-center py-6 border-b border-white/10">
           <img src="/aap_logo.jpg" alt="AAP Logo" className="w-20 h-20 object-contain mb-2 rounded-full border-2 border-white/20 bg-white" />
@@ -221,28 +248,36 @@ export default function DashboardLayout({ children }) {
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         
         {/* Header */}
-        <header className="bg-white h-[100px] flex items-center justify-between px-8 border-b border-gray-200 shrink-0 shadow-sm z-10">
+        <header className="bg-white h-[72px] lg:h-[100px] flex items-center justify-between gap-2 px-3 lg:px-8 border-b border-gray-200 shrink-0 shadow-sm z-10">
           {/* Header Left - Organization Info */}
-          <div className="flex items-center gap-5">
-            <div className="w-[100px] h-[100px] flex items-center justify-center shrink-0 -mt-2">
-              <img 
-                src="/kejriwal_new.png" 
-                alt="Arvind Kejriwal" 
-                className="w-full h-full object-contain scale-125 mix-blend-multiply drop-shadow-sm" 
+          <div className="flex items-center gap-2 lg:gap-5 min-w-0">
+            {/* Hamburger (mobile only) */}
+            <button
+              onClick={() => setMobileNavOpen(true)}
+              className="lg:hidden text-[#0B3A82] p-1 shrink-0"
+              aria-label="Open menu"
+            >
+              <Menu size={26} />
+            </button>
+            <div className="hidden sm:flex w-[60px] h-[60px] lg:w-[100px] lg:h-[100px] items-center justify-center shrink-0 lg:-mt-2">
+              <img
+                src="/kejriwal_new.png"
+                alt="Arvind Kejriwal"
+                className="w-full h-full object-contain scale-125 mix-blend-multiply drop-shadow-sm"
                 onError={(e) => {
                   e.target.style.display = 'none';
                   e.target.parentElement.innerHTML = '<span class="text-gray-400 font-bold text-xl">AK</span>';
-                }} 
+                }}
               />
             </div>
-            <div className="flex flex-col justify-center">
-              <h1 className="text-[28px] font-bold text-[#0B3A82] leading-tight">Aam Aadmi Party, Chhattisgarh</h1>
-              <p className="text-[15px] text-gray-600 mt-0.5 font-medium">Honest Politics | Better Chhattisgarh</p>
+            <div className="flex flex-col justify-center min-w-0">
+              <h1 className="text-base lg:text-[28px] font-bold text-[#0B3A82] leading-tight truncate">Aam Aadmi Party, Chhattisgarh</h1>
+              <p className="hidden sm:block text-xs lg:text-[15px] text-gray-600 mt-0.5 font-medium truncate">Honest Politics | Better Chhattisgarh</p>
             </div>
           </div>
 
-          {/* Header Center - Search */}
-          <div className="flex-1 max-w-md mx-8 relative">
+          {/* Header Center - Search (hidden on small screens) */}
+          <div className="hidden md:block flex-1 max-w-md mx-4 lg:mx-8 relative">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
               type="text"
@@ -277,12 +312,12 @@ export default function DashboardLayout({ children }) {
           </div>
 
           {/* Header Right - User */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3 pl-4">
-              <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
+          <div className="flex items-center gap-4 shrink-0">
+            <div className="flex items-center gap-3 lg:pl-4">
+              <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
                 <User size={20} />
               </div>
-              <div className="text-left flex flex-col justify-center mr-2">
+              <div className="hidden sm:flex text-left flex-col justify-center mr-2">
                 <div className="text-sm font-bold text-gray-900 leading-tight">
                   {session.user.name}
                 </div>
@@ -290,18 +325,18 @@ export default function DashboardLayout({ children }) {
                   {roleLabel(role)}
                 </div>
               </div>
-              <span className="text-gray-400">▼</span>
+              <span className="hidden sm:inline text-gray-400">▼</span>
             </div>
           </div>
         </header>
 
         {/* Scrollable Main Content */}
-        <main className="flex-1 overflow-y-auto p-8 relative">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-8 relative">
           {children}
         </main>
-        
+
         {/* Footer */}
-        <footer className="bg-[#0B3A82] text-white py-3 px-8 text-[13px] flex justify-between items-center shrink-0">
+        <footer className="bg-[#0B3A82] text-white py-3 px-4 lg:px-8 text-xs lg:text-[13px] flex flex-col sm:flex-row gap-1 sm:gap-0 justify-between items-center shrink-0 text-center">
           <div className="font-medium text-blue-100">Aam Aadmi Party, Chhattisgarh | Honest Politics, Better Chhattisgarh</div>
           <div className="text-blue-200">© {new Date().getFullYear()} Aam Aadmi Party Chhattisgarh</div>
         </footer>
