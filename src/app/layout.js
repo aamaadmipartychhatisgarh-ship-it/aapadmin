@@ -8,8 +8,13 @@ const inter = Inter({
 });
 
 export const metadata = {
-  title: "Admin Dashboard",
-  description: "Secure admin dashboard",
+  title: "AAP Admin — Aam Aadmi Party, Chhattisgarh",
+  description: "Aam Aadmi Party Chhattisgarh — Organization Management Dashboard",
+  icons: {
+    icon: "/favicon.jpg",
+    shortcut: "/favicon.jpg",
+    apple: "/favicon.jpg",
+  },
 };
 
 export const viewport = {
