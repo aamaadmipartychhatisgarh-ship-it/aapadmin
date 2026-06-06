@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, RefreshCw } from "lucide-react";
+import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -21,25 +21,12 @@ export default function DashboardLayout({ children }) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  // App version — injected at build time (works in browser AND desktop).
-  // Falls back to the Tauri app API if the env var isn't set.
-  const [appVersion, setAppVersion] = useState(
-    process.env.NEXT_PUBLIC_APP_VERSION || ""
-  );
+  // App version — injected at build time from package.json.
+  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "";
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
-
-  useEffect(() => {
-    if (
-      !appVersion &&
-      typeof window !== "undefined" &&
-      window.__TAURI__?.app?.getVersion
-    ) {
-      window.__TAURI__.app.getVersion().then(setAppVersion).catch(() => {});
-    }
-  }, [appVersion]);
 
   if (status === "loading" || status === "unauthenticated") {
     return <div className="min-h-screen bg-[#0B3A82] flex items-center justify-center text-white">Loading...</div>;
@@ -216,13 +203,6 @@ export default function DashboardLayout({ children }) {
         {/* Bottom Area */}
         <div className="p-4 mt-auto space-y-1">
           <button
-            onClick={() => window.dispatchEvent(new Event("check-for-updates"))}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-md text-blue-200 hover:text-white hover:bg-white/10 w-full transition-all text-sm"
-          >
-            <RefreshCw size={18} />
-            <span>Check for updates</span>
-          </button>
-          <button
             onClick={handleSignOut}
             className="flex items-center gap-3 px-4 py-2.5 rounded-md text-blue-200 hover:text-white hover:bg-white/10 w-full transition-all text-sm"
           >
@@ -298,9 +278,6 @@ export default function DashboardLayout({ children }) {
 
           {/* Header Right - User */}
           <div className="flex items-center gap-4">
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold border border-green-200">
-              ✨ Updated to v0.1.4
-            </span>
             <div className="flex items-center gap-3 pl-4">
               <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
                 <User size={20} />

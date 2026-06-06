@@ -1,7 +1,6 @@
 import { Inter } from "next/font/google";
 import "./globals.css";
 import Providers from "@/components/Providers";
-import UpdateChecker from "@/components/UpdateChecker";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -21,7 +20,6 @@ export default function RootLayout({ children }) {
     >
       <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-50 font-sans">
         <Providers>{children}</Providers>
-        <UpdateChecker />
       </body>
     </html>
   );
