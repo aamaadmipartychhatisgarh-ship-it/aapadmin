@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import InstallApp from "@/components/InstallApp";
 
 export const LightLogin = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -113,6 +114,8 @@ export const LightLogin = () => {
             >
               {loading ? "Signing in..." : "Sign In"}
             </button>
+
+            <InstallApp variant="login" />
           </form>
         </div>
       </div>

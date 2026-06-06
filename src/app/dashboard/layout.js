@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Heartbeat from "@/components/Heartbeat";
+import InstallApp from "@/components/InstallApp";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 async function handleSignOut() {
@@ -229,6 +230,7 @@ export default function DashboardLayout({ children }) {
 
         {/* Bottom Area */}
         <div className="p-4 mt-auto space-y-1">
+          <InstallApp variant="sidebar" />
           <button
             onClick={handleSignOut}
             className="flex items-center gap-3 px-4 py-2.5 rounded-md text-blue-200 hover:text-white hover:bg-white/10 w-full transition-all text-sm"
