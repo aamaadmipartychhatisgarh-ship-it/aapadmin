@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, isOversight } from "@/lib/permissions";
-import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity } from "lucide-react";
+import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil } from "lucide-react";
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -30,6 +30,7 @@ function Body({ session }) {
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState(null);
   const [message, setMessage] = useState("");
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
@@ -75,8 +76,7 @@ function Body({ session }) {
       const r = await fetch("/api/workers/import-excel", { method: "POST", body: fd });
       const d = await r.json();
       if (r.ok) {
-        let msg = `Imported ${d.inserted} members (${d.skipped} rows skipped).`;
-        if (d.unmatched_districts?.length) msg += ` Unmatched districts: ${d.unmatched_districts.slice(0, 5).join(", ")}${d.unmatched_districts.length > 5 ? "…" : ""}.`;
+        let msg = `Members: ${d.workers_inserted} new, ${d.workers_updated} updated → Contacts: ${d.contacts_inserted} new, ${d.contacts_updated} updated.`;
         if (d.unmatched_assemblies?.length) msg += ` Unmatched assemblies: ${d.unmatched_assemblies.slice(0, 5).join(", ")}${d.unmatched_assemblies.length > 5 ? "…" : ""}.`;
         setMessage(msg);
         load();
@@ -148,6 +148,7 @@ function Body({ session }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Activity</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
+                {canEdit && <th className="px-4 py-3 font-semibold text-gray-600 text-right">Edit</th>}
               </tr>
             </thead>
             <tbody>
@@ -171,6 +172,13 @@ function Body({ session }) {
                       {w.status}
                     </span>
                   </td>
+                  {canEdit && (
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={(e) => { e.stopPropagation(); setEditing(w); }} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
+                        <Pencil size={14} /> Edit
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -188,6 +196,71 @@ function Body({ session }) {
       </div>
 
       {showAdd && <AddWorkerModal districts={districts} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
+      {editing && <EditWorkerModal worker={editing} districts={districts} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+    </div>
+  );
+}
+
+function EditWorkerModal({ worker, districts, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: worker.name || "",
+    mobile: worker.mobile || "",
+    position: worker.position || "",
+    address: worker.address || "",
+    district_id: worker.district_id || "",
+    assembly_id: worker.assembly_id || "",
+    status: worker.status || "active",
+  });
+  const [assemblies, setAssemblies] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (form.district_id) {
+      fetch(`/api/locations?parent_id=${form.district_id}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
+    } else setAssemblies([]);
+  }, [form.district_id]);
+
+  async function save() {
+    setSaving(true); setError("");
+    const r = await fetch(`/api/workers/${worker.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    const d = await r.json();
+    if (r.ok) onSaved(); else { setError(d.message || "Failed"); setSaving(false); }
+  }
+
+  const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-3 max-h-[90vh] overflow-auto">
+        <h2 className="text-xl font-bold text-gray-900">Edit Member</h2>
+        {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
+        <div className="grid grid-cols-2 gap-3">
+          <input className={inp} placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input className={inp} placeholder="Mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+          <input className={inp} placeholder="Position" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
+          <input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "" })}>
+            <option value="">District</option>
+            {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+          <select className={inp} value={form.assembly_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value })} disabled={!form.district_id}>
+            <option value="">Assembly</option>
+            {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={save} disabled={saving || !form.name} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
     </div>
   );
 }

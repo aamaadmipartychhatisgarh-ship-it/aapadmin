@@ -5,11 +5,14 @@ import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import * as XLSX from "xlsx";
 
-// Import members from an Excel (.xlsx/.xls) or CSV file into `workers`.
+// Unified member import from Excel/CSV. Each member is added to BOTH:
+//   - workers  (the org member record — always, phone optional)
+//   - contacts (the calling pipeline — only if a phone is present + not a dup)
+// so imported members show in the Workers list AND in Contact Records and can
+// be assigned to callers.
 //
-// Expected columns (header row, case/space-insensitive). Handles the
-// MEMBER LIST format: S.NO | DATE | NAME | CONTACT NO | JILA | VIDHANSABHA | BLOCK | WARD
-// Synonyms accepted so other sheets work too.
+// Handles the MEMBER LIST format:
+//   S.NO | DATE | NAME | CONTACT NO | JILA | VIDHANSABHA | BLOCK | WARD
 const COLUMN_MAP = {
   name: ["name", "member name", "full name"],
   mobile: ["contact no", "contact", "mobile", "phone", "phone number", "mobile no", "contact number"],
@@ -20,7 +23,6 @@ const COLUMN_MAP = {
   address: ["address", "village", "gram", "city"],
 };
 
-// Build a lookup: header text -> our canonical field.
 function buildHeaderIndex(headerRow) {
   const idx = {};
   headerRow.forEach((h, i) => {
@@ -33,9 +35,51 @@ function buildHeaderIndex(headerRow) {
   return idx;
 }
 
-// Normalize a name for matching (trim, collapse spaces, upper-case).
 function norm(s) {
   return String(s || "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+// Map common spelling variants in member lists -> the canonical DB name (normalized).
+const DISTRICT_ALIASES = {
+  "BALODABAJAR": "BALODABAZAR-BHATAPARA",
+  "BALODA BAZAR": "BALODABAZAR-BHATAPARA",
+  "BALRAMPUR": "BALRAMPUR-RAMANUJGANJ",
+  "GORELA-PENDRA-MARWAHI": "GAURELA-PENDRA-MARWAHI",
+  "GORELLA-PENDRA-MARWAHI": "GAURELA-PENDRA-MARWAHI",
+  "KHAIRGARH": "KHAIRAGARH-CHHUIKHADAN-GANDAI",
+  "KORIYA": "KOREA",
+  "RAIGADH": "RAIGARH",
+  "SARGUJA": "SURGUJA",
+  "SHAKTI": "SAKTI",
+  "KAWARDHA": "KABEERDHAM",
+  "KABIRDHAM": "KABEERDHAM",
+  "DANTEWADA": "DAKSHIN BASTAR DANTEWADA",
+  "KANKER": "UTTAR BASTAR KANKER",
+};
+const ASSEMBLY_ALIASES = {
+  "BRINDANAWAGARH": "BINDRAWAGARH",
+  "BINDRANAWAGARH": "BINDRAWAGARH",
+  "DHARAMJAYGARH": "DHARAMJAIGARH",
+  "DURG GRAMIN": "DURG RURAL",
+  "KHARSIYA": "KHARSIA",
+  "PALITANAKHAR": "PALI-TANAKHAR",
+  "PALI TANAKHAR": "PALI-TANAKHAR",
+  "RAIGADH": "RAIGARH",
+  "RAIPUR NORTH": "RAIPUR CITY NORTH",
+  "RAIPUR WEST": "RAIPUR CITY WEST",
+  "RAIPUR SOUTH": "RAIPUR CITY SOUTH",
+  "RAIPUR RURAL": "RAIPUR CITY RURAL",
+  "RAMANUJAGANJ": "RAMANUJGANJ",
+  "SARAYPALI": "SARAIPALI",
+  "PRATAPUR": "PRATAPPUR",
+};
+
+function resolveLoc(name, byName, aliases) {
+  if (!name) return null;
+  if (byName.has(name)) return byName.get(name);
+  const aliased = aliases[name];
+  if (aliased && byName.has(aliased)) return byName.get(aliased);
+  return null;
 }
 
 export async function POST(req) {
@@ -67,46 +111,51 @@ export async function POST(req) {
 
     const headerIdx = buildHeaderIndex(rows[0]);
     if (headerIdx.name === undefined) {
-      return NextResponse.json(
-        { message: "Could not find a NAME column in the sheet." },
-        { status: 400 }
-      );
+      return NextResponse.json({ message: "Could not find a NAME column in the sheet." }, { status: 400 });
     }
 
-    // Preload locations once (name -> id), so we don't query per row.
-    const districtRows = await query(
-      "SELECT id, name FROM locations WHERE type = 'district'"
-    );
-    const assemblyRows = await query(
-      "SELECT id, name FROM locations WHERE type = 'assembly'"
-    );
+    const districtRows = await query("SELECT id, name FROM locations WHERE type = 'district'");
+    const assemblyRows = await query("SELECT id, name FROM locations WHERE type = 'assembly'");
     const districtByName = new Map(districtRows.map((r) => [norm(r.name), r.id]));
     const assemblyByName = new Map(assemblyRows.map((r) => [norm(r.name), r.id]));
+    const existingContactByPhone = new Map(
+      (await query("SELECT id, phone_number FROM contacts")).map((r) => [String(r.phone_number), r.id])
+    );
 
-    const get = (row, field) =>
-      headerIdx[field] !== undefined ? row[headerIdx[field]] : "";
+    // Existing workers keyed by mobile (for upsert). Rows with no mobile fall
+    // back to matching by normalized name.
+    const workerRows = await query("SELECT id, name, mobile FROM workers");
+    const workerByMobile = new Map();
+    const workerByName = new Map();
+    for (const w of workerRows) {
+      if (w.mobile) workerByMobile.set(String(w.mobile).replace(/[^\d+]/g, ""), w.id);
+      else workerByName.set(norm(w.name), w.id);
+    }
 
-    let inserted = 0;
-    let skipped = 0;
+    const get = (row, field) => (headerIdx[field] !== undefined ? row[headerIdx[field]] : "");
+
+    let workersInserted = 0;
+    let workersUpdated = 0;
+    let contactsInserted = 0;
+    let contactsUpdated = 0;
+    let skippedNoName = 0;
+    let contactsSkippedNoPhone = 0;
+    const seenPhones = new Set();
+    const seenWorkerKeys = new Set();
     const unmatchedDistricts = new Set();
     const unmatchedAssemblies = new Set();
-
-    // Build address from block + ward when no explicit address column.
-    const VALUES = [];
-    const params = [];
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const name = String(get(row, "name") || "").trim();
-      if (!name) { skipped++; continue; }
+      if (!name) { skippedNoName++; continue; }
 
-      const mobileRaw = String(get(row, "mobile") || "").trim();
-      const mobile = mobileRaw ? mobileRaw.replace(/[^\d+]/g, "") : null;
+      const phone = String(get(row, "mobile") || "").trim().replace(/[^\d+]/g, "") || null;
 
       const districtName = norm(get(row, "district"));
       const assemblyName = norm(get(row, "assembly"));
-      const districtId = districtName ? districtByName.get(districtName) ?? null : null;
-      const assemblyId = assemblyName ? assemblyByName.get(assemblyName) ?? null : null;
+      const districtId = resolveLoc(districtName, districtByName, DISTRICT_ALIASES);
+      const assemblyId = resolveLoc(assemblyName, assemblyByName, ASSEMBLY_ALIASES);
       if (districtName && !districtId) unmatchedDistricts.add(districtName);
       if (assemblyName && !assemblyId) unmatchedAssemblies.add(assemblyName);
 
@@ -119,39 +168,72 @@ export async function POST(req) {
       if (ward) addressParts.push(`Ward: ${ward}`);
       const address = addressParts.join(", ") || null;
 
-      VALUES.push("(?, ?, ?, ?, ?, 'Member', 'active')");
-      params.push(name, mobile, address, districtId, assemblyId);
-      inserted++;
+      // ---- WORKERS upsert (key = mobile, else name) ----
+      const wKey = phone ? `m:${phone}` : `n:${norm(name)}`;
+      // Skip exact duplicate rows within the same file.
+      if (seenWorkerKeys.has(wKey)) {
+        // still consider contacts below
+      } else {
+        seenWorkerKeys.add(wKey);
+        const existingWorkerId = phone ? workerByMobile.get(phone) : workerByName.get(norm(name));
+        if (existingWorkerId) {
+          await query(
+            `UPDATE workers SET name = ?, mobile = ?, address = ?, district_id = ?, assembly_id = ? WHERE id = ?`,
+            [name, phone, address, districtId, assemblyId, existingWorkerId]
+          );
+          workersUpdated++;
+        } else {
+          const res = await query(
+            `INSERT INTO workers (name, mobile, address, district_id, assembly_id, position, status)
+             VALUES (?, ?, ?, ?, ?, 'Member', 'active')`,
+            [name, phone, address, districtId, assemblyId]
+          );
+          // Track the new id so later rows in the same file dedupe to it.
+          if (phone) workerByMobile.set(phone, res.insertId);
+          else workerByName.set(norm(name), res.insertId);
+          workersInserted++;
+        }
+      }
 
-      // Flush in batches of 500 to keep queries fast and within packet limits.
-      if (VALUES.length >= 500) {
-        await query(
-          `INSERT INTO workers (name, mobile, address, district_id, assembly_id, position, status)
-           VALUES ${VALUES.join(", ")}`,
-          params
-        );
-        VALUES.length = 0;
-        params.length = 0;
+      // ---- CONTACTS upsert (key = phone; UNIQUE) ----
+      if (!phone) {
+        contactsSkippedNoPhone++;
+      } else if (seenPhones.has(phone)) {
+        // duplicate within this file — already handled
+      } else {
+        seenPhones.add(phone);
+        if (existingContactByPhone.has(phone)) {
+          // Update existing contact's details, but DON'T touch assignment/completion.
+          await query(
+            `UPDATE contacts SET person_name = ?, address = ?, district_id = ?, assembly_id = ? WHERE id = ?`,
+            [name, address, districtId, assemblyId, existingContactByPhone.get(phone)]
+          );
+          contactsUpdated++;
+        } else {
+          const res = await query(
+            `INSERT INTO contacts (person_name, phone_number, address, district_id, assembly_id)
+             VALUES (?, ?, ?, ?, ?)`,
+            [name, phone, address, districtId, assemblyId]
+          );
+          existingContactByPhone.set(phone, res.insertId);
+          contactsInserted++;
+        }
       }
     }
 
-    if (VALUES.length) {
-      await query(
-        `INSERT INTO workers (name, mobile, address, district_id, assembly_id, position, status)
-         VALUES ${VALUES.join(", ")}`,
-        params
-      );
-    }
-
     return NextResponse.json({
-      inserted,
-      skipped,
       total_rows: rows.length - 1,
+      workers_inserted: workersInserted,
+      workers_updated: workersUpdated,
+      contacts_inserted: contactsInserted,
+      contacts_updated: contactsUpdated,
+      contacts_skipped_no_phone: contactsSkippedNoPhone,
+      skipped_no_name: skippedNoName,
       unmatched_districts: [...unmatchedDistricts],
       unmatched_assemblies: [...unmatchedAssemblies],
     });
   } catch (err) {
-    console.error("workers import-excel error:", err);
+    console.error("import-excel error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
