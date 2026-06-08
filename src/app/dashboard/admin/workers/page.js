@@ -31,7 +31,9 @@ function Body({ session }) {
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [message, setMessage] = useState("");
+  const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
+  const excelRef = useRef(null);
 
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
@@ -63,6 +65,32 @@ function Body({ session }) {
     else setMessage(d.message || "Upload failed");
   }
 
+  // Import from an Excel (.xlsx/.xls/.csv) file — handles the MEMBER LIST format.
+  async function importExcel(file) {
+    setMessage("");
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/workers/import-excel", { method: "POST", body: fd });
+      const d = await r.json();
+      if (r.ok) {
+        let msg = `Imported ${d.inserted} members (${d.skipped} rows skipped).`;
+        if (d.unmatched_districts?.length) msg += ` Unmatched districts: ${d.unmatched_districts.slice(0, 5).join(", ")}${d.unmatched_districts.length > 5 ? "…" : ""}.`;
+        if (d.unmatched_assemblies?.length) msg += ` Unmatched assemblies: ${d.unmatched_assemblies.slice(0, 5).join(", ")}${d.unmatched_assemblies.length > 5 ? "…" : ""}.`;
+        setMessage(msg);
+        load();
+      } else {
+        setMessage(d.message || "Import failed");
+      }
+    } catch {
+      setMessage("Import failed — file too large or network error.");
+    } finally {
+      setImporting(false);
+      if (excelRef.current) excelRef.current.value = "";
+    }
+  }
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex justify-between items-end gap-4 flex-wrap">
@@ -72,6 +100,11 @@ function Body({ session }) {
         </div>
         {canEdit && (
           <div className="flex gap-2">
+            <button onClick={() => excelRef.current?.click()} disabled={importing} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
+              {importing ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+              {importing ? "Importing…" : "Import Excel"}
+            </button>
+            <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
             <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
               <Upload size={16} /> Import CSV
             </button>
