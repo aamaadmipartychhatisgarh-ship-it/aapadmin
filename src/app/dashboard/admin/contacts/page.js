@@ -23,6 +23,7 @@ export default function Page() {
 
 function Body() {
   const [contacts, setContacts] = useState([]);
+  const [total, setTotal] = useState(0);
   const [users, setUsers] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [search, setSearch] = useState("");
@@ -34,7 +35,9 @@ function Body() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [importing, setImporting] = useState(false);
-  const [bulkCaller, setBulkCaller] = useState("");
+  const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
+  const [bulkMode, setBulkMode] = useState("even"); // even | perCaller
+  const [perCaller, setPerCaller] = useState(100);
   const [bulkBusy, setBulkBusy] = useState(false);
   const fileRef = useRef(null);
   const excelRef = useRef(null);
@@ -52,7 +55,7 @@ function Body() {
     if (search) params.set("search", search);
     if (districtId) params.set("district_id", districtId);
     const r = await fetch(`/api/contacts?${params}`);
-    if (r.ok) setContacts((await r.json()).contacts || []);
+    if (r.ok) { const d = await r.json(); setContacts(d.contacts || []); setTotal(d.total ?? (d.contacts || []).length); }
     setLoading(false);
   }
 
@@ -61,29 +64,40 @@ function Body() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Bulk-assign ALL contacts matching the current filters to the chosen caller.
-  async function bulkAssign() {
+  function toggleBulkCaller(id) {
+    setBulkCallers((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+
+  // Distribute matching contacts across the selected callers (even split or N each).
+  async function bulkDistribute() {
     setMessage(""); setError("");
-    const callerName = bulkCaller ? (users.find((u) => String(u.id) === String(bulkCaller))?.username || "caller") : "the pool";
-    if (!confirm(`Assign ALL ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${search ? ` matching "${search}"` : ""} to ${callerName}? (Already-called contacts are skipped.)`)) return;
+    if (bulkCallers.length === 0) { setError("Select at least one caller to distribute to."); return; }
+    const names = bulkCallers.map((id) => users.find((u) => u.id === id)?.username).filter(Boolean).join(", ");
+    const desc = bulkMode === "perCaller"
+      ? `${perCaller} contacts each to ${bulkCallers.length} caller(s): ${names}`
+      : `evenly across ${bulkCallers.length} caller(s): ${names}`;
+    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""} — ${desc}? (Already-called contacts are skipped.)`)) return;
     setBulkBusy(true);
     try {
-      const r = await fetch("/api/contacts/bulk-assign", {
+      const r = await fetch("/api/contacts/bulk-distribute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          assigned_to_user_id: bulkCaller || null,
+          caller_ids: bulkCallers,
+          mode: bulkMode,
+          per_caller: bulkMode === "perCaller" ? Number(perCaller) : undefined,
           status: filter,
           district_id: districtId || undefined,
           search: search || undefined,
         }),
       });
       const d = await r.json();
-      if (!r.ok) { setError(d.message || "Bulk assign failed"); return; }
-      setMessage(`Assigned ${d.assigned} contacts to ${callerName}.`);
+      if (!r.ok) { setError(d.message || "Distribute failed"); return; }
+      const breakdown = Object.entries(d.per_caller_counts || {}).map(([u, n]) => `${u}: ${n}`).join(", ");
+      setMessage(`Distributed ${d.assigned} contacts — ${breakdown || "none matched"}.`);
       load();
     } catch {
-      setError("Bulk assign failed — network error.");
+      setError("Distribute failed — network error.");
     } finally {
       setBulkBusy(false);
     }
@@ -142,7 +156,9 @@ function Body() {
       <div className="flex justify-between items-end gap-4 flex-wrap">
         <div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Contacts</h1>
-          <p className="text-gray-500 mt-2 font-medium">Voter list for the calling team. Upload CSV or add manually.</p>
+          <p className="text-gray-500 mt-2 font-medium">
+            <span className="font-bold text-[#164FA3]">{total.toLocaleString()}</span> {filter !== "all" ? filter : ""} contact{total === 1 ? "" : "s"}{districtId ? " in this district" : ""}. Calling list for the team.
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => excelRef.current?.click()} disabled={importing} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
@@ -179,19 +195,53 @@ function Body() {
         </div>
       </div>
 
-      {/* Bulk assign bar — assign ALL contacts matching the filters above to one caller */}
-      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3 flex items-center gap-3 flex-wrap">
-        <UserPlus size={18} className="text-[#164FA3] ml-1" />
-        <span className="text-sm text-gray-700 font-medium">Bulk assign all matching contacts to:</span>
-        <select value={bulkCaller} onChange={(e) => setBulkCaller(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
-          <option value="">— pool (unassign) —</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
-        </select>
-        <button onClick={bulkAssign} disabled={bulkBusy} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
-          {bulkBusy ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
-          {bulkBusy ? "Assigning…" : "Assign all matching"}
-        </button>
-        <span className="text-xs text-gray-500">Showing {contacts.length}{contacts.length >= 500 ? "+" : ""} of the matching set. Already-called (Done) contacts are never reassigned.</span>
+      {/* Bulk distribute — share matching contacts across several callers */}
+      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <UserPlus size={18} className="text-[#164FA3]" />
+          <span className="text-sm text-gray-800 font-semibold">
+            Distribute the {total.toLocaleString()} {filter !== "all" ? filter + " " : ""}contacts
+            {districtId ? ` in ${districts.find((d) => String(d.id) === String(districtId))?.name || "this district"}` : ""} across callers
+          </span>
+        </div>
+
+        {/* caller multi-select */}
+        <div className="flex flex-wrap gap-2">
+          {users.length === 0 && <span className="text-xs text-gray-500">No callers exist yet. Create caller users first.</span>}
+          {users.map((u) => {
+            const on = bulkCallers.includes(u.id);
+            return (
+              <button key={u.id} onClick={() => toggleBulkCaller(u.id)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${on ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200 hover:border-[#164FA3]"}`}>
+                {on ? "✓ " : ""}{u.username}
+              </button>
+            );
+          })}
+          {users.length > 1 && (
+            <button onClick={() => setBulkCallers(bulkCallers.length === users.length ? [] : users.map((u) => u.id))}
+              className="px-3 py-1.5 rounded-full text-xs font-medium text-[#164FA3] underline">
+              {bulkCallers.length === users.length ? "clear all" : "select all"}
+            </button>
+          )}
+        </div>
+
+        {/* mode + action */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex gap-1 bg-white rounded-lg border border-gray-200 p-1">
+            <button onClick={() => setBulkMode("even")} className={`px-3 py-1.5 rounded-md text-xs font-semibold ${bulkMode === "even" ? "bg-[#164FA3] text-white" : "text-gray-600"}`}>Split evenly</button>
+            <button onClick={() => setBulkMode("perCaller")} className={`px-3 py-1.5 rounded-md text-xs font-semibold ${bulkMode === "perCaller" ? "bg-[#164FA3] text-white" : "text-gray-600"}`}>N per caller</button>
+          </div>
+          {bulkMode === "perCaller" && (
+            <input type="number" min="1" value={perCaller} onChange={(e) => setPerCaller(e.target.value)} className="h-9 w-24 px-3 rounded-lg border border-gray-200 text-sm" placeholder="per caller" />
+          )}
+          <button onClick={bulkDistribute} disabled={bulkBusy || bulkCallers.length === 0} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
+            {bulkBusy ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+            {bulkBusy ? "Distributing…" : bulkMode === "even"
+              ? `Split evenly to ${bulkCallers.length || 0} caller(s)`
+              : `Give ${perCaller || 0} each to ${bulkCallers.length || 0} caller(s)`}
+          </button>
+          <span className="text-xs text-gray-500">Already-called (Done) contacts are never reassigned.</span>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

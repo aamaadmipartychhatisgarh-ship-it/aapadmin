@@ -17,36 +17,43 @@ export async function GET(req) {
     const assigned_to = searchParams.get("assigned_to");
     const search = searchParams.get("search");
 
-    let sql = `
-      SELECT c.*,
-             u.username AS assigned_to_username,
-             ld.name AS district_name,
-             lw.name AS ward_name
-        FROM contacts c
-        LEFT JOIN users u ON u.id = c.assigned_to_user_id
-        LEFT JOIN locations ld ON ld.id = c.district_id
-        LEFT JOIN locations lw ON lw.id = c.ward_id
-       WHERE 1=1
-    `;
+    // Build the shared WHERE clause once (used for both the count and the list).
+    let where = " WHERE 1=1";
     const params = [];
-    if (status === "pending") sql += " AND c.is_completed = 0";
-    if (status === "done") sql += " AND c.is_completed = 1";
-    if (status === "assigned") sql += " AND c.assigned_to_user_id IS NOT NULL";
-    if (status === "pool") sql += " AND c.assigned_to_user_id IS NULL";
-    if (district_id) { sql += " AND c.district_id = ?"; params.push(district_id); }
-    if (assigned_to) { sql += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
+    if (status === "pending") where += " AND c.is_completed = 0";
+    if (status === "done") where += " AND c.is_completed = 1";
+    if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
+    if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
+    if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
+    if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
     if (search) {
-      sql += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
+      where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);
     }
     // Geographic scope from role
     const scope = scopeFilterSync(session.user, "c");
-    sql += " " + scope.where;
+    where += " " + scope.where;
     params.push(...scope.params);
-    sql += " ORDER BY c.is_completed ASC, c.id DESC LIMIT 500";
 
-    const contacts = await query(sql, params);
-    return NextResponse.json({ contacts });
+    // Total matching the current filters (not capped by the list limit).
+    const countRows = await query(`SELECT COUNT(*) AS total FROM contacts c ${where}`, params);
+    const total = Number(countRows[0]?.total || 0);
+
+    const contacts = await query(
+      `SELECT c.*,
+              u.username AS assigned_to_username,
+              ld.name AS district_name,
+              lw.name AS ward_name
+         FROM contacts c
+         LEFT JOIN users u ON u.id = c.assigned_to_user_id
+         LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations lw ON lw.id = c.ward_id
+         ${where}
+        ORDER BY c.is_completed ASC, c.id DESC
+        LIMIT 500`,
+      params
+    );
+    return NextResponse.json({ contacts, total });
   } catch (err) {
     console.error("contacts GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
