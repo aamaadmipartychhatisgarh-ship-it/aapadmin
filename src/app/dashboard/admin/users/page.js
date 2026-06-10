@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { ShieldAlert, Zap } from "lucide-react";
-import { isAdmin, ASSIGNABLE_ROLES, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
+import { ShieldAlert, Zap, Pencil, Trash2 } from "lucide-react";
+import { isAdmin, isTopAdmin, ASSIGNABLE_ROLES, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 export default function UsersManagement() {
   const { data: session, status } = useSession();
@@ -19,6 +19,8 @@ export default function UsersManagement() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [editing, setEditing] = useState(null);
+  const canManage = isTopAdmin(session);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -50,6 +52,15 @@ export default function UsersManagement() {
       body: JSON.stringify(patch),
     });
     if (r.ok) fetchUsers();
+  };
+
+  const deleteUser = async (u) => {
+    setError(""); setSuccess("");
+    if (!confirm(`Delete user "${u.username}"? This cannot be undone. Their assigned contacts/tasks return to the pool.`)) return;
+    const r = await fetch(`/api/users/${u.id}`, { method: "DELETE" });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { setSuccess(`Deleted ${u.username}.`); fetchUsers(); }
+    else setError(d.message || "Delete failed");
   };
 
   const handleCreateUser = async (e) => {
@@ -183,6 +194,7 @@ export default function UsersManagement() {
                   <th className="pb-3 font-semibold">Role</th>
                   <th className="pb-3 font-semibold">Home District</th>
                   <th className="pb-3 font-semibold">Joined</th>
+                  {canManage && <th className="pb-3 font-semibold text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -226,11 +238,23 @@ export default function UsersManagement() {
                         day: 'numeric'
                       })}
                     </td>
+                    {canManage && (
+                      <td className="py-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setEditing(u)} title="Edit" className="p-1.5 rounded-lg text-blue-100 hover:bg-white/15 hover:text-white">
+                            <Pencil size={16} />
+                          </button>
+                          <button onClick={() => deleteUser(u)} disabled={String(u.id) === String(session.user.id)} title={String(u.id) === String(session.user.id) ? "You can't delete yourself" : "Delete"} className="p-1.5 rounded-lg text-red-200 hover:bg-red-500/30 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan="4" className="py-8 text-center text-blue-200 font-medium">
+                    <td colSpan={canManage ? 5 : 4} className="py-8 text-center text-blue-200 font-medium">
                       No users found
                     </td>
                   </tr>
@@ -238,6 +262,75 @@ export default function UsersManagement() {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {editing && (
+        <EditUserModal
+          user={editing}
+          districts={districts}
+          onClose={() => setEditing(null)}
+          onSaved={(msg) => { setEditing(null); setSuccess(msg); fetchUsers(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditUserModal({ user, districts, onClose, onSaved }) {
+  const [username, setUsername] = useState(user.username || "");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState(normalizeRole(user.role));
+  const [homeDistrictId, setHomeDistrictId] = useState(user.home_district_id || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    setSaving(true); setError("");
+    const patch = { username, role, home_district_id: homeDistrictId || null };
+    if (password) patch.password = password; // only change password if a new one is typed
+    const r = await fetch(`/api/users/${user.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) onSaved(`Updated ${username}.`);
+    else { setError(d.message || "Update failed"); setSaving(false); }
+  }
+
+  const inp = "w-full bg-gray-100 border border-gray-200 h-11 rounded-xl px-3 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none";
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+        <h2 className="text-xl font-bold text-gray-900">Edit User</h2>
+        {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
+        <div>
+          <label className="text-xs text-gray-500">Username</label>
+          <input className={inp} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500">New password <span className="text-gray-400">(leave blank to keep current)</span></label>
+          <input className={inp} type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep current" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500">Role</label>
+          <select className={inp + " appearance-none"} value={role} onChange={(e) => setRole(e.target.value)}>
+            {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500">Home district</label>
+          <select className={inp + " appearance-none"} value={homeDistrictId} onChange={(e) => setHomeDistrictId(e.target.value)}>
+            <option value="">— No home district —</option>
+            {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={save} disabled={saving || !username.trim()} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">
+            {saving ? "Saving…" : "Save"}
+          </button>
         </div>
       </div>
     </div>
