@@ -59,14 +59,35 @@ export async function POST(req) {
     }
     const d = await req.json();
     if (!d.name) return NextResponse.json({ message: "Name is required" }, { status: 400 });
+
+    const mobile = d.mobile ? String(d.mobile).trim().replace(/[^\d+]/g, "") : null;
+
     const res = await query(
       `INSERT INTO workers (name, mobile, address, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [d.name, d.mobile || null, d.address || null, d.district_id || null, d.assembly_id || null,
+      [d.name, mobile, d.address || null, d.district_id || null, d.assembly_id || null,
        d.ward_id || null, d.booth_id || null, d.position || null, d.skills || null,
        d.status === "inactive" ? "inactive" : "active", Number(d.activity_score) || 0]
     );
-    return NextResponse.json({ id: res.insertId }, { status: 201 });
+
+    // Also add the worker to the calling pipeline (contacts) if they have a phone.
+    // Deduped on phone_number (UNIQUE); a duplicate is fine — don't fail the worker.
+    let addedToContacts = false;
+    if (mobile) {
+      try {
+        await query(
+          `INSERT INTO contacts (person_name, phone_number, address, district_id, assembly_id, ward_id, booth_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [d.name, mobile, d.address || null, d.district_id || null, d.assembly_id || null,
+           d.ward_id || null, d.booth_id || null]
+        );
+        addedToContacts = true;
+      } catch (e) {
+        if (e.code !== "ER_DUP_ENTRY") throw e; // already a contact → ignore
+      }
+    }
+
+    return NextResponse.json({ id: res.insertId, addedToContacts }, { status: 201 });
   } catch (err) {
     console.error("workers POST error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
