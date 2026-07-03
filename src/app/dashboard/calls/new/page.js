@@ -20,15 +20,16 @@ export default function LogCall() {
   const [error, setError] = useState("");
   
   const [statuses, setStatuses] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState([]);
-  
+
   const initialForm = {
     person_name: "",
     phone_number: "",
     address: "",
-    destination: "",
+    designation_id: "",
     zone_id: "",
     lok_sabha_id: "",
     district_id: "",
@@ -49,6 +50,7 @@ export default function LogCall() {
   useEffect(() => {
     fetchStatuses();
     fetchLocations("zone", null, setZones);
+    fetch("/api/designations").then((r) => r.ok ? r.json() : { designations: [] }).then((d) => setDesignations(d.designations || []));
   }, []);
 
   const fetchStatuses = async () => {
@@ -153,8 +155,11 @@ export default function LogCall() {
               <input type="tel" name="phone_number" required value={formData.phone_number} onChange={handleChange} className="w-full bg-gray-50 border border-gray-200 text-gray-900 h-11 rounded-xl px-4 focus:ring-2 focus:ring-[#FCB712] outline-none transition-all" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Destination/Designation</label>
-              <input type="text" name="destination" value={formData.destination} onChange={handleChange} className="w-full bg-gray-50 border border-gray-200 text-gray-900 h-11 rounded-xl px-4 focus:ring-2 focus:ring-[#FCB712] outline-none transition-all" />
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Designation</label>
+              <select name="designation_id" value={formData.designation_id} onChange={handleChange} className="w-full bg-gray-50 border border-gray-200 text-gray-900 h-11 rounded-xl px-4 focus:ring-2 focus:ring-[#FCB712] outline-none transition-all">
+                <option value="">Select Designation</option>
+                {designations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Address</label>

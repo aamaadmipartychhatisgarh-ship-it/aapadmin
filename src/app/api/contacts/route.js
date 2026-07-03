@@ -14,6 +14,7 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
     const district_id = searchParams.get("district_id");
+    const designation_id = searchParams.get("designation_id");
     const assigned_to = searchParams.get("assigned_to");
     const search = searchParams.get("search");
 
@@ -25,6 +26,7 @@ export async function GET(req) {
     if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
     if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
+    if (designation_id) { where += " AND c.designation_id = ?"; params.push(designation_id); }
     if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
     if (search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
@@ -43,11 +45,13 @@ export async function GET(req) {
       `SELECT c.*,
               u.username AS assigned_to_username,
               ld.name AS district_name,
-              lw.name AS ward_name
+              lw.name AS ward_name,
+              dsg.name AS designation_name
          FROM contacts c
          LEFT JOIN users u ON u.id = c.assigned_to_user_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
+         LEFT JOIN designations dsg ON dsg.id = c.designation_id
          ${where}
         ORDER BY c.is_completed ASC, c.id DESC
         LIMIT 500`,
@@ -67,14 +71,14 @@ export async function POST(req) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const data = await req.json();
-    const { person_name, phone_number, address, district_id, ward_id, booth_id, assigned_to_user_id } = data;
+    const { person_name, phone_number, address, designation_id, district_id, ward_id, booth_id, assigned_to_user_id } = data;
     if (!person_name || !phone_number) {
       return NextResponse.json({ message: "Name and phone are required" }, { status: 400 });
     }
     const res = await query(
-      `INSERT INTO contacts (person_name, phone_number, address, district_id, ward_id, booth_id, assigned_to_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [person_name, phone_number, address || null, district_id || null, ward_id || null, booth_id || null, assigned_to_user_id || null]
+      `INSERT INTO contacts (person_name, phone_number, address, designation_id, district_id, ward_id, booth_id, assigned_to_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [person_name, phone_number, address || null, designation_id || null, district_id || null, ward_id || null, booth_id || null, assigned_to_user_id || null]
     );
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {

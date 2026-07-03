@@ -163,6 +163,7 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { name: "Log a Call", href: "/dashboard/calls/new", icon: PhoneCall },
       { name: "My Calls", href: "/dashboard/calls", icon: Database },
+      { name: "Complaints", href: "/dashboard/complaints", icon: MessageSquare },
       { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
     ];
   }

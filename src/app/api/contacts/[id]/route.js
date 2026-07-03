@@ -7,12 +7,23 @@ import { query } from "@/lib/db";
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    if (!session) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
+    const admin = isAdmin(session);
+    if (!admin) {
+      // Callers may only edit the contact they currently hold (locked mid-call),
+      // and only its basic details — not assignment or completion state.
+      const [row] = await query("SELECT locked_by_user_id FROM contacts WHERE id = ?", [id]);
+      if (!row || String(row.locked_by_user_id) !== String(session.user.id)) {
+        return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+      }
+    }
     const data = await req.json();
-    const fields = ["person_name", "phone_number", "address", "district_id", "ward_id", "booth_id", "assigned_to_user_id", "is_completed"];
+    const fields = admin
+      ? ["person_name", "phone_number", "address", "designation_id", "district_id", "ward_id", "booth_id", "assigned_to_user_id", "is_completed"]
+      : ["person_name", "phone_number", "address", "designation_id", "district_id"];
     const sets = [];
     const vals = [];
     for (const f of fields) {

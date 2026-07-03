@@ -32,6 +32,8 @@ export default function CallsPage() {
   const router = useRouter();
   const [calls, setCalls] = useState([]);
   const [search, setSearch] = useState("");
+  const [designations, setDesignations] = useState([]);
+  const [designationId, setDesignationId] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -43,16 +45,21 @@ export default function CallsPage() {
   }, [status, session, router]);
 
   useEffect(() => {
+    fetch("/api/designations").then((r) => r.ok ? r.json() : { designations: [] }).then((d) => setDesignations(d.designations || []));
+  }, []);
+
+  useEffect(() => {
     if (status !== "authenticated" || isOversight(session)) return;
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, session, search]);
+  }, [status, session, search, designationId]);
 
   async function load() {
     setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
+    if (designationId) params.set("designation_id", designationId);
     try {
       const r = await fetch(`/api/calls?${params}`);
       if (r.ok) setCalls((await r.json()).calls || []);
@@ -77,15 +84,19 @@ export default function CallsPage() {
         </Link>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input
           type="text"
           placeholder="Search by name or phone"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 outline-none text-sm py-2"
+          className="flex-1 min-w-[180px] outline-none text-sm py-2"
         />
+        <select value={designationId} onChange={(e) => setDesignationId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All designations</option>
+          {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -104,6 +115,7 @@ export default function CallsPage() {
                   <th className="px-4 py-3 font-semibold text-gray-600">When</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Person</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
+                  <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Sentiment</th>
@@ -122,6 +134,7 @@ export default function CallsPage() {
                       {c.is_vip ? <Star size={12} className="inline ml-1 text-[#FCB712] fill-[#FCB712]" /> : null}
                     </td>
                     <td className="px-4 py-3 text-gray-700 font-mono text-xs">{c.phone_number}</td>
+                    <td className="px-4 py-3 text-gray-600 text-xs">{c.designation_name || "—"}</td>
                     <td className="px-4 py-3 text-gray-600 text-xs">{c.district_name || "—"}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-block text-[11px] font-semibold px-2 py-1 rounded-full border ${STATUS_PILL[c.status_name] || "bg-gray-100 text-gray-600 border-gray-200"}`}>

@@ -29,6 +29,7 @@ function WorkspaceBody() {
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [statuses, setStatuses] = useState([]);
   const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -45,13 +46,14 @@ function WorkspaceBody() {
 
   // Inline contact edit state
   const [editing, setEditing] = useState(false);
-  const [edit, setEdit] = useState({ person_name: "", phone_number: "", address: "", district_id: "" });
+  const [edit, setEdit] = useState({ person_name: "", phone_number: "", address: "", district_id: "", designation_id: "" });
   const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => {
     loadQueue();
     fetch("/api/statuses").then((r) => r.json()).then((d) => setStatuses(d.statuses || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
   // Restore active lock if the user reloaded mid-call
@@ -88,6 +90,7 @@ function WorkspaceBody() {
       phone_number: active.phone_number || "",
       address: active.address || "",
       district_id: active.district_id || "",
+      designation_id: active.designation_id || "",
     });
     setEditing(false);
   }, [active?.id]);
@@ -145,6 +148,7 @@ function WorkspaceBody() {
       const payload = {
         ...form,
         contact_id: active.id,
+        designation_id: active.designation_id,
         district_id: active.district_id,
         ward_id: active.ward_id,
         booth_id: active.booth_id,
@@ -198,7 +202,7 @@ function WorkspaceBody() {
       }
       // Patch the active contact in place
       const districtName = districts.find((d) => String(d.id) === String(edit.district_id))?.name || active.district_name;
-      setActive({ ...active, ...edit, district_name: districtName });
+      setActive({ ...active, ...edit, district_name: districtName, designation_id: edit.designation_id || null });
       setForm({ ...form, person_name: edit.person_name, phone_number: edit.phone_number });
       setEditing(false);
       setMessage("Contact updated.");
@@ -319,6 +323,11 @@ function WorkspaceBody() {
                       {history.length > 0 && <span className="bg-[#FCB712] text-[#164FA3] text-[10px] font-bold px-2 py-0.5 rounded-full">RETRY ×{history.length}</span>}
                     </div>
                     <h2 className="text-3xl font-bold">{active.person_name}</h2>
+                    {active.designation_id && (
+                      <div className="text-sm font-semibold text-[#FCB712] mt-1">
+                        {designations.find((d) => String(d.id) === String(active.designation_id))?.name || ""}
+                      </div>
+                    )}
                     <a href={`tel:${active.phone_number}`} className="text-xl font-mono mt-1 inline-block hover:underline">{active.phone_number}</a>
                     {(active.district_name || active.ward_name) && (
                       <div className="flex items-center gap-1 mt-3 text-blue-200 text-sm">
@@ -353,6 +362,14 @@ function WorkspaceBody() {
                     placeholder="Address"
                     className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-blue-200 text-sm outline-none focus:bg-white/20"
                   />
+                  <select
+                    value={edit.designation_id || ""}
+                    onChange={(e) => setEdit({ ...edit, designation_id: e.target.value })}
+                    className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm outline-none focus:bg-white/20"
+                  >
+                    <option className="text-gray-900" value="">No designation</option>
+                    {designations.map((d) => <option key={d.id} value={d.id} className="text-gray-900">{d.name}</option>)}
+                  </select>
                   <select
                     value={edit.district_id || ""}
                     onChange={(e) => setEdit({ ...edit, district_id: e.target.value })}

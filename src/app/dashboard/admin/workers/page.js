@@ -24,10 +24,12 @@ function Body({ session }) {
   const canEdit = isAdmin(session);
   const [data, setData] = useState({ workers: [], total: 0, page: 1, pages: 1 });
   const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [districtId, setDistrictId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [positionFilter, setPositionFilter] = useState("");
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -38,13 +40,14 @@ function Body({ session }) {
 
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
   useEffect(() => {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, districtId, statusFilter, page]);
+  }, [search, districtId, statusFilter, positionFilter, page]);
 
   async function load() {
     setLoading(true);
@@ -52,6 +55,7 @@ function Body({ session }) {
     if (search) p.set("search", search);
     if (districtId) p.set("district_id", districtId);
     if (statusFilter) p.set("status", statusFilter);
+    if (positionFilter) p.set("position", positionFilter);
     const r = await fetch(`/api/workers?${p}`);
     if (r.ok) setData(await r.json());
     setLoading(false);
@@ -125,6 +129,10 @@ function Body({ session }) {
           <option value="">All districts</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
+        <select value={positionFilter} onChange={(e) => { setPositionFilter(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
+          <option value="">All designations</option>
+          {designations.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+        </select>
         <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
           <option value="">All statuses</option>
           <option value="active">Active</option>
@@ -143,7 +151,7 @@ function Body({ session }) {
               <tr>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Mobile</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Position</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Activity</th>
@@ -195,13 +203,13 @@ function Body({ session }) {
         )}
       </div>
 
-      {showAdd && <AddWorkerModal districts={districts} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
-      {editing && <EditWorkerModal worker={editing} districts={districts} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {showAdd && <AddWorkerModal districts={districts} designations={designations} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
+      {editing && <EditWorkerModal worker={editing} districts={districts} designations={designations} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );
 }
 
-function EditWorkerModal({ worker, districts, onClose, onSaved }) {
+function EditWorkerModal({ worker, districts, designations, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: worker.name || "",
     mobile: worker.mobile || "",
@@ -241,7 +249,12 @@ function EditWorkerModal({ worker, districts, onClose, onSaved }) {
         <div className="grid grid-cols-2 gap-3">
           <input className={inp} placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <input className={inp} placeholder="Mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
-          <input className={inp} placeholder="Position" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
+          <select className={inp} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
+            <option value="">Designation</option>
+            {/* Imported workers can carry a position that isn't in the master list — keep it selectable. */}
+            {form.position && !designations.some((d) => d.name === form.position) && <option value={form.position}>{form.position}</option>}
+            {designations.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+          </select>
           <input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "" })}>
             <option value="">District</option>
@@ -265,7 +278,7 @@ function EditWorkerModal({ worker, districts, onClose, onSaved }) {
   );
 }
 
-function AddWorkerModal({ districts, onClose, onSaved }) {
+function AddWorkerModal({ districts, designations, onClose, onSaved }) {
   const [form, setForm] = useState({ name: "", mobile: "", position: "", skills: "", district_id: "", assembly_id: "", status: "active", activity_score: 50 });
   const [assemblies, setAssemblies] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -293,7 +306,10 @@ function AddWorkerModal({ districts, onClose, onSaved }) {
         <div className="grid grid-cols-2 gap-3">
           <input className={inp} placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <input className={inp} placeholder="Mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
-          <input className={inp} placeholder="Position" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
+          <select className={inp} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
+            <option value="">Designation</option>
+            {designations.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+          </select>
           <input className={inp} placeholder="Skills (comma-sep)" value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} />
           <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "" })}>
             <option value="">District</option>

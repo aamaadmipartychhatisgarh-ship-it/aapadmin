@@ -26,9 +26,11 @@ function Body() {
   const [total, setTotal] = useState(0);
   const [users, setUsers] = useState([]);
   const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("pending"); // all | pending | done | assigned | pool
   const [districtId, setDistrictId] = useState("");
+  const [designationId, setDesignationId] = useState("");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -42,10 +44,11 @@ function Body() {
   const fileRef = useRef(null);
   const excelRef = useRef(null);
 
-  useEffect(() => { load(); }, [filter, districtId]);
+  useEffect(() => { load(); }, [filter, districtId, designationId]);
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
   async function load() {
@@ -54,6 +57,7 @@ function Body() {
     if (filter !== "all") params.set("status", filter);
     if (search) params.set("search", search);
     if (districtId) params.set("district_id", districtId);
+    if (designationId) params.set("designation_id", designationId);
     const r = await fetch(`/api/contacts?${params}`);
     if (r.ok) { const d = await r.json(); setContacts(d.contacts || []); setTotal(d.total ?? (d.contacts || []).length); }
     setLoading(false);
@@ -188,6 +192,10 @@ function Body() {
           <option value="">All districts</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
+        <select value={designationId} onChange={(e) => setDesignationId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All designations</option>
+          {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
         <div className="flex gap-1">
           {["all", "pending", "done", "assigned", "pool"].map((f) => (
             <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase ${filter === f ? "bg-[#164FA3] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{f}</button>
@@ -255,6 +263,7 @@ function Body() {
               <tr>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
@@ -266,6 +275,7 @@ function Body() {
                 <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">{c.person_name}</td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{c.phone_number}</td>
+                  <td className="px-4 py-3 text-gray-600">{c.designation_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.district_name || "—"}</td>
                   <td className="px-4 py-3">
                     {c.is_completed ? (
@@ -309,14 +319,17 @@ function EditContactModal({ contact, onClose, onSaved }) {
     person_name: contact.person_name || "",
     phone_number: contact.phone_number || "",
     address: contact.address || "",
+    designation_id: contact.designation_id || "",
     district_id: contact.district_id || "",
   });
   const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
   async function save() {
@@ -328,6 +341,7 @@ function EditContactModal({ contact, onClose, onSaved }) {
         person_name: form.person_name,
         phone_number: form.phone_number,
         address: form.address,
+        designation_id: form.designation_id || null,
         district_id: form.district_id || null,
       }),
     });
@@ -344,6 +358,10 @@ function EditContactModal({ contact, onClose, onSaved }) {
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+        <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
+          <option value="">No designation</option>
+          {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
         <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
           <option value="">No district</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -360,13 +378,15 @@ function EditContactModal({ contact, onClose, onSaved }) {
 }
 
 function AddContactModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ person_name: "", phone_number: "", address: "", district_id: "" });
+  const [form, setForm] = useState({ person_name: "", phone_number: "", address: "", designation_id: "", district_id: "" });
   const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
   async function save() {
@@ -389,6 +409,10 @@ function AddContactModal({ onClose, onSaved }) {
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+        <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
+          <option value="">No designation</option>
+          {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
         <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
           <option value="">No district</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}

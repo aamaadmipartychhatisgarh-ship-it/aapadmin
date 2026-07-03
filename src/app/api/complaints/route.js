@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight, scopeFilterSync } from "@/lib/permissions";
+import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+
+// Oversight roles AND callers can log/view complaints (callers stay geo-scoped).
+const canUseComplaints = (session) => isOversight(session) || isCaller(session);
 
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || !canUseComplaints(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const statusF = searchParams.get("status");
     const typeF = searchParams.get("type");
@@ -33,7 +36,8 @@ export async function GET(req) {
               SUM(status='open') AS open,
               SUM(status='in_progress') AS in_progress,
               SUM(status='resolved') AS resolved
-       FROM complaints`
+       FROM complaints c ${scope.where ? `WHERE ${scope.where.replace(/^AND /, "")}` : ""}`,
+      scope.params
     ).then((r) => [r]);
     const byType = await query(`SELECT type, COUNT(*) AS n FROM complaints GROUP BY type`);
     return NextResponse.json({ complaints, counts, byType });
@@ -46,7 +50,7 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || !canUseComplaints(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const d = await req.json();
     if (!d.citizen_name) return NextResponse.json({ message: "Citizen name required" }, { status: 400 });
     const res = await query(

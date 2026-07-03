@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
-// GET /api/workers?search=&district_id=&assembly_id=&status=&page=&limit=
+// GET /api/workers?search=&district_id=&assembly_id=&status=&position=&page=&limit=
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -16,6 +16,7 @@ export async function GET(req) {
     const districtId = searchParams.get("district_id");
     const assemblyId = searchParams.get("assembly_id");
     const status = searchParams.get("status");
+    const position = searchParams.get("position");
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
     const offset = (page - 1) * limit;
@@ -26,6 +27,7 @@ export async function GET(req) {
     if (districtId) { where.push("w.district_id = ?"); params.push(districtId); }
     if (assemblyId) { where.push("w.assembly_id = ?"); params.push(assemblyId); }
     if (status) { where.push("w.status = ?"); params.push(status); }
+    if (position) { where.push("w.position = ?"); params.push(position); }
     // Geographic scope from role
     const scope = scopeFilterSync(session.user, "w");
     if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
