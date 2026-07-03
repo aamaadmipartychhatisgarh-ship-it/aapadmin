@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, isOversight } from "@/lib/permissions";
-import { Network, Plus, Users, Loader2, ChevronRight, Trophy, Pencil } from "lucide-react";
+import { Network, Plus, Users, Loader2, ChevronRight, Trophy, Pencil, Search } from "lucide-react";
 
 const LEVELS = [
   { key: "state", label: "State" }, { key: "zone", label: "Zone" },
@@ -39,6 +39,8 @@ function Body({ canEdit }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [locations, setLocations] = useState([]);
+  const [search, setSearch] = useState("");
+  const [levelFilter, setLevelFilter] = useState("");
 
   useEffect(() => { load(); }, []);
   async function load() {
@@ -48,7 +50,12 @@ function Body({ canEdit }) {
     setLoading(false);
   }
 
-  const grouped = LEVELS.map((lv) => ({ ...lv, items: teams.filter((t) => t.level === lv.key) })).filter((g) => g.items.length > 0);
+  // Client-side filters — the whole team list is already loaded.
+  const visible = teams.filter((t) =>
+    (!search || t.name.toLowerCase().includes(search.trim().toLowerCase())) &&
+    (!levelFilter || t.level === levelFilter)
+  );
+  const grouped = LEVELS.map((lv) => ({ ...lv, items: visible.filter((t) => t.level === lv.key) })).filter((g) => g.items.length > 0);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -62,6 +69,15 @@ function Body({ canEdit }) {
             <Plus size={16} /> Create Team
           </button>
         )}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+        <Search size={18} className="text-gray-400 ml-2" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search team name" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
+        <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All levels</option>
+          {LEVELS.map((lv) => <option key={lv.key} value={lv.key}>{lv.label}</option>)}
+        </select>
       </div>
 
       {loading ? (

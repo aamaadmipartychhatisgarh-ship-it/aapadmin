@@ -14,6 +14,7 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
     const district_id = searchParams.get("district_id");
+    const assembly_id = searchParams.get("assembly_id");
     const designation_id = searchParams.get("designation_id");
     const assigned_to = searchParams.get("assigned_to");
     const search = searchParams.get("search");
@@ -26,6 +27,7 @@ export async function GET(req) {
     if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
     if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
+    if (assembly_id) { where += " AND c.assembly_id = ?"; params.push(assembly_id); }
     if (designation_id) { where += " AND c.designation_id = ?"; params.push(designation_id); }
     if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
     if (search) {

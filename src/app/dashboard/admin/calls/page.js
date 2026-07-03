@@ -42,12 +42,15 @@ export default function AdminCallRecords() {
   const [statusFilter, setStatusFilter] = useState("");
   const [districtFilter, setDistrictFilter] = useState("");
   const [agentFilter, setAgentFilter] = useState("");
+  const [designationFilter, setDesignationFilter] = useState("");
+  const [sentimentFilter, setSentimentFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
   // Master data
   const [statuses, setStatuses] = useState([]);
   const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [users, setUsers] = useState([]);
 
   useEffect(() => {
@@ -58,14 +61,16 @@ export default function AdminCallRecords() {
   useEffect(() => {
     if (status !== "authenticated" || !isAdmin(session)) return;
     (async () => {
-      const [s, d, u] = await Promise.all([
+      const [s, d, u, dg] = await Promise.all([
         fetch("/api/statuses").then((r) => r.json()).catch(() => ({})),
         fetch("/api/locations?type=district").then((r) => r.json()).catch(() => ({})),
         fetch("/api/users").then((r) => r.json()).catch(() => ({})),
+        fetch("/api/designations").then((r) => r.json()).catch(() => ({})),
       ]);
       setStatuses(s.statuses || []);
       setDistricts(d.locations || []);
       setUsers((u.users || []).filter((x) => normalizeRole(x.role) === ROLES.CALLER));
+      setDesignations(dg.designations || []);
     })();
   }, [status, session]);
 
@@ -76,6 +81,8 @@ export default function AdminCallRecords() {
     if (statusFilter) params.set("status_id", statusFilter);
     if (districtFilter) params.set("district_id", districtFilter);
     if (agentFilter) params.set("user_id", agentFilter);
+    if (designationFilter) params.set("designation_id", designationFilter);
+    if (sentimentFilter) params.set("sentiment", sentimentFilter);
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
     try {
@@ -97,11 +104,12 @@ export default function AdminCallRecords() {
     const t = setTimeout(fetchCalls, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter, districtFilter, agentFilter, dateFrom, dateTo]);
+  }, [search, statusFilter, districtFilter, agentFilter, designationFilter, sentimentFilter, dateFrom, dateTo]);
 
   const resetFilters = () => {
     setSearch(""); setStatusFilter(""); setDistrictFilter("");
-    setAgentFilter(""); setDateFrom(""); setDateTo("");
+    setAgentFilter(""); setDesignationFilter(""); setSentimentFilter("");
+    setDateFrom(""); setDateTo("");
   };
 
   const summary = useMemo(() => {
@@ -182,6 +190,24 @@ export default function AdminCallRecords() {
             <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]">
               <option value="">All agents</option>
               {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>Designation</Label>
+            <select value={designationFilter} onChange={(e) => setDesignationFilter(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]">
+              <option value="">All designations</option>
+              {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>Sentiment</Label>
+            <select value={sentimentFilter} onChange={(e) => setSentimentFilter(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]">
+              <option value="">All sentiments</option>
+              <option value="positive">Positive</option>
+              <option value="supporter">Supporter</option>
+              <option value="neutral">Neutral</option>
+              <option value="negative">Negative</option>
+              <option value="opponent">Opponent</option>
             </select>
           </div>
           <div className="lg:col-span-2 flex items-end gap-2">

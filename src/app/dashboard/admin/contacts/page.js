@@ -30,7 +30,10 @@ function Body() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("pending"); // all | pending | done | assigned | pool
   const [districtId, setDistrictId] = useState("");
+  const [assemblies, setAssemblies] = useState([]);
+  const [assemblyId, setAssemblyId] = useState("");
   const [designationId, setDesignationId] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -44,12 +47,20 @@ function Body() {
   const fileRef = useRef(null);
   const excelRef = useRef(null);
 
-  useEffect(() => { load(); }, [filter, districtId, designationId]);
+  useEffect(() => { load(); }, [filter, districtId, assemblyId, designationId, assignedTo]);
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
+
+  // Assembly options follow the selected district.
+  useEffect(() => {
+    if (districtId) {
+      fetch(`/api/locations?parent_id=${districtId}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
+    } else setAssemblies([]);
+    setAssemblyId("");
+  }, [districtId]);
 
   async function load() {
     setLoading(true);
@@ -57,7 +68,9 @@ function Body() {
     if (filter !== "all") params.set("status", filter);
     if (search) params.set("search", search);
     if (districtId) params.set("district_id", districtId);
+    if (assemblyId) params.set("assembly_id", assemblyId);
     if (designationId) params.set("designation_id", designationId);
+    if (assignedTo) params.set("assigned_to", assignedTo);
     const r = await fetch(`/api/contacts?${params}`);
     if (r.ok) { const d = await r.json(); setContacts(d.contacts || []); setTotal(d.total ?? (d.contacts || []).length); }
     setLoading(false);
@@ -192,9 +205,17 @@ function Body() {
           <option value="">All districts</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
+        <select value={assemblyId} onChange={(e) => setAssemblyId(e.target.value)} disabled={!districtId} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white disabled:opacity-50">
+          <option value="">All assemblies</option>
+          {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
         <select value={designationId} onChange={(e) => setDesignationId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">All designations</option>
           {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">Any caller</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
         </select>
         <div className="flex gap-1">
           {["all", "pending", "done", "assigned", "pool"].map((f) => (

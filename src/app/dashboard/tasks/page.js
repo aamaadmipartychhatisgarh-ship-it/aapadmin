@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
-import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil } from "lucide-react";
+import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search } from "lucide-react";
 
 const PRIORITY = {
   urgent: "bg-red-100 text-red-700", high: "bg-orange-100 text-orange-700",
@@ -32,11 +32,34 @@ function Body({ canManage }) {
   const [view, setView] = useState(canManage ? "all" : "mine");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("");
+  const [districtId, setDistrictId] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
+  const [districts, setDistricts] = useState([]);
+  const [users, setUsers] = useState([]);
 
-  useEffect(() => { load(); }, [view]);
+  useEffect(() => {
+    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    if (canManage) fetch("/api/users").then((r) => r.json()).then((d) => setUsers(d.users || [])).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(load, search ? 300 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, search, statusFilter, priorityFilter, districtId, assignedTo]);
   async function load() {
     setLoading(true);
-    const r = await fetch(`/api/tasks?view=${view}`);
+    const p = new URLSearchParams({ view });
+    if (search) p.set("search", search);
+    if (statusFilter) p.set("status", statusFilter);
+    if (priorityFilter) p.set("priority", priorityFilter);
+    if (districtId) p.set("district_id", districtId);
+    if (assignedTo) p.set("assigned_to", assignedTo);
+    const r = await fetch(`/api/tasks?${p}`);
     if (r.ok) setData(await r.json());
     setLoading(false);
   }
@@ -77,6 +100,35 @@ function Body({ canManage }) {
         {views.map((v) => (
           <button key={v.k} onClick={() => setView(v.k)} className={`px-4 py-2 rounded-xl text-sm font-medium ${view === v.k ? "bg-[#164FA3] text-white" : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"}`}>{v.l}</button>
         ))}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+        <Search size={18} className="text-gray-400 ml-2" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title or description" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="in_progress">In progress</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All priorities</option>
+          <option value="urgent">Urgent</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <select value={districtId} onChange={(e) => setDistrictId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All districts</option>
+          {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        {canManage && view !== "mine" && (
+          <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+            <option value="">Any assignee</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+          </select>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

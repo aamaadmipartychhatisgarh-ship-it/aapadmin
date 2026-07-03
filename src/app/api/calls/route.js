@@ -18,6 +18,7 @@ export async function GET(req) {
     const district_id = searchParams.get("district_id");
     const status_id = searchParams.get("status_id");
     const designation_id = searchParams.get("designation_id");
+    const sentiment = searchParams.get("sentiment");
     const user_id = searchParams.get("user_id");
     const search = searchParams.get("search");
 
@@ -75,6 +76,10 @@ export async function GET(req) {
     if (designation_id) {
       sql += " AND c.designation_id = ?";
       params.push(designation_id);
+    }
+    if (sentiment) {
+      sql += " AND c.sentiment = ?";
+      params.push(sentiment);
     }
     if (search) {
       sql += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";

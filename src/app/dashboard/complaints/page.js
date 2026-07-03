@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
-import { MessageSquare, Plus, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle } from "lucide-react";
+import { MessageSquare, Plus, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Search } from "lucide-react";
 
 const TYPE_META = {
   water: { label: "Water", icon: Droplet, color: "text-sky-600 bg-sky-50" },
@@ -39,13 +39,28 @@ function Body() {
   const [data, setData] = useState({ complaints: [], counts: {} });
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [districtId, setDistrictId] = useState("");
+  const [districts, setDistricts] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
 
-  useEffect(() => { load(); }, [filter]);
+  useEffect(() => {
+    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(load, search ? 300 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, search, typeFilter, districtId]);
   async function load() {
     setLoading(true);
     const p = new URLSearchParams();
     if (filter) p.set("status", filter);
+    if (search) p.set("search", search);
+    if (typeFilter) p.set("type", typeFilter);
+    if (districtId) p.set("district_id", districtId);
     const r = await fetch(`/api/complaints?${p}`);
     if (r.ok) setData(await r.json());
     setLoading(false);
@@ -69,6 +84,19 @@ function Body() {
         <SumCard label="Open" value={c.open || 0} danger={Number(c.open) > 0} />
         <SumCard label="In Progress" value={c.in_progress || 0} />
         <SumCard label="Resolved" value={c.resolved || 0} />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+        <Search size={18} className="text-gray-400 ml-2" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search citizen name or phone" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All types</option>
+          {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={districtId} onChange={(e) => setDistrictId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All districts</option>
+          {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
       </div>
 
       <div className="flex gap-2 flex-wrap">

@@ -28,6 +28,8 @@ function Body({ session }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [districtId, setDistrictId] = useState("");
+  const [assemblies, setAssemblies] = useState([]);
+  const [assemblyId, setAssemblyId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [positionFilter, setPositionFilter] = useState("");
   const [page, setPage] = useState(1);
@@ -43,17 +45,26 @@ function Body({ session }) {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
+  // Assembly options follow the selected district.
+  useEffect(() => {
+    if (districtId) {
+      fetch(`/api/locations?parent_id=${districtId}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
+    } else setAssemblies([]);
+    setAssemblyId("");
+  }, [districtId]);
+
   useEffect(() => {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, districtId, statusFilter, positionFilter, page]);
+  }, [search, districtId, assemblyId, statusFilter, positionFilter, page]);
 
   async function load() {
     setLoading(true);
     const p = new URLSearchParams({ page: String(page), limit: "20" });
     if (search) p.set("search", search);
     if (districtId) p.set("district_id", districtId);
+    if (assemblyId) p.set("assembly_id", assemblyId);
     if (statusFilter) p.set("status", statusFilter);
     if (positionFilter) p.set("position", positionFilter);
     const r = await fetch(`/api/workers?${p}`);
@@ -128,6 +139,10 @@ function Body({ session }) {
         <select value={districtId} onChange={(e) => { setDistrictId(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
           <option value="">All districts</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <select value={assemblyId} onChange={(e) => { setAssemblyId(e.target.value); setPage(1); }} disabled={!districtId} className="h-9 px-3 rounded-lg border border-gray-200 text-sm disabled:opacity-50">
+          <option value="">All assemblies</option>
+          {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <select value={positionFilter} onChange={(e) => { setPositionFilter(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
           <option value="">All designations</option>

@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
-// GET /api/tasks?view=mine|all|pending&status=&priority=
+// GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -13,6 +13,9 @@ export async function GET(req) {
     const view = searchParams.get("view") || "all";
     const statusF = searchParams.get("status");
     const priority = searchParams.get("priority");
+    const districtId = searchParams.get("district_id");
+    const assignedTo = searchParams.get("assigned_to");
+    const search = searchParams.get("search");
 
     const where = [];
     const params = [];
@@ -24,6 +27,9 @@ export async function GET(req) {
     if (view === "pending") where.push("t.status IN ('pending','in_progress')");
     if (statusF) { where.push("t.status = ?"); params.push(statusF); }
     if (priority) { where.push("t.priority = ?"); params.push(priority); }
+    if (districtId) { where.push("t.district_id = ?"); params.push(districtId); }
+    if (assignedTo) { where.push("t.assigned_to_user_id = ?"); params.push(assignedTo); }
+    if (search) { where.push("(t.title LIKE ? OR t.description LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
     // Geographic scope (oversight only — caller already filtered to own tasks above).
     // tasks table only has district_id, so declare that.
     if (isOversight(session) && view !== "mine") {

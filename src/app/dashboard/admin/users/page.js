@@ -20,7 +20,17 @@ export default function UsersManagement() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [districtFilter, setDistrictFilter] = useState("");
   const canManage = isTopAdmin(session);
+
+  // Directory filters (client-side — the full list is already loaded).
+  const visibleUsers = users.filter((u) =>
+    (!search || u.username.toLowerCase().includes(search.trim().toLowerCase())) &&
+    (!roleFilter || normalizeRole(u.role) === roleFilter) &&
+    (!districtFilter || String(u.home_district_id || "") === districtFilter)
+  );
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -181,9 +191,35 @@ export default function UsersManagement() {
               </div>
               <span className="font-bold text-white">User Directory</span>
             </div>
-            <div className="bg-white/20 px-4 py-2 rounded-full text-xs font-semibold cursor-pointer border border-white/5 flex items-center gap-2 hover:bg-white/30 transition-colors">
-              All Users <span className="text-white">v</span>
+            <div className="text-xs font-semibold text-blue-100">
+              {visibleUsers.length} of {users.length} users
             </div>
+          </div>
+
+          {/* Directory filters */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search username…"
+              className="flex-1 min-w-[160px] bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white placeholder-blue-200 outline-none focus:bg-white/20"
+            />
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white outline-none"
+            >
+              <option className="text-gray-900" value="">All roles</option>
+              {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r} className="text-gray-900">{roleLabel(r)}</option>)}
+            </select>
+            <select
+              value={districtFilter}
+              onChange={(e) => setDistrictFilter(e.target.value)}
+              className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white outline-none"
+            >
+              <option className="text-gray-900" value="">All districts</option>
+              {districts.map((d) => <option key={d.id} value={String(d.id)} className="text-gray-900">{d.name}</option>)}
+            </select>
           </div>
 
           <div className="flex-1 overflow-x-auto">
@@ -198,7 +234,7 @@ export default function UsersManagement() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => (
+                {visibleUsers.map((u) => (
                   <tr key={u.id} className="border-b border-white/10 hover:bg-white/10 transition-colors group">
                     <td className="py-4">
                       <div className="flex items-center gap-3">

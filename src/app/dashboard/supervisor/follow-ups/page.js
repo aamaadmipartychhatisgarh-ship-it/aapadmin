@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
-import { Star } from "lucide-react";
+import { Star, Search } from "lucide-react";
 
 export default function Page() {
   return <SupervisorGuard><Body /></SupervisorGuard>;
@@ -11,6 +11,10 @@ export default function Page() {
 function Body() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [agentFilter, setAgentFilter] = useState("");
+  const [vipOnly, setVipOnly] = useState(false);
+  const [overdueOnly, setOverdueOnly] = useState(false);
 
   useEffect(() => {
     fetch("/api/supervisor/follow-ups")
@@ -21,6 +25,17 @@ function Body() {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  // Client-side filters — the full list is already loaded.
+  const agents = [...new Set(rows.map((r) => r.agent_name).filter(Boolean))].sort();
+  const q = search.trim().toLowerCase();
+  const visible = rows.filter((r) => {
+    const date = r.follow_up_date ? r.follow_up_date.slice(0, 10) : null;
+    return (!q || (r.person_name || "").toLowerCase().includes(q) || (r.phone_number || "").includes(q)) &&
+      (!agentFilter || r.agent_name === agentFilter) &&
+      (!vipOnly || r.is_vip) &&
+      (!overdueOnly || (date && date < today));
+  });
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div>
@@ -28,11 +43,26 @@ function Body() {
         <p className="text-gray-500 mt-2 font-medium">VIPs are pinned to the top. Overdue dates highlighted in red.</p>
       </div>
 
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+        <Search size={18} className="text-gray-400 ml-2" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or phone" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
+        <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All agents</option>
+          {agents.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <input type="checkbox" checked={vipOnly} onChange={(e) => setVipOnly(e.target.checked)} /> VIP only
+        </label>
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} /> Overdue only
+        </label>
+      </div>
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="p-8 text-gray-400">Loading…</div>
-        ) : rows.length === 0 ? (
-          <div className="p-8 text-gray-400">No pending follow-ups.</div>
+        ) : visible.length === 0 ? (
+          <div className="p-8 text-gray-400">No pending follow-ups{rows.length ? " match the filters" : ""}.</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
@@ -47,7 +77,7 @@ function Body() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {visible.map((r) => {
                 const date = r.follow_up_date ? r.follow_up_date.slice(0, 10) : null;
                 const overdue = date && date < today;
                 return (

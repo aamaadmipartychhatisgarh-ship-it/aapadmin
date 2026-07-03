@@ -34,6 +34,11 @@ export default function CallsPage() {
   const [search, setSearch] = useState("");
   const [designations, setDesignations] = useState([]);
   const [designationId, setDesignationId] = useState("");
+  const [statuses, setStatuses] = useState([]);
+  const [statusId, setStatusId] = useState("");
+  const [sentiment, setSentiment] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,6 +51,7 @@ export default function CallsPage() {
 
   useEffect(() => {
     fetch("/api/designations").then((r) => r.ok ? r.json() : { designations: [] }).then((d) => setDesignations(d.designations || []));
+    fetch("/api/statuses").then((r) => r.ok ? r.json() : { statuses: [] }).then((d) => setStatuses(d.statuses || []));
   }, []);
 
   useEffect(() => {
@@ -53,13 +59,17 @@ export default function CallsPage() {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, session, search, designationId]);
+  }, [status, session, search, designationId, statusId, sentiment, dateFrom, dateTo]);
 
   async function load() {
     setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (designationId) params.set("designation_id", designationId);
+    if (statusId) params.set("status_id", statusId);
+    if (sentiment) params.set("sentiment", sentiment);
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
     try {
       const r = await fetch(`/api/calls?${params}`);
       if (r.ok) setCalls((await r.json()).calls || []);
@@ -97,6 +107,16 @@ export default function CallsPage() {
           <option value="">All designations</option>
           {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
+        <select value={statusId} onChange={(e) => setStatusId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All statuses</option>
+          {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <select value={sentiment} onChange={(e) => setSentiment(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All sentiments</option>
+          {Object.entries(SENTIMENT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="From date" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white" />
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="To date" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white" />
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

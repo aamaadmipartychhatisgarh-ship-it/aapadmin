@@ -14,9 +14,13 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const statusF = searchParams.get("status");
     const typeF = searchParams.get("type");
+    const districtId = searchParams.get("district_id");
+    const search = searchParams.get("search");
     const where = [], params = [];
     if (statusF) { where.push("c.status = ?"); params.push(statusF); }
     if (typeF) { where.push("c.type = ?"); params.push(typeF); }
+    if (districtId) { where.push("c.district_id = ?"); params.push(districtId); }
+    if (search) { where.push("(c.citizen_name LIKE ? OR c.citizen_phone LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
     // complaints table has district_id + assembly_id (no zone_id)
     const scope = scopeFilterSync(session.user, "c", { cols: ["district_id", "assembly_id"] });
     if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
