@@ -18,6 +18,8 @@ export const ROLES = {
   SUPERVISOR: "supervisor",
   CALLER: "caller",
   WORKER: "worker",
+  PRESS_MEDIA: "press_media",
+  SOCIAL_MEDIA: "social_media",
 };
 
 // Normalize any incoming role string (legacy or canonical) to canonical.
@@ -39,6 +41,8 @@ const RANK = {
   [ROLES.DISTRICT_ADMIN]: 60,
   [ROLES.ASSEMBLY_ADMIN]: 50,
   [ROLES.SUPERVISOR]: 40,
+  [ROLES.PRESS_MEDIA]: 30,
+  [ROLES.SOCIAL_MEDIA]: 30,
   [ROLES.CALLER]: 20,
   [ROLES.WORKER]: 10,
 };
@@ -82,6 +86,20 @@ export function isCaller(session) {
 export function isSupervisorRole(session) {
   return roleOf(session) === ROLES.SUPERVISOR;
 }
+export function isPressMedia(session) {
+  return roleOf(session) === ROLES.PRESS_MEDIA;
+}
+export function isSocialMedia(session) {
+  return roleOf(session) === ROLES.SOCIAL_MEDIA;
+}
+// Module access: press media staff manage the Media Center; social media staff
+// manage the Social War Room + Social Command. Oversight roles keep access.
+export function canAccessMedia(session) {
+  return isOversight(session) || isPressMedia(session);
+}
+export function canAccessSocial(session) {
+  return isOversight(session) || isSocialMedia(session);
+}
 
 // --- Geographic scope ------------------------------------------------------
 // Returns the scope a user is limited to. super_admin/state_admin = whole state.
@@ -114,6 +132,8 @@ export const ROLE_LABELS = {
   [ROLES.SUPERVISOR]: "Supervisor",
   [ROLES.CALLER]: "Caller",
   [ROLES.WORKER]: "Worker",
+  [ROLES.PRESS_MEDIA]: "Press Media",
+  [ROLES.SOCIAL_MEDIA]: "Social Media",
 };
 
 export function roleLabel(role) {
@@ -125,6 +145,7 @@ export const ASSIGNABLE_ROLES = [
   ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.ZONE_ADMIN,
   ROLES.DISTRICT_ADMIN, ROLES.ASSEMBLY_ADMIN,
   ROLES.SUPERVISOR, ROLES.CALLER, ROLES.WORKER,
+  ROLES.PRESS_MEDIA, ROLES.SOCIAL_MEDIA,
 ];
 
 // --- Scope SQL helpers ----------------------------------------------------

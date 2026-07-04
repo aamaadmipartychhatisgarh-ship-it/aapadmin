@@ -2,13 +2,14 @@
 
 import { useEffect, useState, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
+import { canAccessMedia } from "@/lib/permissions";
 import {
   Newspaper, Tv, Mic, UserCheck, BarChart3, Upload, Plus, Loader2, X,
   Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil,
 } from "lucide-react";
 
 export default function Page() {
-  return <SupervisorGuard><Body /></SupervisorGuard>;
+  return <SupervisorGuard allow={canAccessMedia}><Body /></SupervisorGuard>;
 }
 
 const TABS = [

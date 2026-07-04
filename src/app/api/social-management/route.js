@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
+import { normalizeRole, ROLES, canAccessSocial } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 // Aggregate data for the Social Management page (overview + per-LS rollups).
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
     // Social pages are keyed by lok_sabha_id. Scope per role:
     //   zone_admin     → pages whose LS is in the zone

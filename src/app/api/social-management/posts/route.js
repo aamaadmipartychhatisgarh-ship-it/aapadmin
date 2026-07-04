@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight } from "@/lib/permissions";
+import { canAccessSocial } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 // Create a manual post log entry. status starts as 'pending' (or 'draft').
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const d = await req.json();
     if (!d.page_id) return NextResponse.json({ message: "page_id required" }, { status: 400 });
     const res = await query(

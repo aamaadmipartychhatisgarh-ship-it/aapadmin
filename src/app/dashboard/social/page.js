@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
+import { canAccessSocial } from "@/lib/permissions";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Loader2, Eye, Users, TrendingUp, Flame, ThumbsUp, Camera, MessageCircle } from "lucide-react";
 
@@ -12,7 +13,7 @@ const PLATFORM = {
 };
 
 export default function Page() {
-  return <SupervisorGuard><Body /></SupervisorGuard>;
+  return <SupervisorGuard allow={canAccessSocial}><Body /></SupervisorGuard>;
 }
 
 function fmt(n) {

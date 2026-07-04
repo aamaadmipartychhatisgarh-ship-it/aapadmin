@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight } from "@/lib/permissions";
+import { canAccessMedia } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 // Aggregated GET for the Media hub page.
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
     const newspapers = await query(`SELECT * FROM newspapers ORDER BY sort_order, name`);
     const channels = await query(`SELECT * FROM news_channels ORDER BY sort_order, name`);

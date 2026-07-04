@@ -156,6 +156,19 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
     ];
+  } else if (canonical === ROLES.PRESS_MEDIA) {
+    // Press media staff: the Media Center is their workspace.
+    navItems = [
+      { name: "Media", href: "/dashboard/media", icon: Newspaper },
+      { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+    ];
+  } else if (canonical === ROLES.SOCIAL_MEDIA) {
+    // Social media staff: war room + command center.
+    navItems = [
+      { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
+      { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
+      { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+    ];
   } else {
     // Caller (and legacy 'user'/'agent') — the calling workspace
     navItems = [

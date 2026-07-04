@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight } from "@/lib/permissions";
+import { canAccessMedia } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 // GET invites + their attendance for a conference
 export async function GET(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
     const invites = await query(
       `SELECT ji.*, j.name AS journalist_name, j.outlet, j.mobile
@@ -27,7 +27,7 @@ export async function GET(req, { params }) {
 export async function POST(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
     const d = await req.json();
     if (!d.journalist_id) return NextResponse.json({ message: "journalist_id required" }, { status: 400 });

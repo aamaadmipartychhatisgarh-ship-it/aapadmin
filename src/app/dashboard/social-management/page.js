@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
+import { canAccessSocial } from "@/lib/permissions";
 import {
   Share2, Loader2, Plus, X, Upload, CheckCircle2, XCircle, Eye, Heart, MessageCircle,
   TrendingUp, AlertCircle, Clock, ThumbsUp, Camera, PlayCircle, ChevronRight, FileText, Pencil,
@@ -30,7 +31,7 @@ const TABS = [
 ];
 
 export default function Page() {
-  return <SupervisorGuard><Body /></SupervisorGuard>;
+  return <SupervisorGuard allow={canAccessSocial}><Body /></SupervisorGuard>;
 }
 
 function fmt(n) {

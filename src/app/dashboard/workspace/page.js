@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Star, MessageSquare } from "lucide-react";
-import { isAdmin, isOversight } from "@/lib/permissions";
+import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 
 export default function WorkspacePage() {
   const { data: session, status } = useSession();
@@ -15,10 +15,12 @@ export default function WorkspacePage() {
     else if (status === "authenticated" && isOversight(session)) {
       // The workspace is for callers only. Send oversight roles to their landing page.
       router.push(isAdmin(session) ? "/dashboard/admin" : "/dashboard/supervisor");
+    } else if (status === "authenticated" && (isPressMedia(session) || isSocialMedia(session))) {
+      router.push(isPressMedia(session) ? "/dashboard/media" : "/dashboard/social");
     }
   }, [status, session, router]);
 
-  if (status === "loading" || !session || isOversight(session)) {
+  if (status === "loading" || !session || isOversight(session) || isPressMedia(session) || isSocialMedia(session)) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <WorkspaceBody />;
