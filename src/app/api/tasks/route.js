@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensureUserTeamMembers } from "@/lib/teamSchema";
 
 // GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
 export async function GET(req) {
@@ -19,10 +20,11 @@ export async function GET(req) {
 
     const where = [];
     const params = [];
-    // Non-oversight users only see their own tasks.
+    // Non-oversight users only see their own tasks — assigned directly or via a team they belong to.
     if (view === "mine" || !isOversight(session)) {
-      where.push("t.assigned_to_user_id = ?");
-      params.push(session.user.id);
+      await ensureUserTeamMembers();
+      where.push("(t.assigned_to_user_id = ? OR t.assigned_to_team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ?))");
+      params.push(session.user.id, session.user.id);
     }
     if (view === "pending") where.push("t.status IN ('pending','in_progress')");
     if (statusF) { where.push("t.status = ?"); params.push(statusF); }

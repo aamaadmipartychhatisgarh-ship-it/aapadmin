@@ -211,8 +211,8 @@ function LocationsTree() {
               <option value="lok_sabha">Lok Sabha</option>
               <option value="district">District</option>
               <option value="assembly">Vidhan Sabha</option>
-              <option value="ward">Ward</option>
-              <option value="booth">Booth</option>
+              <option value="ward">Block</option>
+              <option value="booth">Polling Station</option>
             </select>
           </div>
           <div className="md:col-span-2">
@@ -271,13 +271,14 @@ const CHILD_TYPE = {
   ward: "booth",
 };
 
+// DB type keys stay 'ward'/'booth' — only the display labels changed.
 const TYPE_LABEL = {
   zone: "Zone",
   lok_sabha: "Lok Sabha",
   district: "District",
   assembly: "Vidhan Sabha",
-  ward: "Ward",
-  booth: "Booth",
+  ward: "Block",
+  booth: "Polling Station",
 };
 
 const TYPE_COLOR = {

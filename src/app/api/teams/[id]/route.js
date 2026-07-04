@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensureUserTeamMembers } from "@/lib/teamSchema";
 
 export async function GET(req, { params }) {
   try {
@@ -10,6 +11,7 @@ export async function GET(req, { params }) {
     if (!session || !isOversight(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
+    await ensureUserTeamMembers();
     const { id } = await params;
     const [team] = await query(
       `SELECT t.*, l.name AS location_name, w.name AS leader_name
@@ -17,10 +19,18 @@ export async function GET(req, { params }) {
          LEFT JOIN workers w ON w.id = t.leader_worker_id WHERE t.id = ?`, [id]
     );
     if (!team) return NextResponse.json({ message: "Not found" }, { status: 404 });
+    // Members are user accounts (tm.user_id) or field workers (tm.worker_id).
     const members = await query(
-      `SELECT tm.id AS membership_id, tm.role_in_team, w.id, w.name, w.position, w.activity_score, w.status
-         FROM team_members tm JOIN workers w ON w.id = tm.worker_id
-        WHERE tm.team_id = ? ORDER BY w.activity_score DESC`, [id]
+      `SELECT tm.id AS membership_id, tm.role_in_team, tm.user_id, tm.worker_id,
+              CASE WHEN tm.user_id IS NOT NULL THEN 'user' ELSE 'worker' END AS member_type,
+              COALESCE(u.username, w.name) AS name,
+              u.role AS user_role,
+              w.id AS id, w.position, w.activity_score, w.status
+         FROM team_members tm
+         LEFT JOIN users u ON u.id = tm.user_id
+         LEFT JOIN workers w ON w.id = tm.worker_id
+        WHERE tm.team_id = ?
+        ORDER BY tm.user_id IS NULL, w.activity_score DESC`, [id]
     );
     return NextResponse.json({ team, members });
   } catch (err) {

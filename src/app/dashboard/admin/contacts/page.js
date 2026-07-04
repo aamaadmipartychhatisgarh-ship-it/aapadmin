@@ -41,6 +41,8 @@ function Body() {
   const [editing, setEditing] = useState(null);
   const [importing, setImporting] = useState(false);
   const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
+  const [teams, setTeams] = useState([]);
+  const [bulkTeam, setBulkTeam] = useState("");
   const [bulkMode, setBulkMode] = useState("even"); // even | perCaller
   const [perCaller, setPerCaller] = useState(100);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -52,7 +54,24 @@ function Body() {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
   }, []);
+
+  // Selecting a team pre-selects all its caller members for distribution.
+  async function loadTeamCallers(teamId) {
+    setBulkTeam(teamId);
+    if (!teamId) return;
+    const r = await fetch(`/api/teams/${teamId}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const callerIds = users.map((u) => u.id);
+    const memberCallerIds = (d.members || [])
+      .filter((m) => m.member_type === "user" && callerIds.includes(m.user_id))
+      .map((m) => m.user_id);
+    setBulkCallers(memberCallerIds);
+    if (memberCallerIds.length === 0) setError("This team has no caller accounts as members. Add users to the team first.");
+    else setError("");
+  }
 
   // Assembly options follow the selected district.
   useEffect(() => {
@@ -233,6 +252,17 @@ function Body() {
             {districtId ? ` in ${districts.find((d) => String(d.id) === String(districtId))?.name || "this district"}` : ""} across callers
           </span>
         </div>
+
+        {/* team shortcut — selects all caller accounts in the team */}
+        {teams.length > 0 && (
+          <div className="flex items-center gap-2">
+            <select value={bulkTeam} onChange={(e) => loadTeamCallers(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+              <option value="">Pick callers from a team…</option>
+              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <span className="text-xs text-gray-500">or pick callers individually below</span>
+          </div>
+        )}
 
         {/* caller multi-select */}
         <div className="flex flex-wrap gap-2">

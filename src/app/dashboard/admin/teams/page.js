@@ -10,8 +10,8 @@ import { Network, Plus, Users, Loader2, ChevronRight, Trophy, Pencil, Search } f
 const LEVELS = [
   { key: "state", label: "State" }, { key: "zone", label: "Zone" },
   { key: "lok_sabha", label: "Lok Sabha" }, { key: "district", label: "District" },
-  { key: "assembly", label: "Assembly" }, { key: "ward", label: "Ward" },
-  { key: "mandal", label: "Mandal" }, { key: "booth", label: "Booth" },
+  { key: "assembly", label: "Assembly" }, { key: "ward", label: "Block" },
+  { key: "mandal", label: "Mandal" }, { key: "booth", label: "Polling Station" },
 ];
 const LEVEL_COLOR = {
   state: "bg-[#164FA3] text-white", zone: "bg-purple-100 text-purple-800",

@@ -11,10 +11,19 @@ export async function PUT(req, { params }) {
     const { id } = await params;
     const d = await req.json();
 
-    // Assignees can update status of their own tasks; oversight can edit anything.
+    // Assignees can update status of their own tasks (directly assigned or via
+    // a team they belong to); oversight can edit anything.
     if (!isOversight(session)) {
-      const [row] = await query("SELECT assigned_to_user_id FROM tasks WHERE id = ?", [id]);
-      if (!row || String(row.assigned_to_user_id) !== String(session.user.id)) {
+      const [row] = await query("SELECT assigned_to_user_id, assigned_to_team_id FROM tasks WHERE id = ?", [id]);
+      let mine = row && String(row.assigned_to_user_id) === String(session.user.id);
+      if (!mine && row?.assigned_to_team_id) {
+        const member = await query(
+          "SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ? LIMIT 1",
+          [row.assigned_to_team_id, session.user.id]
+        ).catch(() => []);
+        mine = member.length > 0;
+      }
+      if (!mine) {
         return NextResponse.json({ message: "Forbidden" }, { status: 403 });
       }
     }

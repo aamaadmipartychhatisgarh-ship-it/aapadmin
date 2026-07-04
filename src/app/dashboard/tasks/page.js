@@ -205,14 +205,17 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     priority: editing.priority || "medium",
     deadline: editing.deadline ? editing.deadline.slice(0, 10) : "",
     assigned_to_user_id: editing.assigned_to_user_id || "",
+    assigned_to_team_id: editing.assigned_to_team_id || "",
     district_id: editing.district_id || "",
-  } : { title: "", description: "", priority: "medium", deadline: "", assigned_to_user_id: "", district_id: "" });
+  } : { title: "", description: "", priority: "medium", deadline: "", assigned_to_user_id: "", assigned_to_team_id: "", district_id: "" });
   const [users, setUsers] = useState([]);
+  const [teams, setTeams] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers(d.users || [])).catch(() => {});
+    fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
   }, []);
 
@@ -241,6 +244,10 @@ function AddTaskModal({ onClose, onSaved, editing }) {
           <select className={inp} value={form.assigned_to_user_id} onChange={(e) => setForm({ ...form, assigned_to_user_id: e.target.value })}>
             <option value="">Assign to user…</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+          </select>
+          <select className={inp} value={form.assigned_to_team_id} onChange={(e) => setForm({ ...form, assigned_to_team_id: e.target.value })}>
+            <option value="">Assign to team…</option>
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
             <option value="">District (optional)</option>

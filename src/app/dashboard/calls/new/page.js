@@ -197,7 +197,7 @@ export default function LogCall() {
               </select>
             </div>
           </div>
-          <p className="text-xs text-gray-400 mt-4 font-medium">* Further hierarchical levels (Assembly, Ward, etc.) can be configured by admins.</p>
+          <p className="text-xs text-gray-400 mt-4 font-medium">* Further hierarchical levels (Assembly, Block, etc.) can be configured by admins.</p>
         </div>
 
         {/* Call Outcome Card */}

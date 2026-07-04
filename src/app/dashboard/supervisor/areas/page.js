@@ -9,8 +9,8 @@ const LEVELS = [
   { key: "lok_sabha", label: "Lok Sabha" },
   { key: "district", label: "District" },
   { key: "assembly", label: "Vidhan Sabha" },
-  { key: "ward", label: "Ward" },
-  { key: "booth", label: "Booth" },
+  { key: "ward", label: "Block" },
+  { key: "booth", label: "Polling Station" },
 ];
 
 export default function Page() {

@@ -7,7 +7,7 @@ import { GraduationCap, PlayCircle, FileText, CheckCircle2, Loader2, Phone, Vote
 
 const CATEGORY = {
   calling: { label: "Calling Training", icon: Phone, color: "text-blue-600 bg-blue-50" },
-  booth: { label: "Booth Management", icon: Vote, color: "text-emerald-600 bg-emerald-50" },
+  booth: { label: "Polling Station Management", icon: Vote, color: "text-emerald-600 bg-emerald-50" },
   social_media: { label: "Social Media", icon: Share2, color: "text-pink-600 bg-pink-50" },
   organization: { label: "Organization", icon: Building2, color: "text-amber-600 bg-amber-50" },
 };
