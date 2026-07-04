@@ -40,10 +40,13 @@ export async function GET(req) {
     const [[{ total }]] = await query(`SELECT COUNT(*) AS total FROM workers w ${whereSql}`, params).then((r) => [r]);
 
     const workers = await query(
-      `SELECT w.*, ld.name AS district_name, la.name AS assembly_name
+      `SELECT w.*, ld.name AS district_name, la.name AS assembly_name,
+              lz.name AS zone_name, lls.name AS lok_sabha_name
          FROM workers w
          LEFT JOIN locations ld ON ld.id = w.district_id
          LEFT JOIN locations la ON la.id = w.assembly_id
+         LEFT JOIN locations lz ON lz.id = w.zone_id
+         LEFT JOIN locations lls ON lls.id = w.lok_sabha_id
          ${whereSql}
          ORDER BY w.activity_score DESC, w.id DESC
          LIMIT ? OFFSET ?`,

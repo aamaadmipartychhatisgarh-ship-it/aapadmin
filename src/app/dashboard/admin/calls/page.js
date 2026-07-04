@@ -40,7 +40,10 @@ export default function AdminCallRecords() {
   // Filters
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [lokSabhaFilter, setLokSabhaFilter] = useState("");
   const [districtFilter, setDistrictFilter] = useState("");
+  const [assemblyFilter, setAssemblyFilter] = useState("");
   const [agentFilter, setAgentFilter] = useState("");
   const [designationFilter, setDesignationFilter] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState("");
@@ -49,7 +52,10 @@ export default function AdminCallRecords() {
 
   // Master data
   const [statuses, setStatuses] = useState([]);
+  const [zones, setZones] = useState([]);
+  const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState([]);
+  const [assembliesList, setAssembliesList] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [users, setUsers] = useState([]);
 
@@ -61,14 +67,20 @@ export default function AdminCallRecords() {
   useEffect(() => {
     if (status !== "authenticated" || !isAdmin(session)) return;
     (async () => {
-      const [s, d, u, dg] = await Promise.all([
+      const [s, z, ls, d, a, u, dg] = await Promise.all([
         fetch("/api/statuses").then((r) => r.json()).catch(() => ({})),
+        fetch("/api/locations?type=zone").then((r) => r.json()).catch(() => ({})),
+        fetch("/api/locations?type=lok_sabha").then((r) => r.json()).catch(() => ({})),
         fetch("/api/locations?type=district").then((r) => r.json()).catch(() => ({})),
+        fetch("/api/locations?type=assembly").then((r) => r.json()).catch(() => ({})),
         fetch("/api/users").then((r) => r.json()).catch(() => ({})),
         fetch("/api/designations").then((r) => r.json()).catch(() => ({})),
       ]);
       setStatuses(s.statuses || []);
+      setZones(z.locations || []);
+      setLokSabhas(ls.locations || []);
       setDistricts(d.locations || []);
+      setAssembliesList(a.locations || []);
       setUsers((u.users || []).filter((x) => normalizeRole(x.role) === ROLES.CALLER));
       setDesignations(dg.designations || []);
     })();
@@ -79,7 +91,10 @@ export default function AdminCallRecords() {
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (statusFilter) params.set("status_id", statusFilter);
+    if (zoneFilter) params.set("zone_id", zoneFilter);
+    if (lokSabhaFilter) params.set("lok_sabha_id", lokSabhaFilter);
     if (districtFilter) params.set("district_id", districtFilter);
+    if (assemblyFilter) params.set("assembly_id", assemblyFilter);
     if (agentFilter) params.set("user_id", agentFilter);
     if (designationFilter) params.set("designation_id", designationFilter);
     if (sentimentFilter) params.set("sentiment", sentimentFilter);
@@ -104,10 +119,11 @@ export default function AdminCallRecords() {
     const t = setTimeout(fetchCalls, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter, districtFilter, agentFilter, designationFilter, sentimentFilter, dateFrom, dateTo]);
+  }, [search, statusFilter, zoneFilter, lokSabhaFilter, districtFilter, assemblyFilter, agentFilter, designationFilter, sentimentFilter, dateFrom, dateTo]);
 
   const resetFilters = () => {
-    setSearch(""); setStatusFilter(""); setDistrictFilter("");
+    setSearch(""); setStatusFilter(""); setZoneFilter(""); setLokSabhaFilter("");
+    setDistrictFilter(""); setAssemblyFilter("");
     setAgentFilter(""); setDesignationFilter(""); setSentimentFilter("");
     setDateFrom(""); setDateTo("");
   };
@@ -179,10 +195,31 @@ export default function AdminCallRecords() {
             </select>
           </div>
           <div>
+            <Label>Zone</Label>
+            <select value={zoneFilter} onChange={(e) => setZoneFilter(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]">
+              <option value="">All zones</option>
+              {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>Lok Sabha</Label>
+            <select value={lokSabhaFilter} onChange={(e) => setLokSabhaFilter(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]">
+              <option value="">All Lok Sabhas</option>
+              {lokSabhas.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </div>
+          <div>
             <Label>District</Label>
             <select value={districtFilter} onChange={(e) => setDistrictFilter(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]">
               <option value="">All districts</option>
               {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>Assembly</Label>
+            <select value={assemblyFilter} onChange={(e) => setAssemblyFilter(e.target.value)} className="w-full h-10 px-3 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]">
+              <option value="">All assemblies</option>
+              {assembliesList.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
           <div>

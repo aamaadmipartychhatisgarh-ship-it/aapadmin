@@ -15,7 +15,9 @@ export async function GET(req) {
     const date_from = searchParams.get("date_from");
     const date_to = searchParams.get("date_to");
     const zone_id = searchParams.get("zone_id");
+    const lok_sabha_id = searchParams.get("lok_sabha_id");
     const district_id = searchParams.get("district_id");
+    const assembly_id = searchParams.get("assembly_id");
     const status_id = searchParams.get("status_id");
     const designation_id = searchParams.get("designation_id");
     const sentiment = searchParams.get("sentiment");
@@ -65,9 +67,17 @@ export async function GET(req) {
       sql += " AND c.zone_id = ?";
       params.push(zone_id);
     }
+    if (lok_sabha_id) {
+      sql += " AND c.lok_sabha_id = ?";
+      params.push(lok_sabha_id);
+    }
     if (district_id) {
       sql += " AND c.district_id = ?";
       params.push(district_id);
+    }
+    if (assembly_id) {
+      sql += " AND c.assembly_id = ?";
+      params.push(assembly_id);
     }
     if (status_id) {
       sql += " AND c.status_id = ?";

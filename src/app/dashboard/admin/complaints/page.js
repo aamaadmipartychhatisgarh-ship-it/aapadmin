@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
-import { MessageSquare, Plus, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search } from "lucide-react";
+import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search } from "lucide-react";
 
 const TYPE_META = {
   water: { label: "Water", icon: Droplet, color: "text-sky-600 bg-sky-50" },
@@ -40,7 +40,6 @@ function Body() {
   const [typeFilter, setTypeFilter] = useState("");
   const [districtId, setDistrictId] = useState("");
   const [districts, setDistricts] = useState([]);
-  const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
 
   useEffect(() => {
@@ -74,11 +73,8 @@ function Body() {
       <div className="flex justify-between items-end gap-4 flex-wrap">
         <div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Complaints</h1>
-          <p className="text-gray-500 mt-2 font-medium">Track and resolve citizen civic issues.</p>
+          <p className="text-gray-500 mt-2 font-medium">Review and resolve citizen civic issues. Complaints are logged by callers.</p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md">
-          <Plus size={16} /> Log Complaint
-        </button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -156,7 +152,6 @@ function Body() {
         )}
       </div>
 
-      {showAdd && <AddModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {editing && <AddModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );

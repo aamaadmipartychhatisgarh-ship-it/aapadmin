@@ -57,11 +57,13 @@ function Body({ session }) {
     setLokSabhaId("");
   }, [zoneId]);
 
-  // Assembly options follow the selected district.
+  // Assembly filter is independent of district: imported workers can carry an
+  // assembly without a matching district, so requiring a district first made
+  // assembly-wise search miss them. Show all assemblies unless a district is
+  // picked (then narrow the options to that district's assemblies).
   useEffect(() => {
-    if (districtId) {
-      fetch(`/api/locations?parent_id=${districtId}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
-    } else setAssemblies([]);
+    const url = districtId ? `/api/locations?parent_id=${districtId}` : "/api/locations?type=assembly";
+    fetch(url).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
     setAssemblyId("");
   }, [districtId]);
 
@@ -162,7 +164,7 @@ function Body({ session }) {
           <option value="">All districts</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <select value={assemblyId} onChange={(e) => { setAssemblyId(e.target.value); setPage(1); }} disabled={!districtId} className="h-9 px-3 rounded-lg border border-gray-200 text-sm disabled:opacity-50">
+        <select value={assemblyId} onChange={(e) => { setAssemblyId(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
           <option value="">All assemblies</option>
           {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
@@ -183,14 +185,18 @@ function Body({ session }) {
         ) : data.workers.length === 0 ? (
           <div className="p-12 text-center text-gray-400"><Users size={36} className="mx-auto text-gray-300 mb-3" />No workers match.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Mobile</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Zone</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Address</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Activity</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 {canEdit && <th className="px-4 py-3 font-semibold text-gray-600 text-right">Edit</th>}
@@ -214,8 +220,11 @@ function Body({ session }) {
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{w.mobile || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{w.position || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">{w.zone_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">{w.lok_sabha_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{w.district_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{w.assembly_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs max-w-[200px] truncate" title={w.address || ""}>{w.address || "—"}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -240,6 +249,7 @@ function Body({ session }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
         {!loading && data.pages > 1 && (
           <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between text-sm bg-gray-50">

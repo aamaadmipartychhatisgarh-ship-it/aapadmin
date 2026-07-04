@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2 } from "lucide-react";
+import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X } from "lucide-react";
 
 export default function MasterDataSettings() {
   const [statuses, setStatuses] = useState([]);
@@ -76,6 +76,8 @@ export default function MasterDataSettings() {
           setValue={setNewStatus}
           loading={statusLoading}
           placeholder="New status name…"
+          apiBase="/api/statuses"
+          onChanged={fetchStatuses}
         />
 
         {/* Designations */}
@@ -88,6 +90,8 @@ export default function MasterDataSettings() {
           setValue={setNewDesignation}
           loading={desigLoading}
           placeholder="New designation name…"
+          apiBase="/api/designations"
+          onChanged={fetchDesignations}
         />
       </div>
 
@@ -97,7 +101,36 @@ export default function MasterDataSettings() {
   );
 }
 
-function ListCard({ icon: Icon, title, items, onSubmit, value, setValue, loading, placeholder }) {
+function ListCard({ icon: Icon, title, items, onSubmit, value, setValue, loading, placeholder, apiBase, onChanged }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function saveEdit(id) {
+    if (!editName.trim()) return;
+    setBusy(true); setError("");
+    const r = await fetch(`${apiBase}/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName.trim() }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { setEditingId(null); onChanged(); }
+    else setError(d.message || "Update failed");
+    setBusy(false);
+  }
+
+  async function remove(item) {
+    if (!confirm(`Delete "${item.name}"? Records using it will show no ${title.toLowerCase().replace(/s$/, "")}.`)) return;
+    setBusy(true); setError("");
+    const r = await fetch(`${apiBase}/${item.id}`, { method: "DELETE" });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) onChanged();
+    else setError(d.message || "Delete failed");
+    setBusy(false);
+  }
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-[500px]">
       <div className="p-6 border-b border-gray-100 flex items-center gap-2 text-[#164FA3]">
@@ -118,13 +151,32 @@ function ListCard({ icon: Icon, title, items, onSubmit, value, setValue, loading
             <Plus size={16} /> Add
           </button>
         </form>
+        {error && <div className="mt-3 bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-xs">{error}</div>}
       </div>
       <div className="flex-1 overflow-auto p-2">
         <ul className="divide-y divide-gray-100">
           {items.map((s) => (
-            <li key={s.id} className="p-4 hover:bg-gray-50 flex items-center justify-between rounded-lg">
-              <span className="font-medium text-gray-700">{s.name}</span>
-              <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">ID: {s.id}</span>
+            <li key={s.id} className="p-4 hover:bg-gray-50 flex items-center justify-between gap-2 rounded-lg">
+              {editingId === s.id ? (
+                <>
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveEdit(s.id); if (e.key === "Escape") setEditingId(null); }}
+                    autoFocus
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
+                  />
+                  <button onClick={() => saveEdit(s.id)} disabled={busy} title="Save" className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={16} /></button>
+                  <button onClick={() => setEditingId(null)} title="Cancel" className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-gray-700 flex-1">{s.name}</span>
+                  <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">ID: {s.id}</span>
+                  <button onClick={() => { setEditingId(s.id); setEditName(s.name); setError(""); }} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
+                  <button onClick={() => remove(s)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={14} /></button>
+                </>
+              )}
             </li>
           ))}
         </ul>

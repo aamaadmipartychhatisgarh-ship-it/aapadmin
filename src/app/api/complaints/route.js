@@ -4,7 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
-// Oversight roles AND callers can log/view complaints (callers stay geo-scoped).
+// Callers log complaints (heard live on calls); oversight roles review and
+// monitor them. Both can view (callers stay geo-scoped).
 const canUseComplaints = (session) => isOversight(session) || isCaller(session);
 
 export async function GET(req) {
@@ -54,7 +55,10 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canUseComplaints(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // Logging is caller-only; admins/supervisors review complaints, they don't create them.
+    if (!session || !isCaller(session)) {
+      return NextResponse.json({ message: "Only callers can log complaints" }, { status: 403 });
+    }
     const d = await req.json();
     if (!d.citizen_name) return NextResponse.json({ message: "Citizen name required" }, { status: 400 });
     const res = await query(

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Star } from "lucide-react";
+import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Star, MessageSquare } from "lucide-react";
 import { isAdmin, isOversight } from "@/lib/permissions";
 
 export default function WorkspacePage() {
@@ -43,6 +43,9 @@ function WorkspaceBody() {
   const [history, setHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Quick complaint logging while on a call
+  const [showComplaint, setShowComplaint] = useState(false);
 
   // Inline contact edit state
   const [editing, setEditing] = useState(false);
@@ -149,7 +152,10 @@ function WorkspaceBody() {
         ...form,
         contact_id: active.id,
         designation_id: active.designation_id,
+        zone_id: active.zone_id,
+        lok_sabha_id: active.lok_sabha_id,
         district_id: active.district_id,
+        assembly_id: active.assembly_id,
         ward_id: active.ward_id,
         booth_id: active.booth_id,
         address: active.address,
@@ -310,6 +316,9 @@ function WorkspaceBody() {
             <Phone size={48} className="text-gray-300 mx-auto mb-4" />
             <h2 className="text-xl font-bold text-gray-900 mb-2">Ready when you are</h2>
             <p className="text-gray-500">Click <strong>Start Next Call</strong> to claim a contact and start the timer.</p>
+            <button onClick={() => setShowComplaint(true)} className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#164FA3] border border-blue-200 hover:bg-blue-50 px-4 py-2 rounded-xl">
+              <MessageSquare size={16} /> Log Complaint
+            </button>
           </div>
         ) : (
           <>
@@ -388,6 +397,9 @@ function WorkspaceBody() {
                     </button>
                     <button onClick={() => setEditing(true)} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2">
                       <Pencil size={16} /> Edit details
+                    </button>
+                    <button onClick={() => setShowComplaint(true)} className="bg-[#FCB712] text-[#164FA3] font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2">
+                      <MessageSquare size={16} /> Log Complaint
                     </button>
                   </>
                 ) : (
@@ -491,6 +503,70 @@ function WorkspaceBody() {
             </div>
           </>
         )}
+      </div>
+
+      {showComplaint && (
+        <ComplaintModal
+          contact={active}
+          districts={districts}
+          onClose={() => setShowComplaint(false)}
+          onSaved={() => { setShowComplaint(false); setMessage("Complaint logged."); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Quick complaint capture — prefilled from the contact the caller is talking to.
+const COMPLAINT_TYPES = { water: "Water", roads: "Roads", electricity: "Electricity", ration: "Ration", other: "Other" };
+
+function ComplaintModal({ contact, districts, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    citizen_name: contact?.person_name || "",
+    citizen_phone: contact?.phone_number || "",
+    type: "water",
+    description: "",
+    district_id: contact?.district_id || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    setSaving(true); setError("");
+    const r = await fetch("/api/complaints", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    if (r.ok) { onSaved(); return; }
+    const d = await r.json().catch(() => ({}));
+    setError(d.message || "Failed to log complaint");
+    setSaving(false);
+  }
+
+  const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-gray-900">Log Complaint</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
+        <input className={inp} placeholder="Citizen name *" value={form.citizen_name} onChange={(e) => setForm({ ...form, citizen_name: e.target.value })} />
+        <input className={inp} placeholder="Phone" value={form.citizen_phone} onChange={(e) => setForm({ ...form, citizen_phone: e.target.value })} />
+        <select className={inp} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+          {Object.entries(COMPLAINT_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
+          <option value="">District</option>
+          {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <textarea className={inp} rows={3} placeholder="What is the complaint about?" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={save} disabled={saving || !form.citizen_name} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Log Complaint"}</button>
+        </div>
       </div>
     </div>
   );

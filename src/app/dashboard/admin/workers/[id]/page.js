@@ -62,9 +62,14 @@ function Body({ id, canEdit, router }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-[#164FA3] text-white flex items-center justify-center text-2xl font-bold">
-              {w.name[0]?.toUpperCase()}
-            </div>
+            {w.photo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={w.photo_url} alt={w.name} className="w-16 h-16 rounded-full object-cover border-2 border-[#164FA3]" />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-[#164FA3] text-white flex items-center justify-center text-2xl font-bold">
+                {w.name[0]?.toUpperCase()}
+              </div>
+            )}
             <div>
               {!editing ? (
                 <>
@@ -97,11 +102,14 @@ function Body({ id, canEdit, router }) {
           <Detail icon={Phone} label="Mobile">
             {editing ? <input className={inp} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} /> : (w.mobile || "—")}
           </Detail>
-          <Detail icon={User} label="Position">
+          <Detail icon={User} label="Designation">
             {editing ? <input className={inp} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} /> : (w.position || "—")}
           </Detail>
+          <Detail icon={MapPin} label="Address">
+            {editing ? <input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /> : (w.address || "—")}
+          </Detail>
           <Detail icon={MapPin} label="Location">
-            {[w.zone_name, w.district_name, w.assembly_name].filter(Boolean).join(" / ") || "—"}
+            {[w.zone_name, w.lok_sabha_name, w.district_name, w.assembly_name, w.ward_name, w.booth_name].filter(Boolean).join(" / ") || "—"}
           </Detail>
           <Detail icon={Activity} label="Status">
             {editing ? (
