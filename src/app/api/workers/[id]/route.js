@@ -49,7 +49,7 @@ export async function PUT(req, { params }) {
     }
     const { id } = await params;
     const d = await req.json();
-    const fields = ["name","mobile","address","district_id","assembly_id","ward_id","booth_id","position","skills","status","activity_score"];
+    const fields = ["name","mobile","photo_url","address","zone_id","lok_sabha_id","district_id","assembly_id","ward_id","booth_id","position","skills","status","activity_score"];
     const sets = [], vals = [];
     for (const f of fields) {
       if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }

@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
-// GET /api/workers?search=&district_id=&assembly_id=&status=&position=&page=&limit=
+// GET /api/workers?search=&zone_id=&lok_sabha_id=&district_id=&assembly_id=&status=&position=&page=&limit=
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -13,6 +13,8 @@ export async function GET(req) {
     }
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search");
+    const zoneId = searchParams.get("zone_id");
+    const lokSabhaId = searchParams.get("lok_sabha_id");
     const districtId = searchParams.get("district_id");
     const assemblyId = searchParams.get("assembly_id");
     const status = searchParams.get("status");
@@ -24,6 +26,8 @@ export async function GET(req) {
     const where = [];
     const params = [];
     if (search) { where.push("(w.name LIKE ? OR w.mobile LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
+    if (zoneId) { where.push("w.zone_id = ?"); params.push(zoneId); }
+    if (lokSabhaId) { where.push("w.lok_sabha_id = ?"); params.push(lokSabhaId); }
     if (districtId) { where.push("w.district_id = ?"); params.push(districtId); }
     if (assemblyId) { where.push("w.assembly_id = ?"); params.push(assemblyId); }
     if (status) { where.push("w.status = ?"); params.push(status); }
@@ -65,9 +69,10 @@ export async function POST(req) {
     const mobile = d.mobile ? String(d.mobile).trim().replace(/[^\d+]/g, "") : null;
 
     const res = await query(
-      `INSERT INTO workers (name, mobile, address, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [d.name, mobile, d.address || null, d.district_id || null, d.assembly_id || null,
+      `INSERT INTO workers (name, mobile, photo_url, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [d.name, mobile, d.photo_url || null, d.address || null,
+       d.zone_id || null, d.lok_sabha_id || null, d.district_id || null, d.assembly_id || null,
        d.ward_id || null, d.booth_id || null, d.position || null, d.skills || null,
        d.status === "inactive" ? "inactive" : "active", Number(d.activity_score) || 0]
     );
