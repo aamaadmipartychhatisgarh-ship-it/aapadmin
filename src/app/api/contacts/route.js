@@ -13,6 +13,7 @@ export async function GET(req) {
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
+    const duplicates = searchParams.get("duplicates"); // "1" → only likely-duplicate contacts
     const district_id = searchParams.get("district_id");
     const assembly_id = searchParams.get("assembly_id");
     const designation_id = searchParams.get("designation_id");
@@ -33,6 +34,25 @@ export async function GET(req) {
     if (search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);
+    }
+    // Likely duplicates: phone_number is UNIQUE, so real-world duplicates are the
+    // same person saved with a differently formatted number (+91/0 prefix) or the
+    // same name entered twice. Match on last-10-digits of the phone OR exact name.
+    if (duplicates === "1") {
+      where += ` AND (
+        RIGHT(REGEXP_REPLACE(c.phone_number, '[^0-9]', ''), 10) IN (
+          SELECT p FROM (
+            SELECT RIGHT(REGEXP_REPLACE(phone_number, '[^0-9]', ''), 10) AS p
+              FROM contacts GROUP BY p HAVING COUNT(*) > 1
+          ) dup_phones
+        )
+        OR LOWER(TRIM(c.person_name)) IN (
+          SELECT n FROM (
+            SELECT LOWER(TRIM(person_name)) AS n
+              FROM contacts GROUP BY n HAVING COUNT(*) > 1
+          ) dup_names
+        )
+      )`;
     }
     // Geographic scope from role
     const scope = scopeFilterSync(session.user, "c");
@@ -55,7 +75,9 @@ export async function GET(req) {
          LEFT JOIN locations lw ON lw.id = c.ward_id
          LEFT JOIN designations dsg ON dsg.id = c.designation_id
          ${where}
-        ORDER BY c.is_completed ASC, c.id DESC
+        ORDER BY ${duplicates === "1"
+          ? "LOWER(TRIM(c.person_name)) ASC, RIGHT(REGEXP_REPLACE(c.phone_number, '[^0-9]', ''), 10) ASC, c.id ASC"
+          : "c.is_completed ASC, c.id DESC"}
         LIMIT 500`,
       params
     );

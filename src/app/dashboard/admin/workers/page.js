@@ -319,6 +319,16 @@ function WorkerModal({ title, initial, isEdit, districts, designations, onClose,
     }
   }
 
+  // A worker can hold multiple designations — stored comma-separated in `position`.
+  const selectedDesignations = (form.position || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const customDesignations = selectedDesignations.filter((n) => !designations.some((d) => d.name === n));
+  function toggleDesignation(name) {
+    const next = selectedDesignations.includes(name)
+      ? selectedDesignations.filter((n) => n !== name)
+      : [...selectedDesignations, name];
+    setForm({ ...form, position: next.join(", ") });
+  }
+
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -349,14 +359,31 @@ function WorkerModal({ title, initial, isEdit, districts, designations, onClose,
         <div className="grid grid-cols-2 gap-3">
           <Fld label="Name *"><input className={inp} placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Fld>
           <Fld label="Mobile"><input className={inp} placeholder="Mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} /></Fld>
-          <Fld label="Designation">
-            <select className={inp} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
-              <option value="">Select designation</option>
-              {/* Imported workers can carry a position that isn't in the master list — keep it selectable. */}
-              {form.position && !designations.some((d) => d.name === form.position) && <option value={form.position}>{form.position}</option>}
-              {designations.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
-            </select>
-          </Fld>
+          <div className="col-span-2">
+            <Fld label="Designations (select one or more)">
+              <div className="flex flex-wrap gap-2">
+                {/* Imported workers can carry designations that aren't in the master list — keep them removable. */}
+                {customDesignations.map((n) => (
+                  <button key={n} type="button" onClick={() => toggleDesignation(n)}
+                    className="px-3 py-1.5 rounded-full text-xs font-semibold border bg-[#164FA3] text-white border-[#164FA3]">
+                    ✓ {n}
+                  </button>
+                ))}
+                {designations.map((d) => {
+                  const on = selectedDesignations.includes(d.name);
+                  return (
+                    <button key={d.id} type="button" onClick={() => toggleDesignation(d.name)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${on ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200 hover:border-[#164FA3]"}`}>
+                      {on ? "✓ " : ""}{d.name}
+                    </button>
+                  );
+                })}
+                {designations.length === 0 && customDesignations.length === 0 && (
+                  <span className="text-xs text-gray-400">No designations yet — add them in Master Data.</span>
+                )}
+              </div>
+            </Fld>
+          </div>
           {!isEdit && <Fld label="Skills"><input className={inp} placeholder="Skills (comma-sep)" value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} /></Fld>}
           <div className="col-span-2">
             <Fld label="Address"><input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Fld>

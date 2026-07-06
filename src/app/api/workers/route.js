@@ -31,7 +31,8 @@ export async function GET(req) {
     if (districtId) { where.push("w.district_id = ?"); params.push(districtId); }
     if (assemblyId) { where.push("w.assembly_id = ?"); params.push(assemblyId); }
     if (status) { where.push("w.status = ?"); params.push(status); }
-    if (position) { where.push("w.position = ?"); params.push(position); }
+    // position holds one or more comma-separated designations ("A, B") — match any.
+    if (position) { where.push("(w.position = ? OR FIND_IN_SET(?, REPLACE(w.position, ', ', ',')))"); params.push(position, position); }
     // Geographic scope from role
     const scope = scopeFilterSync(session.user, "w");
     if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }

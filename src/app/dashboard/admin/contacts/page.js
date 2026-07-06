@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Upload, Plus, Search, UserPlus, Loader2, CheckCircle2, Pencil } from "lucide-react";
+import { Upload, Plus, Search, UserPlus, Loader2, CheckCircle2, Pencil, Trash2 } from "lucide-react";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 
 export default function Page() {
@@ -84,7 +84,8 @@ function Body() {
   async function load() {
     setLoading(true);
     const params = new URLSearchParams();
-    if (filter !== "all") params.set("status", filter);
+    if (filter === "duplicates") params.set("duplicates", "1");
+    else if (filter !== "all") params.set("status", filter);
     if (search) params.set("search", search);
     if (districtId) params.set("district_id", districtId);
     if (assemblyId) params.set("assembly_id", assemblyId);
@@ -178,6 +179,13 @@ function Body() {
     }
   }
 
+  async function removeContact(c) {
+    if (!confirm(`Delete contact "${c.person_name}" (${c.phone_number})? Their call history stays, but the contact is removed from the calling list.`)) return;
+    const r = await fetch(`/api/contacts/${c.id}`, { method: "DELETE" });
+    if (r.ok) { setMessage(`Deleted ${c.person_name}.`); load(); }
+    else { const d = await r.json().catch(() => ({})); setError(d.message || "Delete failed"); }
+  }
+
   async function assign(contactId, userId) {
     await fetch(`/api/contacts/${contactId}`, {
       method: "PUT",
@@ -193,7 +201,9 @@ function Body() {
         <div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Contacts</h1>
           <p className="text-gray-500 mt-2 font-medium">
-            <span className="font-bold text-[#164FA3]">{total.toLocaleString()}</span> {filter !== "all" ? filter : ""} contact{total === 1 ? "" : "s"}{districtId ? " in this district" : ""}. Calling list for the team.
+            <span className="font-bold text-[#164FA3]">{total.toLocaleString()}</span>{" "}
+            {filter === "duplicates" ? "possible duplicate" : filter !== "all" ? filter : ""} contact{total === 1 ? "" : "s"}{districtId ? " in this district" : ""}.
+            {filter === "duplicates" ? " Same name or same number in a different format — review and delete the extras." : " Calling list for the team."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -236,14 +246,15 @@ function Body() {
           <option value="">Any caller</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
         </select>
-        <div className="flex gap-1">
-          {["all", "pending", "done", "assigned", "pool"].map((f) => (
-            <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase ${filter === f ? "bg-[#164FA3] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{f}</button>
+        <div className="flex gap-1 flex-wrap">
+          {["all", "pending", "done", "assigned", "pool", "duplicates"].map((f) => (
+            <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase ${filter === f ? (f === "duplicates" ? "bg-amber-500 text-white" : "bg-[#164FA3] text-white") : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{f}</button>
           ))}
         </div>
       </div>
 
-      {/* Bulk distribute — share matching contacts across several callers */}
+      {/* Bulk distribute — share matching contacts across several callers (hidden in duplicates view) */}
+      {filter !== "duplicates" && (
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3">
         <div className="flex items-center gap-2">
           <UserPlus size={18} className="text-[#164FA3]" />
@@ -302,6 +313,7 @@ function Body() {
           <span className="text-xs text-gray-500">Already-called (Done) contacts are never reassigned.</span>
         </div>
       </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
@@ -347,9 +359,12 @@ function Body() {
                       {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
                     </select>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
                     <button onClick={() => setEditing(c)} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
                       <Pencil size={14} /> Edit
+                    </button>
+                    <button onClick={() => removeContact(c)} className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium">
+                      <Trash2 size={14} /> Delete
                     </button>
                   </td>
                 </tr>
