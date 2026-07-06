@@ -203,7 +203,7 @@ function Body() {
           <p className="text-gray-500 mt-2 font-medium">
             <span className="font-bold text-[#164FA3]">{total.toLocaleString()}</span>{" "}
             {filter === "duplicates" ? "possible duplicate" : filter !== "all" ? filter : ""} contact{total === 1 ? "" : "s"}{districtId ? " in this district" : ""}.
-            {filter === "duplicates" ? " Same name or same number in a different format — review and delete the extras." : " Calling list for the team."}
+            {filter === "duplicates" ? " Same phone number saved in different formats — review and delete the extras." : " Calling list for the team."}
           </p>
         </div>
         <div className="flex gap-2">

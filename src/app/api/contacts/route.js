@@ -35,23 +35,14 @@ export async function GET(req) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);
     }
-    // Likely duplicates: phone_number is UNIQUE, so real-world duplicates are the
-    // same person saved with a differently formatted number (+91/0 prefix) or the
-    // same name entered twice. Match on last-10-digits of the phone OR exact name.
+    // Duplicates: phone_number is UNIQUE, so duplicates are the same number saved
+    // in different formats (+91/0 prefix, spaces). Match on the last 10 digits.
     if (duplicates === "1") {
-      where += ` AND (
-        RIGHT(REGEXP_REPLACE(c.phone_number, '[^0-9]', ''), 10) IN (
-          SELECT p FROM (
-            SELECT RIGHT(REGEXP_REPLACE(phone_number, '[^0-9]', ''), 10) AS p
-              FROM contacts GROUP BY p HAVING COUNT(*) > 1
-          ) dup_phones
-        )
-        OR LOWER(TRIM(c.person_name)) IN (
-          SELECT n FROM (
-            SELECT LOWER(TRIM(person_name)) AS n
-              FROM contacts GROUP BY n HAVING COUNT(*) > 1
-          ) dup_names
-        )
+      where += ` AND RIGHT(REGEXP_REPLACE(c.phone_number, '[^0-9]', ''), 10) IN (
+        SELECT p FROM (
+          SELECT RIGHT(REGEXP_REPLACE(phone_number, '[^0-9]', ''), 10) AS p
+            FROM contacts GROUP BY p HAVING COUNT(*) > 1
+        ) dup_phones
       )`;
     }
     // Geographic scope from role
@@ -76,7 +67,7 @@ export async function GET(req) {
          LEFT JOIN designations dsg ON dsg.id = c.designation_id
          ${where}
         ORDER BY ${duplicates === "1"
-          ? "LOWER(TRIM(c.person_name)) ASC, RIGHT(REGEXP_REPLACE(c.phone_number, '[^0-9]', ''), 10) ASC, c.id ASC"
+          ? "RIGHT(REGEXP_REPLACE(c.phone_number, '[^0-9]', ''), 10) ASC, c.id ASC"
           : "c.is_completed ASC, c.id DESC"}
         LIMIT 500`,
       params
