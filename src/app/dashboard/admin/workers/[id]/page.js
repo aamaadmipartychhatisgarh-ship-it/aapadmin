@@ -5,7 +5,8 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, isOversight } from "@/lib/permissions";
-import { ArrowLeft, User, Phone, MapPin, Activity, Award, Users as UsersIcon, Loader2, Save, Trash2 } from "lucide-react";
+import { EditWorkerModal } from "@/components/WorkerModal";
+import { ArrowLeft, User, Phone, MapPin, Activity, Award, Users as UsersIcon, Loader2, Trash2 } from "lucide-react";
 
 export default function Page({ params }) {
   const { id } = use(params);
@@ -24,26 +25,21 @@ export default function Page({ params }) {
 function Body({ id, canEdit, router }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({});
-  const [saving, setSaving] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
 
   useEffect(() => { load(); }, [id]);
+  useEffect(() => {
+    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+  }, []);
+
   async function load() {
     setLoading(true);
     const r = await fetch(`/api/workers/${id}`);
-    if (r.ok) {
-      const d = await r.json();
-      setData(d);
-      setForm({ name: d.worker.name, mobile: d.worker.mobile || "", position: d.worker.position || "",
-        skills: d.worker.skills || "", status: d.worker.status, activity_score: d.worker.activity_score, address: d.worker.address || "" });
-    }
+    if (r.ok) setData(await r.json());
     setLoading(false);
-  }
-  async function save() {
-    setSaving(true);
-    await fetch(`/api/workers/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    setSaving(false); setEditing(false); load();
   }
   async function del() {
     if (!confirm("Delete this worker?")) return;
@@ -53,7 +49,6 @@ function Body({ id, canEdit, router }) {
 
   if (loading || !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   const w = data.worker;
-  const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl">
@@ -71,68 +66,35 @@ function Body({ id, canEdit, router }) {
               </div>
             )}
             <div>
-              {!editing ? (
-                <>
-                  <h1 className="text-2xl font-bold text-gray-900">{w.name}</h1>
-                  <p className="text-gray-500">{w.position || "—"}</p>
-                </>
-              ) : (
-                <input className={inp} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              )}
+              <h1 className="text-2xl font-bold text-gray-900">{w.name}</h1>
+              <p className="text-gray-500">{w.position || "—"}</p>
             </div>
           </div>
           {canEdit && (
             <div className="flex gap-2">
-              {!editing ? (
-                <>
-                  <button onClick={() => setEditing(true)} className="px-4 py-2 text-sm bg-[#164FA3] text-white rounded-lg font-medium">Edit</button>
-                  <button onClick={del} className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"><Trash2 size={16} /></button>
-                </>
-              ) : (
-                <>
-                  <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-[#164FA3] text-white rounded-lg font-medium flex items-center gap-1"><Save size={14} /> {saving ? "Saving…" : "Save"}</button>
-                  <button onClick={() => setEditing(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-                </>
-              )}
+              <button onClick={() => setShowEdit(true)} className="px-4 py-2 text-sm bg-[#164FA3] text-white rounded-lg font-medium">Edit</button>
+              <button onClick={del} className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"><Trash2 size={16} /></button>
             </div>
           )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-          <Detail icon={Phone} label="Mobile">
-            {editing ? <input className={inp} value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} /> : (w.mobile || "—")}
-          </Detail>
-          <Detail icon={User} label="Designation">
-            {editing ? <input className={inp} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} /> : (w.position || "—")}
-          </Detail>
-          <Detail icon={MapPin} label="Address">
-            {editing ? <input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /> : (w.address || "—")}
-          </Detail>
+          <Detail icon={Phone} label="Mobile">{w.mobile || "—"}</Detail>
+          <Detail icon={User} label="Designation">{w.position || "—"}</Detail>
+          <Detail icon={MapPin} label="Address">{w.address || "—"}</Detail>
           <Detail icon={MapPin} label="Location">
             {[w.zone_name, w.lok_sabha_name, w.district_name, w.assembly_name, w.ward_name, w.booth_name].filter(Boolean).join(" / ") || "—"}
           </Detail>
           <Detail icon={Activity} label="Status">
-            {editing ? (
-              <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                <option value="active">Active</option><option value="inactive">Inactive</option>
-              </select>
-            ) : (
-              <span className={`text-xs font-semibold px-2 py-1 rounded-full ${w.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{w.status}</span>
-            )}
+            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${w.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{w.status}</span>
           </Detail>
           <Detail icon={Activity} label="Activity Score">
-            {editing ? (
-              <input type="range" min="0" max="100" value={form.activity_score} onChange={(e) => setForm({ ...form, activity_score: Number(e.target.value) })} className="w-full" />
-            ) : (
-              <div className="flex items-center gap-2">
-                <div className="w-32 h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3]" style={{ width: `${w.activity_score}%` }} /></div>
-                <span className="font-bold text-gray-700">{w.activity_score}</span>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <div className="w-32 h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3]" style={{ width: `${w.activity_score}%` }} /></div>
+              <span className="font-bold text-gray-700">{w.activity_score}</span>
+            </div>
           </Detail>
-          <Detail icon={User} label="Skills">
-            {editing ? <input className={inp} value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} /> : (w.skills || "—")}
-          </Detail>
+          <Detail icon={User} label="Skills">{w.skills || "—"}</Detail>
         </div>
       </div>
 
@@ -157,6 +119,16 @@ function Body({ id, canEdit, router }) {
           )}
         </div>
       </div>
+
+      {showEdit && (
+        <EditWorkerModal
+          worker={w}
+          districts={districts}
+          designations={designations}
+          onClose={() => setShowEdit(false)}
+          onSaved={() => { setShowEdit(false); load(); }}
+        />
+      )}
     </div>
   );
 }
