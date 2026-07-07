@@ -38,9 +38,9 @@ export async function GET(req) {
     // Duplicates: phone_number is UNIQUE, so duplicates are the same number saved
     // in different formats (+91/0 prefix, spaces). Match on the last 10 digits.
     if (duplicates === "1") {
-      where += ` AND RIGHT(REGEXP_REPLACE(c.phone_number, '[^0-9]', ''), 10) IN (
+      where += ` AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) IN (
         SELECT p FROM (
-          SELECT RIGHT(REGEXP_REPLACE(phone_number, '[^0-9]', ''), 10) AS p
+          SELECT RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) AS p
             FROM contacts GROUP BY p HAVING COUNT(*) > 1
         ) dup_phones
       )`;
@@ -67,7 +67,7 @@ export async function GET(req) {
          LEFT JOIN designations dsg ON dsg.id = c.designation_id
          ${where}
         ORDER BY ${duplicates === "1"
-          ? "RIGHT(REGEXP_REPLACE(c.phone_number, '[^0-9]', ''), 10) ASC, c.id ASC"
+          ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, c.id ASC"
           : "c.is_completed ASC, c.id DESC"}
         LIMIT 500`,
       params

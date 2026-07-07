@@ -36,9 +36,9 @@ export async function GET(req) {
     if (position) { where.push("(w.position = ? OR FIND_IN_SET(?, REPLACE(w.position, ', ', ',')))"); params.push(position, position); }
     // Duplicate workers = same mobile (last 10 digits) appearing more than once.
     if (duplicates === "1") {
-      where.push(`w.mobile IS NOT NULL AND RIGHT(REGEXP_REPLACE(w.mobile, '[^0-9]', ''), 10) IN (
+      where.push(`w.mobile IS NOT NULL AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(w.mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) IN (
         SELECT p FROM (
-          SELECT RIGHT(REGEXP_REPLACE(mobile, '[^0-9]', ''), 10) AS p
+          SELECT RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) AS p
             FROM workers WHERE mobile IS NOT NULL GROUP BY p HAVING COUNT(*) > 1
         ) dup_mobiles
       )`);
@@ -60,7 +60,7 @@ export async function GET(req) {
          LEFT JOIN locations lls ON lls.id = w.lok_sabha_id
          ${whereSql}
          ORDER BY ${duplicates === "1"
-           ? "RIGHT(REGEXP_REPLACE(w.mobile, '[^0-9]', ''), 10) ASC, w.id ASC"
+           ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(w.mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, w.id ASC"
            : "w.activity_score DESC, w.id DESC"}
          LIMIT ? OFFSET ?`,
       [...params, limit, offset]
@@ -90,7 +90,7 @@ export async function POST(req) {
       const [dup] = await query(
         `SELECT id, name FROM workers
           WHERE mobile IS NOT NULL
-            AND RIGHT(REGEXP_REPLACE(mobile, '[^0-9]', ''), 10) = RIGHT(REGEXP_REPLACE(?, '[^0-9]', ''), 10)
+            AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) = RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10)
           LIMIT 1`,
         [mobile]
       );

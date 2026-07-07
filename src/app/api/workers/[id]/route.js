@@ -60,7 +60,7 @@ export async function PUT(req, { params }) {
       const [dup] = await query(
         `SELECT id, name FROM workers
           WHERE id != ? AND mobile IS NOT NULL
-            AND RIGHT(REGEXP_REPLACE(mobile, '[^0-9]', ''), 10) = RIGHT(REGEXP_REPLACE(?, '[^0-9]', ''), 10)
+            AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) = RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10)
           LIMIT 1`,
         [id, String(d.mobile)]
       );
