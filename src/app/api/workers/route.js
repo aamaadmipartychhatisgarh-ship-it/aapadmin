@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
+import { canManageWorkers, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 // GET /api/workers?search=&zone_id=&lok_sabha_id=&district_id=&assembly_id=&status=&position=&page=&limit=
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) {
+    if (!session || !canManageWorkers(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { searchParams } = new URL(req.url);
@@ -19,6 +19,7 @@ export async function GET(req) {
     const assemblyId = searchParams.get("assembly_id");
     const status = searchParams.get("status");
     const position = searchParams.get("position");
+    const duplicates = searchParams.get("duplicates"); // "1" → only same-mobile duplicates
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
     const offset = (page - 1) * limit;
@@ -33,6 +34,15 @@ export async function GET(req) {
     if (status) { where.push("w.status = ?"); params.push(status); }
     // position holds one or more comma-separated designations ("A, B") — match any.
     if (position) { where.push("(w.position = ? OR FIND_IN_SET(?, REPLACE(w.position, ', ', ',')))"); params.push(position, position); }
+    // Duplicate workers = same mobile (last 10 digits) appearing more than once.
+    if (duplicates === "1") {
+      where.push(`w.mobile IS NOT NULL AND RIGHT(REGEXP_REPLACE(w.mobile, '[^0-9]', ''), 10) IN (
+        SELECT p FROM (
+          SELECT RIGHT(REGEXP_REPLACE(mobile, '[^0-9]', ''), 10) AS p
+            FROM workers WHERE mobile IS NOT NULL GROUP BY p HAVING COUNT(*) > 1
+        ) dup_mobiles
+      )`);
+    }
     // Geographic scope from role
     const scope = scopeFilterSync(session.user, "w");
     if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
@@ -49,7 +59,9 @@ export async function GET(req) {
          LEFT JOIN locations lz ON lz.id = w.zone_id
          LEFT JOIN locations lls ON lls.id = w.lok_sabha_id
          ${whereSql}
-         ORDER BY w.activity_score DESC, w.id DESC
+         ORDER BY ${duplicates === "1"
+           ? "RIGHT(REGEXP_REPLACE(w.mobile, '[^0-9]', ''), 10) ASC, w.id ASC"
+           : "w.activity_score DESC, w.id DESC"}
          LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
@@ -64,13 +76,31 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    if (!session || !canManageWorkers(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const d = await req.json();
     if (!d.name) return NextResponse.json({ message: "Name is required" }, { status: 400 });
 
     const mobile = d.mobile ? String(d.mobile).trim().replace(/[^\d+]/g, "") : null;
+
+    // One mobile number → one worker. Compare on the last 10 digits so
+    // "+91 98765..." and "098765..." count as the same number.
+    if (mobile) {
+      const [dup] = await query(
+        `SELECT id, name FROM workers
+          WHERE mobile IS NOT NULL
+            AND RIGHT(REGEXP_REPLACE(mobile, '[^0-9]', ''), 10) = RIGHT(REGEXP_REPLACE(?, '[^0-9]', ''), 10)
+          LIMIT 1`,
+        [mobile]
+      );
+      if (dup) {
+        return NextResponse.json(
+          { message: `A worker with this mobile number already exists: ${dup.name} (ID ${dup.id}).` },
+          { status: 409 }
+        );
+      }
+    }
 
     const res = await query(
       `INSERT INTO workers (name, mobile, photo_url, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score)

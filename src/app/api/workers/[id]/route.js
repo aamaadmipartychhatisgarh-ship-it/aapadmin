@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isAdmin, isOversight } from "@/lib/permissions";
+import { isAdmin, canManageWorkers } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 export async function GET(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) {
+    if (!session || !canManageWorkers(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
@@ -48,11 +48,30 @@ export async function GET(req, { params }) {
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    // Callers update worker details too; deletion below stays admin-only.
+    if (!session || !canManageWorkers(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
     const d = await req.json();
+
+    // One mobile per worker — block updates that would collide with another record.
+    if (d.mobile) {
+      const [dup] = await query(
+        `SELECT id, name FROM workers
+          WHERE id != ? AND mobile IS NOT NULL
+            AND RIGHT(REGEXP_REPLACE(mobile, '[^0-9]', ''), 10) = RIGHT(REGEXP_REPLACE(?, '[^0-9]', ''), 10)
+          LIMIT 1`,
+        [id, String(d.mobile)]
+      );
+      if (dup) {
+        return NextResponse.json(
+          { message: `Another worker already uses this mobile number: ${dup.name} (ID ${dup.id}).` },
+          { status: 409 }
+        );
+      }
+    }
+
     const fields = ["name","mobile","photo_url","address","zone_id","lok_sabha_id","district_id","assembly_id","ward_id","booth_id","position","skills","status","activity_score"];
     const sets = [], vals = [];
     for (const f of fields) {

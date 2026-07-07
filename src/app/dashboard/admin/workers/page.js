@@ -4,25 +4,27 @@ import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { isAdmin, isOversight } from "@/lib/permissions";
-import { AddWorkerModal, EditWorkerModal } from "@/components/WorkerModal";
-import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil } from "lucide-react";
+import { isAdmin, canManageWorkers } from "@/lib/permissions";
+import { AddWorkerModal } from "@/components/WorkerModal";
+import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil, Trash2 } from "lucide-react";
 
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isOversight(session)) router.push("/dashboard");
+    else if (status === "authenticated" && !canManageWorkers(session)) router.push("/dashboard");
   }, [status, session, router]);
-  if (status !== "authenticated" || !isOversight(session)) {
+  if (status !== "authenticated" || !canManageWorkers(session)) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <Body session={session} />;
 }
 
 function Body({ session }) {
-  const canEdit = isAdmin(session);
+  // Callers can add/edit workers; bulk imports stay admin-only.
+  const canEdit = canManageWorkers(session);
+  const canImport = isAdmin(session);
   const [data, setData] = useState({ workers: [], total: 0, page: 1, pages: 1 });
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
@@ -37,9 +39,9 @@ function Body({ session }) {
   const [assemblyId, setAssemblyId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [positionFilter, setPositionFilter] = useState("");
+  const [dupOnly, setDupOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
-  const [editing, setEditing] = useState(null);
   const [message, setMessage] = useState("");
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
@@ -72,7 +74,7 @@ function Body({ session }) {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, zoneId, lokSabhaId, districtId, assemblyId, statusFilter, positionFilter, page]);
+  }, [search, zoneId, lokSabhaId, districtId, assemblyId, statusFilter, positionFilter, dupOnly, page]);
 
   async function load() {
     setLoading(true);
@@ -84,9 +86,17 @@ function Body({ session }) {
     if (assemblyId) p.set("assembly_id", assemblyId);
     if (statusFilter) p.set("status", statusFilter);
     if (positionFilter) p.set("position", positionFilter);
+    if (dupOnly) p.set("duplicates", "1");
     const r = await fetch(`/api/workers?${p}`);
     if (r.ok) setData(await r.json());
     setLoading(false);
+  }
+
+  async function removeWorker(w) {
+    if (!confirm(`Delete worker "${w.name}"${w.mobile ? ` (${w.mobile})` : ""}? This cannot be undone.`)) return;
+    const r = await fetch(`/api/workers/${w.id}`, { method: "DELETE" });
+    if (r.ok) { setMessage(`Deleted ${w.name}.`); load(); }
+    else { const d = await r.json().catch(() => ({})); setMessage(d.message || "Delete failed"); }
   }
 
   async function uploadCsv(file) {
@@ -130,22 +140,26 @@ function Body({ session }) {
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Workers</h1>
           <p className="text-gray-500 mt-2 font-medium">{data.total} members across the organization.</p>
         </div>
-        {canEdit && (
-          <div className="flex gap-2">
-            <button onClick={() => excelRef.current?.click()} disabled={importing} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
-              {importing ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-              {importing ? "Importing…" : "Import Excel"}
-            </button>
-            <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
-            <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
-              <Upload size={16} /> Import CSV
-            </button>
-            <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
+        <div className="flex gap-2">
+          {canImport && (
+            <>
+              <button onClick={() => excelRef.current?.click()} disabled={importing} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
+                {importing ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                {importing ? "Importing…" : "Import Excel"}
+              </button>
+              <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
+              <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
+                <Upload size={16} /> Import CSV
+              </button>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
+            </>
+          )}
+          {canEdit && (
             <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md">
               <Plus size={16} /> Add Worker
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {message && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex items-center gap-2"><CheckCircle2 size={16} />{message}</div>}
@@ -178,6 +192,9 @@ function Body({ session }) {
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
+        <button onClick={() => { setDupOnly(!dupOnly); setPage(1); }} className={`h-9 px-3 rounded-lg text-xs font-semibold uppercase ${dupOnly ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+          Duplicates
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -240,10 +257,16 @@ function Body({ session }) {
                     </span>
                   </td>
                   {canEdit && (
-                    <td className="px-4 py-3 text-right">
-                      <button onClick={(e) => { e.stopPropagation(); setEditing(w); }} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {/* Open the worker's own page with the edit form — after saving, staff stay on that page. */}
+                      <button onClick={(e) => { e.stopPropagation(); location.href = `/dashboard/admin/workers/${w.id}?edit=1`; }} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
                         <Pencil size={14} /> Edit
                       </button>
+                      {canImport && (
+                        <button onClick={(e) => { e.stopPropagation(); removeWorker(w); }} className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium">
+                          <Trash2 size={14} /> Delete
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -264,7 +287,6 @@ function Body({ session }) {
       </div>
 
       {showAdd && <AddWorkerModal districts={districts} designations={designations} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
-      {editing && <EditWorkerModal worker={editing} districts={districts} designations={designations} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );
 }

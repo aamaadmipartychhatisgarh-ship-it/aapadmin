@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Upload, Plus, Search, UserPlus, Loader2, CheckCircle2, Pencil, Trash2 } from "lucide-react";
+import { Upload, Plus, Search, UserPlus, UserMinus, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList } from "lucide-react";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 
 export default function Page() {
@@ -39,6 +39,7 @@ function Body() {
   const [error, setError] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [taskFor, setTaskFor] = useState(null); // contact to create a task for
   const [importing, setImporting] = useState(false);
   const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
   const [teams, setTeams] = useState([]);
@@ -179,6 +180,31 @@ function Body() {
     }
   }
 
+  // Recall contacts from callers' workspaces — back to the pool, nothing deleted.
+  async function bulkRecall() {
+    setMessage(""); setError("");
+    const target = bulkCallers.length > 0
+      ? `${bulkCallers.length} selected caller(s)`
+      : "ALL callers";
+    if (!confirm(`Remove assigned contacts from ${target}? Contacts stay in the database and return to the pool; completed calls are not touched.`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await fetch("/api/contacts/bulk-unassign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caller_ids: bulkCallers }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.message || "Recall failed"); return; }
+      setMessage(`Removed ${d.unassigned} contact(s) from ${target} — they are back in the pool.`);
+      load();
+    } catch {
+      setError("Recall failed — network error.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   async function removeContact(c) {
     if (!confirm(`Delete contact "${c.person_name}" (${c.phone_number})? Their call history stays, but the contact is removed from the calling list.`)) return;
     const r = await fetch(`/api/contacts/${c.id}`, { method: "DELETE" });
@@ -312,6 +338,15 @@ function Body() {
           </button>
           <span className="text-xs text-gray-500">Already-called (Done) contacts are never reassigned.</span>
         </div>
+
+        {/* Recall — pull assigned contacts back out of caller workspaces (no deletion) */}
+        <div className="flex items-center gap-3 flex-wrap pt-2 border-t border-blue-100">
+          <button onClick={bulkRecall} disabled={bulkBusy} className="inline-flex items-center gap-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-semibold">
+            <UserMinus size={16} />
+            {bulkCallers.length > 0 ? `Remove contacts from ${bulkCallers.length} selected caller(s)` : "Remove contacts from ALL callers"}
+          </button>
+          <span className="text-xs text-gray-500">Contacts go back to the pool — nothing is deleted from the database.</span>
+        </div>
       </div>
       )}
 
@@ -360,6 +395,9 @@ function Body() {
                     </select>
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button onClick={() => setTaskFor(c)} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded-lg font-medium">
+                      <ClipboardList size={14} /> Task
+                    </button>
                     <button onClick={() => setEditing(c)} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
                       <Pencil size={14} /> Edit
                     </button>
@@ -376,6 +414,61 @@ function Body() {
 
       {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {editing && <EditContactModal contact={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {taskFor && <ContactTaskModal contact={taskFor} users={users} onClose={() => setTaskFor(null)} onSaved={() => { setTaskFor(null); setMessage(`Task assigned for ${taskFor.person_name}.`); }} />}
+    </div>
+  );
+}
+
+// Assign a task pinned to a contact — the telecaller sees it in the workspace
+// while calling that person and can update its status there.
+function ContactTaskModal({ contact, users, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    priority: "medium",
+    deadline: "",
+    assigned_to_user_id: contact.assigned_to_user_id || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    setSaving(true); setError("");
+    const r = await fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...form, contact_id: contact.id, district_id: contact.district_id || null }),
+    });
+    if (r.ok) { onSaved(); return; }
+    const d = await r.json().catch(() => ({}));
+    setError(d.message || "Failed to create task");
+    setSaving(false);
+  }
+
+  const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+        <h2 className="text-xl font-bold text-gray-900">Task for {contact.person_name}</h2>
+        <p className="text-xs text-gray-500 -mt-2">{contact.phone_number} · shown to the caller during the call</p>
+        {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
+        <input className={inp} placeholder="Task title *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+        <textarea className={inp} rows={2} placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <div className="grid grid-cols-2 gap-3">
+          <select className={inp} value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+            <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>
+          </select>
+          <input type="date" className={inp} value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} />
+        </div>
+        <select className={inp} value={form.assigned_to_user_id} onChange={(e) => setForm({ ...form, assigned_to_user_id: e.target.value })}>
+          <option value="">Assign to caller (optional)…</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+        </select>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={save} disabled={saving || !form.title} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Assign Task"}</button>
+        </div>
+      </div>
     </div>
   );
 }

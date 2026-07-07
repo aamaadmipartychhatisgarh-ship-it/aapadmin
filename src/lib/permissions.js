@@ -92,6 +92,11 @@ export function isPressMedia(session) {
 export function isSocialMedia(session) {
   return roleOf(session) === ROLES.SOCIAL_MEDIA;
 }
+// Callers (field staff) can view and edit worker records in their territory —
+// they collect/update member details while calling. Deletion stays admin-only.
+export function canManageWorkers(session) {
+  return isOversight(session) || isCaller(session);
+}
 // Module access: press media staff manage the Media Center; social media staff
 // manage the Social War Room + Social Command. Oversight roles keep access.
 export function canAccessMedia(session) {

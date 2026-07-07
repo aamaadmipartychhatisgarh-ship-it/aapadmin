@@ -4,7 +4,7 @@ import { useEffect, useState, use } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { isAdmin, isOversight } from "@/lib/permissions";
+import { isAdmin, canManageWorkers } from "@/lib/permissions";
 import { EditWorkerModal } from "@/components/WorkerModal";
 import { ArrowLeft, User, Phone, MapPin, Activity, Award, Users as UsersIcon, Loader2, Trash2 } from "lucide-react";
 
@@ -14,15 +14,16 @@ export default function Page({ params }) {
   const router = useRouter();
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isOversight(session)) router.push("/dashboard");
+    else if (status === "authenticated" && !canManageWorkers(session)) router.push("/dashboard");
   }, [status, session, router]);
-  if (status !== "authenticated" || !isOversight(session)) {
+  if (status !== "authenticated" || !canManageWorkers(session)) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
-  return <Body id={id} canEdit={isAdmin(session)} router={router} />;
+  // Callers can edit workers; deleting stays admin-only.
+  return <Body id={id} canEdit={canManageWorkers(session)} canDelete={isAdmin(session)} router={router} />;
 }
 
-function Body({ id, canEdit, router }) {
+function Body({ id, canEdit, canDelete, router }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showEdit, setShowEdit] = useState(false);
@@ -33,6 +34,8 @@ function Body({ id, canEdit, router }) {
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    // Arriving via the list's Edit button (?edit=1) opens the form straight away.
+    if (new URLSearchParams(window.location.search).get("edit") === "1") setShowEdit(true);
   }, []);
 
   async function load() {
@@ -73,7 +76,9 @@ function Body({ id, canEdit, router }) {
           {canEdit && (
             <div className="flex gap-2">
               <button onClick={() => setShowEdit(true)} className="px-4 py-2 text-sm bg-[#164FA3] text-white rounded-lg font-medium">Edit</button>
-              <button onClick={del} className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"><Trash2 size={16} /></button>
+              {canDelete && (
+                <button onClick={del} className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"><Trash2 size={16} /></button>
+              )}
             </div>
           )}
         </div>

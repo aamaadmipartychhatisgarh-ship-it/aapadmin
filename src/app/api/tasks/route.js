@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
+import { ensureTaskContactColumn } from "@/lib/taskSchema";
 
 // GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
 export async function GET(req) {
@@ -17,11 +18,18 @@ export async function GET(req) {
     const districtId = searchParams.get("district_id");
     const assignedTo = searchParams.get("assigned_to");
     const search = searchParams.get("search");
+    const contactId = searchParams.get("contact_id");
 
     const where = [];
     const params = [];
-    // Non-oversight users only see their own tasks — assigned directly or via a team they belong to.
-    if (view === "mine" || !isOversight(session)) {
+    // Tasks pinned to a specific contact are visible to whoever is working that
+    // contact (the telecaller sees them mid-call), regardless of assignee.
+    if (contactId) {
+      await ensureTaskContactColumn();
+      where.push("t.contact_id = ?");
+      params.push(contactId);
+    } else if (view === "mine" || !isOversight(session)) {
+      // Non-oversight users only see their own tasks — assigned directly or via a team they belong to.
       await ensureUserTeamMembers();
       where.push("(t.assigned_to_user_id = ? OR t.assigned_to_team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ?))");
       params.push(session.user.id, session.user.id);
@@ -77,11 +85,13 @@ export async function POST(req) {
     if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const d = await req.json();
     if (!d.title) return NextResponse.json({ message: "Title required" }, { status: 400 });
+    await ensureTaskContactColumn();
     const res = await query(
-      `INSERT INTO tasks (title, description, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, created_by_user_id)
-       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (title, description, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
       [d.title, d.description || null, d.priority || "medium", d.deadline || null,
-       d.assigned_to_user_id || null, d.assigned_to_team_id || null, d.district_id || null, session.user.id]
+       d.assigned_to_user_id || null, d.assigned_to_team_id || null, d.district_id || null,
+       d.contact_id || null, session.user.id]
     );
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {

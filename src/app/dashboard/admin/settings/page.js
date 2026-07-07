@@ -200,8 +200,10 @@ function LocationsTree() {
     refresh();
   }, []);
 
+  const [treeVersion, setTreeVersion] = useState(0);
   const refresh = async () => {
     setLoading(true);
+    setTreeVersion((v) => v + 1); // remount the tree so expanded branches reload fresh data
     const [zonesRes, allRes] = await Promise.all([
       fetch("/api/locations?type=zone").then((r) => r.json()),
       fetch("/api/locations?all=1").then((r) => r.json()),
@@ -306,8 +308,8 @@ function LocationsTree() {
         ) : zones.length === 0 ? (
           <div className="py-8 text-center text-gray-400">No locations yet. Add a zone above.</div>
         ) : (
-          <ul>
-            {zones.map((z) => <TreeNode key={z.id} node={z} depth={0} />)}
+          <ul key={treeVersion}>
+            {zones.map((z) => <TreeNode key={z.id} node={z} depth={0} onChanged={refresh} />)}
           </ul>
         )}
       </div>
@@ -353,13 +355,29 @@ function isValidParent(childType, parentType) {
   return allowed[childType] === parentType;
 }
 
-function TreeNode({ node, depth }) {
+const PARENT_TYPE = {
+  lok_sabha: "zone",
+  district: "lok_sabha",
+  assembly: "district",
+  ward: "assembly",
+  booth: "ward",
+};
+
+function TreeNode({ node, depth, onChanged }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(node.name);
+  const [editParent, setEditParent] = useState(node.parent_id || "");
+  const [parentOptions, setParentOptions] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const childType = CHILD_TYPE[node.type];
+  const parentType = PARENT_TYPE[node.type];
 
   const toggle = async () => {
+    if (editing) return;
     if (!childType) return; // leaf
     if (expanded) { setExpanded(false); return; }
     if (children == null) {
@@ -371,11 +389,48 @@ function TreeNode({ node, depth }) {
     setExpanded(true);
   };
 
+  async function openEdit(e) {
+    e.stopPropagation();
+    setEditName(node.name);
+    setEditParent(node.parent_id || "");
+    setError("");
+    if (parentType) {
+      const r = await fetch(`/api/locations?type=${parentType}`);
+      if (r.ok) setParentOptions((await r.json()).locations || []);
+    }
+    setEditing(true);
+  }
+
+  async function saveEdit(e) {
+    e.stopPropagation();
+    setBusy(true); setError("");
+    const r = await fetch(`/api/locations/${node.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName, ...(parentType ? { parent_id: editParent || null } : {}) }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (r.ok) { setEditing(false); onChanged(); }
+    else setError(d.message || "Update failed");
+  }
+
+  async function del(e) {
+    e.stopPropagation();
+    if (!confirm(`Delete "${node.name}"?`)) return;
+    setBusy(true); setError("");
+    const r = await fetch(`/api/locations/${node.id}`, { method: "DELETE" });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (r.ok) onChanged();
+    else setError(d.message || "Delete failed");
+  }
+
   return (
     <li>
       <div
         onClick={toggle}
-        className={`flex items-center gap-2 py-2 px-2 rounded-lg cursor-pointer hover:bg-blue-50 ${childType ? "" : "cursor-default hover:bg-gray-50"}`}
+        className={`group flex items-center gap-2 py-2 px-2 rounded-lg cursor-pointer hover:bg-blue-50 ${childType ? "" : "cursor-default hover:bg-gray-50"}`}
         style={{ paddingLeft: `${depth * 20 + 8}px` }}
       >
         {childType ? (
@@ -386,14 +441,35 @@ function TreeNode({ node, depth }) {
         <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full shrink-0 ${TYPE_COLOR[node.type]}`}>
           {TYPE_LABEL[node.type]}
         </span>
-        <span className="font-medium text-gray-800">{node.name}</span>
-        {children && (
-          <span className="ml-auto text-xs text-gray-400">{children.length} {TYPE_LABEL[childType]?.toLowerCase()}{children.length === 1 ? "" : "s"}</span>
+        {!editing ? (
+          <>
+            <span className="font-medium text-gray-800">{node.name}</span>
+            <span className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button onClick={openEdit} title={parentType ? "Rename / move to another parent" : "Rename"} className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-100 rounded-lg"><Pencil size={13} /></button>
+              <button onClick={del} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={13} /></button>
+            </span>
+            {loading && <Loader2 size={14} className="animate-spin text-gray-400" />}
+          </>
+        ) : (
+          <span className="flex items-center gap-2 flex-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+            <input value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus className="border border-gray-300 rounded-lg px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+            {parentType && (
+              <select value={editParent} onChange={(e) => setEditParent(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white">
+                <option value="">— {TYPE_LABEL[parentType]} —</option>
+                {parentOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+            <button onClick={saveEdit} disabled={busy || !editName.trim()} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={15} /></button>
+            <button onClick={(e) => { e.stopPropagation(); setEditing(false); }} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={15} /></button>
+            {error && <span className="text-xs text-red-600">{error}</span>}
+          </span>
         )}
-        {loading && <Loader2 size={14} className="animate-spin text-gray-400 ml-auto" />}
       </div>
+      {!editing && error && (
+        <div className="text-xs text-red-600" style={{ paddingLeft: `${depth * 20 + 32}px` }}>{error}</div>
+      )}
       {expanded && children && children.length > 0 && (
-        <ul>{children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} />)}</ul>
+        <ul>{children.map((c) => <TreeNode key={c.id} node={c} depth={depth + 1} onChanged={onChanged} />)}</ul>
       )}
       {expanded && children && children.length === 0 && (
         <div className="text-xs text-gray-400 italic" style={{ paddingLeft: `${(depth + 1) * 20 + 8}px` }}>

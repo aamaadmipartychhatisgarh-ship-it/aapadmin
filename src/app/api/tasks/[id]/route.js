@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight } from "@/lib/permissions";
+import { isOversight, isCaller } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 export async function PUT(req, { params }) {
@@ -14,7 +14,8 @@ export async function PUT(req, { params }) {
     // Assignees can update status of their own tasks (directly assigned or via
     // a team they belong to); oversight can edit anything.
     if (!isOversight(session)) {
-      const [row] = await query("SELECT assigned_to_user_id, assigned_to_team_id FROM tasks WHERE id = ?", [id]);
+      const [row] = await query("SELECT assigned_to_user_id, assigned_to_team_id, contact_id FROM tasks WHERE id = ?", [id])
+        .catch(() => query("SELECT assigned_to_user_id, assigned_to_team_id, NULL AS contact_id FROM tasks WHERE id = ?", [id]));
       let mine = row && String(row.assigned_to_user_id) === String(session.user.id);
       if (!mine && row?.assigned_to_team_id) {
         const member = await query(
@@ -23,6 +24,9 @@ export async function PUT(req, { params }) {
         ).catch(() => []);
         mine = member.length > 0;
       }
+      // Contact-linked tasks are workable by any caller — they update the status
+      // right from the workspace while calling that contact.
+      if (!mine && row?.contact_id && isCaller(session)) mine = true;
       if (!mine) {
         return NextResponse.json({ message: "Forbidden" }, { status: 403 });
       }

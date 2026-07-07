@@ -49,6 +49,9 @@ function WorkspaceBody() {
   // Quick complaint logging while on a call
   const [showComplaint, setShowComplaint] = useState(false);
 
+  // Tasks pinned to the active contact
+  const [contactTasks, setContactTasks] = useState([]);
+
   // Inline contact edit state
   const [editing, setEditing] = useState(false);
   const [edit, setEdit] = useState({ person_name: "", phone_number: "", address: "", district_id: "", designation_id: "" });
@@ -77,6 +80,25 @@ function WorkspaceBody() {
       return () => clearInterval(timerRef.current);
     }
   }, [active]);
+
+  // Tasks assigned on this contact — shown so the caller can act during the call.
+  async function loadContactTasks(contactId) {
+    const r = await fetch(`/api/tasks?contact_id=${contactId}`);
+    if (r.ok) setContactTasks((await r.json()).tasks || []);
+  }
+  useEffect(() => {
+    if (!active) { setContactTasks([]); return; }
+    loadContactTasks(active.id);
+  }, [active?.id]);
+
+  async function setTaskStatus(taskId, newStatus) {
+    await fetch(`/api/tasks/${taskId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus }),
+    });
+    if (active) loadContactTasks(active.id);
+  }
 
   // Whenever a contact becomes active, fetch its prior call history
   useEffect(() => {
@@ -416,6 +438,49 @@ function WorkspaceBody() {
                 )}
               </div>
             </div>
+
+            {/* Tasks assigned on this contact */}
+            {contactTasks.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-emerald-200 p-4">
+                <div className="flex items-center gap-2 text-emerald-700 mb-3">
+                  <ListChecks size={16} />
+                  <span className="font-bold text-sm">Assigned tasks for this contact ({contactTasks.length})</span>
+                </div>
+                <ul className="space-y-2">
+                  {contactTasks.map((t) => (
+                    <li key={t.id} className="flex items-start justify-between gap-3 border border-gray-100 rounded-xl p-3">
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900 text-sm">
+                          {t.title}
+                          <span className={`ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                            t.priority === "urgent" ? "bg-red-100 text-red-700" :
+                            t.priority === "high" ? "bg-orange-100 text-orange-700" :
+                            t.priority === "medium" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
+                          }`}>{t.priority}</span>
+                        </div>
+                        {t.description && <div className="text-xs text-gray-500 mt-0.5">{t.description}</div>}
+                        {t.deadline && <div className="text-[11px] text-gray-400 mt-0.5">Due {t.deadline.slice(0, 10)}</div>}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {["pending", "in_progress", "completed"].map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => setTaskStatus(t.id, s)}
+                            className={`text-[10px] font-semibold uppercase px-2 py-1 rounded-lg ${
+                              t.status === s
+                                ? s === "completed" ? "bg-emerald-600 text-white" : s === "in_progress" ? "bg-[#164FA3] text-white" : "bg-gray-600 text-white"
+                                : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                            }`}
+                          >
+                            {s.replace("_", " ")}
+                          </button>
+                        ))}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Previous attempts history */}
             {history.length > 0 && (

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
+import { isOversight, isPressMedia, isSocialMedia, isCaller } from "@/lib/permissions";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 
@@ -11,8 +11,8 @@ import path from "path";
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    // Press/social media staff upload files for their modules too.
-    if (!session || !(isOversight(session) || isPressMedia(session) || isSocialMedia(session))) {
+    // Press/social media staff upload for their modules; callers upload worker photos.
+    if (!session || !(isOversight(session) || isPressMedia(session) || isSocialMedia(session) || isCaller(session))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const form = await req.formData();
