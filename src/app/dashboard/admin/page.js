@@ -46,7 +46,11 @@ export default function AdminDashboard() {
       setLoading(false);
     };
     load();
-    const id = setInterval(load, 30000); // live refresh every 30s
+    // Only poll while the tab is visible — background tabs polling every 30s
+    // pile server-side load (and processes) for no one who's looking.
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 30000);
     return () => { cancelled = true; clearInterval(id); };
   }, [status, session, range]);
 

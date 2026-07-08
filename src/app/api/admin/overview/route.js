@@ -20,16 +20,18 @@ export async function GET(req) {
     // Geographic scope: zone/district/assembly admins see only their territory.
     const scope = scopeFilterSync(session.user, "c");
 
+    // Use half-open ranges (not DATE(called_at) = ...) so an index on
+    // called_at can be used — the function wrap would force a full scan.
     let curWhere, prevWhere;
     if (range === "yesterday") {
-      curWhere = "DATE(called_at) = CURDATE() - INTERVAL 1 DAY";
-      prevWhere = "DATE(called_at) = CURDATE() - INTERVAL 2 DAY";
+      curWhere = "called_at >= CURDATE() - INTERVAL 1 DAY AND called_at < CURDATE()";
+      prevWhere = "called_at >= CURDATE() - INTERVAL 2 DAY AND called_at < CURDATE() - INTERVAL 1 DAY";
     } else if (range === "week") {
       curWhere = "called_at >= CURDATE() - INTERVAL 6 DAY";
       prevWhere = "called_at >= CURDATE() - INTERVAL 13 DAY AND called_at < CURDATE() - INTERVAL 6 DAY";
     } else {
-      curWhere = "DATE(called_at) = CURDATE()";
-      prevWhere = "DATE(called_at) = CURDATE() - INTERVAL 1 DAY";
+      curWhere = "called_at >= CURDATE() AND called_at < CURDATE() + INTERVAL 1 DAY";
+      prevWhere = "called_at >= CURDATE() - INTERVAL 1 DAY AND called_at < CURDATE()";
     }
 
     const tallySql = (where) => `

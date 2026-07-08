@@ -31,7 +31,9 @@ function LiveBody() {
         .then((d) => setUsers(d.users || []))
         .finally(() => setLoading(false));
     load();
-    const id = setInterval(load, 15000);
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 15000);
     return () => clearInterval(id);
   }, []);
 

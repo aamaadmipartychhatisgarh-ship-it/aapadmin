@@ -19,7 +19,9 @@ function Body() {
         .then((d) => setAlerts(d.alerts || []))
         .finally(() => setLoading(false));
     load();
-    const id = setInterval(load, 30000);
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 30000);
     return () => clearInterval(id);
   }, []);
 
