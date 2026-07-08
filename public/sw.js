@@ -26,9 +26,17 @@ self.addEventListener("fetch", (event) => {
   // Only handle GET; never cache API/auth calls — always go to network.
   if (req.method !== "GET" || req.url.includes("/api/")) return;
 
+  // Network-first. On failure, fall back to any cached copy — but ALWAYS
+  // resolve to a real Response. Returning undefined here throws
+  // "Failed to convert value to 'Response'" and turns a transient network
+  // blip into a hard-broken page for every client with the SW installed.
   event.respondWith(
-    fetch(req).catch(() =>
-      caches.match(req).then((res) => res || caches.match("/dashboard"))
-    )
+    fetch(req).catch(async () => {
+      const cached = (await caches.match(req)) || (await caches.match("/dashboard"));
+      if (cached) return cached;
+      // Nothing cached and the network is down — behave like a normal
+      // network failure instead of crashing the fetch handler.
+      return Response.error();
+    })
   );
 });
