@@ -87,12 +87,17 @@ export async function POST(req) {
     // One mobile number → one worker. Compare on the last 10 digits so
     // "+91 98765..." and "098765..." count as the same number.
     if (mobile) {
+      // Normalize to the last 10 digits in JS and compare with a plain `= ?`.
+      // Nesting the bound param inside REPLACE(?, …) makes MariaDB throw
+      // ER_CANT_AGGREGATE_3COLLATIONS (param is utf8mb4_unicode_ci, the column
+      // is utf8mb4_general_ci), which 500s worker save on production.
+      const mobileKey = mobile.replace(/\D/g, "").slice(-10);
       const [dup] = await query(
         `SELECT id, name FROM workers
           WHERE mobile IS NOT NULL
-            AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) = RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10)
+            AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) = ?
           LIMIT 1`,
-        [mobile]
+        [mobileKey]
       );
       if (dup) {
         return NextResponse.json(

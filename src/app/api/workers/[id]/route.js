@@ -57,12 +57,17 @@ export async function PUT(req, { params }) {
 
     // One mobile per worker — block updates that would collide with another record.
     if (d.mobile) {
+      // Compare on the last 10 digits, normalized in JS. Nesting the bound
+      // param inside REPLACE(?, …) makes MariaDB throw
+      // ER_CANT_AGGREGATE_3COLLATIONS (param collation vs the column's), which
+      // 500s worker edit on production.
+      const mobileKey = String(d.mobile).replace(/\D/g, "").slice(-10);
       const [dup] = await query(
         `SELECT id, name FROM workers
           WHERE id != ? AND mobile IS NOT NULL
-            AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) = RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10)
+            AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) = ?
           LIMIT 1`,
-        [id, String(d.mobile)]
+        [id, mobileKey]
       );
       if (dup) {
         return NextResponse.json(
