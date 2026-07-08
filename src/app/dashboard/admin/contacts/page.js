@@ -25,6 +25,8 @@ function Body() {
   const [contacts, setContacts] = useState([]);
   const [total, setTotal] = useState(0);
   const [users, setUsers] = useState([]);
+  const [zones, setZones] = useState([]);
+  const [zoneId, setZoneId] = useState("");
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [search, setSearch] = useState("");
@@ -50,9 +52,10 @@ function Body() {
   const fileRef = useRef(null);
   const excelRef = useRef(null);
 
-  useEffect(() => { load(); }, [filter, districtId, assemblyId, designationId, assignedTo]);
+  useEffect(() => { load(); }, [filter, zoneId, districtId, assemblyId, designationId, assignedTo]);
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)));
+    fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
     fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
@@ -88,6 +91,7 @@ function Body() {
     if (filter === "duplicates") params.set("duplicates", "1");
     else if (filter !== "all") params.set("status", filter);
     if (search) params.set("search", search);
+    if (zoneId) params.set("zone_id", zoneId);
     if (districtId) params.set("district_id", districtId);
     if (assemblyId) params.set("assembly_id", assemblyId);
     if (designationId) params.set("designation_id", designationId);
@@ -256,6 +260,10 @@ function Body() {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input type="text" placeholder="Search by name or phone" value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1 min-w-[180px] outline-none text-sm py-2" />
+        <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All zones</option>
+          {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+        </select>
         <select value={districtId} onChange={(e) => setDistrictId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">All districts</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}

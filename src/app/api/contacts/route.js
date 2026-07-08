@@ -14,6 +14,7 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
     const duplicates = searchParams.get("duplicates"); // "1" → only likely-duplicate contacts
+    const zone_id = searchParams.get("zone_id");
     const district_id = searchParams.get("district_id");
     const assembly_id = searchParams.get("assembly_id");
     const designation_id = searchParams.get("designation_id");
@@ -27,6 +28,18 @@ export async function GET(req) {
     if (status === "done") where += " AND c.is_completed = 1";
     if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
     if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
+    // contacts.zone_id is not populated, so resolve zone via the location
+    // hierarchy: district -> lok_sabha -> zone (plus the one district that
+    // parents directly under a zone).
+    if (zone_id) {
+      where += ` AND c.district_id IN (
+        SELECT d.id FROM locations d
+         WHERE d.type = 'district'
+           AND (d.parent_id = ?
+                OR d.parent_id IN (SELECT ls.id FROM locations ls WHERE ls.type = 'lok_sabha' AND ls.parent_id = ?))
+      )`;
+      params.push(zone_id, zone_id);
+    }
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
     if (assembly_id) { where += " AND c.assembly_id = ?"; params.push(assembly_id); }
     if (designation_id) { where += " AND c.designation_id = ?"; params.push(designation_id); }
