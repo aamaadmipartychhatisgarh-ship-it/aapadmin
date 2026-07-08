@@ -10,6 +10,31 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
   },
+  async headers() {
+    return [
+      {
+        // Next.js defaults static pages to `s-maxage=31536000` (1 year),
+        // assuming the CDN is purged on every deploy. Hostinger's CDN does
+        // NOT auto-purge, so it kept serving year-old HTML that references
+        // chunk files a later build already deleted -> ChunkLoadError / 404.
+        // Force revalidation on HTML/RSC documents so the CDN always fetches
+        // markup that points at the CURRENT build's chunks. Hashed assets
+        // under /_next/static keep their own immutable long cache (excluded).
+        source: "/((?!_next/).*)",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+        ],
+      },
+      {
+        // A service worker must never be cached, or clients get stuck on an
+        // old one (this is how the earlier broken sw.js lingered).
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
