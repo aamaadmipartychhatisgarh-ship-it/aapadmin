@@ -4,6 +4,17 @@ import { authOptions } from "@/lib/auth";
 import { canManageWorkers, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
+// A worker's `position` is one or more comma-separated designation names.
+// Contacts carry a single designation_id, so map the first name that matches
+// the master designations list (returns null if none/no match).
+async function resolvePrimaryDesignationId(position) {
+  if (!position) return null;
+  const first = String(position).split(",")[0].trim();
+  if (!first) return null;
+  const rows = await query("SELECT id FROM designations WHERE name = ? LIMIT 1", [first]);
+  return rows[0]?.id ?? null;
+}
+
 // GET /api/workers?search=&zone_id=&lok_sabha_id=&district_id=&assembly_id=&status=&position=&page=&limit=
 export async function GET(req) {
   try {
@@ -118,13 +129,16 @@ export async function POST(req) {
 
     // Also add the worker to the calling pipeline (contacts) if they have a phone.
     // Deduped on phone_number (UNIQUE); a duplicate is fine — don't fail the worker.
+    // Workers hold designations as comma-separated names in `position`; contacts
+    // hold a single designation_id, so map the primary (first) one across.
+    const designationId = await resolvePrimaryDesignationId(d.position);
     let addedToContacts = false;
     if (mobile) {
       try {
         await query(
-          `INSERT INTO contacts (person_name, phone_number, address, district_id, assembly_id, ward_id, booth_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [d.name, mobile, d.address || null, d.district_id || null, d.assembly_id || null,
+          `INSERT INTO contacts (person_name, phone_number, address, designation_id, district_id, assembly_id, ward_id, booth_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [d.name, mobile, d.address || null, designationId, d.district_id || null, d.assembly_id || null,
            d.ward_id || null, d.booth_id || null]
         );
         addedToContacts = true;
