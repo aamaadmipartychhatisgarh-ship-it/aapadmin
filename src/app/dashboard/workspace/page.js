@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Star, MessageSquare } from "lucide-react";
+import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Star, MessageSquare, Search } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 
 export default function WorkspacePage() {
@@ -27,7 +27,12 @@ export default function WorkspacePage() {
 }
 
 function WorkspaceBody() {
-  const [queue, setQueue] = useState({ assigned: [], scheduled: [], pool_count: 0, home_district: null, active_lock: null });
+  const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], pool_count: 0, home_district: null, active_lock: null });
+  // Queue search / filters
+  const [qSearch, setQSearch] = useState("");
+  const [qDistrict, setQDistrict] = useState("");
+  const [qDesignation, setQDesignation] = useState("");
+  const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [statuses, setStatuses] = useState([]);
   const [districts, setDistricts] = useState([]);
@@ -124,10 +129,23 @@ function WorkspaceBody() {
 
   async function loadQueue() {
     setLoading(true);
-    const r = await fetch("/api/workspace/queue");
+    const params = new URLSearchParams();
+    if (qSearch.trim()) params.set("search", qSearch.trim());
+    if (qDistrict) params.set("district_id", qDistrict);
+    if (qDesignation) params.set("designation_id", qDesignation);
+    const qs = params.toString();
+    const r = await fetch(`/api/workspace/queue${qs ? `?${qs}` : ""}`);
     if (r.ok) setQueue(await r.json());
     setLoading(false);
   }
+
+  // Re-load the queue when search / filters change (debounced for typing).
+  useEffect(() => {
+    if (!didMountQueue.current) { didMountQueue.current = true; return; }
+    const t = setTimeout(() => loadQueue(), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qSearch, qDistrict, qDesignation]);
 
   function startActive(contact, startedAtMs = Date.now()) {
     setActive({ ...contact, started_at: startedAtMs });
@@ -266,7 +284,7 @@ function WorkspaceBody() {
 
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
             <div className="bg-blue-50 rounded-xl p-3">
-              <div className="text-blue-900 font-bold text-2xl">{queue.assigned.length}</div>
+              <div className="text-blue-900 font-bold text-2xl">{queue.assigned_total ?? queue.assigned.length}</div>
               <div className="text-blue-700 text-xs uppercase tracking-wide font-medium">Due Today</div>
             </div>
             <div className="bg-amber-50 rounded-xl p-3">
@@ -280,13 +298,49 @@ function WorkspaceBody() {
           <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
             <Users size={16} /> Assigned to You
           </h3>
+
+          {/* Search + filters */}
+          <div className="space-y-2 mb-3">
+            <div className="relative">
+              <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={qSearch}
+                onChange={(e) => setQSearch(e.target.value)}
+                placeholder="Search name or number…"
+                className="w-full bg-white border border-gray-200 h-9 rounded-lg pl-8 pr-8 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
+              />
+              {qSearch && (
+                <button onClick={() => setQSearch("")} title="Clear" className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-700">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select value={qDistrict} onChange={(e) => setQDistrict(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
+                <option value="">All districts</option>
+                {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+              <select value={qDesignation} onChange={(e) => setQDesignation(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
+                <option value="">All designations</option>
+                {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
+              </select>
+            </div>
+          </div>
+
           {loading ? (
             <div className="text-gray-400 text-sm">Loading…</div>
           ) : queue.assigned.length === 0 ? (
-            <div className="text-gray-400 text-sm">Nothing due today. Click Start Next Call to pull from the pool.</div>
+            <div className="text-gray-400 text-sm">
+              {qSearch || qDistrict || qDesignation ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
+            </div>
           ) : (
+            <>
+              <div className="text-[11px] text-gray-400 mb-2">
+                Showing {queue.assigned.length}{(queue.assigned_total ?? 0) > queue.assigned.length ? ` of ${queue.assigned_total}` : ""}
+              </div>
             <ul className="space-y-2 max-h-[300px] overflow-y-auto">
-              {queue.assigned.slice(0, 50).map((c) => (
+              {queue.assigned.map((c) => (
                 <li key={c.id}>
                   <button
                     disabled={!!active}
@@ -306,6 +360,7 @@ function WorkspaceBody() {
                 </li>
               ))}
             </ul>
+            </>
           )}
         </div>
 

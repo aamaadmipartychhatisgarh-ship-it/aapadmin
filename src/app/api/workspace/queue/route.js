@@ -9,7 +9,7 @@ import { query } from "@/lib/db";
 //   pool_count: how many unassigned, uncompleted contacts are available in caller's home district
 //   home_district: { id, name } | null
 //   active_lock: a contact currently locked by this caller (if they're mid-call)
-export async function GET() {
+export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
@@ -21,6 +21,18 @@ export async function GET() {
     }
     const userId = session.user.id;
 
+    // Optional search / filters on the assigned queue.
+    const { searchParams } = new URL(req.url);
+    const search = searchParams.get("search");
+    const districtId = searchParams.get("district_id");
+    const designationId = searchParams.get("designation_id");
+    const qFilters = [];
+    const qParams = [];
+    if (search) { qFilters.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); qParams.push(`%${search}%`, `%${search}%`); }
+    if (districtId) { qFilters.push("c.district_id = ?"); qParams.push(districtId); }
+    if (designationId) { qFilters.push("c.designation_id = ?"); qParams.push(designationId); }
+    const filterSql = qFilters.length ? " AND " + qFilters.join(" AND ") : "";
+
     const [me] = await query(
       `SELECT u.home_district_id, l.name AS home_district_name
          FROM users u
@@ -31,6 +43,17 @@ export async function GET() {
 
     // Active queue: skip contacts whose follow-up date is still in the future.
     // They reappear on/after the scheduled date.
+    // Total due-today assigned matching the filters (uncapped) — so the UI can
+    // show the real count instead of being limited by the page size.
+    const [{ assigned_total }] = await query(
+      `SELECT COUNT(*) AS assigned_total
+         FROM contacts c
+        WHERE c.assigned_to_user_id = ?
+          AND c.is_completed = 0
+          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${filterSql}`,
+      [userId, ...qParams]
+    );
+
     const assigned = await query(
       `SELECT c.*, ld.name AS district_name, lw.name AS ward_name,
               (SELECT COUNT(*) FROM calls WHERE contact_id = c.id) AS attempts
@@ -39,13 +62,13 @@ export async function GET() {
          LEFT JOIN locations lw ON lw.id = c.ward_id
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
+          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${filterSql}
         ORDER BY c.is_vip DESC,
                  c.follow_up_date IS NOT NULL DESC,
                  c.follow_up_date ASC,
                  c.id ASC
-        LIMIT 200`,
-      [userId]
+        LIMIT 1000`,
+      [userId, ...qParams]
     );
 
     // Scheduled (future) follow-ups: surfaced so the caller can see what's coming.
@@ -87,6 +110,7 @@ export async function GET() {
 
     return NextResponse.json({
       assigned,
+      assigned_total,
       scheduled,
       pool_count: poolCount,
       home_district: me?.home_district_id ? { id: me.home_district_id, name: me.home_district_name } : null,
