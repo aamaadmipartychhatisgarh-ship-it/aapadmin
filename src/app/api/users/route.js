@@ -1,7 +1,7 @@
 import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isAdmin, isTopAdmin, ASSIGNABLE_ROLES } from "@/lib/permissions";
+import { isTopAdmin, isOversight, ASSIGNABLE_ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import bcrypt from "bcryptjs";
 
@@ -46,7 +46,9 @@ export async function GET() {
   try {
     const session = await getServerSession(authOptions);
 
-    if (!session || !isAdmin(session)) {
+    // Oversight roles (supervisors + admins) can read the user list — supervisors
+    // need it to assign tasks. User creation/editing stays top-admin only.
+    if (!session || !isOversight(session)) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 
