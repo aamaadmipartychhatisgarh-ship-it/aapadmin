@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X, Search } from "lucide-react";
 
 export default function MasterDataSettings() {
   const [statuses, setStatuses] = useState([]);
@@ -193,8 +193,31 @@ function LocationsTree() {
 
   // New-location form state
   const [newLocation, setNewLocation] = useState({ type: "zone", name: "", parent_id: "" });
-  const [allLocations, setAllLocations] = useState([]); // for parent dropdown
+  const [allLocations, setAllLocations] = useState([]); // for parent dropdown + search
   const [adding, setAdding] = useState(false);
+
+  // Search across the whole political-geography master data (all levels)
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const byId = useMemo(() => {
+    const m = {};
+    allLocations.forEach((l) => { m[l.id] = l; });
+    return m;
+  }, [allLocations]);
+  const pathOf = (node) => {
+    const parts = [];
+    let p = byId[node.parent_id];
+    let guard = 0;
+    while (p && guard++ < 10) { parts.unshift(p.name); p = byId[p.parent_id]; }
+    return parts.join(" → ");
+  };
+  const results = useMemo(() => {
+    if (!q) return null;
+    return allLocations
+      .filter((l) => l.name.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, 300);
+  }, [q, allLocations]);
 
   useEffect(() => {
     refresh();
@@ -301,10 +324,58 @@ function LocationsTree() {
         </form>
       </div>
 
-      {/* Tree */}
+      {/* Search */}
+      <div className="px-6 pt-4">
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search any location — zone, Lok Sabha, district, Vidhan Sabha, block…"
+            className="w-full bg-white border border-gray-200 h-10 rounded-lg pl-9 pr-9 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              title="Clear"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tree, or flat search results */}
       <div className="p-4 max-h-[600px] overflow-auto">
         {loading ? (
           <div className="py-8 text-center text-gray-400"><Loader2 className="inline animate-spin" /></div>
+        ) : results !== null ? (
+          results.length === 0 ? (
+            <div className="py-8 text-center text-gray-400">No locations match “{search.trim()}”.</div>
+          ) : (
+            <>
+              <div className="px-2 pb-2 text-xs text-gray-400">
+                {results.length}{results.length === 300 ? "+" : ""} match{results.length === 1 ? "" : "es"}
+              </div>
+              <ul className="divide-y divide-gray-100">
+                {results.map((l) => {
+                  const path = pathOf(l);
+                  return (
+                    <li key={l.id} className="flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-blue-50">
+                      <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full shrink-0 ${TYPE_COLOR[l.type]}`}>
+                        {TYPE_LABEL[l.type]}
+                      </span>
+                      <span className="font-medium text-gray-800 shrink-0">{l.name}</span>
+                      {path && <span className="text-xs text-gray-400 truncate">in {path}</span>}
+                      <span className="ml-auto text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded shrink-0">ID: {l.id}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )
         ) : zones.length === 0 ? (
           <div className="py-8 text-center text-gray-400">No locations yet. Add a zone above.</div>
         ) : (
