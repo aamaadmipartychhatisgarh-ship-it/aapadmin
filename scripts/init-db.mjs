@@ -125,7 +125,7 @@ async function initDb() {
         FOREIGN KEY (zone_id) REFERENCES locations(id) ON DELETE SET NULL,
         FOREIGN KEY (lok_sabha_id) REFERENCES locations(id) ON DELETE SET NULL,
         FOREIGN KEY (district_id) REFERENCES locations(id) ON DELETE SET NULL,
-        FOREIGN KEY (status_id) REFERENCES call_statuses(id) ON DELETE SET NULL
+        FOREIGN KEY (status_id) REFERENCES call_statuses(id) ON DELETE RESTRICT
       );
     `);
 

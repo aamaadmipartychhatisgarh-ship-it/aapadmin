@@ -62,8 +62,8 @@ export async function GET(req) {
          ORDER BY ${duplicates === "1"
            ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(w.mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, w.id ASC"
            : "w.activity_score DESC, w.id DESC"}
-         LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+         LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
 
     return NextResponse.json({ workers, total, page, limit, pages: Math.ceil(total / limit) });

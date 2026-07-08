@@ -1,0 +1,39 @@
+services:
+  mysql:
+    image: mysql:8
+    container_name: aapadmin_mysql
+    restart: unless-stopped
+    environment:
+      # App defaults to an empty root password (see src/lib/db.js & SETUP.md)
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: aapadmin
+    ports:
+      - "3306:3306"
+    volumes:
+      - aapadmin_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: aapadmin_phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: ""
+      # allow logging in to a root account that has no password
+      UPLOAD_LIMIT: 256M
+    ports:
+      # 8080 is used by another project on this machine, so use 8081
+      - "8081:80"
+
+volumes:
+  aapadmin_mysql_data:
