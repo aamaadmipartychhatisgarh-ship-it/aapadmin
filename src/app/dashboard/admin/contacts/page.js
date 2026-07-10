@@ -487,17 +487,40 @@ function EditContactModal({ contact, onClose, onSaved }) {
     phone_number: contact.phone_number || "",
     address: contact.address || "",
     designation_id: contact.designation_id || "",
+    zone_id: contact.zone_id || "",
     district_id: contact.district_id || "",
+    assembly_id: contact.assembly_id || "",
+    ward_id: contact.ward_id || "",
+    booth_id: contact.booth_id || "",
   });
+  const [zones, setZones] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
+  const [assemblies, setAssemblies] = useState([]);
+  const [wards, setWards] = useState([]);
+  const [booths, setBooths] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
+
+  // Cascade the geography: assembly ← district, ward ← assembly, booth ← ward.
+  useEffect(() => {
+    if (!form.district_id) { setAssemblies([]); return; }
+    fetch(`/api/locations?parent_id=${form.district_id}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
+  }, [form.district_id]);
+  useEffect(() => {
+    if (!form.assembly_id) { setWards([]); return; }
+    fetch(`/api/locations?parent_id=${form.assembly_id}`).then((r) => r.json()).then((d) => setWards(d.locations || []));
+  }, [form.assembly_id]);
+  useEffect(() => {
+    if (!form.ward_id) { setBooths([]); return; }
+    fetch(`/api/locations?parent_id=${form.ward_id}`).then((r) => r.json()).then((d) => setBooths(d.locations || []));
+  }, [form.ward_id]);
 
   async function save() {
     setSaving(true); setError("");
@@ -509,7 +532,11 @@ function EditContactModal({ contact, onClose, onSaved }) {
         phone_number: form.phone_number,
         address: form.address,
         designation_id: form.designation_id || null,
+        zone_id: form.zone_id || null,
         district_id: form.district_id || null,
+        assembly_id: form.assembly_id || null,
+        ward_id: form.ward_id || null,
+        booth_id: form.booth_id || null,
       }),
     });
     const data = await r.json();
@@ -517,22 +544,41 @@ function EditContactModal({ contact, onClose, onSaved }) {
     onSaved();
   }
 
+  const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white";
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <h2 className="text-xl font-bold text-gray-900">Edit Contact</h2>
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
-        <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
-        <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
-        <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-        <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
+        <input className={inp} placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
+        <input className={inp} placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
+        <input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+        <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
           <option value="">No designation</option>
           {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
-          <option value="">No district</option>
-          {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        <div className="grid grid-cols-2 gap-3">
+          <select className={inp} value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value })}>
+            <option value="">No zone</option>
+            {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+          </select>
+          <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "", ward_id: "", booth_id: "" })}>
+            <option value="">No district</option>
+            {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+          <select className={inp} value={form.assembly_id} disabled={!form.district_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value, ward_id: "", booth_id: "" })}>
+            <option value="">{form.district_id ? "No assembly" : "Pick district"}</option>
+            {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <select className={inp} value={form.ward_id} disabled={!form.assembly_id} onChange={(e) => setForm({ ...form, ward_id: e.target.value, booth_id: "" })}>
+            <option value="">{form.assembly_id ? "No ward" : "Pick assembly"}</option>
+            {wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+          <select className={inp} value={form.booth_id} disabled={!form.ward_id} onChange={(e) => setForm({ ...form, booth_id: e.target.value })}>
+            <option value="">{form.ward_id ? "No booth" : "Pick ward"}</option>
+            {booths.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </div>
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
           <button onClick={save} disabled={saving || !form.person_name || !form.phone_number} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">

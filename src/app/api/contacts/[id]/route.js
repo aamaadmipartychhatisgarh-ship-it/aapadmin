@@ -13,17 +13,24 @@ export async function PUT(req, { params }) {
     const { id } = await params;
     const admin = isAdmin(session);
     if (!admin) {
-      // Callers may only edit the contact they currently hold (locked mid-call),
-      // and only its basic details — not assignment or completion state.
+      // Callers may edit the contact they currently hold (locked mid-call).
+      // They can change every detail of the contact — name, phone, address,
+      // designation and the full geography (zone/district/assembly/ward/booth) —
+      // but never its queue assignment or completion state, and never delete it.
       const [row] = await query("SELECT locked_by_user_id FROM contacts WHERE id = ?", [id]);
       if (!row || String(row.locked_by_user_id) !== String(session.user.id)) {
         return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
       }
     }
     const data = await req.json();
-    const fields = admin
-      ? ["person_name", "phone_number", "address", "designation_id", "district_id", "ward_id", "booth_id", "assigned_to_user_id", "is_completed"]
-      : ["person_name", "phone_number", "address", "designation_id", "district_id"];
+    // Descriptive + geographic details anyone with edit rights may change.
+    const DETAIL_FIELDS = [
+      "person_name", "phone_number", "address", "designation_id",
+      "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id", "booth_id",
+    ];
+    // Queue assignment + completion state stay admin-only (not "contact details").
+    const ADMIN_ONLY_FIELDS = ["assigned_to_user_id", "is_completed"];
+    const fields = admin ? [...DETAIL_FIELDS, ...ADMIN_ONLY_FIELDS] : DETAIL_FIELDS;
     const sets = [];
     const vals = [];
     for (const f of fields) {

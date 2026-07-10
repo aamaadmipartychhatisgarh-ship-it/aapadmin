@@ -35,6 +35,7 @@ function WorkspaceBody() {
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [statuses, setStatuses] = useState([]);
+  const [zones, setZones] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,17 +58,38 @@ function WorkspaceBody() {
   // Tasks pinned to the active contact
   const [contactTasks, setContactTasks] = useState([]);
 
-  // Inline contact edit state
+  // Inline contact edit state. Callers can edit every detail of the contact
+  // (like an admin) except its queue assignment — and they can't delete it.
   const [editing, setEditing] = useState(false);
-  const [edit, setEdit] = useState({ person_name: "", phone_number: "", address: "", district_id: "", designation_id: "" });
+  const [edit, setEdit] = useState(initialEdit());
   const [editSaving, setEditSaving] = useState(false);
+  // Cascading location options for the edit form (assembly → ward → booth).
+  const [editAssemblies, setEditAssemblies] = useState([]);
+  const [editWards, setEditWards] = useState([]);
+  const [editBooths, setEditBooths] = useState([]);
 
   useEffect(() => {
     loadQueue();
     fetch("/api/statuses").then((r) => r.json()).then((d) => setStatuses(d.statuses || []));
+    fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
+
+  // Assembly options follow the chosen district; ward follows assembly; booth
+  // follows ward — same hierarchy the admin geography uses.
+  useEffect(() => {
+    if (!edit.district_id) { setEditAssemblies([]); return; }
+    fetch(`/api/locations?parent_id=${edit.district_id}`).then((r) => r.json()).then((d) => setEditAssemblies(d.locations || []));
+  }, [edit.district_id]);
+  useEffect(() => {
+    if (!edit.assembly_id) { setEditWards([]); return; }
+    fetch(`/api/locations?parent_id=${edit.assembly_id}`).then((r) => r.json()).then((d) => setEditWards(d.locations || []));
+  }, [edit.assembly_id]);
+  useEffect(() => {
+    if (!edit.ward_id) { setEditBooths([]); return; }
+    fetch(`/api/locations?parent_id=${edit.ward_id}`).then((r) => r.json()).then((d) => setEditBooths(d.locations || []));
+  }, [edit.ward_id]);
 
   // Restore active lock if the user reloaded mid-call
   useEffect(() => {
@@ -121,8 +143,12 @@ function WorkspaceBody() {
       person_name: active.person_name || "",
       phone_number: active.phone_number || "",
       address: active.address || "",
-      district_id: active.district_id || "",
       designation_id: active.designation_id || "",
+      zone_id: active.zone_id || "",
+      district_id: active.district_id || "",
+      assembly_id: active.assembly_id || "",
+      ward_id: active.ward_id || "",
+      booth_id: active.booth_id || "",
     });
     setEditing(false);
   }, [active?.id]);
@@ -248,9 +274,16 @@ function WorkspaceBody() {
         setError(data.message || "Failed to update contact");
         return;
       }
-      // Patch the active contact in place
-      const districtName = districts.find((d) => String(d.id) === String(edit.district_id))?.name || active.district_name;
-      setActive({ ...active, ...edit, district_name: districtName, designation_id: edit.designation_id || null });
+      // Patch the active contact in place so the card reflects the new details.
+      const districtName = districts.find((d) => String(d.id) === String(edit.district_id))?.name || (edit.district_id ? active.district_name : null);
+      const wardName = editWards.find((w) => String(w.id) === String(edit.ward_id))?.name || (edit.ward_id ? active.ward_name : null);
+      setActive({
+        ...active,
+        ...edit,
+        district_name: districtName,
+        ward_name: wardName,
+        designation_id: edit.designation_id || null,
+      });
       setForm({ ...form, person_name: edit.person_name, phone_number: edit.phone_number });
       setEditing(false);
       setMessage("Contact updated.");
@@ -450,22 +483,81 @@ function WorkspaceBody() {
                     placeholder="Address"
                     className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-blue-200 text-sm outline-none focus:bg-white/20"
                   />
-                  <select
-                    value={edit.designation_id || ""}
-                    onChange={(e) => setEdit({ ...edit, designation_id: e.target.value })}
-                    className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm outline-none focus:bg-white/20"
-                  >
-                    <option className="text-gray-900" value="">No designation</option>
-                    {designations.map((d) => <option key={d.id} value={d.id} className="text-gray-900">{d.name}</option>)}
-                  </select>
-                  <select
-                    value={edit.district_id || ""}
-                    onChange={(e) => setEdit({ ...edit, district_id: e.target.value })}
-                    className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm outline-none focus:bg-white/20"
-                  >
-                    <option className="text-gray-900" value="">No district</option>
-                    {districts.map((d) => <option key={d.id} value={d.id} className="text-gray-900">{d.name}</option>)}
-                  </select>
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Designation</label>
+                    <select
+                      value={edit.designation_id || ""}
+                      onChange={(e) => setEdit({ ...edit, designation_id: e.target.value })}
+                      className={editSelectCls}
+                    >
+                      <option className="text-gray-900" value="">No designation</option>
+                      {designations.map((d) => <option key={d.id} value={d.id} className="text-gray-900">{d.name}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="pt-1 border-t border-white/15">
+                    <div className="text-[11px] uppercase tracking-wide text-blue-200 mb-2 mt-2">Location</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Zone</label>
+                        <select
+                          value={edit.zone_id || ""}
+                          onChange={(e) => setEdit({ ...edit, zone_id: e.target.value })}
+                          className={editSelectCls}
+                        >
+                          <option className="text-gray-900" value="">No zone</option>
+                          {zones.map((z) => <option key={z.id} value={z.id} className="text-gray-900">{z.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">District</label>
+                        <select
+                          value={edit.district_id || ""}
+                          onChange={(e) => setEdit({ ...edit, district_id: e.target.value, assembly_id: "", ward_id: "", booth_id: "" })}
+                          className={editSelectCls}
+                        >
+                          <option className="text-gray-900" value="">No district</option>
+                          {districts.map((d) => <option key={d.id} value={d.id} className="text-gray-900">{d.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Assembly</label>
+                        <select
+                          value={edit.assembly_id || ""}
+                          onChange={(e) => setEdit({ ...edit, assembly_id: e.target.value, ward_id: "", booth_id: "" })}
+                          disabled={!edit.district_id}
+                          className={editSelectCls}
+                        >
+                          <option className="text-gray-900" value="">{edit.district_id ? "No assembly" : "Pick district first"}</option>
+                          {editAssemblies.map((a) => <option key={a.id} value={a.id} className="text-gray-900">{a.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Ward</label>
+                        <select
+                          value={edit.ward_id || ""}
+                          onChange={(e) => setEdit({ ...edit, ward_id: e.target.value, booth_id: "" })}
+                          disabled={!edit.assembly_id}
+                          className={editSelectCls}
+                        >
+                          <option className="text-gray-900" value="">{edit.assembly_id ? "No ward" : "Pick assembly first"}</option>
+                          {editWards.map((w) => <option key={w.id} value={w.id} className="text-gray-900">{w.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Booth</label>
+                        <select
+                          value={edit.booth_id || ""}
+                          onChange={(e) => setEdit({ ...edit, booth_id: e.target.value })}
+                          disabled={!edit.ward_id}
+                          className={editSelectCls}
+                        >
+                          <option className="text-gray-900" value="">{edit.ward_id ? "No booth" : "Pick ward first"}</option>
+                          {editBooths.map((b) => <option key={b.id} value={b.id} className="text-gray-900">{b.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
               <div className="flex gap-2 mt-6">
@@ -706,6 +798,17 @@ function initialForm() {
     is_vip: false,
   };
 }
+
+// Blank state for the inline contact editor — every detail a caller may change.
+function initialEdit() {
+  return {
+    person_name: "", phone_number: "", address: "", designation_id: "",
+    zone_id: "", district_id: "", assembly_id: "", ward_id: "", booth_id: "",
+  };
+}
+
+// Shared styling for the on-call edit form's selects (dark card, light popup).
+const editSelectCls = "w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm outline-none focus:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed";
 
 function fmtTime(s) {
   if (s == null) return "—";
