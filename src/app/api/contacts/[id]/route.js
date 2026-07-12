@@ -4,6 +4,28 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
+// The contacts table has been extended over several migrations, and a given
+// deployment may not have every column yet (e.g. assembly_id/booth_id). Naming
+// a missing column in a single UPDATE aborts the whole statement, which would
+// silently drop the caller's edit. So we intersect the requested fields with
+// the columns that actually exist. Resolved once, then cached for the process.
+let contactColumnsPromise;
+async function getContactColumns() {
+  if (!contactColumnsPromise) {
+    contactColumnsPromise = query(
+      `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'`
+    )
+      .then((rows) => new Set(rows.map((r) => r.name)))
+      .catch((err) => {
+        // Don't cache a failure — let the next request retry the lookup.
+        contactColumnsPromise = undefined;
+        throw err;
+      });
+  }
+  return contactColumnsPromise;
+}
+
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
@@ -31,10 +53,12 @@ export async function PUT(req, { params }) {
     // Queue assignment + completion state stay admin-only (not "contact details").
     const ADMIN_ONLY_FIELDS = ["assigned_to_user_id", "is_completed"];
     const fields = admin ? [...DETAIL_FIELDS, ...ADMIN_ONLY_FIELDS] : DETAIL_FIELDS;
+    // Only touch columns this deployment's schema actually has.
+    const existingColumns = await getContactColumns();
     const sets = [];
     const vals = [];
     for (const f of fields) {
-      if (f in data) { sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]); }
+      if (f in data && existingColumns.has(f)) { sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]); }
     }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
     vals.push(id);
