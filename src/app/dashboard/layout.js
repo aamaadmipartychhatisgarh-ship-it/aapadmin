@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X } from "lucide-react";
+import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -59,6 +59,7 @@ export default function DashboardLayout({ children }) {
       { name: "Wrong Numbers", href: "/dashboard/admin/contacts?filter=wrong", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
+      { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
@@ -81,6 +82,7 @@ export default function DashboardLayout({ children }) {
       { name: "Wrong Numbers", href: "/dashboard/admin/contacts?filter=wrong", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
+      { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
@@ -102,6 +104,7 @@ export default function DashboardLayout({ children }) {
       { name: "Wrong Numbers", href: "/dashboard/admin/contacts?filter=wrong", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
+      { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
@@ -119,6 +122,7 @@ export default function DashboardLayout({ children }) {
       { name: "Wrong Numbers", href: "/dashboard/admin/contacts?filter=wrong", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
+      { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },

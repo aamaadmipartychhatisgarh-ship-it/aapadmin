@@ -69,7 +69,10 @@ function WorkspaceBody() {
   const [editBooths, setEditBooths] = useState([]);
 
   useEffect(() => {
-    loadQueue();
+    // Apply this caller's standing assignment rules (reclaim stale + top up to
+    // the daily quota), then load the freshly-filled queue. Failures are
+    // non-fatal — the queue still loads.
+    fetch("/api/workspace/topup", { method: "POST" }).catch(() => {}).finally(() => loadQueue());
     fetch("/api/statuses").then((r) => r.json()).then((d) => setStatuses(d.statuses || []));
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));

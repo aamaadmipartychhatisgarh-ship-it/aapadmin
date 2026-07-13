@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, normalizeRole, ROLES, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { contactsHaveAssignedAt } from "@/lib/assignmentRules";
 
 // Distribute contacts matching the given filters across MULTIPLE callers.
 //
@@ -89,7 +90,9 @@ export async function POST(req) {
       buckets.get(callerId).push(row.id);
     });
 
-    // One UPDATE per caller (bulk by id list).
+    // One UPDATE per caller (bulk by id list). Stamp assigned_at when available
+    // so stale-reclaim knows how long each contact has been held.
+    const stampAssignedAt = await contactsHaveAssignedAt();
     let assigned = 0;
     const perCounts = {};
     for (const c of callers) {
@@ -98,7 +101,7 @@ export async function POST(req) {
       if (ids.length === 0) continue;
       const ph = ids.map(() => "?").join(",");
       await query(
-        `UPDATE contacts SET assigned_to_user_id = ? WHERE id IN (${ph})`,
+        `UPDATE contacts SET assigned_to_user_id = ?${stampAssignedAt ? ", assigned_at = NOW()" : ""} WHERE id IN (${ph})`,
         [c.id, ...ids]
       );
       assigned += ids.length;

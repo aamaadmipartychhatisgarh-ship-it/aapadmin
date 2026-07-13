@@ -60,6 +60,11 @@ export async function PUT(req, { params }) {
     for (const f of fields) {
       if (f in data && existingColumns.has(f)) { sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]); }
     }
+    // Stamp assigned_at whenever the owner changes, so stale-reclaim can tell how
+    // long a contact has been held (cleared when it returns to the pool).
+    if (admin && "assigned_to_user_id" in data && existingColumns.has("assigned_at")) {
+      sets.push(data.assigned_to_user_id ? "assigned_at = NOW()" : "assigned_at = NULL");
+    }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
     vals.push(id);
     await query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
