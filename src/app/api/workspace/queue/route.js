@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { buildRulesOrMatch } from "@/lib/assignmentRules";
 
 // Returns:
 //   assigned: contacts explicitly assigned to this caller, not yet completed
@@ -54,21 +55,37 @@ export async function GET(req) {
       [userId, ...qParams]
     );
 
+    // A contact is a "daily assignment" if it matches one of this caller's
+    // active standing rules — those should be worked first. Build the match
+    // expression (degrades to "0" / no rules if the feature isn't set up).
+    let daily = { sql: "0", params: [] };
+    try {
+      const rules = await query(
+        `SELECT * FROM assignment_rules WHERE caller_user_id = ? AND is_active = 1`,
+        [userId]
+      );
+      if (rules.length) daily = buildRulesOrMatch(rules, "c");
+    } catch (e) {
+      if (e.code !== "ER_NO_SUCH_TABLE") throw e; // migration not run yet → no daily flag
+    }
+
     const assigned = await query(
       `SELECT c.*, ld.name AS district_name, lw.name AS ward_name,
-              (SELECT COUNT(*) FROM calls WHERE contact_id = c.id) AS attempts
+              (SELECT COUNT(*) FROM calls WHERE contact_id = c.id) AS attempts,
+              (CASE WHEN (${daily.sql}) THEN 1 ELSE 0 END) AS is_daily
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
           AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${filterSql}
-        ORDER BY c.is_vip DESC,
+        ORDER BY (CASE WHEN (${daily.sql}) THEN 0 ELSE 1 END) ASC,
+                 c.is_vip DESC,
                  c.follow_up_date IS NOT NULL DESC,
                  c.follow_up_date ASC,
                  c.id ASC
         LIMIT 1000`,
-      [userId, ...qParams]
+      [...daily.params, userId, ...qParams, ...daily.params]
     );
 
     // Scheduled (future) follow-ups: surfaced so the caller can see what's coming.

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus, Trash2, CalendarClock, CheckCircle2, ToggleLeft, ToggleRight } from "lucide-react";
+import { Loader2, Plus, Trash2, CalendarClock, CheckCircle2, ToggleLeft, ToggleRight, ChevronRight, Users } from "lucide-react";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 
 export default function Page() {
@@ -104,29 +104,96 @@ function Body() {
             </thead>
             <tbody>
               {rules.map((r) => (
-                <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-semibold text-gray-900">{r.caller_name}</td>
-                  <td className="px-4 py-3 text-gray-600">
-                    {(r.designation_ids?.length ? r.designation_ids.map(desigName).join(", ") : "Any designation")}
-                    {(r.zone_id || r.lok_sabha_id || r.district_id || r.assembly_id) ? <span className="text-gray-400"> · scoped area</span> : <span className="text-gray-400"> · all areas</span>}
-                  </td>
-                  <td className="px-4 py-3 text-right font-bold text-gray-900">{r.daily_quota}</td>
-                  <td className="px-4 py-3 text-right text-gray-500">{r.stale_days}d</td>
-                  <td className="px-4 py-3 text-right text-gray-700">{r.pool_matches ?? "—"}</td>
-                  <td className="px-4 py-3 text-center">
-                    <button onClick={() => toggle(r)} title={r.is_active ? "Active — click to pause" : "Paused — click to activate"}>
-                      {r.is_active ? <ToggleRight size={26} className="text-emerald-600" /> : <ToggleLeft size={26} className="text-gray-300" />}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => remove(r)} className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium"><Trash2 size={14} /> Delete</button>
-                  </td>
-                </tr>
+                <RuleRow key={r.id} r={r} desigName={desigName} onToggle={toggle} onRemove={remove} />
               ))}
             </tbody>
           </table>
         )}
       </div>
+    </div>
+  );
+}
+
+// One rule row + an expandable panel listing the contacts it covers (the
+// caller's current daily set, and what's waiting in the pool for next top-up).
+function RuleRow({ r, desigName, onToggle, onRemove }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  async function expand() {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (!data) {
+      setLoading(true);
+      const res = await fetch(`/api/assignment-rules/${r.id}/contacts`);
+      if (res.ok) setData(await res.json());
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <tr className="border-t border-gray-100 hover:bg-gray-50">
+        <td className="px-4 py-3 font-semibold text-gray-900">{r.caller_name}</td>
+        <td className="px-4 py-3 text-gray-600">
+          {(r.designation_ids?.length ? r.designation_ids.map(desigName).join(", ") : "Any designation")}
+          {(r.zone_id || r.lok_sabha_id || r.district_id || r.assembly_id) ? <span className="text-gray-400"> · scoped area</span> : <span className="text-gray-400"> · all areas</span>}
+        </td>
+        <td className="px-4 py-3 text-right font-bold text-gray-900">{r.daily_quota}</td>
+        <td className="px-4 py-3 text-right text-gray-500">{r.stale_days}d</td>
+        <td className="px-4 py-3 text-right text-gray-700">{r.pool_matches ?? "—"}</td>
+        <td className="px-4 py-3 text-center">
+          <button onClick={() => onToggle(r)} title={r.is_active ? "Active — click to pause" : "Paused — click to activate"}>
+            {r.is_active ? <ToggleRight size={26} className="text-emerald-600" /> : <ToggleLeft size={26} className="text-gray-300" />}
+          </button>
+        </td>
+        <td className="px-4 py-3 text-right whitespace-nowrap">
+          <button onClick={expand} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
+            <ChevronRight size={14} className={`transition-transform ${open ? "rotate-90" : ""}`} /> Contacts
+          </button>
+          <button onClick={() => onRemove(r)} className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium"><Trash2 size={14} /> Delete</button>
+        </td>
+      </tr>
+      {open && (
+        <tr className="bg-gray-50/60">
+          <td colSpan={7} className="px-4 py-4">
+            {loading ? (
+              <div className="text-gray-400 text-sm flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading contacts…</div>
+            ) : !data ? null : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <ContactList title={`Assigned now to ${r.caller_name}`} accent="emerald" rows={data.assigned} />
+                <ContactList title="Waiting in pool (next top-up)" accent="amber" rows={data.pool} />
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function ContactList({ title, accent, rows }) {
+  const dot = accent === "emerald" ? "bg-emerald-500" : "bg-amber-500";
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`w-2 h-2 rounded-full ${dot}`} />
+        <span className="text-xs font-semibold text-gray-700">{title}</span>
+        <span className="text-xs text-gray-400">({rows.length})</span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="text-xs text-gray-400 py-2">None.</div>
+      ) : (
+        <ul className="space-y-1 max-h-56 overflow-y-auto">
+          {rows.map((c) => (
+            <li key={c.id} className="flex items-center justify-between text-xs border-b border-gray-50 pb-1">
+              <span className="font-medium text-gray-800">{c.person_name}</span>
+              <span className="text-gray-400">{c.phone_number}{c.designation_name ? ` · ${c.designation_name}` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

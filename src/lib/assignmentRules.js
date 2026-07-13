@@ -25,6 +25,22 @@ export function parseIds(csv) {
   return [...new Set(String(csv).split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
 }
 
+// Combine several rules into one boolean expression: a contact is "daily" if it
+// matches ANY of them. Returns { sql, params } where sql is `(...) OR (...)`
+// (or "0" when there are no rules). A rule with no filters matches everything.
+export function buildRulesOrMatch(rules, alias = "c") {
+  const groups = [];
+  const params = [];
+  for (const r of rules) {
+    const m = buildRuleMatch(r, alias);
+    const inner = m.where.trim().replace(/^AND\s+/, "");
+    groups.push(inner ? `(${inner})` : "(1=1)");
+    params.push(...m.params);
+  }
+  if (groups.length === 0) return { sql: "0", params: [] };
+  return { sql: groups.join(" OR "), params };
+}
+
 // Returns { where, params } — a chunk of AND conditions against contacts alias `c`.
 export function buildRuleMatch(rule, alias = "c") {
   const c = `${alias}.`;

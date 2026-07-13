@@ -372,8 +372,15 @@ function WorkspaceBody() {
             </div>
           ) : (
             <>
-              <div className="text-[11px] text-gray-400 mb-2">
-                Showing {queue.assigned.length}{(queue.assigned_total ?? 0) > queue.assigned.length ? ` of ${queue.assigned_total}` : ""}
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] text-gray-400">
+                  Showing {queue.assigned.length}{(queue.assigned_total ?? 0) > queue.assigned.length ? ` of ${queue.assigned_total}` : ""}
+                </div>
+                {queue.assigned.some((c) => c.is_daily) && (
+                  <div className="text-[11px] font-bold text-[#164FA3] bg-[#FCB712]/20 px-2 py-0.5 rounded-full">
+                    {queue.assigned.filter((c) => c.is_daily).length} daily — do first
+                  </div>
+                )}
               </div>
             <ul className="space-y-2 max-h-[300px] overflow-y-auto">
               {queue.assigned.map((c) => (
@@ -381,10 +388,11 @@ function WorkspaceBody() {
                   <button
                     disabled={!!active}
                     onClick={() => claim(c.id)}
-                    className="w-full text-left p-3 rounded-lg hover:bg-blue-50 border border-gray-100 disabled:opacity-60 disabled:hover:bg-white flex items-center gap-2"
+                    className={`w-full text-left p-3 rounded-lg border disabled:opacity-60 flex items-center gap-2 ${c.is_daily ? "bg-amber-50 border-amber-300 hover:bg-amber-100" : "border-gray-100 hover:bg-blue-50 disabled:hover:bg-white"}`}
                   >
                     <div className="flex-1">
-                      <div className="font-medium text-gray-900 text-sm flex items-center gap-1">
+                      <div className="font-medium text-gray-900 text-sm flex items-center gap-1 flex-wrap">
+                        {c.is_daily ? <span className="text-[9px] font-bold uppercase bg-[#FCB712] text-[#164FA3] px-1.5 py-0.5 rounded">Daily</span> : null}
                         {c.person_name}
                         {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712]" /> : null}
                         {c.attempts > 0 ? <span className="ml-1 text-[10px] font-bold text-gray-400">×{c.attempts}</span> : null}
