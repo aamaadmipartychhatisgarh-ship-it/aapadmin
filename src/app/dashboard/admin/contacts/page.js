@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { Upload, Plus, Search, UserPlus, UserMinus, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList } from "lucide-react";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 
+const PAGE_SIZE = 50; // contacts per page — keeps each query light on big tables
+
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -27,8 +29,12 @@ function Body() {
   const [users, setUsers] = useState([]);
   const [zones, setZones] = useState([]);
   const [zoneId, setZoneId] = useState("");
+  const [lokSabhas, setLokSabhas] = useState([]);
+  const [lokSabhaId, setLokSabhaId] = useState("");
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
+  const [designationIds, setDesignationIds] = useState([]);
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   // Initialise from a ?filter= deep-link (e.g. sidebar "Wrong Numbers") on the
   // very first render, so every load uses the right filter and none race in as
@@ -42,8 +48,7 @@ function Body() {
   }); // all | pending | done | assigned | pool | duplicates | wrong
   const [districtId, setDistrictId] = useState("");
   const [assemblies, setAssemblies] = useState([]);
-  const [assemblyId, setAssemblyId] = useState("");
-  const [designationId, setDesignationId] = useState("");
+  const [assemblyIds, setAssemblyIds] = useState([]);
   const [assignedTo, setAssignedTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -62,14 +67,30 @@ function Body() {
   const excelRef = useRef(null);
   const loadSeq = useRef(0);
 
-  useEffect(() => { load(); }, [filter, zoneId, districtId, assemblyId, designationId, assignedTo]);
+  // Reload the page of results whenever a filter or the page number changes.
+  useEffect(() => { load(); }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page]);
+  // Any filter change (not a page change) jumps back to page 1.
+  useEffect(() => { setPage(1); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search]);
+
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)));
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
-    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
     fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
   }, []);
+
+  // Cascading location filters: Lok Sabha follows Zone, District follows Lok
+  // Sabha, Assembly follows District — each narrowed to its parent's children.
+  useEffect(() => {
+    const url = zoneId ? `/api/locations?parent_id=${zoneId}` : `/api/locations?type=lok_sabha`;
+    fetch(url).then((r) => r.json()).then((d) => setLokSabhas((d.locations || []).filter((l) => l.type === "lok_sabha")));
+    setLokSabhaId(""); setDistrictId(""); setAssemblyIds([]);
+  }, [zoneId]);
+  useEffect(() => {
+    const url = lokSabhaId ? `/api/locations?parent_id=${lokSabhaId}` : `/api/locations?type=district`;
+    fetch(url).then((r) => r.json()).then((d) => setDistricts((d.locations || []).filter((l) => l.type === "district")));
+    setDistrictId(""); setAssemblyIds([]);
+  }, [lokSabhaId]);
 
   // Selecting a team pre-selects all its caller members for distribution.
   async function loadTeamCallers(teamId) {
@@ -90,9 +111,9 @@ function Body() {
   // Assembly options follow the selected district.
   useEffect(() => {
     if (districtId) {
-      fetch(`/api/locations?parent_id=${districtId}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
+      fetch(`/api/locations?parent_id=${districtId}`).then((r) => r.json()).then((d) => setAssemblies((d.locations || []).filter((l) => l.type === "assembly")));
     } else setAssemblies([]);
-    setAssemblyId("");
+    setAssemblyIds([]);
   }, [districtId]);
 
   async function load() {
@@ -107,10 +128,13 @@ function Body() {
     else if (filter !== "all") params.set("status", filter);
     if (search) params.set("search", search);
     if (zoneId) params.set("zone_id", zoneId);
+    if (lokSabhaId) params.set("lok_sabha_id", lokSabhaId);
     if (districtId) params.set("district_id", districtId);
-    if (assemblyId) params.set("assembly_id", assemblyId);
-    if (designationId) params.set("designation_id", designationId);
+    if (assemblyIds.length) params.set("assembly_ids", assemblyIds.join(","));
+    if (designationIds.length) params.set("designation_ids", designationIds.join(","));
     if (assignedTo) params.set("assigned_to", assignedTo);
+    params.set("page", String(page));
+    params.set("page_size", String(PAGE_SIZE));
     const r = await fetch(`/api/contacts?${params}`);
     if (seq !== loadSeq.current) return; // a newer load started — drop this stale result
     if (r.ok) { const d = await r.json(); setContacts(d.contacts || []); setTotal(d.total ?? (d.contacts || []).length); }
@@ -134,8 +158,9 @@ function Body() {
     const desc = bulkMode === "perCaller"
       ? `${perCaller} contacts each to ${bulkCallers.length} caller(s): ${names}`
       : `evenly across ${bulkCallers.length} caller(s): ${names}`;
-    const designationName = designations.find((d) => String(d.id) === String(designationId))?.name;
-    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${designationName ? ` with designation "${designationName}"` : ""} — ${desc}? (Already-called contacts are skipped.)`)) return;
+    const desigNames = designations.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
+    const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
+    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${desigLabel} — ${desc}? (Already-called contacts are skipped.)`)) return;
     setBulkBusy(true);
     try {
       const r = await fetch("/api/contacts/bulk-distribute", {
@@ -147,7 +172,7 @@ function Body() {
           per_caller: bulkMode === "perCaller" ? Number(perCaller) : undefined,
           status: filter,
           district_id: districtId || undefined,
-          designation_id: designationId || undefined,
+          designation_ids: designationIds.length ? designationIds.join(",") : undefined,
           search: search || undefined,
         }),
       });
@@ -308,18 +333,21 @@ function Body() {
           <option value="">All zones</option>
           {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
         </select>
+        <select value={lokSabhaId} onChange={(e) => setLokSabhaId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">All Lok Sabhas</option>
+          {lokSabhas.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
         <select value={districtId} onChange={(e) => setDistrictId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">All districts</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <select value={assemblyId} onChange={(e) => setAssemblyId(e.target.value)} disabled={!districtId} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white disabled:opacity-50">
-          <option value="">All assemblies</option>
-          {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-        <select value={designationId} onChange={(e) => setDesignationId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
-          <option value="">All designations</option>
-          {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        <MultiSelect
+          label="assemblies" items={assemblies} selected={assemblyIds} onChange={setAssemblyIds}
+          disabled={!districtId} disabledLabel="Pick district"
+        />
+        <MultiSelect
+          label="designations" items={designations} selected={designationIds} onChange={setDesignationIds}
+        />
         <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">Any caller</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
@@ -356,7 +384,7 @@ function Body() {
           <span className="text-sm text-gray-800 font-semibold">
             Distribute the {total.toLocaleString()} {filter !== "all" ? filter + " " : ""}contacts
             {districtId ? ` in ${districts.find((d) => String(d.id) === String(districtId))?.name || "this district"}` : ""}
-            {designationId ? ` — designation "${designations.find((d) => String(d.id) === String(designationId))?.name || ""}"` : ""} across callers
+            {designationIds.length ? ` — ${designationIds.length} designation${designationIds.length === 1 ? "" : "s"}` : ""} across callers
           </span>
         </div>
 
@@ -482,9 +510,99 @@ function Body() {
         )}
       </div>
 
+      <Pagination total={total} page={page} pageSize={PAGE_SIZE} onPage={setPage} loading={loading} />
+
       {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {editing && <EditContactModal contact={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
       {taskFor && <ContactTaskModal contact={taskFor} users={users} onClose={() => setTaskFor(null)} onSaved={() => { setTaskFor(null); setMessage(`Task assigned for ${taskFor.person_name}.`); }} />}
+    </div>
+  );
+}
+
+// Page-number controls (1 · 2 · 3 …) with Prev/Next. Only renders when there's
+// more than one page.
+function Pagination({ total, page, pageSize, onPage, loading }) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (pageCount <= 1) return null;
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(total, page * pageSize);
+
+  // A compact window of page numbers around the current page.
+  const nums = [];
+  const push = (n) => { if (n >= 1 && n <= pageCount && !nums.includes(n)) nums.push(n); };
+  push(1); push(2);
+  for (let n = page - 1; n <= page + 1; n++) push(n);
+  push(pageCount - 1); push(pageCount);
+  nums.sort((a, b) => a - b);
+
+  return (
+    <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="text-xs text-gray-500">Showing {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()}</div>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onPage(page - 1)} disabled={page <= 1 || loading}
+          className="px-2.5 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Prev</button>
+        {nums.map((n, i) => {
+          const gap = i > 0 && n - nums[i - 1] > 1;
+          return (
+            <span key={n} className="flex items-center">
+              {gap && <span className="px-1 text-gray-400">…</span>}
+              <button onClick={() => onPage(n)} disabled={loading}
+                className={`min-w-[34px] px-2.5 py-1.5 rounded-lg text-sm font-semibold ${n === page ? "bg-[#164FA3] text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>{n}</button>
+            </span>
+          );
+        })}
+        <button onClick={() => onPage(page + 1)} disabled={page >= pageCount || loading}
+          className="px-2.5 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next</button>
+      </div>
+    </div>
+  );
+}
+
+// Compact multi-select dropdown for filters (assemblies, designations). Shows
+// "All …" / "N selected", opens a checkbox panel, closes on outside click.
+function MultiSelect({ label, items, selected, onChange, disabled, disabledLabel }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  const btnLabel = disabled ? (disabledLabel || `All ${label}`)
+    : selected.length === 0 ? `All ${label}`
+    : selected.length === 1 ? (items.find((i) => i.id === selected[0])?.name || `1 ${label}`)
+    : `${selected.length} ${label}`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => !disabled && setOpen((o) => !o)}
+        disabled={disabled}
+        className={`h-9 px-3 rounded-lg border text-sm bg-white flex items-center gap-2 disabled:opacity-50 ${selected.length ? "border-[#164FA3] text-[#164FA3] font-semibold" : "border-gray-200 text-gray-700"}`}
+      >
+        <span className="capitalize">{btnLabel}</span>
+        <span className="text-gray-400">▾</span>
+      </button>
+      {open && !disabled && (
+        <div className="absolute z-20 mt-1 w-56 max-h-72 overflow-y-auto bg-white border border-gray-200 rounded-xl shadow-lg p-2">
+          <div className="flex items-center justify-between px-1 pb-2 mb-1 border-b border-gray-100">
+            <button type="button" onClick={() => onChange(items.map((i) => i.id))} className="text-[11px] font-semibold text-[#164FA3] hover:underline">Select all</button>
+            <button type="button" onClick={() => onChange([])} className="text-[11px] font-semibold text-gray-500 hover:underline">Clear</button>
+          </div>
+          {items.length === 0 ? (
+            <div className="px-2 py-3 text-xs text-gray-400">No {label} available.</div>
+          ) : items.map((i) => (
+            <label key={i.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm">
+              <input type="checkbox" checked={selected.includes(i.id)} onChange={() => toggle(i.id)} className="accent-[#164FA3]" />
+              <span className="text-gray-700">{i.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

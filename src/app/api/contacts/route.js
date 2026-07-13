@@ -4,6 +4,12 @@ import { authOptions, isSupervisor } from "@/lib/auth";
 import { isAdmin, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
+// Parse a "1,2,3" style query value into a de-duped list of positive integers.
+function idList(raw) {
+  if (!raw) return [];
+  return [...new Set(String(raw).split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
+}
+
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -16,11 +22,18 @@ export async function GET(req) {
     const duplicates = searchParams.get("duplicates"); // "1" → only likely-duplicate contacts
     const wrong = searchParams.get("wrong"); // "1" → only contacts whose latest call was a Wrong Number
     const zone_id = searchParams.get("zone_id");
+    const lok_sabha_id = searchParams.get("lok_sabha_id");
     const district_id = searchParams.get("district_id");
-    const assembly_id = searchParams.get("assembly_id");
-    const designation_id = searchParams.get("designation_id");
+    // assembly_id / designation_id accept a single value OR a comma-separated
+    // list (assembly_ids / designation_ids) so several can be picked at once.
+    const assembly_ids = idList(searchParams.get("assembly_ids") || searchParams.get("assembly_id"));
+    const designation_ids = idList(searchParams.get("designation_ids") || searchParams.get("designation_id"));
     const assigned_to = searchParams.get("assigned_to");
     const search = searchParams.get("search");
+    // Pagination — bounded so a huge table returns one page, not everything.
+    const page = Math.max(1, parseInt(searchParams.get("page"), 10) || 1);
+    const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get("page_size"), 10) || 50));
+    const offset = (page - 1) * pageSize;
 
     // Build the shared WHERE clause once (used for both the count and the list).
     let where = " WHERE 1=1";
@@ -41,9 +54,21 @@ export async function GET(req) {
       )`;
       params.push(zone_id, zone_id);
     }
+    // Lok Sabha: contacts don't reliably carry lok_sabha_id, so resolve through
+    // the district whose parent is this Lok Sabha.
+    if (lok_sabha_id) {
+      where += " AND c.district_id IN (SELECT id FROM locations WHERE type = 'district' AND parent_id = ?)";
+      params.push(lok_sabha_id);
+    }
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
-    if (assembly_id) { where += " AND c.assembly_id = ?"; params.push(assembly_id); }
-    if (designation_id) { where += " AND c.designation_id = ?"; params.push(designation_id); }
+    if (assembly_ids.length) {
+      where += ` AND c.assembly_id IN (${assembly_ids.map(() => "?").join(",")})`;
+      params.push(...assembly_ids);
+    }
+    if (designation_ids.length) {
+      where += ` AND c.designation_id IN (${designation_ids.map(() => "?").join(",")})`;
+      params.push(...designation_ids);
+    }
     if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
     if (search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
@@ -59,16 +84,23 @@ export async function GET(req) {
         ) dup_phones
       )`;
     }
-    // Wrong numbers: contacts whose most recent call outcome was "Wrong Number".
-    // Latest-call semantics so a number that was later reached/corrected drops
-    // out of the list. Keep this identical to the bulk-delete endpoint.
+    // Wrong numbers: contacts whose most recent call outcome was "Wrong Number"
+    // AND whose current phone still matches the number that was called — so
+    // once an admin corrects the number, the contact drops off this list and
+    // returns to the normal calling list. Keep identical to the bulk-delete
+    // endpoint.
     if (wrong === "1") {
       where += ` AND (
         SELECT csx.name FROM calls cx
           JOIN call_statuses csx ON csx.id = cx.status_id
          WHERE cx.contact_id = c.id
          ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1
-      ) = 'Wrong Number'`;
+      ) = 'Wrong Number'
+      AND (
+        SELECT cx.phone_number FROM calls cx
+         WHERE cx.contact_id = c.id
+         ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1
+      ) = c.phone_number`;
     }
     // Geographic scope from role
     const scope = scopeFilterSync(session.user, "c");
@@ -94,10 +126,10 @@ export async function GET(req) {
         ORDER BY ${duplicates === "1"
           ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, c.id ASC"
           : "c.is_completed ASC, c.id DESC"}
-        LIMIT 500`,
+        LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
-    return NextResponse.json({ contacts, total });
+    return NextResponse.json({ contacts, total, page, page_size: pageSize });
   } catch (err) {
     console.error("contacts GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

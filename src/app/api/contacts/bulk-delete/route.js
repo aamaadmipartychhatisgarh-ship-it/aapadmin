@@ -20,12 +20,18 @@ export async function POST(req) {
     const body = await req.json().catch(() => ({}));
 
     // Same predicate as the contacts list's ?wrong=1 view — keep in sync.
+    // Latest call is Wrong Number AND the number hasn't since been corrected.
     let where = ` WHERE (
         SELECT csx.name FROM calls cx
           JOIN call_statuses csx ON csx.id = cx.status_id
          WHERE cx.contact_id = c.id
          ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1
-      ) = 'Wrong Number'`;
+      ) = 'Wrong Number'
+      AND (
+        SELECT cx.phone_number FROM calls cx
+         WHERE cx.contact_id = c.id
+         ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1
+      ) = c.phone_number`;
     const params = [];
     if (body.district_id) { where += " AND c.district_id = ?"; params.push(body.district_id); }
     // Respect the admin's geographic scope.

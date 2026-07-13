@@ -53,7 +53,13 @@ export async function POST(req) {
     if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
     if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
     if (body.district_id) { where += " AND c.district_id = ?"; params.push(body.district_id); }
-    if (body.designation_id) { where += " AND c.designation_id = ?"; params.push(body.designation_id); }
+    // designation_ids ("1,2,3") or a single designation_id.
+    const designationIds = [...new Set(String(body.designation_ids ?? body.designation_id ?? "")
+      .split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
+    if (designationIds.length) {
+      where += ` AND c.designation_id IN (${designationIds.map(() => "?").join(",")})`;
+      params.push(...designationIds);
+    }
     if (body.search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${body.search}%`, `%${body.search}%`);

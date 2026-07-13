@@ -265,6 +265,7 @@ export default function AdminCallRecords() {
                 <th className="px-4 py-3 font-semibold text-gray-600">Person</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Agent</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Location</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Sentiment</th>
@@ -275,9 +276,9 @@ export default function AdminCallRecords() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="10" className="py-12 text-center text-gray-400"><Loader2 className="inline animate-spin text-[#164FA3]" /></td></tr>
+                <tr><td colSpan="11" className="py-12 text-center text-gray-400"><Loader2 className="inline animate-spin text-[#164FA3]" /></td></tr>
               ) : calls.length === 0 ? (
-                <tr><td colSpan="10" className="py-12 text-center text-gray-400">No calls match the current filters.</td></tr>
+                <tr><td colSpan="11" className="py-12 text-center text-gray-400">No calls match the current filters.</td></tr>
               ) : (
                 calls.map((c) => {
                   const statusStyle = STATUS_PILL[c.status_name] || STATUS_PILL["Wrong Number"];
@@ -293,6 +294,7 @@ export default function AdminCallRecords() {
                       </td>
                       <td className="px-4 py-3 text-gray-700 font-mono text-xs">{c.phone_number}</td>
                       <td className="px-4 py-3 text-gray-600">{c.agent_name || "—"}</td>
+                      <td className="px-4 py-3 text-gray-700">{c.designation_name || "—"}</td>
                       <td className="px-4 py-3 text-gray-600 text-xs">
                         {[c.district_name, c.assembly_name].filter(Boolean).join(" / ") || "—"}
                       </td>
