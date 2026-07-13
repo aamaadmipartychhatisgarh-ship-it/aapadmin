@@ -158,7 +158,7 @@ function Body() {
                   <tr key={c.user_id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-3"><RankBadge rank={c.rank} /></td>
                     <td className="px-4 py-3 font-semibold text-gray-900">{c.name}</td>
-                    <td className="px-4 py-3 text-right font-medium">{c.total_calls.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right font-bold text-gray-900">{c.total_calls.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right font-semibold text-emerald-700">{c.connected.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right"><RateChip rate={c.connect_rate} /></td>
                     <td className="px-4 py-3 text-right text-gray-500">{c.not_picked}</td>
