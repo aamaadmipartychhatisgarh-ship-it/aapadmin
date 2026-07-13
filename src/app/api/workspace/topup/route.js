@@ -81,15 +81,18 @@ export async function POST() {
           }
 
           // (2) Still short of quota? Take matching, due contacts from OTHER
-          // callers — oldest-held first — and move them here (locks cleared),
-          // even if they're mid-call.
+          // callers — oldest-held first — and move them here (locks cleared).
+          // Only contacts held longer than the rule's window are eligible, so a
+          // fresh manual reassignment isn't immediately yanked back.
           if (need > 0) {
+            const staleDays = Number(rule.stale_days) || 3;
             const [otherRows] = await conn.execute(
               `SELECT c.id FROM contacts c
                 WHERE c.is_completed = 0
                   AND c.assigned_to_user_id IS NOT NULL
                   AND c.assigned_to_user_id <> ?
                   AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
+                  AND (c.assigned_at IS NULL OR c.assigned_at < NOW() - INTERVAL ${staleDays} DAY)
                   ${m.where}
                 ORDER BY c.assigned_at ASC, c.id ASC
                 LIMIT ${need} FOR UPDATE`,

@@ -64,7 +64,7 @@ function Body() {
         <p className="text-gray-500 mt-2 font-medium">
           Standing rules that keep a caller&apos;s queue topped up each day — e.g. give a caller all
           <span className="font-semibold text-gray-700"> Lok Sabha Prabhari</span> contacts in a district, up to a daily limit.
-          Rules run when the caller opens their workspace: the queue is filled from the unassigned pool, and if it&apos;s still short of the quota, matching contacts are pulled from other callers.
+          Rules run when the caller opens their workspace: the queue is filled from the unassigned pool, and if it&apos;s still short of the quota, matching contacts that have been sitting with another caller longer than the window below are pulled in. A just-(re)assigned contact is left alone, so manual assignments stick.
         </p>
       </div>
 
@@ -301,7 +301,7 @@ function AddRuleForm({ callers, designations, zones, onSaved, onError }) {
           <input type="number" min="1" value={quota} onChange={(e) => setQuota(e.target.value)} className={`${sel} w-full`} />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">Reclaim stale after (days)</label>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Pull from others after (days)</label>
           <input type="number" min="1" value={staleDays} onChange={(e) => setStaleDays(e.target.value)} className={`${sel} w-full`} />
         </div>
       </div>
