@@ -95,8 +95,162 @@ export default function MasterDataSettings() {
         />
       </div>
 
+      {/* Merge duplicate / synonymous designations — full width */}
+      <MergeDesignations onChanged={fetchDesignations} />
+
       {/* Locations — full width */}
       <LocationsTree />
+    </div>
+  );
+}
+
+// Normalize a designation name so spelling/spacing/case/punctuation differences
+// collapse to the same key — e.g. "Block  President", "block-president" and
+// "Block President." all map to "block president". Used to flag likely dupes.
+function normDesignation(name) {
+  return (name || "")
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")   // punctuation -> space
+    .replace(/\s+/g, " ")        // collapse whitespace
+    .trim();
+}
+
+// Find, review and merge duplicate or synonymous designations into one row.
+function MergeDesignations({ onChanged }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fromId, setFromId] = useState("");
+  const [intoId, setIntoId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function load() {
+    setLoading(true);
+    const r = await fetch("/api/designations?stats=1");
+    if (r.ok) setItems((await r.json()).designations || []);
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  // Groups of names that normalize to the same key (likely accidental dupes).
+  // NB: this module imports lucide's `Map` icon, which shadows the global Map
+  // constructor — so group with a plain object, not `new Map()`.
+  const dupeGroups = useMemo(() => {
+    const byKey = {};
+    for (const d of items) {
+      const k = normDesignation(d.name);
+      (byKey[k] ||= []).push(d);
+    }
+    return Object.values(byKey).filter((g) => g.length > 1);
+  }, [items]);
+
+  async function merge(from_id, into_id) {
+    const from = items.find((d) => d.id === from_id);
+    const into = items.find((d) => d.id === into_id);
+    if (!from || !into) return;
+    if (!confirm(`Merge "${from.name}" into "${into.name}"?\n\nAll ${from.contact_count ?? 0} contact(s) and any calls using "${from.name}" will be moved to "${into.name}", and "${from.name}" will be deleted. This cannot be undone.`)) return;
+    setBusy(true); setMessage(""); setError("");
+    try {
+      const r = await fetch("/api/designations/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from_id, into_id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.message || "Merge failed"); return; }
+      setMessage(`Merged "${d.merged_from}" into "${d.merged_into}" — moved ${d.moved_contacts} contact(s) and ${d.moved_calls} call(s).`);
+      setFromId(""); setIntoId("");
+      await load();
+      onChanged?.();
+    } catch {
+      setError("Merge failed — network error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Pick the busiest row in a group as the natural merge target.
+  function targetOf(group) {
+    return [...group].sort((a, b) => (b.contact_count ?? 0) - (a.contact_count ?? 0) || a.id - b.id)[0];
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+      <div className="flex items-center gap-3 mb-1">
+        <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center"><Users size={18} /></div>
+        <h2 className="text-lg font-bold text-gray-900">Merge Designations</h2>
+      </div>
+      <p className="text-sm text-gray-500 mb-4">Collapse duplicate or same-meaning designations into one. Contacts and calls are repointed to the target; the merged-away name is deleted.</p>
+
+      {message && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 text-sm mb-4">{message}</div>}
+      {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm mb-4">{error}</div>}
+
+      {loading ? (
+        <div className="text-gray-400 text-sm flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+      ) : (
+        <>
+          {/* Auto-detected likely duplicates */}
+          <div className="mb-6">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Likely duplicates (same name, different spelling/case/spacing)</h3>
+            {dupeGroups.length === 0 ? (
+              <div className="text-sm text-gray-400">None found — no two designations normalize to the same name.</div>
+            ) : (
+              <ul className="space-y-3">
+                {dupeGroups.map((group, gi) => {
+                  const target = targetOf(group);
+                  return (
+                    <li key={gi} className="border border-amber-200 bg-amber-50/50 rounded-xl p-3">
+                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                        {group.map((d) => (
+                          <span key={d.id} className={`text-xs font-medium px-2 py-1 rounded-lg border ${d.id === target.id ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-700 border-gray-200"}`}>
+                            {d.name} <span className="opacity-70">· {d.contact_count ?? 0}</span>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-gray-500">Keep <b>{target.name}</b>, merge the rest in:</span>
+                        <button
+                          onClick={() => group.filter((d) => d.id !== target.id).reduce(
+                            (p, d) => p.then(() => merge(d.id, target.id)), Promise.resolve()
+                          )}
+                          disabled={busy}
+                          className="text-xs font-semibold bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg"
+                        >
+                          Merge {group.length - 1} into “{target.name}”
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* Manual merge — for synonyms the normalizer can't catch */}
+          <div className="border-t border-gray-100 pt-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Manual merge (for synonyms — different words, same role)</h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select value={fromId} onChange={(e) => setFromId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white min-w-[180px]">
+                <option value="">Merge this…</option>
+                {items.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.contact_count ?? 0})</option>)}
+              </select>
+              <ChevronRight size={16} className="text-gray-400" />
+              <select value={intoId} onChange={(e) => setIntoId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white min-w-[180px]">
+                <option value="">…into this</option>
+                {items.filter((d) => String(d.id) !== String(fromId)).map((d) => <option key={d.id} value={d.id}>{d.name} ({d.contact_count ?? 0})</option>)}
+              </select>
+              <button
+                onClick={() => merge(Number(fromId), Number(intoId))}
+                disabled={busy || !fromId || !intoId}
+                className="text-xs font-semibold bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white px-4 py-2 rounded-lg"
+              >
+                {busy ? "Merging…" : "Merge"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

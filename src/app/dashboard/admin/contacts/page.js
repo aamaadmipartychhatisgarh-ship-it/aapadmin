@@ -118,7 +118,8 @@ function Body() {
     const desc = bulkMode === "perCaller"
       ? `${perCaller} contacts each to ${bulkCallers.length} caller(s): ${names}`
       : `evenly across ${bulkCallers.length} caller(s): ${names}`;
-    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""} — ${desc}? (Already-called contacts are skipped.)`)) return;
+    const designationName = designations.find((d) => String(d.id) === String(designationId))?.name;
+    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${designationName ? ` with designation "${designationName}"` : ""} — ${desc}? (Already-called contacts are skipped.)`)) return;
     setBulkBusy(true);
     try {
       const r = await fetch("/api/contacts/bulk-distribute", {
@@ -130,6 +131,7 @@ function Body() {
           per_caller: bulkMode === "perCaller" ? Number(perCaller) : undefined,
           status: filter,
           district_id: districtId || undefined,
+          designation_id: designationId || undefined,
           search: search || undefined,
         }),
       });
@@ -294,7 +296,8 @@ function Body() {
           <UserPlus size={18} className="text-[#164FA3]" />
           <span className="text-sm text-gray-800 font-semibold">
             Distribute the {total.toLocaleString()} {filter !== "all" ? filter + " " : ""}contacts
-            {districtId ? ` in ${districts.find((d) => String(d.id) === String(districtId))?.name || "this district"}` : ""} across callers
+            {districtId ? ` in ${districts.find((d) => String(d.id) === String(districtId))?.name || "this district"}` : ""}
+            {designationId ? ` — designation "${designations.find((d) => String(d.id) === String(designationId))?.name || ""}"` : ""} across callers
           </span>
         </div>
 

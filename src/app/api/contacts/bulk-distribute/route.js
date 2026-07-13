@@ -53,6 +53,7 @@ export async function POST(req) {
     if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
     if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
     if (body.district_id) { where += " AND c.district_id = ?"; params.push(body.district_id); }
+    if (body.designation_id) { where += " AND c.designation_id = ?"; params.push(body.designation_id); }
     if (body.search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${body.search}%`, `%${body.search}%`);
