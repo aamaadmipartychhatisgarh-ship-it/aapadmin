@@ -136,7 +136,7 @@ function Body() {
     if (assignedTo) params.set("assigned_to", assignedTo);
     params.set("page", String(page));
     params.set("page_size", String(PAGE_SIZE));
-    const r = await fetch(`/api/contacts?${params}`);
+    const r = await fetch(`/api/contacts?${params}`, { cache: "no-store" });
     if (seq !== loadSeq.current) return; // a newer load started — drop this stale result
     if (r.ok) { const d = await r.json(); setContacts(d.contacts || []); setTotal(d.total ?? (d.contacts || []).length); }
     setLoading(false);

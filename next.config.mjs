@@ -19,10 +19,20 @@ const nextConfig = {
         // chunk files a later build already deleted -> ChunkLoadError / 404.
         // Force revalidation on HTML/RSC documents so the CDN always fetches
         // markup that points at the CURRENT build's chunks. Hashed assets
-        // under /_next/static keep their own immutable long cache (excluded).
-        source: "/((?!_next/).*)",
+        // under /_next/static keep their own immutable long cache (excluded),
+        // and /api/ is excluded too — see the dedicated rule below.
+        source: "/((?!_next/|api/).*)",
         headers: [
           { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
+        ],
+      },
+      {
+        // API responses carry per-user, always-changing data. They must never
+        // be shared-cached (the `public` header above let Hostinger's CDN serve
+        // a stale list — e.g. an old "assigned to" value after a reassignment).
+        source: "/api/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, private" },
         ],
       },
       {
