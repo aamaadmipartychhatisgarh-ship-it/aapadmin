@@ -30,7 +30,16 @@ function Body() {
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("pending"); // all | pending | done | assigned | pool
+  // Initialise from a ?filter= deep-link (e.g. sidebar "Wrong Numbers") on the
+  // very first render, so every load uses the right filter and none race in as
+  // the default. Body only mounts client-side, so reading the URL here is safe.
+  const [filter, setFilter] = useState(() => {
+    if (typeof window !== "undefined") {
+      const f = new URLSearchParams(window.location.search).get("filter");
+      if (f && ["all", "pending", "done", "assigned", "pool", "duplicates", "wrong"].includes(f)) return f;
+    }
+    return "pending";
+  }); // all | pending | done | assigned | pool | duplicates | wrong
   const [districtId, setDistrictId] = useState("");
   const [assemblies, setAssemblies] = useState([]);
   const [assemblyId, setAssemblyId] = useState("");
@@ -51,6 +60,7 @@ function Body() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const fileRef = useRef(null);
   const excelRef = useRef(null);
+  const loadSeq = useRef(0);
 
   useEffect(() => { load(); }, [filter, zoneId, districtId, assemblyId, designationId, assignedTo]);
   useEffect(() => {
@@ -86,9 +96,14 @@ function Body() {
   }, [districtId]);
 
   async function load() {
+    // Several effects (filter change, URL deep-link, search debounce) can fire
+    // loads near-simultaneously. Tag each request and only let the latest one
+    // apply, so a slower earlier response can't clobber the current filter.
+    const seq = ++loadSeq.current;
     setLoading(true);
     const params = new URLSearchParams();
     if (filter === "duplicates") params.set("duplicates", "1");
+    else if (filter === "wrong") params.set("wrong", "1");
     else if (filter !== "all") params.set("status", filter);
     if (search) params.set("search", search);
     if (zoneId) params.set("zone_id", zoneId);
@@ -97,6 +112,7 @@ function Body() {
     if (designationId) params.set("designation_id", designationId);
     if (assignedTo) params.set("assigned_to", assignedTo);
     const r = await fetch(`/api/contacts?${params}`);
+    if (seq !== loadSeq.current) return; // a newer load started — drop this stale result
     if (r.ok) { const d = await r.json(); setContacts(d.contacts || []); setTotal(d.total ?? (d.contacts || []).length); }
     setLoading(false);
   }
@@ -211,6 +227,30 @@ function Body() {
     }
   }
 
+  // Delete every wrong-number contact in the current view (optionally scoped to
+  // the selected district). The endpoint only ever targets wrong numbers.
+  async function bulkDeleteWrong() {
+    setMessage(""); setError("");
+    if (total === 0) return;
+    if (!confirm(`Delete all ${total} wrong-number contact(s)${districtId ? " in this district" : ""}? Their call history is kept, but the contacts are removed from the calling list. This cannot be undone.`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await fetch("/api/contacts/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ district_id: districtId || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.message || "Delete failed"); return; }
+      setMessage(`Deleted ${d.deleted} wrong-number contact(s).`);
+      load();
+    } catch {
+      setError("Delete failed — network error.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   async function removeContact(c) {
     if (!confirm(`Delete contact "${c.person_name}" (${c.phone_number})? Their call history stays, but the contact is removed from the calling list.`)) return;
     const r = await fetch(`/api/contacts/${c.id}`, { method: "DELETE" });
@@ -234,8 +274,10 @@ function Body() {
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Contacts</h1>
           <p className="text-gray-500 mt-2 font-medium">
             <span className="font-bold text-[#164FA3]">{total.toLocaleString()}</span>{" "}
-            {filter === "duplicates" ? "possible duplicate" : filter !== "all" ? filter : ""} contact{total === 1 ? "" : "s"}{districtId ? " in this district" : ""}.
-            {filter === "duplicates" ? " Same phone number saved in different formats — review and delete the extras." : " Calling list for the team."}
+            {filter === "duplicates" ? "possible duplicate" : filter === "wrong" ? "wrong-number" : filter !== "all" ? filter : ""} contact{total === 1 ? "" : "s"}{districtId ? " in this district" : ""}.
+            {filter === "duplicates" ? " Same phone number saved in different formats — review and delete the extras."
+              : filter === "wrong" ? " Latest call outcome was “Wrong Number” — review and delete them from the calling list."
+              : " Calling list for the team."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -283,14 +325,31 @@ function Body() {
           {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
         </select>
         <div className="flex gap-1 flex-wrap">
-          {["all", "pending", "done", "assigned", "pool", "duplicates"].map((f) => (
-            <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase ${filter === f ? (f === "duplicates" ? "bg-amber-500 text-white" : "bg-[#164FA3] text-white") : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{f}</button>
+          {["all", "pending", "done", "assigned", "pool", "duplicates", "wrong"].map((f) => (
+            <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase ${filter === f ? (f === "duplicates" ? "bg-amber-500 text-white" : f === "wrong" ? "bg-red-600 text-white" : "bg-[#164FA3] text-white") : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{f === "wrong" ? "Wrong #" : f}</button>
           ))}
         </div>
       </div>
 
-      {/* Bulk distribute — share matching contacts across several callers (hidden in duplicates view) */}
-      {filter !== "duplicates" && (
+      {/* Wrong-number cleanup bar — bulk-delete everything in this filtered view */}
+      {filter === "wrong" && (
+        <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 flex-wrap">
+          <Trash2 size={18} className="text-red-600" />
+          <span className="text-sm text-gray-800 font-semibold">
+            {total.toLocaleString()} wrong-number contact{total === 1 ? "" : "s"}
+            {districtId ? ` in ${districts.find((d) => String(d.id) === String(districtId))?.name || "this district"}` : ""}.
+          </span>
+          <button onClick={bulkDeleteWrong} disabled={bulkBusy || total === 0}
+            className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
+            {bulkBusy ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            {bulkBusy ? "Deleting…" : `Delete all ${total.toLocaleString()} wrong number${total === 1 ? "" : "s"}`}
+          </button>
+          <span className="text-xs text-gray-500">Call history is kept — only the contact is removed from the calling list.</span>
+        </div>
+      )}
+
+      {/* Bulk distribute — share matching contacts across several callers (hidden in duplicates/wrong views) */}
+      {filter !== "duplicates" && filter !== "wrong" && (
       <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3">
         <div className="flex items-center gap-2">
           <UserPlus size={18} className="text-[#164FA3]" />

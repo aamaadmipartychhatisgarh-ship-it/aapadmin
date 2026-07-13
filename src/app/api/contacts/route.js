@@ -14,6 +14,7 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
     const duplicates = searchParams.get("duplicates"); // "1" → only likely-duplicate contacts
+    const wrong = searchParams.get("wrong"); // "1" → only contacts whose latest call was a Wrong Number
     const zone_id = searchParams.get("zone_id");
     const district_id = searchParams.get("district_id");
     const assembly_id = searchParams.get("assembly_id");
@@ -57,6 +58,17 @@ export async function GET(req) {
             FROM contacts GROUP BY p HAVING COUNT(*) > 1
         ) dup_phones
       )`;
+    }
+    // Wrong numbers: contacts whose most recent call outcome was "Wrong Number".
+    // Latest-call semantics so a number that was later reached/corrected drops
+    // out of the list. Keep this identical to the bulk-delete endpoint.
+    if (wrong === "1") {
+      where += ` AND (
+        SELECT csx.name FROM calls cx
+          JOIN call_statuses csx ON csx.id = cx.status_id
+         WHERE cx.contact_id = c.id
+         ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1
+      ) = 'Wrong Number'`;
     }
     // Geographic scope from role
     const scope = scopeFilterSync(session.user, "c");
