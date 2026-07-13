@@ -4,10 +4,10 @@ import { authOptions } from "@/lib/auth";
 import { getPool } from "@/lib/db";
 import { buildRuleMatch, zoneMatch } from "@/lib/assignmentRules";
 
-// On-demand daily top-up for the signed-in caller. For each of their active
-// assignment rules: (1) reclaim matching contacts that another caller was
-// assigned but left untouched past the stale window (back to the pool), then
-// (2) fill this caller's queue from the pool up to the rule's daily quota.
+// On-demand daily top-up for the signed-in caller. For each active rule, fill
+// the caller's queue up to the daily quota: first from the unassigned pool,
+// then — if still short — by taking matching contacts away from other callers
+// (locks cleared, even mid-call). Bounded to the caller's home zone.
 //
 // Runs when the caller opens their workspace — no scheduler needed.
 export async function POST() {
@@ -27,7 +27,7 @@ export async function POST() {
       );
       if (rules.length === 0) {
         conn.release();
-        return NextResponse.json({ assigned: 0, reclaimed: 0, rules: 0 });
+        return NextResponse.json({ assigned: 0, taken_from_others: 0, rules: 0 });
       }
 
       // The caller's home zone bounds every rule — daily assignment always pulls
@@ -36,7 +36,7 @@ export async function POST() {
       const zone = zoneMatch(me?.scope_zone_id);
 
       let assignedTotal = 0;
-      let reclaimedTotal = 0;
+      let takenTotal = 0;
 
       for (const rule of rules) {
         const rm = buildRuleMatch(rule);
@@ -45,26 +45,7 @@ export async function POST() {
 
         await conn.beginTransaction();
         try {
-          // (1) Reclaim: matching contacts held by ANOTHER caller, not completed,
-          // not freshly assigned, never called since they were assigned, and not
-          // actively locked — hand them back to the pool.
-          const [rec] = await conn.execute(
-            `UPDATE contacts c
-                SET c.assigned_to_user_id = NULL, c.assigned_at = NULL,
-                    c.locked_by_user_id = NULL, c.locked_at = NULL
-              WHERE c.is_completed = 0
-                AND c.assigned_to_user_id IS NOT NULL
-                AND c.assigned_to_user_id <> ?
-                AND (c.locked_by_user_id IS NULL OR c.locked_at < NOW() - INTERVAL 10 MINUTE)
-                AND c.assigned_at IS NOT NULL
-                AND c.assigned_at < NOW() - INTERVAL ${Number(rule.stale_days) || 3} DAY
-                AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = c.id AND cx.called_at >= c.assigned_at)
-                ${m.where}`,
-            [userId, ...m.params]
-          );
-          reclaimedTotal += rec.affectedRows || 0;
-
-          // (2) How many due, pending, matching contacts this caller already holds.
+          // How many due, pending, matching contacts this caller already holds.
           const [[held]] = await conn.execute(
             `SELECT COUNT(*) AS n FROM contacts c
               WHERE c.assigned_to_user_id = ? AND c.is_completed = 0
@@ -72,10 +53,10 @@ export async function POST() {
                 ${m.where}`,
             [userId, ...m.params]
           );
-          const need = Math.max(0, (Number(rule.daily_quota) || 0) - Number(held.n || 0));
+          let need = Math.max(0, (Number(rule.daily_quota) || 0) - Number(held.n || 0));
 
+          // (1) Fill from the unassigned pool first (locked rows skipped).
           if (need > 0) {
-            // Pull from the unassigned pool (locked rows skipped) up to `need`.
             const [poolRows] = await conn.execute(
               `SELECT c.id FROM contacts c
                 WHERE c.is_completed = 0
@@ -84,8 +65,7 @@ export async function POST() {
                   AND (c.locked_by_user_id IS NULL OR c.locked_at < NOW() - INTERVAL 10 MINUTE)
                   ${m.where}
                 ORDER BY c.is_vip DESC, c.id ASC
-                LIMIT ${need}
-                FOR UPDATE`,
+                LIMIT ${need} FOR UPDATE`,
               m.params
             );
             if (poolRows.length) {
@@ -96,6 +76,34 @@ export async function POST() {
                 [userId, ...ids]
               );
               assignedTotal += ids.length;
+              need -= ids.length;
+            }
+          }
+
+          // (2) Still short of quota? Take matching, due contacts from OTHER
+          // callers — oldest-held first — and move them here (locks cleared),
+          // even if they're mid-call.
+          if (need > 0) {
+            const [otherRows] = await conn.execute(
+              `SELECT c.id FROM contacts c
+                WHERE c.is_completed = 0
+                  AND c.assigned_to_user_id IS NOT NULL
+                  AND c.assigned_to_user_id <> ?
+                  AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
+                  ${m.where}
+                ORDER BY c.assigned_at ASC, c.id ASC
+                LIMIT ${need} FOR UPDATE`,
+              [userId, ...m.params]
+            );
+            if (otherRows.length) {
+              const ids = otherRows.map((r) => r.id);
+              const ph = ids.map(() => "?").join(",");
+              await conn.execute(
+                `UPDATE contacts SET assigned_to_user_id = ?, assigned_at = NOW(),
+                        locked_by_user_id = NULL, locked_at = NULL WHERE id IN (${ph})`,
+                [userId, ...ids]
+              );
+              takenTotal += ids.length;
             }
           }
 
@@ -107,7 +115,7 @@ export async function POST() {
       }
 
       conn.release();
-      return NextResponse.json({ assigned: assignedTotal, reclaimed: reclaimedTotal, rules: rules.length });
+      return NextResponse.json({ assigned: assignedTotal, taken_from_others: takenTotal, rules: rules.length });
     } catch (e) {
       conn.release();
       throw e;
@@ -117,7 +125,7 @@ export async function POST() {
     // table/column is missing — degrade to a no-op instead of breaking the
     // caller's workspace.
     if (err.code === "ER_NO_SUCH_TABLE" || err.code === "ER_BAD_FIELD_ERROR") {
-      return NextResponse.json({ assigned: 0, reclaimed: 0, rules: 0, needs_migration: true });
+      return NextResponse.json({ assigned: 0, taken_from_others: 0, rules: 0, needs_migration: true });
     }
     console.error("workspace topup error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

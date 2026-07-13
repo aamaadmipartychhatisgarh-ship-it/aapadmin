@@ -46,6 +46,10 @@ export async function POST(req) {
       return NextResponse.json({ message: "One or more selected users are not callers." }, { status: 400 });
     }
 
+    // reassign (default true): pull matching contacts off other callers too.
+    // When false, only unassigned pool contacts are handed out.
+    const reassign = body.reassign !== false;
+
     // Build the same WHERE the list/bulk-assign use.
     let where = " WHERE c.is_completed = 0"; // never touch already-called contacts
     const params = [];
@@ -53,6 +57,7 @@ export async function POST(req) {
     // status already implies is_completed for pending/done; keep pool/assigned filters.
     if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
     if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
+    if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
     if (body.district_id) { where += " AND c.district_id = ?"; params.push(body.district_id); }
     // designation_ids ("1,2,3") or a single designation_id.
     const designationIds = [...new Set(String(body.designation_ids ?? body.designation_id ?? "")
@@ -73,10 +78,11 @@ export async function POST(req) {
     const capacity = mode === "perCaller" ? perCaller * callers.length : null; // even = all matching
     const limitSql = capacity ? " LIMIT " + capacity : "";
 
-    // Unassigned first so we hand out fresh work before reshuffling assigned ones.
+    // When reassigning, take the matching set straight by id (so contacts held
+    // by other callers get moved). Otherwise hand out unassigned pool first.
     const rows = await query(
       `SELECT c.id FROM contacts c ${where}
-        ORDER BY (c.assigned_to_user_id IS NOT NULL), c.id ASC ${limitSql}`,
+        ORDER BY ${reassign ? "c.id ASC" : "(c.assigned_to_user_id IS NOT NULL), c.id ASC"} ${limitSql}`,
       params
     );
     if (rows.length === 0) {
@@ -100,8 +106,10 @@ export async function POST(req) {
       perCounts[c.username] = ids.length;
       if (ids.length === 0) continue;
       const ph = ids.map(() => "?").join(",");
+      // Clear any lock so a reassigned contact leaves the previous caller's queue.
       await query(
-        `UPDATE contacts SET assigned_to_user_id = ?${stampAssignedAt ? ", assigned_at = NOW()" : ""} WHERE id IN (${ph})`,
+        `UPDATE contacts SET assigned_to_user_id = ?${stampAssignedAt ? ", assigned_at = NOW()" : ""},
+                locked_by_user_id = NULL, locked_at = NULL WHERE id IN (${ph})`,
         [c.id, ...ids]
       );
       assigned += ids.length;

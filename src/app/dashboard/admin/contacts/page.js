@@ -62,6 +62,7 @@ function Body() {
   const [bulkTeam, setBulkTeam] = useState("");
   const [bulkMode, setBulkMode] = useState("even"); // even | perCaller
   const [perCaller, setPerCaller] = useState(100);
+  const [reassignOthers, setReassignOthers] = useState(true); // pull contacts off other callers
   const [bulkBusy, setBulkBusy] = useState(false);
   const fileRef = useRef(null);
   const excelRef = useRef(null);
@@ -174,6 +175,7 @@ function Body() {
           district_id: districtId || undefined,
           designation_ids: designationIds.length ? designationIds.join(",") : undefined,
           search: search || undefined,
+          reassign: reassignOthers,
         }),
       });
       const d = await r.json();
@@ -436,6 +438,12 @@ function Body() {
           </button>
           <span className="text-xs text-gray-500">Already-called (Done) contacts are never reassigned.</span>
         </div>
+
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <input type="checkbox" checked={reassignOthers} onChange={(e) => setReassignOthers(e.target.checked)} />
+          Take contacts already assigned to other callers
+          <span className="text-xs text-gray-400 font-normal">(off = only hand out unassigned pool)</span>
+        </label>
 
         {/* Recall — pull assigned contacts back out of caller workspaces (no deletion) */}
         <div className="flex items-center gap-3 flex-wrap pt-2 border-t border-blue-100">
