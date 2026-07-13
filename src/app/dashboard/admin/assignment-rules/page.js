@@ -64,7 +64,7 @@ function Body() {
         <p className="text-gray-500 mt-2 font-medium">
           Standing rules that keep a caller&apos;s queue topped up each day — e.g. give a caller all
           <span className="font-semibold text-gray-700"> Lok Sabha Prabhari</span> contacts in a district, up to a daily limit.
-          Rules run when the caller opens their workspace: stale contacts held by others are reclaimed, then the queue is filled from the pool.
+          Rules run when the caller opens their workspace: the queue is filled from the unassigned pool, and if it&apos;s still short of the quota, matching contacts are pulled from other callers.
         </p>
       </div>
 
@@ -161,9 +161,10 @@ function RuleRow({ r, desigName, onToggle, onRemove }) {
             {loading ? (
               <div className="text-gray-400 text-sm flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading contacts…</div>
             ) : !data ? null : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <ContactList title={`Assigned now to ${r.caller_name}`} accent="emerald" rows={data.assigned} />
                 <ContactList title="Waiting in pool (next top-up)" accent="amber" rows={data.pool} />
+                <ContactList title="Held by other callers (will be pulled in)" accent="red" rows={data.others || []} showOwner />
               </div>
             )}
           </td>
@@ -173,8 +174,8 @@ function RuleRow({ r, desigName, onToggle, onRemove }) {
   );
 }
 
-function ContactList({ title, accent, rows }) {
-  const dot = accent === "emerald" ? "bg-emerald-500" : "bg-amber-500";
+function ContactList({ title, accent, rows, showOwner }) {
+  const dot = accent === "emerald" ? "bg-emerald-500" : accent === "red" ? "bg-red-500" : "bg-amber-500";
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-3">
       <div className="flex items-center gap-2 mb-2">
@@ -188,7 +189,10 @@ function ContactList({ title, accent, rows }) {
         <ul className="space-y-1 max-h-56 overflow-y-auto">
           {rows.map((c) => (
             <li key={c.id} className="flex items-center justify-between text-xs border-b border-gray-50 pb-1">
-              <span className="font-medium text-gray-800">{c.person_name}</span>
+              <span className="font-medium text-gray-800">
+                {c.person_name}
+                {showOwner && c.owner_name ? <span className="ml-1 text-red-500">· {c.owner_name}</span> : null}
+              </span>
               <span className="text-gray-400">{c.phone_number}{c.designation_name ? ` · ${c.designation_name}` : ""}</span>
             </li>
           ))}
