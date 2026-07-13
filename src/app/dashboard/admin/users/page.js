@@ -11,25 +11,25 @@ export default function UsersManagement() {
   const router = useRouter();
 
   const [users, setUsers] = useState([]);
-  const [districts, setDistricts] = useState([]);
+  const [zones, setZones] = useState([]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("caller");
-  const [homeDistrictId, setHomeDistrictId] = useState("");
+  const [zoneId, setZoneId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
-  const [districtFilter, setDistrictFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
   const canManage = isTopAdmin(session);
 
   // Directory filters (client-side — the full list is already loaded).
   const visibleUsers = users.filter((u) =>
     (!search || u.username.toLowerCase().includes(search.trim().toLowerCase())) &&
     (!roleFilter || normalizeRole(u.role) === roleFilter) &&
-    (!districtFilter || String(u.home_district_id || "") === districtFilter)
+    (!zoneFilter || String(u.scope_zone_id || "") === zoneFilter)
   );
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export default function UsersManagement() {
       router.push("/dashboard");
     } else if (status === "authenticated" && isAdmin(session)) {
       fetchUsers();
-      fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+      fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     }
   }, [status, session, router]);
 
@@ -85,7 +85,7 @@ export default function UsersManagement() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ username, password, role, home_district_id: homeDistrictId || null }),
+        body: JSON.stringify({ username, password, role, scope_zone_id: zoneId || null }),
       });
 
       const data = await res.json();
@@ -95,7 +95,7 @@ export default function UsersManagement() {
         setUsername("");
         setPassword("");
         setRole("caller");
-        setHomeDistrictId("");
+        setZoneId("");
         fetchUsers();
       } else {
         setError(data.message || "Failed to create user");
@@ -117,7 +117,7 @@ export default function UsersManagement() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      
+
       {/* Header Area */}
       <div className="flex justify-between items-end mb-8">
         <div>
@@ -127,7 +127,7 @@ export default function UsersManagement() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Create User Form */}
         <div className="lg:col-span-1 bg-white rounded-[2rem] p-7 shadow-sm flex flex-col h-fit border border-gray-100">
           <div className="flex justify-between items-start mb-6">
@@ -138,21 +138,21 @@ export default function UsersManagement() {
               <span className="font-bold text-gray-900">Add Account</span>
             </div>
           </div>
-          
+
           <form onSubmit={handleCreateUser} className="space-y-4">
             {error && <div className="text-red-500 text-xs font-medium bg-red-50 p-2 rounded-lg">{error}</div>}
             {success && <div className="text-green-600 text-xs font-medium bg-green-50 p-2 rounded-lg">{success}</div>}
-            
-            <input 
-              type="text" 
+
+            <input
+              type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
               placeholder="Username"
               className="w-full bg-gray-100 border border-gray-200 h-12 rounded-2xl px-4 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none transition-all placeholder:text-gray-500"
             />
-            <input 
-              type="password" 
+            <input
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -169,12 +169,12 @@ export default function UsersManagement() {
               ))}
             </select>
             <select
-              value={homeDistrictId}
-              onChange={(e) => setHomeDistrictId(e.target.value)}
+              value={zoneId}
+              onChange={(e) => setZoneId(e.target.value)}
               className="w-full bg-gray-100 border border-gray-200 h-12 rounded-2xl px-4 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none appearance-none"
             >
-              <option value="">— No home district —</option>
-              {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              <option value="">— No zone —</option>
+              {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
             </select>
             <button type="submit" disabled={loading} className="w-full h-12 bg-[#164FA3] hover:bg-blue-800 text-white font-semibold rounded-2xl transition-all shadow-md mt-2">
               {loading ? "Adding..." : "Add Account"}
@@ -213,12 +213,12 @@ export default function UsersManagement() {
               {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r} className="text-gray-900">{roleLabel(r)}</option>)}
             </select>
             <select
-              value={districtFilter}
-              onChange={(e) => setDistrictFilter(e.target.value)}
+              value={zoneFilter}
+              onChange={(e) => setZoneFilter(e.target.value)}
               className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white outline-none"
             >
-              <option className="text-gray-900" value="">All districts</option>
-              {districts.map((d) => <option key={d.id} value={String(d.id)} className="text-gray-900">{d.name}</option>)}
+              <option className="text-gray-900" value="">All zones</option>
+              {zones.map((z) => <option key={z.id} value={String(z.id)} className="text-gray-900">{z.name}</option>)}
             </select>
           </div>
 
@@ -228,7 +228,7 @@ export default function UsersManagement() {
                 <tr className="text-blue-100 border-b border-white/10">
                   <th className="pb-3 font-semibold">User</th>
                   <th className="pb-3 font-semibold">Role</th>
-                  <th className="pb-3 font-semibold">Home District</th>
+                  <th className="pb-3 font-semibold">Zone</th>
                   <th className="pb-3 font-semibold">Joined</th>
                   {canManage && <th className="pb-3 font-semibold text-right">Actions</th>}
                 </tr>
@@ -259,12 +259,12 @@ export default function UsersManagement() {
                     </td>
                     <td className="py-4">
                       <select
-                        value={u.home_district_id || ""}
-                        onChange={(e) => updateUser(u.id, { home_district_id: e.target.value || null })}
+                        value={u.scope_zone_id || ""}
+                        onChange={(e) => updateUser(u.id, { scope_zone_id: e.target.value || null })}
                         className="bg-white/10 text-white text-xs rounded px-2 py-1 border border-white/20"
                       >
                         <option className="text-gray-900" value="">—</option>
-                        {districts.map((d) => <option key={d.id} value={d.id} className="text-gray-900">{d.name}</option>)}
+                        {zones.map((z) => <option key={z.id} value={z.id} className="text-gray-900">{z.name}</option>)}
                       </select>
                     </td>
                     <td className="py-4 text-blue-100 font-medium">
@@ -304,7 +304,7 @@ export default function UsersManagement() {
       {editing && (
         <EditUserModal
           user={editing}
-          districts={districts}
+          zones={zones}
           onClose={() => setEditing(null)}
           onSaved={(msg) => { setEditing(null); setSuccess(msg); fetchUsers(); }}
         />
@@ -313,17 +313,17 @@ export default function UsersManagement() {
   );
 }
 
-function EditUserModal({ user, districts, onClose, onSaved }) {
+function EditUserModal({ user, zones, onClose, onSaved }) {
   const [username, setUsername] = useState(user.username || "");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState(normalizeRole(user.role));
-  const [homeDistrictId, setHomeDistrictId] = useState(user.home_district_id || "");
+  const [zoneId, setZoneId] = useState(user.scope_zone_id || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function save() {
     setSaving(true); setError("");
-    const patch = { username, role, home_district_id: homeDistrictId || null };
+    const patch = { username, role, scope_zone_id: zoneId || null };
     if (password) patch.password = password; // only change password if a new one is typed
     const r = await fetch(`/api/users/${user.id}`, {
       method: "PUT",
@@ -356,10 +356,10 @@ function EditUserModal({ user, districts, onClose, onSaved }) {
           </select>
         </div>
         <div>
-          <label className="text-xs text-gray-500">Home district</label>
-          <select className={inp + " appearance-none"} value={homeDistrictId} onChange={(e) => setHomeDistrictId(e.target.value)}>
-            <option value="">— No home district —</option>
-            {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          <label className="text-xs text-gray-500">Zone</label>
+          <select className={inp + " appearance-none"} value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
+            <option value="">— No zone —</option>
+            {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
           </select>
         </div>
         <div className="flex justify-end gap-2 pt-2">

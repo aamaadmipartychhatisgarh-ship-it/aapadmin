@@ -25,6 +25,21 @@ export function parseIds(csv) {
   return [...new Set(String(csv).split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
 }
 
+// Constrain contacts to a caller's home zone: districts directly under the
+// zone, or under a lok_sabha under the zone. Returns { where, params } (an
+// AND-fragment) or an empty match when no zone is set.
+export function zoneMatch(zoneId, alias = "c") {
+  if (!zoneId) return { where: "", params: [] };
+  const c = alias ? `${alias}.` : "";
+  return {
+    where: ` AND ${c}district_id IN (
+      SELECT d.id FROM locations d WHERE d.type = 'district'
+        AND (d.parent_id = ?
+             OR d.parent_id IN (SELECT ls.id FROM locations ls WHERE ls.type = 'lok_sabha' AND ls.parent_id = ?)))`,
+    params: [zoneId, zoneId],
+  };
+}
+
 // Combine several rules into one boolean expression: a contact is "daily" if it
 // matches ANY of them. Returns { sql, params } where sql is `(...) OR (...)`
 // (or "0" when there are no rules). A rule with no filters matches everything.

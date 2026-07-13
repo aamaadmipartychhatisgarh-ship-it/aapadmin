@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { buildRulesOrMatch } from "@/lib/assignmentRules";
+import { buildRulesOrMatch, zoneMatch } from "@/lib/assignmentRules";
 
 // Returns:
 //   assigned: contacts explicitly assigned to this caller, not yet completed
@@ -35,9 +35,11 @@ export async function GET(req) {
     const filterSql = qFilters.length ? " AND " + qFilters.join(" AND ") : "";
 
     const [me] = await query(
-      `SELECT u.home_district_id, l.name AS home_district_name
+      `SELECT u.home_district_id, l.name AS home_district_name,
+              u.scope_zone_id, lz.name AS scope_zone_name
          FROM users u
          LEFT JOIN locations l ON l.id = u.home_district_id
+         LEFT JOIN locations lz ON lz.id = u.scope_zone_id
         WHERE u.id = ?`,
       [userId]
     );
@@ -112,15 +114,21 @@ export async function GET(req) {
       [userId]
     );
 
+    // Territory pool: the caller's zone if set, else their home district.
     let poolCount = 0;
-    if (me?.home_district_id) {
+    const terr = me?.scope_zone_id
+      ? zoneMatch(me.scope_zone_id, "")
+      : me?.home_district_id
+      ? { where: " AND district_id = ?", params: [me.home_district_id] }
+      : null;
+    if (terr) {
       const [{ n }] = await query(
         `SELECT COUNT(*) AS n FROM contacts
           WHERE is_completed = 0
             AND assigned_to_user_id IS NULL
             AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
-            AND district_id = ?`,
-        [me.home_district_id]
+            ${terr.where}`,
+        terr.params
       );
       poolCount = n;
     }
@@ -130,6 +138,12 @@ export async function GET(req) {
       assigned_total,
       scheduled,
       pool_count: poolCount,
+      // territory label the workspace header shows — zone takes precedence.
+      territory: me?.scope_zone_id
+        ? { type: "zone", name: me.scope_zone_name }
+        : me?.home_district_id
+        ? { type: "district", name: me.home_district_name }
+        : null,
       home_district: me?.home_district_id ? { id: me.home_district_id, name: me.home_district_name } : null,
       active_lock: lockedRows[0] || null,
     });

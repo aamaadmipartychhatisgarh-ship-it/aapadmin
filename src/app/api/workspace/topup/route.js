@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { getPool } from "@/lib/db";
-import { buildRuleMatch } from "@/lib/assignmentRules";
+import { buildRuleMatch, zoneMatch } from "@/lib/assignmentRules";
 
 // On-demand daily top-up for the signed-in caller. For each of their active
 // assignment rules: (1) reclaim matching contacts that another caller was
@@ -30,11 +30,18 @@ export async function POST() {
         return NextResponse.json({ assigned: 0, reclaimed: 0, rules: 0 });
       }
 
+      // The caller's home zone bounds every rule — daily assignment always pulls
+      // from that zone (the rule's own geo/designation narrows further).
+      const [[me]] = await conn.execute(`SELECT scope_zone_id FROM users WHERE id = ?`, [userId]);
+      const zone = zoneMatch(me?.scope_zone_id);
+
       let assignedTotal = 0;
       let reclaimedTotal = 0;
 
       for (const rule of rules) {
-        const m = buildRuleMatch(rule);
+        const rm = buildRuleMatch(rule);
+        // Rule filter AND the caller's zone.
+        const m = { where: rm.where + zone.where, params: [...rm.params, ...zone.params] };
 
         await conn.beginTransaction();
         try {

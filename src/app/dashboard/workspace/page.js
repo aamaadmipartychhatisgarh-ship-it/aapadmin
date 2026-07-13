@@ -305,9 +305,9 @@ function WorkspaceBody() {
             <h2 className="font-bold">Your Queue</h2>
           </div>
           <div className="text-sm text-gray-600 mb-4">
-            {queue.home_district
-              ? <>District: <span className="font-semibold text-gray-900">{queue.home_district.name}</span></>
-              : <span className="text-amber-600">No home district set. Ask an admin.</span>}
+            {queue.territory
+              ? <>{queue.territory.type === "zone" ? "Zone" : "District"}: <span className="font-semibold text-gray-900">{queue.territory.name}</span></>
+              : <span className="text-amber-600">No zone set. Ask an admin.</span>}
           </div>
 
           <button

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { getPool } from "@/lib/db";
+import { zoneMatch } from "@/lib/assignmentRules";
 
 // Body: { contact_id?: number }
 // If contact_id given: claim that specific contact (must be assigned to user OR in pool with same district).
@@ -47,12 +48,16 @@ export async function POST(req) {
         );
         row = rows[0];
       } else {
-        const [[me]] = await conn.execute(`SELECT home_district_id FROM users WHERE id = ?`, [userId]);
-        if (!me?.home_district_id) {
+        const [[me]] = await conn.execute(`SELECT home_district_id, scope_zone_id FROM users WHERE id = ?`, [userId]);
+        if (!me?.home_district_id && !me?.scope_zone_id) {
           await conn.rollback();
-          return NextResponse.json({ message: "No home district set. Ask an admin to assign one." }, { status: 400 });
+          return NextResponse.json({ message: "No territory set. Ask an admin to assign a zone." }, { status: 400 });
         }
-        // Try caller's own assigned queue first (incl. due follow-ups), then fall back to the district pool.
+        // Territory: the caller's zone if set, otherwise their home district.
+        const terr = me.scope_zone_id
+          ? zoneMatch(me.scope_zone_id, "")
+          : { where: " AND district_id = ?", params: [me.home_district_id] };
+        // Try caller's own assigned queue first (incl. due follow-ups), then fall back to the territory pool.
         const [assignedRows] = await conn.execute(
           `SELECT * FROM contacts
             WHERE is_completed = 0
@@ -72,10 +77,10 @@ export async function POST(req) {
                 AND assigned_to_user_id IS NULL
                 AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
                 AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
-                AND district_id = ?
+                ${terr.where}
               ORDER BY id ASC
               LIMIT 1 FOR UPDATE`,
-            [me.home_district_id]
+            terr.params
           );
           row = poolRows[0];
         }
