@@ -27,7 +27,7 @@ export default function WorkspacePage() {
 }
 
 function WorkspaceBody() {
-  const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], pool_count: 0, home_district: null, active_lock: null });
+  const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], wrong_numbers: [], pool_count: 0, home_district: null, active_lock: null });
   // Queue search / filters
   const [qSearch, setQSearch] = useState("");
   const [qDistrict, setQDistrict] = useState("");
@@ -210,12 +210,22 @@ function WorkspaceBody() {
     loadQueue();
   }
 
+  // Restore a wrong-number contact back into the active queue.
+  async function restoreWrongNumber(contactId) {
+    const r = await fetch("/api/workspace/wrong-number", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_id: contactId }),
+    });
+    if (r.ok) { setMessage("Contact restored to your queue."); loadQueue(); }
+    else { const d = await r.json().catch(() => ({})); setError(d.message || "Could not restore contact."); }
+  }
+
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
-    if (form.is_follow_up_required && !form.follow_up_date) {
-      setError("Pick a follow-up date or uncheck Follow-up required.");
-      return;
-    }
+    // Sentiment and follow-up date are both optional. A follow-up date, when
+    // set, implies a follow-up is required (the two are no longer coupled to a
+    // separate checkbox).
     setSubmitting(true);
     setError("");
     try {
@@ -242,15 +252,17 @@ function WorkspaceBody() {
       const data = await r.json();
       if (!r.ok) { setError(data.message || "Failed to save"); return; }
       const savedDuration = elapsed;
+      const scheduledFor = form.is_follow_up_required && form.follow_up_date ? form.follow_up_date : null;
+      const followMsg = scheduledFor ? ` Reminder set for ${scheduledFor}.` : "";
       // Reset the active state, then immediately auto-claim the next contact.
       setActive(null);
       setForm(initialForm());
       setElapsed(0);
       const claimed = await claim();
       if (claimed) {
-        setMessage(`Saved (${savedDuration}s). Next contact ready.`);
+        setMessage(`Saved (${savedDuration}s).${followMsg} Next contact ready.`);
       } else {
-        setMessage(`Saved (${savedDuration}s). No more contacts available.`);
+        setMessage(`Saved (${savedDuration}s).${followMsg} No more contacts available.`);
         loadQueue();
       }
     } finally {
@@ -413,20 +425,55 @@ function WorkspaceBody() {
             <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
               <Calendar size={16} /> Scheduled Later
             </h3>
+            <p className="text-[11px] text-gray-400 mb-2">Tap any contact to call back now — logging the call updates the reminder.</p>
             <ul className="space-y-2 max-h-[200px] overflow-y-auto">
               {queue.scheduled.slice(0, 20).map((c) => (
-                <li key={c.id} className="p-3 rounded-lg border border-gray-100">
-                  <div className="font-medium text-gray-900 text-sm flex items-center gap-1">
-                    {c.person_name}
-                    {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712]" /> : null}
-                  </div>
-                  <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
-                  <div className="text-[11px] font-semibold text-[#164FA3] mt-1">Follow up on {c.follow_up_date?.slice(0, 10)}</div>
+                <li key={c.id}>
+                  <button
+                    disabled={!!active}
+                    onClick={() => claim(c.id)}
+                    title="Call back now — reopens this contact so you can log the call and update the reminder"
+                    className="w-full text-left p-3 rounded-lg border border-gray-100 hover:bg-blue-50 disabled:opacity-60 disabled:hover:bg-white"
+                  >
+                    <div className="font-medium text-gray-900 text-sm flex items-center gap-1">
+                      {c.person_name}
+                      {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712]" /> : null}
+                    </div>
+                    <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
+                    <div className="text-[11px] font-semibold text-[#164FA3] mt-1">Follow up on {c.follow_up_date?.slice(0, 10)} · tap to call back</div>
+                  </button>
                 </li>
               ))}
             </ul>
           </div>
         )}
+
+        {queue.wrong_numbers && queue.wrong_numbers.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
+              <X size={16} className="text-red-500" /> Wrong Numbers ({queue.wrong_numbers.length})
+            </h3>
+            <p className="text-[11px] text-gray-400 mb-2">Kept out of the calling queue. Restore one if the number turns out to be valid.</p>
+            <ul className="space-y-2 max-h-[220px] overflow-y-auto">
+              {queue.wrong_numbers.map((c) => (
+                <li key={c.id} className="p-3 rounded-lg border border-gray-100 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium text-gray-900 text-sm truncate">{c.person_name}</div>
+                    <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
+                  </div>
+                  <button
+                    onClick={() => restoreWrongNumber(c.id)}
+                    className="shrink-0 text-xs font-semibold text-[#164FA3] border border-blue-200 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg"
+                  >
+                    Restore
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <ProgressPanel />
       </div>
 
       {/* RIGHT: active call */}
@@ -698,6 +745,10 @@ function WorkspaceBody() {
                     <option value="neutral">Neutral</option>
                     <option value="negative">Negative</option>
                     <option value="opponent">Opponent</option>
+                    {/* "Not a Supporter" applies only when the call was actually picked. */}
+                    {(statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked" || form.sentiment === "not_supporter") && (
+                      <option value="not_supporter">Not a Supporter</option>
+                    )}
                   </select>
                 </Field>
                 <div className="md:col-span-2">
@@ -705,15 +756,25 @@ function WorkspaceBody() {
                     <textarea rows={3} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={inputCls} placeholder="What did they say?" />
                   </Field>
                 </div>
-                <div className="md:col-span-2 flex flex-wrap items-center gap-6">
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                    <input type="checkbox" checked={form.is_follow_up_required} onChange={(e) => setForm({ ...form, is_follow_up_required: e.target.checked })} />
-                    Follow-up required
-                  </label>
-                  {form.is_follow_up_required && (
-                    <input type="date" value={form.follow_up_date} onChange={(e) => setForm({ ...form, follow_up_date: e.target.value })} className="border border-gray-200 rounded px-3 py-1.5 text-sm" />
-                  )}
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <div className="md:col-span-2 flex flex-wrap items-end gap-6">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Follow-up date (optional)</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={form.follow_up_date}
+                        onChange={(e) => setForm({ ...form, follow_up_date: e.target.value, is_follow_up_required: !!e.target.value })}
+                        className="border border-gray-200 rounded px-3 py-1.5 text-sm"
+                      />
+                      {form.follow_up_date && (
+                        <button type="button" onClick={() => setForm({ ...form, follow_up_date: "", is_follow_up_required: false })} className="text-xs text-gray-400 hover:text-gray-700 underline">
+                          clear
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">Sets a reminder; leave blank if none needed.</p>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 pb-1.5">
                     <input type="checkbox" checked={form.is_vip} onChange={(e) => setForm({ ...form, is_vip: e.target.checked })} />
                     VIP
                   </label>
@@ -738,6 +799,62 @@ function WorkspaceBody() {
           onSaved={() => { setShowComplaint(false); setMessage("Complaint logged."); }}
         />
       )}
+    </div>
+  );
+}
+
+// Calling progress: per-day counts of calls / contacts worked, with a date
+// filter, so a caller can see what they did on each date and resume.
+function ProgressPanel() {
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
+  const [from, setFrom] = useState(daysAgo(6));
+  const [to, setTo] = useState(iso(new Date()));
+  const [data, setData] = useState({ days: [], total_calls: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const p = new URLSearchParams();
+    if (from) p.set("date_from", from);
+    if (to) p.set("date_to", to);
+    fetch(`/api/workspace/progress?${p}`)
+      .then((r) => r.json())
+      .then((d) => setData({ days: d.days || [], total_calls: d.total_calls || 0 }))
+      .finally(() => setLoading(false));
+  }, [from, to]);
+
+  const maxCalls = Math.max(1, ...data.days.map((d) => Number(d.calls) || 0));
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
+        <History size={16} /> Your Progress
+      </h3>
+      <div className="flex items-center gap-2 mb-3 text-xs">
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 px-2 rounded-lg border border-gray-200 flex-1 min-w-0" />
+        <span className="text-gray-400">→</span>
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 px-2 rounded-lg border border-gray-200 flex-1 min-w-0" />
+      </div>
+      <div className="text-xs text-gray-500 mb-2">{data.total_calls} calls in range</div>
+      {loading ? (
+        <div className="text-gray-400 text-sm">Loading…</div>
+      ) : data.days.length === 0 ? (
+        <div className="text-gray-400 text-sm">No calls logged in this range.</div>
+      ) : (
+        <ul className="space-y-1.5 max-h-[220px] overflow-y-auto">
+          {data.days.map((d) => (
+            <li key={d.day} className="flex items-center gap-2 text-sm">
+              <span className="w-24 shrink-0 text-gray-600">{new Date(d.day).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</span>
+              <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+                <div className="bg-[#164FA3] h-full rounded-full" style={{ width: `${(Number(d.calls) / maxCalls) * 100}%` }} />
+              </div>
+              <span className="w-16 shrink-0 text-right font-semibold text-gray-900">{d.calls}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-[11px] text-gray-400 mt-2">Completed contacts don't reappear — start your next call to resume where you left off.</p>
     </div>
   );
 }

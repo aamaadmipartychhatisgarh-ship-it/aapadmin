@@ -5,6 +5,7 @@ import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
+import { notifyTaskAssigned } from "@/lib/notify";
 
 // GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
 export async function GET(req) {
@@ -93,6 +94,17 @@ export async function POST(req) {
        d.assigned_to_user_id || null, d.assigned_to_team_id || null, d.district_id || null,
        d.contact_id || null, session.user.id]
     );
+    // Alert the assigned caller(s). Don't notify the person who created it.
+    if (d.assigned_to_user_id || d.assigned_to_team_id) {
+      await notifyTaskAssigned({
+        taskId: res.insertId,
+        title: d.title,
+        description: d.description,
+        assignedToUserId: d.assigned_to_user_id || null,
+        assignedToTeamId: d.assigned_to_team_id || null,
+        excludeUserId: session.user.id,
+      });
+    }
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {
     console.error("tasks POST error:", err);

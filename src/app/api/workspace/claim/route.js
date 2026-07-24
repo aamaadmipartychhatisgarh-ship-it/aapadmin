@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { getPool } from "@/lib/db";
 import { zoneMatch } from "@/lib/assignmentRules";
+import { hasWrongNumberColumn } from "@/lib/contactExtras";
 
 // Body: { contact_id?: number }
 // If contact_id given: claim that specific contact (must be assigned to user OR in pool with same district).
@@ -22,6 +23,11 @@ export async function POST(req) {
     const body = await req.json().catch(() => ({}));
     const explicitId = body.contact_id;
 
+    // Wrong-number contacts must never be claimable from the queue — they live in
+    // their own list until restored. Feature-detected so it's a no-op pre-migration.
+    const notWrong = (await hasWrongNumberColumn())
+      ? " AND (is_wrong_number = 0 OR is_wrong_number IS NULL)" : "";
+
     const pool = getPool();
     const conn = await pool.getConnection();
     try {
@@ -36,13 +42,16 @@ export async function POST(req) {
 
       let row;
       if (explicitId) {
+        // A caller can re-open a contact assigned to them at any time — including
+        // one with a future-dated follow-up reminder (so a same-day call-back
+        // works). Pool contacts still respect the due-date and lock rules.
         const [rows] = await conn.execute(
           `SELECT * FROM contacts WHERE id = ?
-             AND is_completed = 0
-             AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
+             AND is_completed = 0${notWrong}
+             AND (locked_by_user_id IS NULL OR locked_by_user_id = ? OR locked_at < NOW() - INTERVAL 10 MINUTE)
              AND (assigned_to_user_id = ?
                   OR (assigned_to_user_id IS NULL
-                       AND (locked_by_user_id IS NULL OR locked_by_user_id = ? OR locked_at < NOW() - INTERVAL 10 MINUTE)))
+                       AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())))
            FOR UPDATE`,
           [explicitId, userId, userId]
         );
@@ -60,7 +69,7 @@ export async function POST(req) {
         // Try caller's own assigned queue first (incl. due follow-ups), then fall back to the territory pool.
         const [assignedRows] = await conn.execute(
           `SELECT * FROM contacts
-            WHERE is_completed = 0
+            WHERE is_completed = 0${notWrong}
               AND assigned_to_user_id = ?
               AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
               AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
@@ -73,7 +82,7 @@ export async function POST(req) {
         } else {
           const [poolRows] = await conn.execute(
             `SELECT * FROM contacts
-              WHERE is_completed = 0
+              WHERE is_completed = 0${notWrong}
                 AND assigned_to_user_id IS NULL
                 AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
                 AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)

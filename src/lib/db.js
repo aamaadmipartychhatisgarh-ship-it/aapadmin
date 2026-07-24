@@ -15,6 +15,12 @@ export function getPool() {
       password: process.env.DB_PASSWORD || '',
       database: process.env.DB_NAME || 'aapadmin',
       port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306,
+      // Return DATE columns (e.g. follow_up_date, deadline) as plain 'YYYY-MM-DD'
+      // strings instead of JS Date objects. Otherwise mysql2 builds a Date at the
+      // server-local midnight, which serializes to a UTC-shifted ISO string and
+      // shows the reminder/deadline one day off on non-UTC servers. DATETIME/
+      // TIMESTAMP columns (called_at, locked_at, …) are unaffected.
+      dateStrings: ['DATE'],
       waitForConnections: true,
       connectionLimit: 10,
       // Bound the backlog. With queueLimit:0 (unlimited), a DB slowdown lets

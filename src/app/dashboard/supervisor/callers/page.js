@@ -8,27 +8,73 @@ export default function Page() {
   return <SupervisorGuard><CallersBody /></SupervisorGuard>;
 }
 
+function isoDaysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+const TODAY = () => new Date().toISOString().slice(0, 10);
+
+const PRESETS = [
+  { key: "today", label: "Today", from: () => TODAY(), to: () => TODAY() },
+  { key: "7d", label: "Last 7 days", from: () => isoDaysAgo(6), to: () => TODAY() },
+  { key: "30d", label: "Last 30 days", from: () => isoDaysAgo(29), to: () => TODAY() },
+  { key: "all", label: "All time", from: () => "", to: () => "" },
+];
+
 function CallersBody() {
   const [callers, setCallers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [preset, setPreset] = useState("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
   useEffect(() => {
-    fetch("/api/supervisor/callers")
+    setLoading(true);
+    const p = new URLSearchParams();
+    if (from) p.set("date_from", from);
+    if (to) p.set("date_to", to);
+    fetch(`/api/supervisor/callers?${p}`)
       .then((r) => r.json())
       .then((d) => setCallers(d.callers || []))
       .finally(() => setLoading(false));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
+
+  function applyPreset(pk) {
+    setPreset(pk);
+    const found = PRESETS.find((x) => x.key === pk);
+    setFrom(found.from());
+    setTo(found.to());
+  }
+
+  const exportParams = new URLSearchParams();
+  if (from) exportParams.set("date_from", from);
+  if (to) exportParams.set("date_to", to);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end">
+      <div className="flex justify-between items-end gap-4 flex-wrap">
         <div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Caller Performance</h1>
           <p className="text-gray-500 mt-2 font-medium">Ranked by total calls. Includes connected, follow-ups, avg duration.</p>
         </div>
-        <a href="/api/supervisor/export/callers" className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded text-sm font-medium shadow-sm">
-          <Download size={16} /> Export PDF
-        </a>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+            {PRESETS.map((p) => (
+              <button key={p.key} onClick={() => applyPreset(p.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${preset === p.key ? "bg-[#164FA3] text-white" : "text-gray-600 hover:bg-gray-200"}`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <input type="date" value={from} onChange={(e) => { setPreset("custom"); setFrom(e.target.value); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm" />
+          <span className="text-gray-400 text-sm">→</span>
+          <input type="date" value={to} onChange={(e) => { setPreset("custom"); setTo(e.target.value); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm" />
+          <a href={`/api/supervisor/export/callers?${exportParams}`} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded text-sm font-medium shadow-sm">
+            <Download size={16} /> Export PDF
+          </a>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

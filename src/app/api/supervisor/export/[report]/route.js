@@ -53,7 +53,12 @@ function ReportDocument({ title, subtitle, columns, rows }) {
   );
 }
 
-async function buildCallersReport() {
+async function buildCallersReport({ date_from, date_to } = {}) {
+  // Date filter goes on the LEFT JOIN's ON clause so zero-call users still show.
+  const params = [];
+  let joinExtra = "";
+  if (date_from) { joinExtra += " AND DATE(c.called_at) >= ?"; params.push(date_from); }
+  if (date_to)   { joinExtra += " AND DATE(c.called_at) <= ?"; params.push(date_to); }
   const rows = await query(
     `SELECT u.username AS name,
             COUNT(c.id) AS total_calls,
@@ -61,15 +66,17 @@ async function buildCallersReport() {
             SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END) AS follow_ups,
             ROUND(AVG(c.duration_seconds), 0) AS avg_dur
        FROM users u
-       LEFT JOIN calls c ON c.user_id = u.id
+       LEFT JOIN calls c ON c.user_id = u.id ${joinExtra}
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
       WHERE u.role IN ('caller','user','agent')
       GROUP BY u.id, u.username
-      ORDER BY total_calls DESC`
+      ORDER BY total_calls DESC`,
+    params
   );
+  const range = date_from || date_to ? `  |  ${date_from || "…"} → ${date_to || "…"}` : "  |  All time";
   return {
     title: "Caller-Wise Performance Report",
-    subtitle: new Date().toLocaleString("en-GB"),
+    subtitle: new Date().toLocaleString("en-GB") + range,
     columns: [
       { key: "name", label: "Caller", flex: 2 },
       { key: "total_calls", label: "Total", flex: 1 },
@@ -146,7 +153,11 @@ export async function GET(req, { params }) {
     if (!builder) {
       return NextResponse.json({ message: "Unknown report" }, { status: 404 });
     }
-    const payload = await builder();
+    const { searchParams } = new URL(req.url);
+    const payload = await builder({
+      date_from: searchParams.get("date_from"),
+      date_to: searchParams.get("date_to"),
+    });
     const buffer = await renderToBuffer(React.createElement(ReportDocument, payload));
     return new Response(buffer, {
       status: 200,

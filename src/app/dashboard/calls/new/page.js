@@ -223,6 +223,9 @@ export default function LogCall() {
                 <option value="neutral">Neutral</option>
                 <option value="negative">Negative</option>
                 <option value="opponent">Opponent</option>
+                {(statuses.find((s) => String(s.id) === String(formData.status_id))?.name === "Phone Picked" || formData.sentiment === "not_supporter") && (
+                  <option value="not_supporter">Not a Supporter</option>
+                )}
               </select>
             </div>
             <div>

@@ -45,7 +45,7 @@ export async function GET(req) {
     const interested = has("sentiment")
       ? "SUM(CASE WHEN c.sentiment IN ('positive','supporter') THEN 1 ELSE 0 END)" : "0";
     const negative = has("sentiment")
-      ? "SUM(CASE WHEN c.sentiment IN ('negative','opponent') THEN 1 ELSE 0 END)" : "0";
+      ? "SUM(CASE WHEN c.sentiment IN ('negative','opponent','not_supporter') THEN 1 ELSE 0 END)" : "0";
     const uniqueReached = has("contact_id") ? "COUNT(DISTINCT c.contact_id)" : "0";
 
     // Date range is applied in the LEFT JOIN's ON clause so callers with zero

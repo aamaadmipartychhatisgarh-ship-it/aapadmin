@@ -156,6 +156,7 @@ function Body({ canManage }) {
                   <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900">{t.title}</div>
+                      {t.description && <div className="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{t.description}</div>}
                       {t.district_name && <div className="text-xs text-gray-400">{t.district_name}</div>}
                     </td>
                     <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${PRIORITY[t.priority]}`}>{t.priority}</span></td>
@@ -206,17 +207,14 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     deadline: editing.deadline ? editing.deadline.slice(0, 10) : "",
     assigned_to_user_id: editing.assigned_to_user_id || "",
     assigned_to_team_id: editing.assigned_to_team_id || "",
-    district_id: editing.district_id || "",
-  } : { title: "", description: "", priority: "medium", deadline: "", assigned_to_user_id: "", assigned_to_team_id: "", district_id: "" });
+  } : { title: "", description: "", priority: "medium", deadline: "", assigned_to_user_id: "", assigned_to_team_id: "" });
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
-  const [districts, setDistricts] = useState([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers(d.users || [])).catch(() => {});
     fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
-    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
   }, []);
 
   async function save() {
@@ -248,10 +246,6 @@ function AddTaskModal({ onClose, onSaved, editing }) {
           <select className={inp} value={form.assigned_to_team_id} onChange={(e) => setForm({ ...form, assigned_to_team_id: e.target.value })}>
             <option value="">Assign to team…</option>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-          <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
-            <option value="">District (optional)</option>
-            {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </div>
         <div className="flex justify-end gap-2 pt-2">

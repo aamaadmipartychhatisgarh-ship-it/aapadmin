@@ -39,7 +39,7 @@ export async function GET() {
         GROUP BY sentiment`,
       [userId]
     );
-    const sentiment = { positive: 0, supporter: 0, neutral: 0, negative: 0, opponent: 0 };
+    const sentiment = { positive: 0, supporter: 0, neutral: 0, negative: 0, opponent: 0, not_supporter: 0 };
     sentimentRows.forEach((r) => { sentiment[r.sentiment] = Number(r.n) || 0; });
 
     // Rank among standard callers by today's total calls

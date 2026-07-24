@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Heartbeat from "@/components/Heartbeat";
 import InstallApp from "@/components/InstallApp";
+import TaskNotifier from "@/components/TaskNotifier";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 async function handleSignOut() {
@@ -204,6 +205,7 @@ export default function DashboardLayout({ children }) {
   return (
     <div className="h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
       <Heartbeat />
+      <TaskNotifier />
 
       {/* Mobile drawer overlay */}
       {mobileNavOpen && (

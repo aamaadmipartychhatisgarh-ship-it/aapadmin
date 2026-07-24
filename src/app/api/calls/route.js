@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { hasWrongNumberColumn } from "@/lib/contactExtras";
 
 export async function GET(req) {
   try {
@@ -190,16 +191,21 @@ export async function POST(req) {
     // follow-up so it lands in their queue on the right date.
     if (contact_id) {
       const [statusRow] = await query("SELECT name FROM call_statuses WHERE id = ?", [status_id]);
+      const statusName = statusRow?.name;
       const finalStatuses = ["Phone Picked", "Wrong Number", "Rudely Behaved"];
-      const isFinal = statusRow && finalStatuses.includes(statusRow.name);
+      const isFinal = !!statusName && finalStatuses.includes(statusName);
+      const isWrongNumber = statusName === "Wrong Number";
       // If a follow-up was scheduled, keep the contact open and pin it to this caller.
       const wantsFollowUp = !!is_follow_up_required;
+      // Re-logging a call always consumes the previous reminder: set the new
+      // follow-up date when one was given, otherwise clear it (so a call-back
+      // that logs no new reminder doesn't leave the old future date stuck).
       await query(
         `UPDATE contacts
             SET locked_by_user_id = NULL,
                 locked_at = NULL,
                 is_completed = CASE WHEN ? AND NOT ? THEN 1 ELSE 0 END,
-                follow_up_date = CASE WHEN ? THEN ? ELSE follow_up_date END,
+                follow_up_date = CASE WHEN ? THEN ? ELSE NULL END,
                 assigned_to_user_id = CASE WHEN ? THEN ? ELSE assigned_to_user_id END,
                 is_vip = CASE WHEN ? THEN 1 ELSE is_vip END
           WHERE id = ?`,
@@ -211,6 +217,16 @@ export async function POST(req) {
           contact_id,
         ]
       );
+
+      // Wrong Number handling: flag the contact so it moves to the dedicated
+      // Wrong Number list; any other outcome clears the flag. Only runs once the
+      // optional column exists (added by the deploy migration).
+      if (await hasWrongNumberColumn()) {
+        await query(
+          `UPDATE contacts SET is_wrong_number = ? WHERE id = ?`,
+          [isWrongNumber ? 1 : 0, contact_id]
+        );
+      }
     }
 
     return Response.json({ message: "Call logged successfully", id: res.insertId }, { status: 201 });

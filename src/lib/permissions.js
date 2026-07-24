@@ -77,6 +77,10 @@ export function isTopAdmin(session) {
   const r = roleOf(session);
   return r === ROLES.SUPER_ADMIN || r === ROLES.STATE_ADMIN;
 }
+// Strictly the Super Admin — e.g. Workers data export is limited to this role.
+export function isSuperAdmin(session) {
+  return roleOf(session) === ROLES.SUPER_ADMIN;
+}
 export function isOversight(session) {
   return OVERSIGHT_ROLES.includes(roleOf(session));
 }

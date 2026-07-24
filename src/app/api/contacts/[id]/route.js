@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { phoneKey, last10Sql } from "@/lib/phone";
 
 // The contacts table has been extended over several migrations, and a given
 // deployment may not have every column yet (e.g. assembly_id/booth_id). Naming
@@ -75,20 +76,26 @@ export async function PUT(req, { params }) {
     vals.push(id);
     await query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
 
-    // Keep the linked Worker in sync (same person, matched by mobile). We sync
+    // Keep the linked Worker in sync (same person, matched on the last 10 digits
+    // of the phone so format differences don't break the link). We sync
     // name/phone/address/geography, but NOT the worker's `position` (it can hold
     // several designations, which a single contact designation_id can't represent).
+    // If no worker exists yet for this person, create one — so a contact added or
+    // edited in My Workplace always shows up in the Workers directory.
     try {
       const newPhone = ("phone_number" in data)
         ? (data.phone_number ? String(data.phone_number).trim().replace(/[^\d+]/g, "") : null)
         : oldPhone;
-      const matchPhone = oldPhone || newPhone;
-      if (matchPhone) {
-        const [w] = await query("SELECT id FROM workers WHERE mobile = ? LIMIT 1", [matchPhone]);
+      const matchKey = phoneKey(oldPhone || newPhone);
+      if (matchKey) {
+        const [w] = await query(
+          `SELECT id FROM workers WHERE mobile IS NOT NULL AND ${last10Sql("mobile")} = ? LIMIT 1`,
+          [matchKey]
+        );
+        const map = { person_name: "name", phone_number: "mobile", address: "address",
+          zone_id: "zone_id", lok_sabha_id: "lok_sabha_id", district_id: "district_id",
+          assembly_id: "assembly_id", ward_id: "ward_id", booth_id: "booth_id" };
         if (w) {
-          const map = { person_name: "name", phone_number: "mobile", address: "address",
-            zone_id: "zone_id", lok_sabha_id: "lok_sabha_id", district_id: "district_id",
-            assembly_id: "assembly_id", ward_id: "ward_id", booth_id: "booth_id" };
           const wSets = [], wVals = [];
           for (const [cField, wField] of Object.entries(map)) {
             if (cField in data) {
@@ -97,6 +104,23 @@ export async function PUT(req, { params }) {
             }
           }
           if (wSets.length) { wVals.push(w.id); await query(`UPDATE workers SET ${wSets.join(", ")} WHERE id = ?`, wVals); }
+        } else if (newPhone) {
+          // No worker for this person yet → create one from the contact's details.
+          // Map the contact's single designation_id to a designation name for
+          // workers.position.
+          let positionName = null;
+          const desigId = ("designation_id" in data ? data.designation_id : null);
+          if (desigId) {
+            const [dr] = await query("SELECT name FROM designations WHERE id = ? LIMIT 1", [desigId]);
+            positionName = dr?.name || null;
+          }
+          const g = (f) => (f in data ? (data[f] === "" ? null : data[f]) : null);
+          await query(
+            `INSERT INTO workers (name, mobile, address, position, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [("person_name" in data ? data.person_name : null), newPhone, g("address"), positionName,
+             g("zone_id"), g("lok_sabha_id"), g("district_id"), g("assembly_id"), g("ward_id"), g("booth_id")]
+          );
         }
       }
     } catch (e) {

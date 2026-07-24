@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildRulesOrMatch, zoneMatch } from "@/lib/assignmentRules";
+import { hasWrongNumberColumn } from "@/lib/contactExtras";
 
 // Returns:
 //   assigned: contacts explicitly assigned to this caller, not yet completed
@@ -44,6 +45,12 @@ export async function GET(req) {
       [userId]
     );
 
+    // Wrong-number contacts belong only in the dedicated list, never the queue —
+    // exclude them explicitly (not just via is_completed) so a wrong number that
+    // isn't marked completed still can't surface here. Feature-detected.
+    const hasWrong = await hasWrongNumberColumn();
+    const notWrong = hasWrong ? " AND (c.is_wrong_number = 0 OR c.is_wrong_number IS NULL)" : "";
+
     // Active queue: skip contacts whose follow-up date is still in the future.
     // They reappear on/after the scheduled date.
     // Total due-today assigned matching the filters (uncapped) — so the UI can
@@ -53,7 +60,7 @@ export async function GET(req) {
          FROM contacts c
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${filterSql}`,
+          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${notWrong}${filterSql}`,
       [userId, ...qParams]
     );
 
@@ -80,7 +87,7 @@ export async function GET(req) {
          LEFT JOIN locations lw ON lw.id = c.ward_id
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${filterSql}
+          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${notWrong}${filterSql}
         ORDER BY (CASE WHEN (${daily.sql}) THEN 0 ELSE 1 END) ASC,
                  c.is_vip DESC,
                  c.follow_up_date IS NOT NULL DESC,
@@ -104,6 +111,23 @@ export async function GET(req) {
       [userId]
     );
 
+    // Wrong Numbers: contacts this caller marked as a wrong number. They stay
+    // out of the regular queue and live in their own list until manually
+    // restored. Only queried once the optional flag column exists.
+    let wrong_numbers = [];
+    if (hasWrong) {
+      wrong_numbers = await query(
+        `SELECT c.*, ld.name AS district_name
+           FROM contacts c
+           LEFT JOIN locations ld ON ld.id = c.district_id
+          WHERE c.assigned_to_user_id = ?
+            AND c.is_wrong_number = 1
+          ORDER BY c.id DESC
+          LIMIT 200`,
+        [userId]
+      );
+    }
+
     const lockedRows = await query(
       `SELECT c.*, ld.name AS district_name, lw.name AS ward_name
          FROM contacts c
@@ -124,7 +148,7 @@ export async function GET(req) {
     if (terr) {
       const [{ n }] = await query(
         `SELECT COUNT(*) AS n FROM contacts
-          WHERE is_completed = 0
+          WHERE is_completed = 0${hasWrong ? " AND (is_wrong_number = 0 OR is_wrong_number IS NULL)" : ""}
             AND assigned_to_user_id IS NULL
             AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
             ${terr.where}`,
@@ -137,6 +161,7 @@ export async function GET(req) {
       assigned,
       assigned_total,
       scheduled,
+      wrong_numbers,
       pool_count: poolCount,
       // territory label the workspace header shows — zone takes precedence.
       territory: me?.scope_zone_id

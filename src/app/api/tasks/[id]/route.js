@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { notifyTaskAssigned } from "@/lib/notify";
 
 export async function PUT(req, { params }) {
   try {
@@ -41,6 +42,24 @@ export async function PUT(req, { params }) {
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
     vals.push(id);
     await query(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`, vals);
+
+    // If an oversight edit (re)assigned the task, alert the new assignee(s).
+    if (isOversight(session) && (("assigned_to_user_id" in d && d.assigned_to_user_id) || ("assigned_to_team_id" in d && d.assigned_to_team_id))) {
+      let title = d.title, description = d.description;
+      if (title === undefined || description === undefined) {
+        const [t] = await query("SELECT title, description FROM tasks WHERE id = ?", [id]);
+        title = title ?? t?.title;
+        description = description ?? t?.description;
+      }
+      await notifyTaskAssigned({
+        taskId: id,
+        title,
+        description,
+        assignedToUserId: d.assigned_to_user_id || null,
+        assignedToTeamId: d.assigned_to_team_id || null,
+        excludeUserId: session.user.id,
+      });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("task PUT error:", err);

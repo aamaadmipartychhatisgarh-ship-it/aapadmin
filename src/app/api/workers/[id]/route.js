@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin, canManageWorkers } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { resolvePrimaryDesignationId } from "@/lib/designations";
+import { phoneKey, last10Sql } from "@/lib/phone";
 
 export async function GET(req, { params }) {
   try {
@@ -99,9 +100,12 @@ export async function PUT(req, { params }) {
       const newMobile = ("mobile" in d)
         ? (d.mobile ? String(d.mobile).trim().replace(/[^\d+]/g, "") : null)
         : oldMobile;
-      const matchMobile = oldMobile || newMobile;
-      if (matchMobile) {
-        const [existing] = await query("SELECT id FROM contacts WHERE phone_number = ? LIMIT 1", [matchMobile]);
+      const matchKey = phoneKey(oldMobile || newMobile);
+      if (matchKey) {
+        const [existing] = await query(
+          `SELECT id FROM contacts WHERE phone_number IS NOT NULL AND ${last10Sql("phone_number")} = ? LIMIT 1`,
+          [matchKey]
+        );
         const designationId = ("position" in d) ? await resolvePrimaryDesignationId(d.position) : undefined;
         const cSets = [], cVals = [];
         if ("name" in d)         { cSets.push("person_name = ?"); cVals.push(d.name); }

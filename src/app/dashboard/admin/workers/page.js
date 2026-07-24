@@ -4,9 +4,9 @@ import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { isAdmin, canManageWorkers } from "@/lib/permissions";
+import { isAdmin, canManageWorkers, isSuperAdmin } from "@/lib/permissions";
 import { AddWorkerModal, EditWorkerModal } from "@/components/WorkerModal";
-import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil, Trash2 } from "lucide-react";
+import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil, Trash2, Download, FileText } from "lucide-react";
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -22,9 +22,11 @@ export default function Page() {
 }
 
 function Body({ session }) {
-  // Callers can add/edit workers; bulk imports stay admin-only.
+  // Callers can add/edit workers; bulk imports stay admin-only; export is
+  // restricted to the Super Admin.
   const canEdit = canManageWorkers(session);
   const canImport = isAdmin(session);
+  const canExport = isSuperAdmin(session);
   const [data, setData] = useState({ workers: [], total: 0, page: 1, pages: 1 });
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
@@ -142,6 +144,27 @@ function Body({ session }) {
           <p className="text-gray-500 mt-2 font-medium">{data.total} members across the organization.</p>
         </div>
         <div className="flex gap-2">
+          {canExport && (() => {
+            const ep = new URLSearchParams();
+            if (search) ep.set("search", search);
+            if (zoneId) ep.set("zone_id", zoneId);
+            if (lokSabhaId) ep.set("lok_sabha_id", lokSabhaId);
+            if (districtId) ep.set("district_id", districtId);
+            if (assemblyId) ep.set("assembly_id", assemblyId);
+            if (statusFilter) ep.set("status", statusFilter);
+            if (positionFilter) ep.set("position", positionFilter);
+            const qs = ep.toString() ? `?${ep}` : "";
+            return (
+              <>
+                <a href={`/api/workers/export/xlsx${qs}`} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
+                  <Download size={16} /> Excel
+                </a>
+                <a href={`/api/workers/export/pdf${qs}`} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
+                  <FileText size={16} /> PDF
+                </a>
+              </>
+            );
+          })()}
           {canImport && (
             <>
               <button onClick={() => excelRef.current?.click()} disabled={importing} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">

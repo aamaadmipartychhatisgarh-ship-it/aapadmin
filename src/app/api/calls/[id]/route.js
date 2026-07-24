@@ -41,12 +41,25 @@ export async function PUT(req, { params }) {
        }
     }
 
-    const { person_name, phone_number, status_id, remarks } = data;
+    const { person_name, phone_number, status_id, remarks, sentiment, address } = data;
 
     await query(
-      "UPDATE calls SET person_name = ?, phone_number = ?, status_id = ?, remarks = ? WHERE id = ?",
-      [person_name, phone_number, status_id, remarks, id]
+      `UPDATE calls
+          SET person_name = ?, phone_number = ?, status_id = ?, remarks = ?,
+              sentiment = ?, address = COALESCE(?, address)
+        WHERE id = ?`,
+      [person_name, phone_number, status_id, remarks || null, sentiment || null, address ?? null, id]
     );
+
+    // Keep the underlying contact in step so the correction sticks for future
+    // calls (and, via the contact→worker sync, the Workers directory too).
+    const [callRow] = await query("SELECT contact_id FROM calls WHERE id = ?", [id]);
+    if (callRow?.contact_id) {
+      await query(
+        "UPDATE contacts SET person_name = ?, phone_number = ?, address = COALESCE(?, address) WHERE id = ?",
+        [person_name, phone_number, address ?? null, callRow.contact_id]
+      );
+    }
 
     return Response.json({ message: "Call updated" }, { status: 200 });
   } catch (error) {
