@@ -80,8 +80,9 @@ function Body() {
     fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
   }, []);
 
-  // Cascading location filters: Lok Sabha follows Zone, District follows Lok
-  // Sabha, Assembly follows District — each narrowed to its parent's children.
+  // Cascading location filters. Lok Sabha follows Zone. Selecting a Lok Sabha
+  // shows ALL of its Vidhan Sabhas (assemblies) directly — the "pick a district
+  // first" step is gone. District remains an optional narrower filter.
   useEffect(() => {
     const url = zoneId ? `/api/locations?parent_id=${zoneId}` : `/api/locations?type=lok_sabha`;
     fetch(url).then((r) => r.json()).then((d) => setLokSabhas((d.locations || []).filter((l) => l.type === "lok_sabha")));
@@ -90,7 +91,7 @@ function Body() {
   useEffect(() => {
     const url = lokSabhaId ? `/api/locations?parent_id=${lokSabhaId}` : `/api/locations?type=district`;
     fetch(url).then((r) => r.json()).then((d) => setDistricts((d.locations || []).filter((l) => l.type === "district")));
-    setDistrictId(""); setAssemblyIds([]);
+    setDistrictId("");
   }, [lokSabhaId]);
 
   // Selecting a team pre-selects all its caller members for distribution.
@@ -109,13 +110,17 @@ function Body() {
     else setError("");
   }
 
-  // Assembly options follow the selected district.
+  // Assembly (Vidhan Sabha) options: if a district is picked, narrow to it;
+  // otherwise if a Lok Sabha is picked, show ALL of its assemblies directly.
   useEffect(() => {
-    if (districtId) {
-      fetch(`/api/locations?parent_id=${districtId}`).then((r) => r.json()).then((d) => setAssemblies((d.locations || []).filter((l) => l.type === "assembly")));
+    let url = null;
+    if (districtId) url = `/api/locations?parent_id=${districtId}`;
+    else if (lokSabhaId) url = `/api/locations?assemblies_of_lok_sabha=${lokSabhaId}`;
+    if (url) {
+      fetch(url).then((r) => r.json()).then((d) => setAssemblies((d.locations || []).filter((l) => l.type === "assembly")));
     } else setAssemblies([]);
     setAssemblyIds([]);
-  }, [districtId]);
+  }, [districtId, lokSabhaId]);
 
   async function load() {
     // Several effects (filter change, URL deep-link, search debounce) can fire
@@ -345,7 +350,7 @@ function Body() {
         </select>
         <MultiSelect
           label="assemblies" items={assemblies} selected={assemblyIds} onChange={setAssemblyIds}
-          disabled={!districtId} disabledLabel="Pick district"
+          disabled={!districtId && !lokSabhaId} disabledLabel="Pick Lok Sabha"
         />
         <MultiSelect
           label="designations" items={designations} selected={designationIds} onChange={setDesignationIds}

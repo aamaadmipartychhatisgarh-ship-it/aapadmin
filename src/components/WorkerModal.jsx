@@ -24,12 +24,21 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
     else fetch("/api/locations?type=lok_sabha").then((r) => r.json()).then((d) => setLokSabhas(d.locations || []));
   }, [form.zone_id]);
   useEffect(() => {
-    if (form.district_id) fetch(`/api/locations?parent_id=${form.district_id}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
-    else setAssemblies([]);
+    if (form.district_id) {
+      fetch(`/api/locations?parent_id=${form.district_id}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
+    } else if (form.assembly_id) {
+      // Worker has an assembly but no district (common for imported members):
+      // load ALL assemblies so the saved one is still shown/selectable on edit.
+      fetch("/api/locations?type=assembly").then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
+    } else {
+      setAssemblies([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.district_id]);
   useEffect(() => {
     if (form.assembly_id) fetch(`/api/locations?parent_id=${form.assembly_id}`).then((r) => r.json()).then((d) => setWards(d.locations || []));
-    else setWards([]);
+    else if (!form.ward_id) setWards([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.assembly_id]);
   useEffect(() => {
     if (form.ward_id) fetch(`/api/locations?parent_id=${form.ward_id}`).then((r) => r.json()).then((d) => setBooths(d.locations || []));
@@ -142,19 +151,19 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
             </select>
           </Fld>
           <Fld label="Assembly">
-            <select className={inp} value={form.assembly_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value, ward_id: "", booth_id: "" })} disabled={!form.district_id}>
+            <select className={inp} value={form.assembly_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value, ward_id: "", booth_id: "" })} disabled={!form.district_id && !form.assembly_id}>
               <option value="">Select assembly</option>
               {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </Fld>
           <Fld label="Block">
-            <select className={inp} value={form.ward_id} onChange={(e) => setForm({ ...form, ward_id: e.target.value, booth_id: "" })} disabled={!form.assembly_id}>
+            <select className={inp} value={form.ward_id} onChange={(e) => setForm({ ...form, ward_id: e.target.value, booth_id: "" })} disabled={!form.assembly_id && !form.ward_id}>
               <option value="">Select block</option>
               {wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
             </select>
           </Fld>
           <Fld label="Polling Station">
-            <select className={inp} value={form.booth_id} onChange={(e) => setForm({ ...form, booth_id: e.target.value })} disabled={!form.ward_id}>
+            <select className={inp} value={form.booth_id} onChange={(e) => setForm({ ...form, booth_id: e.target.value })} disabled={!form.ward_id && !form.booth_id}>
               <option value="">Select polling station</option>
               {booths.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>

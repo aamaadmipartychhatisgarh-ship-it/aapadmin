@@ -14,6 +14,20 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type");
     const parentId = searchParams.get("parent_id");
+    // Fetch all assemblies under a Lok Sabha (2 levels: lok_sabha → district → assembly).
+    const assembliesOfLokSabha = searchParams.get("assemblies_of_lok_sabha");
+
+    if (assembliesOfLokSabha) {
+      const rows = await query(
+        `SELECT a.id, a.type, a.name, a.parent_id
+           FROM locations a
+           JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
+          WHERE a.type = 'assembly' AND d.parent_id = ?
+          ORDER BY a.name ASC`,
+        [assembliesOfLokSabha]
+      );
+      return Response.json({ locations: rows }, { status: 200 });
+    }
 
     let sql = "SELECT id, type, name, parent_id FROM locations WHERE 1=1";
     const params = [];
@@ -22,7 +36,7 @@ export async function GET(req) {
       sql += " AND type = ?";
       params.push(type);
     }
-    
+
     if (parentId) {
       sql += " AND parent_id = ?";
       params.push(parentId);

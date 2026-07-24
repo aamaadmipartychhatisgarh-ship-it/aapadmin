@@ -3,17 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canManageWorkers, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
-
-// A worker's `position` is one or more comma-separated designation names.
-// Contacts carry a single designation_id, so map the first name that matches
-// the master designations list (returns null if none/no match).
-async function resolvePrimaryDesignationId(position) {
-  if (!position) return null;
-  const first = String(position).split(",")[0].trim();
-  if (!first) return null;
-  const rows = await query("SELECT id FROM designations WHERE name = ? LIMIT 1", [first]);
-  return rows[0]?.id ?? null;
-}
+import { resolvePrimaryDesignationId } from "@/lib/designations";
 
 // GET /api/workers?search=&zone_id=&lok_sabha_id=&district_id=&assembly_id=&status=&position=&page=&limit=
 export async function GET(req) {
@@ -38,8 +28,41 @@ export async function GET(req) {
     const where = [];
     const params = [];
     if (search) { where.push("(w.name LIKE ? OR w.mobile LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
-    if (zoneId) { where.push("w.zone_id = ?"); params.push(zoneId); }
-    if (lokSabhaId) { where.push("w.lok_sabha_id = ?"); params.push(lokSabhaId); }
+    // Zone / Lok Sabha filters resolve through the location hierarchy so that
+    // imported workers (who often only have district_id + assembly_id, no
+    // zone_id/lok_sabha_id) are still matched. A worker is "in" a zone if their
+    // own zone_id matches, OR their district/assembly rolls up to that zone.
+    // Hierarchy: assembly → district → lok_sabha → zone.
+    if (zoneId) {
+      where.push(`(
+        w.zone_id = ?
+        OR w.lok_sabha_id IN (SELECT id FROM locations WHERE type='lok_sabha' AND parent_id = ?)
+        OR w.district_id IN (
+          SELECT d.id FROM locations d
+          JOIN locations ls ON ls.id = d.parent_id AND ls.type='lok_sabha'
+          WHERE ls.parent_id = ?
+        )
+        OR w.assembly_id IN (
+          SELECT a.id FROM locations a
+          JOIN locations d ON d.id = a.parent_id AND d.type='district'
+          JOIN locations ls ON ls.id = d.parent_id AND ls.type='lok_sabha'
+          WHERE ls.parent_id = ?
+        )
+      )`);
+      params.push(zoneId, zoneId, zoneId, zoneId);
+    }
+    if (lokSabhaId) {
+      where.push(`(
+        w.lok_sabha_id = ?
+        OR w.district_id IN (SELECT id FROM locations WHERE type='district' AND parent_id = ?)
+        OR w.assembly_id IN (
+          SELECT a.id FROM locations a
+          JOIN locations d ON d.id = a.parent_id AND d.type='district'
+          WHERE d.parent_id = ?
+        )
+      )`);
+      params.push(lokSabhaId, lokSabhaId, lokSabhaId);
+    }
     if (districtId) { where.push("w.district_id = ?"); params.push(districtId); }
     if (assemblyId) { where.push("w.assembly_id = ?"); params.push(assemblyId); }
     if (status) { where.push("w.status = ?"); params.push(status); }
@@ -63,12 +86,13 @@ export async function GET(req) {
 
     const workers = await query(
       `SELECT w.*, ld.name AS district_name, la.name AS assembly_name,
-              lz.name AS zone_name, lls.name AS lok_sabha_name
+              lz.name AS zone_name, lls.name AS lok_sabha_name, lw.name AS ward_name
          FROM workers w
          LEFT JOIN locations ld ON ld.id = w.district_id
          LEFT JOIN locations la ON la.id = w.assembly_id
          LEFT JOIN locations lz ON lz.id = w.zone_id
          LEFT JOIN locations lls ON lls.id = w.lok_sabha_id
+         LEFT JOIN locations lw ON lw.id = w.ward_id
          ${whereSql}
          ORDER BY ${duplicates === "1"
            ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(w.mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, w.id ASC"

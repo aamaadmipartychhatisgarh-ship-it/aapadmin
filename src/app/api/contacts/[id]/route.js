@@ -66,8 +66,43 @@ export async function PUT(req, { params }) {
       sets.push(data.assigned_to_user_id ? "assigned_at = NOW()" : "assigned_at = NULL");
     }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
+
+    // Remember the contact's current phone so we can find the linked worker even
+    // if the phone is being changed here.
+    const beforeRows = await query("SELECT phone_number FROM contacts WHERE id = ?", [id]);
+    const oldPhone = beforeRows[0]?.phone_number || null;
+
     vals.push(id);
     await query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
+
+    // Keep the linked Worker in sync (same person, matched by mobile). We sync
+    // name/phone/address/geography, but NOT the worker's `position` (it can hold
+    // several designations, which a single contact designation_id can't represent).
+    try {
+      const newPhone = ("phone_number" in data)
+        ? (data.phone_number ? String(data.phone_number).trim().replace(/[^\d+]/g, "") : null)
+        : oldPhone;
+      const matchPhone = oldPhone || newPhone;
+      if (matchPhone) {
+        const [w] = await query("SELECT id FROM workers WHERE mobile = ? LIMIT 1", [matchPhone]);
+        if (w) {
+          const map = { person_name: "name", phone_number: "mobile", address: "address",
+            zone_id: "zone_id", lok_sabha_id: "lok_sabha_id", district_id: "district_id",
+            assembly_id: "assembly_id", ward_id: "ward_id", booth_id: "booth_id" };
+          const wSets = [], wVals = [];
+          for (const [cField, wField] of Object.entries(map)) {
+            if (cField in data) {
+              wSets.push(`${wField} = ?`);
+              wVals.push(cField === "phone_number" ? newPhone : (data[cField] === "" ? null : data[cField]));
+            }
+          }
+          if (wSets.length) { wVals.push(w.id); await query(`UPDATE workers SET ${wSets.join(", ")} WHERE id = ?`, wVals); }
+        }
+      }
+    } catch (e) {
+      console.error("contact->worker sync error:", e);
+    }
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("contacts PUT error:", err);

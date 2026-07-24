@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, canManageWorkers } from "@/lib/permissions";
-import { AddWorkerModal } from "@/components/WorkerModal";
+import { AddWorkerModal, EditWorkerModal } from "@/components/WorkerModal";
 import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil, Trash2 } from "lucide-react";
 
 export default function Page() {
@@ -42,6 +42,7 @@ function Body({ session }) {
   const [dupOnly, setDupOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingWorker, setEditingWorker] = useState(null);
   const [message, setMessage] = useState("");
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
@@ -214,6 +215,7 @@ function Body({ session }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Block</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Address</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Activity</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
@@ -242,6 +244,7 @@ function Body({ session }) {
                   <td className="px-4 py-3 text-gray-600 text-xs">{w.lok_sabha_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{w.district_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{w.assembly_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">{w.ward_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs max-w-[200px] truncate" title={w.address || ""}>{w.address || "—"}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -258,8 +261,9 @@ function Body({ session }) {
                   </td>
                   {canEdit && (
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      {/* Open the worker's own page with the edit form — after saving, staff stay on that page. */}
-                      <button onClick={(e) => { e.stopPropagation(); location.href = `/dashboard/admin/workers/${w.id}?edit=1`; }} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
+                      {/* Edit inline in a modal so the list's filters, page and
+                          scroll position are all preserved after saving. */}
+                      <button onClick={(e) => { e.stopPropagation(); setEditingWorker(w); }} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
                         <Pencil size={14} /> Edit
                       </button>
                       {canImport && (
@@ -287,6 +291,15 @@ function Body({ session }) {
       </div>
 
       {showAdd && <AddWorkerModal districts={districts} designations={designations} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
+      {editingWorker && (
+        <EditWorkerModal
+          worker={editingWorker}
+          districts={districts}
+          designations={designations}
+          onClose={() => setEditingWorker(null)}
+          onSaved={() => { setEditingWorker(null); load(); }}
+        />
+      )}
     </div>
   );
 }
