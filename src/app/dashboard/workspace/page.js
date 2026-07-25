@@ -3,9 +3,10 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search } from "lucide-react";
+import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
+import { compressSquareImage } from "@/lib/imageCompress";
 
 export default function WorkspacePage() {
   const { data: session, status } = useSession();
@@ -70,6 +71,9 @@ function WorkspaceBody() {
   const [editing, setEditing] = useState(false);
   const [edit, setEdit] = useState(initialEdit());
   const [editSaving, setEditSaving] = useState(false);
+  // Profile photo upload for the active contact.
+  const photoInputRef = useRef(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
   // Cascading location options for the edit form (zone → lok sabha; district →
   // assembly). Block/Ward is a free-text field, not a cascade.
   const [editLokSabhas, setEditLokSabhas] = useState([]);
@@ -306,6 +310,36 @@ function WorkspaceBody() {
     }
   }
 
+  // Upload / replace the active contact's profile photo. The image is cropped to
+  // a square and compressed in the browser, uploaded, then saved on the linked
+  // worker so it shows across every module.
+  async function uploadPhoto(file) {
+    if (!active) return;
+    setPhotoUploading(true);
+    setError("");
+    try {
+      const blob = await compressSquareImage(file);
+      const fd = new FormData();
+      fd.append("file", new File([blob], "photo.jpg", { type: "image/jpeg" }));
+      const up = await fetch("/api/uploads", { method: "POST", body: fd });
+      if (!up.ok) throw new Error("upload failed");
+      const { url } = await up.json();
+      const r = await fetch(`/api/contacts/${active.id}/photo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo_url: url }),
+      });
+      if (!r.ok) throw new Error("save failed");
+      setActive((a) => (a ? { ...a, photo_url: url } : a));
+      setMessage("Profile photo updated.");
+    } catch (e) {
+      setError("Could not upload the photo. Please try a JPG/PNG/WEBP image.");
+    } finally {
+      setPhotoUploading(false);
+      if (photoInputRef.current) photoInputRef.current.value = "";
+    }
+  }
+
   // Hierarchical filter options, cascaded from the location tree (parent_id).
   // The zone is the caller's own zone (from Your Queue), applied automatically.
   const callerZone = queue.zone_id;
@@ -496,14 +530,33 @@ function WorkspaceBody() {
               {!editing ? (
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-4 min-w-0">
-                    <Avatar
-                      name={active.person_name}
-                      src={active.photo_url}
-                      size={72}
-                      className="bg-white/15 border-2 border-white/25"
-                      textClassName="text-white"
-                      title={active.person_name}
-                    />
+                    <div className="relative shrink-0">
+                      <Avatar
+                        name={active.person_name}
+                        src={active.photo_url}
+                        size={84}
+                        square
+                        className="bg-white/15 border-2 border-white/25"
+                        textClassName="text-white"
+                        title={active.person_name}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => photoInputRef.current?.click()}
+                        disabled={photoUploading}
+                        title="Upload / change photo (camera or gallery)"
+                        className="absolute -bottom-2 -right-2 w-7 h-7 rounded-full bg-[#FCB712] text-[#164FA3] flex items-center justify-center shadow-md border-2 border-[#164FA3] hover:brightness-95 disabled:opacity-60"
+                      >
+                        {photoUploading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={16} />}
+                      </button>
+                      <input
+                        ref={photoInputRef}
+                        type="file"
+                        accept="image/jpeg,image/jpg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])}
+                      />
+                    </div>
                     <div className="min-w-0">
                     <div className="text-xs uppercase tracking-wider text-blue-200 mb-1 flex items-center gap-2">
                       Calling

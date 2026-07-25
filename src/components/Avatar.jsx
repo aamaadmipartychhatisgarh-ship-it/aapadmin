@@ -19,7 +19,7 @@ export function initialsOf(name) {
 //   size          — px diameter (default 64)
 //   className     — extra classes on the circle (background/border/ring)
 //   textClassName — classes for the initials/icon (color)
-export default function Avatar({ name, src, size = 64, className = "", textClassName = "", onClick, title }) {
+export default function Avatar({ name, src, size = 64, square = false, className = "", textClassName = "", onClick, title }) {
   const [errored, setErrored] = useState(false);
   const ini = initialsOf(name);
   const showImg = src && !errored;
@@ -28,7 +28,7 @@ export default function Avatar({ name, src, size = 64, className = "", textClass
       onClick={onClick}
       title={title}
       style={{ width: size, height: size }}
-      className={`rounded-full shrink-0 overflow-hidden flex items-center justify-center ${onClick ? "cursor-pointer" : ""} ${className}`}
+      className={`${square ? "rounded-xl" : "rounded-full"} shrink-0 overflow-hidden flex items-center justify-center ${onClick ? "cursor-pointer" : ""} ${className}`}
     >
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
