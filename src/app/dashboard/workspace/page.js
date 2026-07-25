@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Star, MessageSquare, Search } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
+import Avatar from "@/components/Avatar";
 
 export default function WorkspacePage() {
   const { data: session, status } = useSession();
@@ -420,7 +421,8 @@ function WorkspaceBody() {
                     onClick={() => claim(c.id)}
                     className={`w-full text-left p-3 rounded-lg border disabled:opacity-60 flex items-center gap-2 ${c.is_daily ? "bg-amber-50 border-amber-300 hover:bg-amber-100" : "border-gray-100 hover:bg-blue-50 disabled:hover:bg-white"}`}
                   >
-                    <div className="flex-1">
+                    <Avatar name={c.person_name} src={c.photo_url} size={36} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
+                    <div className="flex-1 min-w-0">
                       <div className="font-medium text-gray-900 text-sm flex items-center gap-1 flex-wrap">
                         {c.is_daily ? <span className="text-[9px] font-bold uppercase bg-[#FCB712] text-[#164FA3] px-1.5 py-0.5 rounded">Daily</span> : null}
                         {c.person_name}
@@ -488,8 +490,17 @@ function WorkspaceBody() {
             {/* Contact card */}
             <div className="bg-[#164FA3] text-white rounded-2xl shadow-sm p-6">
               {!editing ? (
-                <div className="flex items-start justify-between">
-                  <div>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-4 min-w-0">
+                    <Avatar
+                      name={active.person_name}
+                      src={active.photo_url}
+                      size={72}
+                      className="bg-white/15 border-2 border-white/25"
+                      textClassName="text-white"
+                      title={active.person_name}
+                    />
+                    <div className="min-w-0">
                     <div className="text-xs uppercase tracking-wider text-blue-200 mb-1 flex items-center gap-2">
                       Calling
                       {history.length > 0 && <span className="bg-[#FCB712] text-[#164FA3] text-[10px] font-bold px-2 py-0.5 rounded-full">RETRY ×{history.length}</span>}
@@ -507,6 +518,7 @@ function WorkspaceBody() {
                       </div>
                     )}
                     {active.address && <div className="text-sm text-blue-200 mt-1">{active.address}</div>}
+                    </div>
                   </div>
                   <div className="text-right">
                     <div className="text-xs uppercase tracking-wider text-blue-200">Duration</div>

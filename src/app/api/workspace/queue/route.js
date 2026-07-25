@@ -88,12 +88,13 @@ export async function GET(req) {
     }
 
     const assigned = await query(
-      `SELECT c.*, ld.name AS district_name, lw.name AS ward_name,
+      `SELECT c.*, ld.name AS district_name, lw.name AS ward_name, w.photo_url AS photo_url,
               (SELECT COUNT(*) FROM calls WHERE contact_id = c.id) AS attempts,
               (CASE WHEN (${daily.sql}) THEN 1 ELSE 0 END) AS is_daily
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
+         LEFT JOIN workers w ON w.id = c.worker_id
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
           AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${notWrong}${filterSql}
@@ -125,10 +126,11 @@ export async function GET(req) {
     // Numbers module — callers no longer see or restore them here.
 
     const lockedRows = await query(
-      `SELECT c.*, ld.name AS district_name, lw.name AS ward_name
+      `SELECT c.*, ld.name AS district_name, lw.name AS ward_name, w.photo_url AS photo_url
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
+         LEFT JOIN workers w ON w.id = c.worker_id
         WHERE c.locked_by_user_id = ?
         LIMIT 1`,
       [userId]

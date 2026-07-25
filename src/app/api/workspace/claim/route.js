@@ -104,15 +104,23 @@ export async function POST(req) {
         `UPDATE contacts SET locked_by_user_id = ?, locked_at = NOW() WHERE id = ?`,
         [userId, row.id]
       );
-      // Resolve the district + block/ward names so the edit form preloads them.
+      // Resolve district + block/ward names and the linked worker's photo so the
+      // active call card and edit form can show them.
       const [nameRows] = await conn.execute(
         `SELECT (SELECT name FROM locations WHERE id = ?) AS ward_name,
-                (SELECT name FROM locations WHERE id = ?) AS district_name`,
-        [row.ward_id ?? null, row.district_id ?? null]
+                (SELECT name FROM locations WHERE id = ?) AS district_name,
+                (SELECT photo_url FROM workers WHERE id = ?) AS photo_url`,
+        [row.ward_id ?? null, row.district_id ?? null, row.worker_id ?? null]
       );
       await conn.commit();
       return NextResponse.json({
-        contact: { ...row, ward_name: nameRows[0]?.ward_name ?? null, district_name: nameRows[0]?.district_name ?? null, locked_by_user_id: userId },
+        contact: {
+          ...row,
+          ward_name: nameRows[0]?.ward_name ?? null,
+          district_name: nameRows[0]?.district_name ?? null,
+          photo_url: nameRows[0]?.photo_url ?? null,
+          locked_by_user_id: userId,
+        },
       });
     } catch (e) {
       await conn.rollback();
