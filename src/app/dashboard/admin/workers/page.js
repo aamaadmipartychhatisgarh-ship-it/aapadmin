@@ -79,6 +79,16 @@ function Body({ session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, zoneId, lokSabhaId, districtId, assemblyId, statusFilter, positionFilter, dupOnly, page]);
 
+  // Refetch when the admin returns to this tab so worker edits made elsewhere
+  // (e.g. a caller updating details in My Workplace) show without a manual refresh.
+  useEffect(() => {
+    const onFocus = () => { if (document.visibilityState === "visible") load(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function load() {
     setLoading(true);
     const p = new URLSearchParams({ page: String(page), limit: "20" });

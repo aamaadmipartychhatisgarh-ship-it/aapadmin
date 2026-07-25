@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canManageWorkers, scopeFilterSync } from "@/lib/permissions";
-import { query } from "@/lib/db";
-import { resolvePrimaryDesignationId } from "@/lib/designations";
+import { query, getPool } from "@/lib/db";
+import { syncWorkerToContact } from "@/lib/workerSync";
+
+// Always compute fresh — the Workers directory must reflect the latest contact
+// edits synced from My Workplace, never a cached response.
+export const dynamic = "force-dynamic";
 
 // GET /api/workers?search=&zone_id=&lok_sabha_id=&district_id=&assembly_id=&status=&position=&page=&limit=
 export async function GET(req) {
@@ -142,36 +146,34 @@ export async function POST(req) {
       }
     }
 
-    const res = await query(
-      `INSERT INTO workers (name, mobile, photo_url, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [d.name, mobile, d.photo_url || null, d.address || null,
-       d.zone_id || null, d.lok_sabha_id || null, d.district_id || null, d.assembly_id || null,
-       d.ward_id || null, d.booth_id || null, d.position || null, d.skills || null,
-       d.status === "inactive" ? "inactive" : "active", Number(d.activity_score) || 0]
-    );
-
-    // Also add the worker to the calling pipeline (contacts) if they have a phone.
-    // Deduped on phone_number (UNIQUE); a duplicate is fine — don't fail the worker.
-    // Workers hold designations as comma-separated names in `position`; contacts
-    // hold a single designation_id, so map the primary (first) one across.
-    const designationId = await resolvePrimaryDesignationId(d.position);
-    let addedToContacts = false;
-    if (mobile) {
-      try {
-        await query(
-          `INSERT INTO contacts (person_name, phone_number, address, designation_id, district_id, assembly_id, ward_id, booth_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [d.name, mobile, d.address || null, designationId, d.district_id || null, d.assembly_id || null,
-           d.ward_id || null, d.booth_id || null]
-        );
-        addedToContacts = true;
-      } catch (e) {
-        if (e.code !== "ER_DUP_ENTRY") throw e; // already a contact → ignore
-      }
+    // Create the worker and mirror it into the calling pipeline (contacts) with a
+    // stable worker_id link — atomically. syncWorkerToContact maps the primary
+    // designation and dedupes on the UNIQUE phone_number (linking any existing
+    // contact rather than creating a duplicate).
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    let workerId;
+    try {
+      await conn.beginTransaction();
+      const [res] = await conn.query(
+        `INSERT INTO workers (name, mobile, photo_url, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [d.name, mobile, d.photo_url || null, d.address || null,
+         d.zone_id || null, d.lok_sabha_id || null, d.district_id || null, d.assembly_id || null,
+         d.ward_id || null, d.booth_id || null, d.position || null, d.skills || null,
+         d.status === "inactive" ? "inactive" : "active", Number(d.activity_score) || 0]
+      );
+      workerId = res.insertId;
+      await syncWorkerToContact(conn, workerId);
+      await conn.commit();
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
     }
 
-    return NextResponse.json({ id: res.insertId, addedToContacts }, { status: 201 });
+    return NextResponse.json({ id: workerId }, { status: 201 }); // eslint-disable-line
   } catch (err) {
     console.error("workers POST error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

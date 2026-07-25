@@ -63,7 +63,9 @@ function WorkspaceBody() {
   const [editing, setEditing] = useState(false);
   const [edit, setEdit] = useState(initialEdit());
   const [editSaving, setEditSaving] = useState(false);
-  // Cascading location options for the edit form (assembly → ward → booth).
+  // Cascading location options for the edit form (zone → lok sabha; district →
+  // assembly → ward → booth).
+  const [editLokSabhas, setEditLokSabhas] = useState([]);
   const [editAssemblies, setEditAssemblies] = useState([]);
   const [editWards, setEditWards] = useState([]);
   const [editBooths, setEditBooths] = useState([]);
@@ -79,6 +81,11 @@ function WorkspaceBody() {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
+  // Lok Sabha options follow the chosen zone (all lok sabhas when no zone set).
+  useEffect(() => {
+    const url = edit.zone_id ? `/api/locations?parent_id=${edit.zone_id}` : "/api/locations?type=lok_sabha";
+    fetch(url).then((r) => r.json()).then((d) => setEditLokSabhas(d.locations || []));
+  }, [edit.zone_id]);
   // Assembly options follow the chosen district; ward follows assembly; booth
   // follows ward — same hierarchy the admin geography uses.
   useEffect(() => {
@@ -148,6 +155,7 @@ function WorkspaceBody() {
       address: active.address || "",
       designation_id: active.designation_id || "",
       zone_id: active.zone_id || "",
+      lok_sabha_id: active.lok_sabha_id || "",
       district_id: active.district_id || "",
       assembly_id: active.assembly_id || "",
       ward_id: active.ward_id || "",
@@ -560,11 +568,22 @@ function WorkspaceBody() {
                         <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Zone</label>
                         <select
                           value={edit.zone_id || ""}
-                          onChange={(e) => setEdit({ ...edit, zone_id: e.target.value })}
+                          onChange={(e) => setEdit({ ...edit, zone_id: e.target.value, lok_sabha_id: "" })}
                           className={editSelectCls}
                         >
                           <option className="text-gray-900" value="">No zone</option>
                           {zones.map((z) => <option key={z.id} value={z.id} className="text-gray-900">{z.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Lok Sabha</label>
+                        <select
+                          value={edit.lok_sabha_id || ""}
+                          onChange={(e) => setEdit({ ...edit, lok_sabha_id: e.target.value })}
+                          className={editSelectCls}
+                        >
+                          <option className="text-gray-900" value="">No Lok Sabha</option>
+                          {editLokSabhas.map((l) => <option key={l.id} value={l.id} className="text-gray-900">{l.name}</option>)}
                         </select>
                       </div>
                       <div>
@@ -591,14 +610,14 @@ function WorkspaceBody() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Ward</label>
+                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Block (Ward)</label>
                         <select
                           value={edit.ward_id || ""}
                           onChange={(e) => setEdit({ ...edit, ward_id: e.target.value, booth_id: "" })}
                           disabled={!edit.assembly_id}
                           className={editSelectCls}
                         >
-                          <option className="text-gray-900" value="">{edit.assembly_id ? "No ward" : "Pick assembly first"}</option>
+                          <option className="text-gray-900" value="">{edit.assembly_id ? "No block/ward" : "Pick assembly first"}</option>
                           {editWards.map((w) => <option key={w.id} value={w.id} className="text-gray-900">{w.name}</option>)}
                         </select>
                       </div>
@@ -931,7 +950,7 @@ function initialForm() {
 function initialEdit() {
   return {
     person_name: "", phone_number: "", address: "", designation_id: "",
-    zone_id: "", district_id: "", assembly_id: "", ward_id: "", booth_id: "",
+    zone_id: "", lok_sabha_id: "", district_id: "", assembly_id: "", ward_id: "", booth_id: "",
   };
 }
 

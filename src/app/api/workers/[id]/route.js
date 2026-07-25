@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, canManageWorkers } from "@/lib/permissions";
-import { query } from "@/lib/db";
-import { resolvePrimaryDesignationId } from "@/lib/designations";
-import { phoneKey, last10Sql } from "@/lib/phone";
+import { query, getPool } from "@/lib/db";
+import { syncWorkerToContact } from "@/lib/workerSync";
 
 export async function GET(req, { params }) {
   try {
@@ -79,61 +78,36 @@ export async function PUT(req, { params }) {
       }
     }
 
-    // Remember the worker's current mobile so we can find the linked contact
-    // even if the mobile is being changed in this edit.
-    const beforeRows = await query("SELECT mobile FROM workers WHERE id = ?", [id]);
-    const oldMobile = beforeRows[0]?.mobile || null;
-
     const fields = ["name","mobile","photo_url","address","zone_id","lok_sabha_id","district_id","assembly_id","ward_id","booth_id","position","skills","status","activity_score"];
     const sets = [], vals = [];
     for (const f of fields) {
       if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     }
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
-    vals.push(id);
-    await query(`UPDATE workers SET ${sets.join(", ")} WHERE id = ?`, vals);
 
-    // Keep the linked Contact in sync (same person, matched by phone). Update
-    // name/phone/address/location + the mapped designation so the Contacts page
-    // shows the same info. Don't touch caller assignment / completion status.
+    // Apply the worker edit and mirror it onto the linked contact atomically
+    // (matched by worker_id, falling back to phone; creates + links a contact if
+    // none). Keeps name/phone/address/geography/designation in step across the
+    // Workers, Contacts, calling queue and reports.
+    const pool = getPool();
+    const conn = await pool.getConnection();
+    let updated;
     try {
-      const newMobile = ("mobile" in d)
-        ? (d.mobile ? String(d.mobile).trim().replace(/[^\d+]/g, "") : null)
-        : oldMobile;
-      const matchKey = phoneKey(oldMobile || newMobile);
-      if (matchKey) {
-        const [existing] = await query(
-          `SELECT id FROM contacts WHERE phone_number IS NOT NULL AND ${last10Sql("phone_number")} = ? LIMIT 1`,
-          [matchKey]
-        );
-        const designationId = ("position" in d) ? await resolvePrimaryDesignationId(d.position) : undefined;
-        const cSets = [], cVals = [];
-        if ("name" in d)         { cSets.push("person_name = ?"); cVals.push(d.name); }
-        if (newMobile)           { cSets.push("phone_number = ?"); cVals.push(newMobile); }
-        if ("address" in d)      { cSets.push("address = ?"); cVals.push(d.address || null); }
-        if ("district_id" in d)  { cSets.push("district_id = ?"); cVals.push(d.district_id || null); }
-        if ("assembly_id" in d)  { cSets.push("assembly_id = ?"); cVals.push(d.assembly_id || null); }
-        if ("ward_id" in d)      { cSets.push("ward_id = ?"); cVals.push(d.ward_id || null); }
-        if ("booth_id" in d)     { cSets.push("booth_id = ?"); cVals.push(d.booth_id || null); }
-        if (designationId !== undefined) { cSets.push("designation_id = ?"); cVals.push(designationId); }
-
-        if (existing) {
-          if (cSets.length) { cVals.push(existing.id); await query(`UPDATE contacts SET ${cSets.join(", ")} WHERE id = ?`, cVals); }
-        } else if (newMobile) {
-          // No contact yet (e.g. a worker created before auto-sync) → create one.
-          await query(
-            `INSERT INTO contacts (person_name, phone_number, address, designation_id, district_id, assembly_id, ward_id, booth_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [d.name ?? null, newMobile, d.address || null, designationId ?? null,
-             d.district_id || null, d.assembly_id || null, d.ward_id || null, d.booth_id || null]
-          );
-        }
-      }
+      await conn.beginTransaction();
+      vals.push(id);
+      await conn.query(`UPDATE workers SET ${sets.join(", ")} WHERE id = ?`, vals);
+      await syncWorkerToContact(conn, id);
+      const [rows] = await conn.query("SELECT * FROM workers WHERE id = ?", [id]);
+      updated = rows[0];
+      await conn.commit();
     } catch (e) {
-      if (e.code !== "ER_DUP_ENTRY") console.error("worker->contact sync error:", e);
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, worker: updated });
   } catch (err) {
     console.error("worker PUT error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
