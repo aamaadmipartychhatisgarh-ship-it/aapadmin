@@ -27,7 +27,7 @@ export default function WorkspacePage() {
 }
 
 function WorkspaceBody() {
-  const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], wrong_numbers: [], pool_count: 0, home_district: null, active_lock: null });
+  const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], pool_count: 0, home_district: null, active_lock: null });
   // Queue search / filters
   const [qSearch, setQSearch] = useState("");
   const [qDistrict, setQDistrict] = useState("");
@@ -64,11 +64,9 @@ function WorkspaceBody() {
   const [edit, setEdit] = useState(initialEdit());
   const [editSaving, setEditSaving] = useState(false);
   // Cascading location options for the edit form (zone → lok sabha; district →
-  // assembly → ward → booth).
+  // assembly). Block/Ward is a free-text field, not a cascade.
   const [editLokSabhas, setEditLokSabhas] = useState([]);
   const [editAssemblies, setEditAssemblies] = useState([]);
-  const [editWards, setEditWards] = useState([]);
-  const [editBooths, setEditBooths] = useState([]);
 
   useEffect(() => {
     // Apply this caller's standing assignment rules (reclaim stale + top up to
@@ -86,20 +84,11 @@ function WorkspaceBody() {
     const url = edit.zone_id ? `/api/locations?parent_id=${edit.zone_id}` : "/api/locations?type=lok_sabha";
     fetch(url).then((r) => r.json()).then((d) => setEditLokSabhas(d.locations || []));
   }, [edit.zone_id]);
-  // Assembly options follow the chosen district; ward follows assembly; booth
-  // follows ward — same hierarchy the admin geography uses.
+  // Assembly options follow the chosen district.
   useEffect(() => {
     if (!edit.district_id) { setEditAssemblies([]); return; }
     fetch(`/api/locations?parent_id=${edit.district_id}`).then((r) => r.json()).then((d) => setEditAssemblies(d.locations || []));
   }, [edit.district_id]);
-  useEffect(() => {
-    if (!edit.assembly_id) { setEditWards([]); return; }
-    fetch(`/api/locations?parent_id=${edit.assembly_id}`).then((r) => r.json()).then((d) => setEditWards(d.locations || []));
-  }, [edit.assembly_id]);
-  useEffect(() => {
-    if (!edit.ward_id) { setEditBooths([]); return; }
-    fetch(`/api/locations?parent_id=${edit.ward_id}`).then((r) => r.json()).then((d) => setEditBooths(d.locations || []));
-  }, [edit.ward_id]);
 
   // Restore active lock if the user reloaded mid-call
   useEffect(() => {
@@ -158,8 +147,7 @@ function WorkspaceBody() {
       lok_sabha_id: active.lok_sabha_id || "",
       district_id: active.district_id || "",
       assembly_id: active.assembly_id || "",
-      ward_id: active.ward_id || "",
-      booth_id: active.booth_id || "",
+      ward_name: active.ward_name || "",
     });
     setEditing(false);
   }, [active?.id]);
@@ -216,17 +204,6 @@ function WorkspaceBody() {
     setForm(initialForm());
     setElapsed(0);
     loadQueue();
-  }
-
-  // Restore a wrong-number contact back into the active queue.
-  async function restoreWrongNumber(contactId) {
-    const r = await fetch("/api/workspace/wrong-number", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contact_id: contactId }),
-    });
-    if (r.ok) { setMessage("Contact restored to your queue."); loadQueue(); }
-    else { const d = await r.json().catch(() => ({})); setError(d.message || "Could not restore contact."); }
   }
 
   async function submit() {
@@ -299,12 +276,11 @@ function WorkspaceBody() {
       }
       // Patch the active contact in place so the card reflects the new details.
       const districtName = districts.find((d) => String(d.id) === String(edit.district_id))?.name || (edit.district_id ? active.district_name : null);
-      const wardName = editWards.find((w) => String(w.id) === String(edit.ward_id))?.name || (edit.ward_id ? active.ward_name : null);
       setActive({
         ...active,
         ...edit,
         district_name: districtName,
-        ward_name: wardName,
+        ward_name: edit.ward_name || null,
         designation_id: edit.designation_id || null,
       });
       setForm({ ...form, person_name: edit.person_name, phone_number: edit.phone_number });
@@ -456,31 +432,6 @@ function WorkspaceBody() {
           </div>
         )}
 
-        {queue.wrong_numbers && queue.wrong_numbers.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
-              <X size={16} className="text-red-500" /> Wrong Numbers ({queue.wrong_numbers.length})
-            </h3>
-            <p className="text-[11px] text-gray-400 mb-2">Kept out of the calling queue. Restore one if the number turns out to be valid.</p>
-            <ul className="space-y-2 max-h-[220px] overflow-y-auto">
-              {queue.wrong_numbers.map((c) => (
-                <li key={c.id} className="p-3 rounded-lg border border-gray-100 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-medium text-gray-900 text-sm truncate">{c.person_name}</div>
-                    <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
-                  </div>
-                  <button
-                    onClick={() => restoreWrongNumber(c.id)}
-                    className="shrink-0 text-xs font-semibold text-[#164FA3] border border-blue-200 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg"
-                  >
-                    Restore
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         <ProgressPanel />
       </div>
 
@@ -590,7 +541,7 @@ function WorkspaceBody() {
                         <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">District</label>
                         <select
                           value={edit.district_id || ""}
-                          onChange={(e) => setEdit({ ...edit, district_id: e.target.value, assembly_id: "", ward_id: "", booth_id: "" })}
+                          onChange={(e) => setEdit({ ...edit, district_id: e.target.value, assembly_id: "", ward_name: "" })}
                           className={editSelectCls}
                         >
                           <option className="text-gray-900" value="">No district</option>
@@ -601,7 +552,7 @@ function WorkspaceBody() {
                         <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Assembly</label>
                         <select
                           value={edit.assembly_id || ""}
-                          onChange={(e) => setEdit({ ...edit, assembly_id: e.target.value, ward_id: "", booth_id: "" })}
+                          onChange={(e) => setEdit({ ...edit, assembly_id: e.target.value })}
                           disabled={!edit.district_id}
                           className={editSelectCls}
                         >
@@ -611,27 +562,13 @@ function WorkspaceBody() {
                       </div>
                       <div>
                         <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Block (Ward)</label>
-                        <select
-                          value={edit.ward_id || ""}
-                          onChange={(e) => setEdit({ ...edit, ward_id: e.target.value, booth_id: "" })}
-                          disabled={!edit.assembly_id}
-                          className={editSelectCls}
-                        >
-                          <option className="text-gray-900" value="">{edit.assembly_id ? "No block/ward" : "Pick assembly first"}</option>
-                          {editWards.map((w) => <option key={w.id} value={w.id} className="text-gray-900">{w.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Booth</label>
-                        <select
-                          value={edit.booth_id || ""}
-                          onChange={(e) => setEdit({ ...edit, booth_id: e.target.value })}
-                          disabled={!edit.ward_id}
-                          className={editSelectCls}
-                        >
-                          <option className="text-gray-900" value="">{edit.ward_id ? "No booth" : "Pick ward first"}</option>
-                          {editBooths.map((b) => <option key={b.id} value={b.id} className="text-gray-900">{b.name}</option>)}
-                        </select>
+                        <input
+                          type="text"
+                          value={edit.ward_name}
+                          onChange={(e) => setEdit({ ...edit, ward_name: e.target.value })}
+                          placeholder="Type block / ward name"
+                          className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-blue-200 text-sm outline-none focus:bg-white/20"
+                        />
                       </div>
                     </div>
                   </div>
@@ -950,7 +887,7 @@ function initialForm() {
 function initialEdit() {
   return {
     person_name: "", phone_number: "", address: "", designation_id: "",
-    zone_id: "", lok_sabha_id: "", district_id: "", assembly_id: "", ward_id: "", booth_id: "",
+    zone_id: "", lok_sabha_id: "", district_id: "", assembly_id: "", ward_name: "",
   };
 }
 

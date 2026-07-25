@@ -46,6 +46,31 @@ export async function PUT(req, { params }) {
       }
     }
     const data = await req.json();
+
+    // Block/Ward is entered as free text in My Workplace. Resolve the typed name
+    // to a `ward` location row (reuse an existing one under the same assembly,
+    // case-insensitively, or create it) and store its id in ward_id — so the
+    // value keeps displaying across Workers/Contacts/Reports, which read the
+    // ward via that id. Empty text clears the ward.
+    if ("ward_name" in data) {
+      const wn = typeof data.ward_name === "string" ? data.ward_name.trim() : "";
+      if (!wn) {
+        data.ward_id = null;
+      } else {
+        const asm = ("assembly_id" in data && data.assembly_id) ? data.assembly_id : null;
+        const found = await query(
+          "SELECT id FROM locations WHERE type = 'ward' AND LOWER(name) = LOWER(?) AND (parent_id <=> ?) LIMIT 1",
+          [wn, asm]
+        );
+        if (found[0]?.id) {
+          data.ward_id = found[0].id;
+        } else {
+          const res = await query("INSERT INTO locations (type, name, parent_id) VALUES ('ward', ?, ?)", [wn, asm]);
+          data.ward_id = res.insertId;
+        }
+      }
+    }
+
     // Descriptive + geographic details anyone with edit rights may change.
     const DETAIL_FIELDS = [
       "person_name", "phone_number", "address", "designation_id",

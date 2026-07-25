@@ -111,22 +111,9 @@ export async function GET(req) {
       [userId]
     );
 
-    // Wrong Numbers: contacts this caller marked as a wrong number. They stay
-    // out of the regular queue and live in their own list until manually
-    // restored. Only queried once the optional flag column exists.
-    let wrong_numbers = [];
-    if (hasWrong) {
-      wrong_numbers = await query(
-        `SELECT c.*, ld.name AS district_name
-           FROM contacts c
-           LEFT JOIN locations ld ON ld.id = c.district_id
-          WHERE c.assigned_to_user_id = ?
-            AND c.is_wrong_number = 1
-          ORDER BY c.id DESC
-          LIMIT 200`,
-        [userId]
-      );
-    }
+    // Wrong-number contacts are excluded from the caller's queue (via notWrong
+    // above) and are managed only by supervisors/admins in the dedicated Wrong
+    // Numbers module — callers no longer see or restore them here.
 
     const lockedRows = await query(
       `SELECT c.*, ld.name AS district_name, lw.name AS ward_name
@@ -161,7 +148,6 @@ export async function GET(req) {
       assigned,
       assigned_total,
       scheduled,
-      wrong_numbers,
       pool_count: poolCount,
       // territory label the workspace header shows — zone takes precedence.
       territory: me?.scope_zone_id
