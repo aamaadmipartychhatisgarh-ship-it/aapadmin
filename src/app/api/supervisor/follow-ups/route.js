@@ -2,6 +2,7 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { hasFollowUpTimeColumn } from "@/lib/contactExtras";
 
 export async function GET() {
   try {
@@ -9,10 +10,11 @@ export async function GET() {
     if (!session || !isSupervisor(session)) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
+    const hasFupTime = await hasFollowUpTimeColumn();
 
     const calls = await query(
       `SELECT
-         c.id, c.person_name, c.phone_number, c.remarks, c.follow_up_date,
+         c.id, c.person_name, c.phone_number, c.remarks, c.follow_up_date,${hasFupTime ? " c.follow_up_time," : ""}
          c.is_vip, c.called_at, c.sentiment,
          u.username AS agent_name,
          cs.name AS status_name

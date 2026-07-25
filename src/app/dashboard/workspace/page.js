@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Star, MessageSquare, Search } from "lucide-react";
+import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
 
@@ -219,6 +219,10 @@ function WorkspaceBody() {
 
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
+    if (form.follow_up_time && !form.follow_up_date) {
+      setError("Please select a Follow-up Date before choosing a Follow-up Time.");
+      return;
+    }
     // Sentiment and follow-up date are both optional. A follow-up date, when
     // set, implies a follow-up is required (the two are no longer coupled to a
     // separate checkbox).
@@ -249,7 +253,7 @@ function WorkspaceBody() {
       if (!r.ok) { setError(data.message || "Failed to save"); return; }
       const savedDuration = elapsed;
       const scheduledFor = form.is_follow_up_required && form.follow_up_date ? form.follow_up_date : null;
-      const followMsg = scheduledFor ? ` Reminder set for ${scheduledFor}.` : "";
+      const followMsg = scheduledFor ? ` Reminder set for ${scheduledFor}${form.follow_up_time ? ` at ${form.follow_up_time}` : ""}.` : "";
       // Reset the active state, then immediately auto-claim the next contact.
       setActive(null);
       setForm(initialForm());
@@ -460,7 +464,7 @@ function WorkspaceBody() {
                       {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712]" /> : null}
                     </div>
                     <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
-                    <div className="text-[11px] font-semibold text-[#164FA3] mt-1">Follow up on {c.follow_up_date?.slice(0, 10)} · tap to call back</div>
+                    <div className="text-[11px] font-semibold text-[#164FA3] mt-1">Follow up on {c.follow_up_date?.slice(0, 10)}{c.follow_up_time ? ` at ${String(c.follow_up_time).slice(0, 5)}` : ""} · tap to call back</div>
                   </button>
                 </li>
               ))}
@@ -719,7 +723,7 @@ function WorkspaceBody() {
                           <div className="text-xs text-gray-400 mt-1">
                             {h.duration_seconds != null && <span>{fmtTime(h.duration_seconds)} talk</span>}
                             {h.sentiment && <span> · {h.sentiment}</span>}
-                            {h.is_follow_up_required && h.follow_up_date && <span> · follow-up scheduled {h.follow_up_date.slice(0, 10)}</span>}
+                            {h.is_follow_up_required && h.follow_up_date && <span> · follow-up scheduled {h.follow_up_date.slice(0, 10)}{h.follow_up_time ? ` ${String(h.follow_up_time).slice(0, 5)}` : ""}</span>}
                           </div>
                         </div>
                       ))
@@ -759,22 +763,42 @@ function WorkspaceBody() {
                   </Field>
                 </div>
                 <div className="md:col-span-2 flex flex-wrap items-end gap-6">
+                  {/* Follow-up DATE picker */}
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Follow-up date (optional)</label>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Follow-up Date (optional)</label>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="date"
-                        value={form.follow_up_date}
-                        onChange={(e) => setForm({ ...form, follow_up_date: e.target.value, is_follow_up_required: !!e.target.value })}
-                        className="border border-gray-200 rounded px-3 py-1.5 text-sm"
-                      />
+                      <div className="flex items-center gap-2 border border-gray-200 rounded px-2.5 py-1.5 bg-white focus-within:ring-2 focus-within:ring-[#164FA3]">
+                        <Calendar size={15} className="text-gray-400 shrink-0" />
+                        <input
+                          type="date"
+                          value={form.follow_up_date}
+                          onChange={(e) => setForm({ ...form, follow_up_date: e.target.value, is_follow_up_required: !!e.target.value })}
+                          className="text-sm outline-none bg-transparent"
+                        />
+                      </div>
                       {form.follow_up_date && (
-                        <button type="button" onClick={() => setForm({ ...form, follow_up_date: "", is_follow_up_required: false })} className="text-xs text-gray-400 hover:text-gray-700 underline">
+                        <button type="button" onClick={() => setForm({ ...form, follow_up_date: "", follow_up_time: "", is_follow_up_required: false })} className="text-xs text-gray-400 hover:text-gray-700 underline">
                           clear
                         </button>
                       )}
                     </div>
                     <p className="text-[11px] text-gray-400 mt-1">Sets a reminder; leave blank if none needed.</p>
+                  </div>
+                  {/* Follow-up TIME picker (hour / minute / AM-PM via the native time input) */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Follow-up Time (optional)</label>
+                    <div className={`flex items-center gap-2 border border-gray-200 rounded px-2.5 py-1.5 bg-white focus-within:ring-2 focus-within:ring-[#164FA3] ${!form.follow_up_date ? "opacity-50" : ""}`}>
+                      <Clock size={15} className="text-gray-400 shrink-0" />
+                      <input
+                        type="time"
+                        value={form.follow_up_time}
+                        onChange={(e) => setForm({ ...form, follow_up_time: e.target.value })}
+                        disabled={!form.follow_up_date}
+                        title={form.follow_up_date ? "" : "Pick a date first"}
+                        className="text-sm outline-none bg-transparent disabled:cursor-not-allowed"
+                      />
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">Defaults to the day's reminder time if blank.</p>
                   </div>
                   <label className="flex items-center gap-2 text-sm font-medium text-gray-700 pb-1.5">
                     <input type="checkbox" checked={form.is_vip} onChange={(e) => setForm({ ...form, is_vip: e.target.checked })} />
@@ -945,6 +969,7 @@ function initialForm() {
     remarks: "",
     is_follow_up_required: false,
     follow_up_date: "",
+    follow_up_time: "",
     is_vip: false,
   };
 }

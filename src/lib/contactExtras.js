@@ -16,3 +16,16 @@ export async function hasWrongNumberColumn() {
   }
   return _wrongCol;
 }
+
+// Optional contacts.follow_up_time column (scripts/add-followup-time.mjs).
+let _fupTime;
+export async function hasFollowUpTimeColumn() {
+  if (_fupTime !== undefined) return _fupTime;
+  try {
+    const rows = await query("SHOW COLUMNS FROM contacts LIKE 'follow_up_time'");
+    _fupTime = rows.length > 0;
+  } catch {
+    _fupTime = false;
+  }
+  return _fupTime;
+}

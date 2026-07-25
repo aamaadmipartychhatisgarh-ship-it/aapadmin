@@ -4,8 +4,9 @@ import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildRulesOrMatch, zoneMatch } from "@/lib/assignmentRules";
-import { hasWrongNumberColumn } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
 import { geoFilter } from "@/lib/geoFilter";
+import { dueClause, laterClause } from "@/lib/followup";
 
 // Returns:
 //   assigned: contacts explicitly assigned to this caller, not yet completed
@@ -59,6 +60,10 @@ export async function GET(req) {
     // isn't marked completed still can't surface here. Feature-detected.
     const hasWrong = await hasWrongNumberColumn();
     const notWrong = hasWrong ? " AND (c.is_wrong_number = 0 OR c.is_wrong_number IS NULL)" : "";
+    // Reminders become due at their date + optional time (feature-detected).
+    const hasFupTime = await hasFollowUpTimeColumn();
+    const dueSql = dueClause("c", hasFupTime);
+    const laterSql = laterClause("c", hasFupTime);
 
     // Active queue: skip contacts whose follow-up date is still in the future.
     // They reappear on/after the scheduled date.
@@ -69,7 +74,7 @@ export async function GET(req) {
          FROM contacts c
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${notWrong}${filterSql}`,
+          AND ${dueSql}${notWrong}${filterSql}`,
       [userId, ...qParams]
     );
 
@@ -97,7 +102,7 @@ export async function GET(req) {
          LEFT JOIN workers w ON w.id = c.worker_id
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())${notWrong}${filterSql}
+          AND ${dueSql}${notWrong}${filterSql}
         ORDER BY (CASE WHEN (${daily.sql}) THEN 0 ELSE 1 END) ASC,
                  c.is_vip DESC,
                  c.follow_up_date IS NOT NULL DESC,
@@ -114,9 +119,8 @@ export async function GET(req) {
          LEFT JOIN locations ld ON ld.id = c.district_id
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND c.follow_up_date IS NOT NULL
-          AND c.follow_up_date > CURDATE()
-        ORDER BY c.follow_up_date ASC
+          AND ${laterSql}
+        ORDER BY c.follow_up_date ASC${hasFupTime ? ", c.follow_up_time ASC" : ""}
         LIMIT 50`,
       [userId]
     );

@@ -89,7 +89,7 @@ function Body() {
                     <td className="px-4 py-3 text-gray-600">{r.phone_number}</td>
                     <td className="px-4 py-3 text-gray-600">{r.agent_name || "—"}</td>
                     <td className={`px-4 py-3 ${overdue ? "text-red-600 font-bold" : "text-gray-700"}`}>
-                      {date || "—"}{overdue ? " (overdue)" : ""}
+                      {date || "—"}{r.follow_up_time ? ` ${String(r.follow_up_time).slice(0, 5)}` : ""}{overdue ? " (overdue)" : ""}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{r.sentiment || "—"}</td>
                     <td className="px-4 py-3 text-gray-600 max-w-xs truncate">{r.remarks || "—"}</td>

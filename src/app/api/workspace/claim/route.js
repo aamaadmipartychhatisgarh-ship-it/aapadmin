@@ -4,7 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { getPool } from "@/lib/db";
 import { zoneMatch } from "@/lib/assignmentRules";
-import { hasWrongNumberColumn } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
+import { dueClause } from "@/lib/followup";
 
 // Body: { contact_id?: number }
 // If contact_id given: claim that specific contact (must be assigned to user OR in pool with same district).
@@ -27,6 +28,8 @@ export async function POST(req) {
     // their own list until restored. Feature-detected so it's a no-op pre-migration.
     const notWrong = (await hasWrongNumberColumn())
       ? " AND (is_wrong_number = 0 OR is_wrong_number IS NULL)" : "";
+    // A reminder is due at its date + optional time (feature-detected).
+    const dueSql = dueClause("", await hasFollowUpTimeColumn());
 
     const pool = getPool();
     const conn = await pool.getConnection();
@@ -51,7 +54,7 @@ export async function POST(req) {
              AND (locked_by_user_id IS NULL OR locked_by_user_id = ? OR locked_at < NOW() - INTERVAL 10 MINUTE)
              AND (assigned_to_user_id = ?
                   OR (assigned_to_user_id IS NULL
-                       AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())))
+                       AND ${dueSql}))
            FOR UPDATE`,
           [explicitId, userId, userId]
         );
@@ -71,7 +74,7 @@ export async function POST(req) {
           `SELECT * FROM contacts
             WHERE is_completed = 0${notWrong}
               AND assigned_to_user_id = ?
-              AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
+              AND ${dueSql}
               AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
             ORDER BY is_vip DESC, follow_up_date IS NOT NULL DESC, follow_up_date ASC, id ASC
             LIMIT 1 FOR UPDATE`,
@@ -84,7 +87,7 @@ export async function POST(req) {
             `SELECT * FROM contacts
               WHERE is_completed = 0${notWrong}
                 AND assigned_to_user_id IS NULL
-                AND (follow_up_date IS NULL OR follow_up_date <= CURDATE())
+                AND ${dueSql}
                 AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
                 ${terr.where}
               ORDER BY id ASC

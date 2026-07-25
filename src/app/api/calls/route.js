@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { hasWrongNumberColumn } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
 
 export async function GET(req) {
   try {
@@ -145,6 +145,7 @@ export async function POST(req) {
       sentiment,
       is_follow_up_required,
       follow_up_date,
+      follow_up_time,
       is_vip,
       contact_id,
     } = data;
@@ -186,6 +187,13 @@ export async function POST(req) {
       ]
     );
 
+    // Persist the optional exact follow-up time on the call (feature-detected).
+    const hasFupTime = await hasFollowUpTimeColumn();
+    if (hasFupTime) {
+      await query("UPDATE calls SET follow_up_time = ? WHERE id = ?",
+        [is_follow_up_required && follow_up_time ? follow_up_time : null, res.insertId]);
+    }
+
     // If the call was tied to a contact: clear the lock, update completion / VIP /
     // follow-up state, and hand the contact back to the caller who scheduled the
     // follow-up so it lands in their queue on the right date.
@@ -217,6 +225,16 @@ export async function POST(req) {
           contact_id,
         ]
       );
+
+      // Mirror the exact follow-up time onto the contact (set with a new
+      // follow-up, cleared otherwise) so the queue can surface it at the right
+      // time. Feature-detected.
+      if (hasFupTime) {
+        await query(
+          "UPDATE contacts SET follow_up_time = CASE WHEN ? THEN ? ELSE NULL END WHERE id = ?",
+          [wantsFollowUp ? 1 : 0, follow_up_time || null, contact_id]
+        );
+      }
 
       // Wrong Number handling: flag the contact so it moves to the dedicated
       // Wrong Number list; any other outcome clears the flag. Only runs once the

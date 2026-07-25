@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { hasFollowUpTimeColumn } from "@/lib/contactExtras";
 
 export async function GET(req, { params }) {
   try {
@@ -10,10 +11,11 @@ export async function GET(req, { params }) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
+    const hasFupTime = await hasFollowUpTimeColumn();
 
     const rows = await query(
       `SELECT c.id, c.called_at, c.duration_seconds, c.sentiment, c.remarks,
-              c.is_follow_up_required, c.follow_up_date,
+              c.is_follow_up_required, c.follow_up_date,${hasFupTime ? " c.follow_up_time," : ""}
               cs.name AS status_name,
               u.username AS agent_name
          FROM calls c
