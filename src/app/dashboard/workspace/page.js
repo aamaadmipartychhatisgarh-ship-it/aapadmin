@@ -514,18 +514,9 @@ function WorkspaceBody() {
         {message && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex items-center gap-2"><CheckCircle2 size={18} />{message}</div>}
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3">{error}</div>}
 
-        {!active ? (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
-            <Phone size={48} className="text-gray-300 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Ready when you are</h2>
-            <p className="text-gray-500">Click <strong>Start Next Call</strong> to claim a contact and start the timer.</p>
-            <button onClick={() => setShowComplaint(true)} className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#164FA3] border border-blue-200 hover:bg-blue-50 px-4 py-2 rounded-xl">
-              <MessageSquare size={16} /> Log Complaint
-            </button>
-          </div>
-        ) : (
+        {active && (
           <>
-            {/* Contact card */}
+            {/* Contact information header (permanent while on a call) */}
             <div className="bg-[#164FA3] text-white rounded-2xl shadow-sm p-6">
               {!editing ? (
                 <div className="flex items-start justify-between gap-4">
@@ -702,7 +693,14 @@ function WorkspaceBody() {
                 )}
               </div>
             </div>
+          </>
+        )}
 
+        {/* Permanent Today's Task panel — always visible, reads from My Tasks */}
+        <TodaysTaskPanel onLogComplaint={() => setShowComplaint(true)} />
+
+        {active && (
+          <>
             {/* Tasks assigned on this contact */}
             {contactTasks.length > 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-emerald-200 p-4">
@@ -878,6 +876,107 @@ function WorkspaceBody() {
           onSaved={() => { setShowComplaint(false); setMessage("Complaint logged."); }}
         />
       )}
+    </div>
+  );
+}
+
+// The caller's current assigned task, read from My Tasks. Shows today's pending
+// task first, then today's in-progress, then the most recently assigned open
+// task. Auto-refreshes so a supervisor-assigned task appears without a reload.
+const PRIORITY_BADGE = {
+  urgent: "bg-red-100 text-red-700", high: "bg-orange-100 text-orange-700",
+  medium: "bg-amber-100 text-amber-700", low: "bg-gray-100 text-gray-600",
+};
+function TodaysTaskPanel({ onLogComplaint }) {
+  const [task, setTask] = useState(undefined); // undefined = loading, null = none
+  const [expanded, setExpanded] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    try {
+      const r = await fetch("/api/tasks?view=mine");
+      if (!r.ok) { setTask(null); return; }
+      const tasks = (await r.json()).tasks || [];
+      const today = new Date().toISOString().slice(0, 10);
+      const open = tasks.filter((t) => t.status === "pending" || t.status === "in_progress");
+      const todays = open.filter((t) => t.deadline && t.deadline.slice(0, 10) === today);
+      const featured =
+        todays.find((t) => t.status === "pending") ||
+        todays.find((t) => t.status === "in_progress") ||
+        [...open].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] ||
+        null;
+      setTask(featured);
+    } catch { setTask(null); }
+  }
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 25000);
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => { clearInterval(iv); window.removeEventListener("focus", onFocus); };
+  }, []);
+
+  async function setStatus(s) {
+    if (!task) return;
+    setBusy(true);
+    await fetch(`/api/tasks/${task.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: s }) }).catch(() => {});
+    await load();
+    setBusy(false);
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const deadlineLabel = (d) => {
+    if (!d) return "No deadline";
+    const day = d.slice(0, 10);
+    return day === today ? "Today" : new Date(day).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-gray-900 flex items-center gap-2"><ListChecks size={16} className="text-[#164FA3]" /> Today's Task</h3>
+        {task && <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${task.status === "in_progress" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{task.status.replace("_", " ")}</span>}
+      </div>
+
+      {task === undefined ? (
+        <div className="text-gray-400 text-sm py-4 text-center"><Loader2 className="inline animate-spin" /></div>
+      ) : task === null ? (
+        <div className="text-center py-6">
+          <CheckCircle2 size={32} className="mx-auto text-emerald-400 mb-2" />
+          <div className="font-semibold text-gray-800">No Task Assigned Today</div>
+          <p className="text-sm text-gray-500 mt-1">You&apos;re all caught up. New tasks assigned by your Supervisor will appear here automatically.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="text-lg font-bold text-gray-900">{task.title}</div>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <div><div className="text-gray-400 text-[11px] uppercase tracking-wide">Priority</div><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${PRIORITY_BADGE[task.priority] || "bg-gray-100 text-gray-600"}`}>{task.priority}</span></div>
+            <div><div className="text-gray-400 text-[11px] uppercase tracking-wide">Deadline</div><div className="text-sm font-medium text-gray-800">{deadlineLabel(task.deadline)}</div></div>
+            <div><div className="text-gray-400 text-[11px] uppercase tracking-wide">Assigned By</div><div className="text-sm font-medium text-gray-800">{task.created_by_name || "Supervisor"}</div></div>
+            <div><div className="text-gray-400 text-[11px] uppercase tracking-wide">Created</div><div className="text-sm font-medium text-gray-800">{task.created_at ? new Date(task.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "—"}</div></div>
+          </div>
+          {task.description && (
+            <div>
+              <div className="text-gray-400 text-[11px] uppercase tracking-wide mb-1">Description</div>
+              <div className={`text-sm text-gray-700 whitespace-pre-wrap ${expanded ? "" : "line-clamp-5"}`}>{task.description}</div>
+              {task.description.length > 160 && (
+                <button onClick={() => setExpanded(!expanded)} className="text-xs font-semibold text-[#164FA3] mt-1">{expanded ? "Show less" : "Read More"}</button>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2 pt-1">
+            <a href="/dashboard/tasks" className="text-xs font-semibold bg-[#164FA3] text-white px-3 py-1.5 rounded-lg hover:bg-blue-800">Open Task</a>
+            {task.status === "pending" && <button onClick={() => setStatus("in_progress")} disabled={busy} className="text-xs font-semibold border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50">Mark In Progress</button>}
+            {task.status !== "completed" && <button onClick={() => setStatus("completed")} disabled={busy} className="text-xs font-semibold border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50">Completed</button>}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 pt-3 border-t border-gray-100 text-center">
+        <button onClick={onLogComplaint} className="inline-flex items-center gap-2 text-sm font-semibold text-[#164FA3] hover:underline">
+          <MessageSquare size={15} /> Log Complaint
+        </button>
+      </div>
     </div>
   );
 }

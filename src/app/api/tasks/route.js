@@ -50,11 +50,13 @@ export async function GET(req) {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const tasks = await query(
-      `SELECT t.*, u.username AS assignee_name, tm.name AS team_name, ld.name AS district_name
+      `SELECT t.*, u.username AS assignee_name, tm.name AS team_name, ld.name AS district_name,
+              cu.username AS created_by_name
          FROM tasks t
          LEFT JOIN users u ON u.id = t.assigned_to_user_id
          LEFT JOIN teams tm ON tm.id = t.assigned_to_team_id
          LEFT JOIN locations ld ON ld.id = t.district_id
+         LEFT JOIN users cu ON cu.id = t.created_by_user_id
          ${whereSql}
          ORDER BY FIELD(t.status,'in_progress','pending','completed','cancelled'),
                   FIELD(t.priority,'urgent','high','medium','low'),
