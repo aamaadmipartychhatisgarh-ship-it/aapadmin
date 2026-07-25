@@ -5,6 +5,7 @@ import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildRulesOrMatch, zoneMatch } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn } from "@/lib/contactExtras";
+import { geoFilter } from "@/lib/geoFilter";
 
 // Returns:
 //   assigned: contacts explicitly assigned to this caller, not yet completed
@@ -26,12 +27,19 @@ export async function GET(req) {
     // Optional search / filters on the assigned queue.
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search");
-    const districtId = searchParams.get("district_id");
     const designationId = searchParams.get("designation_id");
     const qFilters = [];
     const qParams = [];
     if (search) { qFilters.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); qParams.push(`%${search}%`, `%${search}%`); }
-    if (districtId) { qFilters.push("c.district_id = ?"); qParams.push(districtId); }
+    // Hierarchical geography filters: Zone → Lok Sabha → District → Assembly.
+    const geo = geoFilter("c", {
+      zone_id: searchParams.get("zone_id"),
+      lok_sabha_id: searchParams.get("lok_sabha_id"),
+      district_id: searchParams.get("district_id"),
+      assembly_id: searchParams.get("assembly_id"),
+    });
+    qFilters.push(...geo.clauses);
+    qParams.push(...geo.params);
     if (designationId) { qFilters.push("c.designation_id = ?"); qParams.push(designationId); }
     const filterSql = qFilters.length ? " AND " + qFilters.join(" AND ") : "";
 

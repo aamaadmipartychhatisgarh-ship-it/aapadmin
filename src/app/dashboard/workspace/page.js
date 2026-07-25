@@ -28,15 +28,20 @@ export default function WorkspacePage() {
 
 function WorkspaceBody() {
   const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], pool_count: 0, home_district: null, active_lock: null });
-  // Queue search / filters
+  // Queue search / hierarchical geography + designation filters.
   const [qSearch, setQSearch] = useState("");
+  const [qZone, setQZone] = useState("");
+  const [qLokSabha, setQLokSabha] = useState("");
   const [qDistrict, setQDistrict] = useState("");
+  const [qAssembly, setQAssembly] = useState("");
   const [qDesignation, setQDesignation] = useState("");
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [statuses, setStatuses] = useState([]);
   const [zones, setZones] = useState([]);
+  const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState([]);
+  const [assemblies, setAssemblies] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -75,7 +80,9 @@ function WorkspaceBody() {
     fetch("/api/workspace/topup", { method: "POST" }).catch(() => {}).finally(() => loadQueue());
     fetch("/api/statuses").then((r) => r.json()).then((d) => setStatuses(d.statuses || []));
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
+    fetch("/api/locations?type=lok_sabha").then((r) => r.json()).then((d) => setLokSabhas(d.locations || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    fetch("/api/locations?type=assembly").then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
@@ -156,7 +163,10 @@ function WorkspaceBody() {
     setLoading(true);
     const params = new URLSearchParams();
     if (qSearch.trim()) params.set("search", qSearch.trim());
+    if (qZone) params.set("zone_id", qZone);
+    if (qLokSabha) params.set("lok_sabha_id", qLokSabha);
     if (qDistrict) params.set("district_id", qDistrict);
+    if (qAssembly) params.set("assembly_id", qAssembly);
     if (qDesignation) params.set("designation_id", qDesignation);
     const qs = params.toString();
     const r = await fetch(`/api/workspace/queue${qs ? `?${qs}` : ""}`);
@@ -170,7 +180,7 @@ function WorkspaceBody() {
     const t = setTimeout(() => loadQueue(), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qSearch, qDistrict, qDesignation]);
+  }, [qSearch, qZone, qLokSabha, qDistrict, qAssembly, qDesignation]);
 
   function startActive(contact, startedAtMs = Date.now()) {
     setActive({ ...contact, started_at: startedAtMs });
@@ -291,6 +301,19 @@ function WorkspaceBody() {
     }
   }
 
+  // Hierarchical filter options, cascaded from the location tree (parent_id).
+  const lsZone = {}; lokSabhas.forEach((l) => { lsZone[l.id] = l.parent_id; });
+  const distLS = {}; districts.forEach((d) => { distLS[d.id] = d.parent_id; });
+  const eq = (a, b) => String(a) === String(b);
+  const lokSabhaOptions = qZone ? lokSabhas.filter((l) => eq(l.parent_id, qZone)) : lokSabhas;
+  const districtOptions = qLokSabha
+    ? districts.filter((d) => eq(d.parent_id, qLokSabha))
+    : qZone ? districts.filter((d) => eq(lsZone[d.parent_id], qZone)) : districts;
+  const assemblyOptions = qDistrict
+    ? assemblies.filter((a) => eq(a.parent_id, qDistrict))
+    : qLokSabha ? assemblies.filter((a) => eq(distLS[a.parent_id], qLokSabha))
+    : qZone ? assemblies.filter((a) => eq(lsZone[distLS[a.parent_id]], qZone)) : assemblies;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
       {/* LEFT: queue */}
@@ -349,11 +372,23 @@ function WorkspaceBody() {
               )}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <select value={qDistrict} onChange={(e) => setQDistrict(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
-                <option value="">All districts</option>
-                {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              <select value={qZone} onChange={(e) => { setQZone(e.target.value); setQLokSabha(""); setQDistrict(""); setQAssembly(""); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
+                <option value="">All zones</option>
+                {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
               </select>
-              <select value={qDesignation} onChange={(e) => setQDesignation(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
+              <select value={qLokSabha} onChange={(e) => { setQLokSabha(e.target.value); setQDistrict(""); setQAssembly(""); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
+                <option value="">All Lok Sabhas</option>
+                {lokSabhaOptions.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+              <select value={qDistrict} onChange={(e) => { setQDistrict(e.target.value); setQAssembly(""); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
+                <option value="">All districts</option>
+                {districtOptions.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+              <select value={qAssembly} onChange={(e) => setQAssembly(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
+                <option value="">All assemblies</option>
+                {assemblyOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <select value={qDesignation} onChange={(e) => setQDesignation(e.target.value)} className="col-span-2 h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
                 <option value="">All designations</option>
                 {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
               </select>
@@ -364,7 +399,7 @@ function WorkspaceBody() {
             <div className="text-gray-400 text-sm">Loading…</div>
           ) : queue.assigned.length === 0 ? (
             <div className="text-gray-400 text-sm">
-              {qSearch || qDistrict || qDesignation ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
+              {qSearch || qZone || qLokSabha || qDistrict || qAssembly || qDesignation ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
             </div>
           ) : (
             <>
