@@ -28,9 +28,10 @@ export default function WorkspacePage() {
 
 function WorkspaceBody() {
   const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], pool_count: 0, home_district: null, active_lock: null });
-  // Queue search / hierarchical geography + designation filters.
+  // Queue search / hierarchical geography + designation filters. Zone is not a
+  // dropdown — it's the caller's own zone (shown in Your Queue) and auto-scopes
+  // the Lok Sabha list.
   const [qSearch, setQSearch] = useState("");
-  const [qZone, setQZone] = useState("");
   const [qLokSabha, setQLokSabha] = useState("");
   const [qDistrict, setQDistrict] = useState("");
   const [qAssembly, setQAssembly] = useState("");
@@ -83,7 +84,7 @@ function WorkspaceBody() {
     fetch("/api/locations?type=lok_sabha").then((r) => r.json()).then((d) => setLokSabhas(d.locations || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/locations?type=assembly").then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
-    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(sortDesignations(d.designations || [])));
   }, []);
 
   // Lok Sabha options follow the chosen zone (all lok sabhas when no zone set).
@@ -163,7 +164,6 @@ function WorkspaceBody() {
     setLoading(true);
     const params = new URLSearchParams();
     if (qSearch.trim()) params.set("search", qSearch.trim());
-    if (qZone) params.set("zone_id", qZone);
     if (qLokSabha) params.set("lok_sabha_id", qLokSabha);
     if (qDistrict) params.set("district_id", qDistrict);
     if (qAssembly) params.set("assembly_id", qAssembly);
@@ -180,7 +180,7 @@ function WorkspaceBody() {
     const t = setTimeout(() => loadQueue(), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qSearch, qZone, qLokSabha, qDistrict, qAssembly, qDesignation]);
+  }, [qSearch, qLokSabha, qDistrict, qAssembly, qDesignation]);
 
   function startActive(contact, startedAtMs = Date.now()) {
     setActive({ ...contact, started_at: startedAtMs });
@@ -302,17 +302,19 @@ function WorkspaceBody() {
   }
 
   // Hierarchical filter options, cascaded from the location tree (parent_id).
+  // The zone is the caller's own zone (from Your Queue), applied automatically.
+  const callerZone = queue.zone_id;
   const lsZone = {}; lokSabhas.forEach((l) => { lsZone[l.id] = l.parent_id; });
   const distLS = {}; districts.forEach((d) => { distLS[d.id] = d.parent_id; });
   const eq = (a, b) => String(a) === String(b);
-  const lokSabhaOptions = qZone ? lokSabhas.filter((l) => eq(l.parent_id, qZone)) : lokSabhas;
+  const lokSabhaOptions = callerZone ? lokSabhas.filter((l) => eq(l.parent_id, callerZone)) : lokSabhas;
   const districtOptions = qLokSabha
     ? districts.filter((d) => eq(d.parent_id, qLokSabha))
-    : qZone ? districts.filter((d) => eq(lsZone[d.parent_id], qZone)) : districts;
+    : callerZone ? districts.filter((d) => eq(lsZone[d.parent_id], callerZone)) : districts;
   const assemblyOptions = qDistrict
     ? assemblies.filter((a) => eq(a.parent_id, qDistrict))
     : qLokSabha ? assemblies.filter((a) => eq(distLS[a.parent_id], qLokSabha))
-    : qZone ? assemblies.filter((a) => eq(lsZone[distLS[a.parent_id]], qZone)) : assemblies;
+    : callerZone ? assemblies.filter((a) => eq(lsZone[distLS[a.parent_id]], callerZone)) : assemblies;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
@@ -372,10 +374,6 @@ function WorkspaceBody() {
               )}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <select value={qZone} onChange={(e) => { setQZone(e.target.value); setQLokSabha(""); setQDistrict(""); setQAssembly(""); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
-                <option value="">All zones</option>
-                {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
-              </select>
               <select value={qLokSabha} onChange={(e) => { setQLokSabha(e.target.value); setQDistrict(""); setQAssembly(""); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
                 <option value="">All Lok Sabhas</option>
                 {lokSabhaOptions.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -388,9 +386,10 @@ function WorkspaceBody() {
                 <option value="">All assemblies</option>
                 {assemblyOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
-              <select value={qDesignation} onChange={(e) => setQDesignation(e.target.value)} className="col-span-2 h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
+              <select value={qDesignation} onChange={(e) => setQDesignation(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
                 <option value="">All designations</option>
                 {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
+                <option value="none">No Designation</option>
               </select>
             </div>
           </div>
@@ -399,7 +398,7 @@ function WorkspaceBody() {
             <div className="text-gray-400 text-sm">Loading…</div>
           ) : queue.assigned.length === 0 ? (
             <div className="text-gray-400 text-sm">
-              {qSearch || qZone || qLokSabha || qDistrict || qAssembly || qDesignation ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
+              {qSearch || qLokSabha || qDistrict || qAssembly || qDesignation ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
             </div>
           ) : (
             <>
@@ -903,6 +902,26 @@ function ComplaintModal({ contact, districts, onClose, onSaved }) {
       </div>
     </div>
   );
+}
+
+// Order designations by organizational level (State → Lok Sabha → District →
+// Vidhan Sabha → Block → Ward → Booth → Member → Volunteer → others). Stable, so
+// the party sub-order within a level (as returned by the API) is preserved.
+function designationRank(name) {
+  const n = (name || "").toLowerCase();
+  if (/\bstate\b|rajya|pradesh/.test(n)) return 0;
+  if (/loksabha|lok\s*sabha/.test(n)) return 1;
+  if (/district|zila|jila/.test(n)) return 2;
+  if (/vidhan\s*sabha|vidhansabha|vidhansbha/.test(n)) return 3;
+  if (/block/.test(n)) return 4;
+  if (/ward/.test(n)) return 5;
+  if (/booth/.test(n)) return 6;
+  if (/member/.test(n)) return 7;
+  if (/volunteer|karyakarta/.test(n)) return 8;
+  return 9;
+}
+function sortDesignations(list) {
+  return [...list].sort((a, b) => designationRank(a.name) - designationRank(b.name));
 }
 
 function initialForm() {

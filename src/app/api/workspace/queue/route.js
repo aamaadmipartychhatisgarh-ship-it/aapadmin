@@ -40,7 +40,8 @@ export async function GET(req) {
     });
     qFilters.push(...geo.clauses);
     qParams.push(...geo.params);
-    if (designationId) { qFilters.push("c.designation_id = ?"); qParams.push(designationId); }
+    if (designationId === "none") { qFilters.push("c.designation_id IS NULL"); }
+    else if (designationId) { qFilters.push("c.designation_id = ?"); qParams.push(designationId); }
     const filterSql = qFilters.length ? " AND " + qFilters.join(" AND ") : "";
 
     const [me] = await query(
@@ -164,6 +165,9 @@ export async function GET(req) {
         ? { type: "district", name: me.home_district_name }
         : null,
       home_district: me?.home_district_id ? { id: me.home_district_id, name: me.home_district_name } : null,
+      // The caller's zone — used to auto-scope the Lok Sabha filter on the client.
+      zone_id: me?.scope_zone_id ?? null,
+      zone_name: me?.scope_zone_name ?? null,
       active_lock: lockedRows[0] || null,
     });
   } catch (err) {
