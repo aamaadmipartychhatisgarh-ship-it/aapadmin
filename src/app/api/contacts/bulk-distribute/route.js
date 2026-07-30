@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, normalizeRole, ROLES, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { contactsHaveAssignedAt } from "@/lib/assignmentRules";
+import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 
 // Distribute contacts matching the given filters across MULTIPLE callers.
 //
@@ -99,6 +99,7 @@ export async function POST(req) {
     // One UPDATE per caller (bulk by id list). Stamp assigned_at when available
     // so stale-reclaim knows how long each contact has been held.
     const stampAssignedAt = await contactsHaveAssignedAt();
+    const stampAssignedBy = await contactsHaveAssignedBy();
     let assigned = 0;
     const perCounts = {};
     for (const c of callers) {
@@ -106,11 +107,12 @@ export async function POST(req) {
       perCounts[c.username] = ids.length;
       if (ids.length === 0) continue;
       const ph = ids.map(() => "?").join(",");
-      // Clear any lock so a reassigned contact leaves the previous caller's queue.
+      // Clear any lock so a reassigned contact leaves the previous caller's queue,
+      // and record WHO assigned it (for the caller's "Assigned by" line).
       await query(
-        `UPDATE contacts SET assigned_to_user_id = ?${stampAssignedAt ? ", assigned_at = NOW()" : ""},
+        `UPDATE contacts SET assigned_to_user_id = ?${stampAssignedAt ? ", assigned_at = NOW()" : ""}${stampAssignedBy ? ", assigned_by_user_id = ?" : ""},
                 locked_by_user_id = NULL, locked_at = NULL WHERE id IN (${ph})`,
-        [c.id, ...ids]
+        stampAssignedBy ? [c.id, session.user.id, ...ids] : [c.id, ...ids]
       );
       assigned += ids.length;
     }

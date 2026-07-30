@@ -3,11 +3,24 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus } from "lucide-react";
+import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
 import { MultiSelect } from "@/components/MultiSelect";
 import { compressSquareImage } from "@/lib/imageCompress";
+
+// Friendly labels for who assigned a contact.
+const ROLE_LABELS = { super_admin: "Super Admin", supervisor: "Supervisor", caller: "Caller" };
+const roleLabel = (r) => ROLE_LABELS[r] || (r ? String(r).replace(/_/g, " ") : "");
+// "30 Jul 2026 • 10:45 AM" in the application timezone (Asia/Kolkata).
+function fmtAssigned(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  const date = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }).format(d);
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true }).format(d);
+  return `${date} • ${time}`;
+}
 
 export default function WorkspacePage() {
   const { data: session, status } = useSession();
@@ -485,6 +498,16 @@ function WorkspaceBody() {
                         {c.attempts > 0 ? <span className="ml-1 text-[10px] font-bold text-gray-400">×{c.attempts}</span> : null}
                       </div>
                       <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
+                      {c.assigned_by_name && (
+                        <div className="mt-1 flex items-start gap-1 text-[11px] text-gray-400 leading-tight">
+                          <UserRound size={12} className="shrink-0 mt-px" />
+                          <span className="min-w-0">
+                            Assigned by: <span className="text-gray-500 font-medium">{c.assigned_by_name}</span>
+                            {c.assigned_by_role ? ` (${roleLabel(c.assigned_by_role)})` : ""}
+                            {c.assigned_at ? <><br />{fmtAssigned(c.assigned_at)}</> : null}
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <ChevronRight size={16} className="text-gray-400" />
                   </button>

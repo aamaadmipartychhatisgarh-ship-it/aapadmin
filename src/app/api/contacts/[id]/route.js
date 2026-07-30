@@ -91,6 +91,12 @@ export async function PUT(req, { params }) {
     if (admin && "assigned_to_user_id" in data && existingColumns.has("assigned_at")) {
       sets.push(data.assigned_to_user_id ? "assigned_at = NOW()" : "assigned_at = NULL");
     }
+    // Record WHO assigned it (for the caller's "Assigned by" line); cleared when
+    // the contact returns to the pool.
+    if (admin && "assigned_to_user_id" in data && existingColumns.has("assigned_by_user_id")) {
+      if (data.assigned_to_user_id) { sets.push("assigned_by_user_id = ?"); vals.push(session.user.id); }
+      else { sets.push("assigned_by_user_id = NULL"); }
+    }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
 
     // Apply the contact edit and mirror it onto the linked worker (matched by the

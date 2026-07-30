@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { buildRulesOrMatch, zoneMatch } from "@/lib/assignmentRules";
+import { buildRulesOrMatch, zoneMatch, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
 import { geoFilter, zoneScope } from "@/lib/geoFilter";
 import { dueClause, laterClause } from "@/lib/followup";
@@ -117,14 +117,25 @@ export async function GET(req) {
       if (e.code !== "ER_NO_SUCH_TABLE") throw e; // migration not run yet → no daily flag
     }
 
+    // Who assigned each contact (supervisor / super admin) for the caller's
+    // "Assigned by" line — only when the column exists (feature-detected).
+    const hasAssignedBy = await contactsHaveAssignedBy();
+    const assignedBySelect = hasAssignedBy
+      ? ", ab.username AS assigned_by_name, ab.role AS assigned_by_role"
+      : "";
+    const assignedByJoin = hasAssignedBy
+      ? "LEFT JOIN users ab ON ab.id = c.assigned_by_user_id"
+      : "";
+
     const assigned = await query(
       `SELECT c.*, ld.name AS district_name, lw.name AS ward_name, w.photo_url AS photo_url,
               (SELECT COUNT(*) FROM calls WHERE contact_id = c.id) AS attempts,
-              (CASE WHEN (${daily.sql}) THEN 1 ELSE 0 END) AS is_daily
+              (CASE WHEN (${daily.sql}) THEN 1 ELSE 0 END) AS is_daily${assignedBySelect}
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
          LEFT JOIN workers w ON w.id = c.worker_id
+         ${assignedByJoin}
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
           AND ${dueSql}${notWrong}${filterSql}

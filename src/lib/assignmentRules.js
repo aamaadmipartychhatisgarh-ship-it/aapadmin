@@ -20,6 +20,19 @@ export async function contactsHaveAssignedAt() {
   return assignedAtPromise;
 }
 
+// Whether contacts.assigned_by_user_id exists yet (added by add-assigned-by).
+// Cached like contactsHaveAssignedAt so we don't re-query information_schema.
+let assignedByPromise;
+export async function contactsHaveAssignedBy() {
+  if (!assignedByPromise) {
+    assignedByPromise = query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts' AND COLUMN_NAME = 'assigned_by_user_id'`
+    ).then((r) => Number(r[0]?.n || 0) > 0).catch(() => { assignedByPromise = undefined; return false; });
+  }
+  return assignedByPromise;
+}
+
 export function parseIds(csv) {
   if (!csv) return [];
   return [...new Set(String(csv).split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { isAdmin, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 
 // Parse a "1,2,3" style query value into a de-duped list of positive integers.
 function idList(raw) {
@@ -147,10 +148,17 @@ export async function POST(req) {
     if (!person_name || !phone_number) {
       return NextResponse.json({ message: "Name and phone are required" }, { status: 400 });
     }
+    // Record assignment metadata (who/when) when the new contact is created
+    // already assigned to a caller, so their "Assigned by" line has data.
+    const cols = ["person_name", "phone_number", "address", "designation_id", "district_id", "ward_id", "booth_id", "assigned_to_user_id"];
+    const vals = [person_name, phone_number, address || null, designation_id || null, district_id || null, ward_id || null, booth_id || null, assigned_to_user_id || null];
+    if (assigned_to_user_id) {
+      if (await contactsHaveAssignedAt()) { cols.push("assigned_at"); vals.push(new Date()); }
+      if (await contactsHaveAssignedBy()) { cols.push("assigned_by_user_id"); vals.push(session.user.id); }
+    }
     const res = await query(
-      `INSERT INTO contacts (person_name, phone_number, address, designation_id, district_id, ward_id, booth_id, assigned_to_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [person_name, phone_number, address || null, designation_id || null, district_id || null, ward_id || null, booth_id || null, assigned_to_user_id || null]
+      `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
+      vals
     );
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {
