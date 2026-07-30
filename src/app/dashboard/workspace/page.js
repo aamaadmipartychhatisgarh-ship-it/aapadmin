@@ -65,6 +65,8 @@ function WorkspaceBody() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  // Bumped after each logged call so "Your Progress" refetches its outcome counts.
+  const [progressKey, setProgressKey] = useState(0);
 
   const [form, setForm] = useState(initialForm());
   const [elapsed, setElapsed] = useState(0);
@@ -290,6 +292,7 @@ function WorkspaceBody() {
       });
       const data = await r.json();
       if (!r.ok) { setError(data.message || "Failed to save"); return; }
+      setProgressKey((k) => k + 1); // refresh outcome progress
       const savedDuration = elapsed;
       const scheduledFor = form.is_follow_up_required && form.follow_up_date ? form.follow_up_date : null;
       const followMsg = scheduledFor ? ` Reminder set for ${scheduledFor}${form.follow_up_time ? ` at ${form.follow_up_time}` : ""}.` : "";
@@ -536,7 +539,7 @@ function WorkspaceBody() {
           </div>
         )}
 
-        <ProgressPanel />
+        <ProgressPanel refreshKey={progressKey} />
       </div>
 
       {/* RIGHT: active call */}
@@ -1013,58 +1016,72 @@ function TodaysTaskPanel({ onLogComplaint }) {
   );
 }
 
-// Calling progress: per-day counts of calls / contacts worked, with a date
-// filter, so a caller can see what they did on each date and resume.
-function ProgressPanel() {
-  const iso = (d) => d.toISOString().slice(0, 10);
-  const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
-  const [from, setFrom] = useState(daysAgo(6));
-  const [to, setTo] = useState(iso(new Date()));
-  const [data, setData] = useState({ days: [], total_calls: 0 });
+// Today's calling progress grouped by call OUTCOME (not by date). Each row shows
+// the status, a colored progress bar (count ÷ total), and the live count. Counts
+// come from a single aggregated query and refresh whenever a call is logged
+// (refreshKey bumps). Follows the caller's day in the application timezone.
+const OUTCOME_ROWS = [
+  { key: "connected", label: "Phone Picked", color: "#10B981" },
+  { key: "no_answer", label: "Not Picked", color: "#3B82F6" },
+  { key: "busy", label: "Busy", color: "#8B5CF6" },
+  { key: "switched_off", label: "Switched Off", color: "#0EA5E9" },
+  { key: "wrong_number", label: "Wrong Number", color: "#6B7280" },
+  { key: "rejected", label: "Rude / Rejected", color: "#EF4444" },
+  { key: "follow_up", label: "Follow-up", color: "#FCB712" },
+];
+
+function ProgressPanel({ refreshKey = 0 }) {
+  const [data, setData] = useState({ total_calls: 0, outcomes: {} });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    const p = new URLSearchParams();
-    if (from) p.set("date_from", from);
-    if (to) p.set("date_to", to);
-    fetch(`/api/workspace/progress?${p}`)
+    fetch(`/api/workspace/progress`)
       .then((r) => r.json())
-      .then((d) => setData({ days: d.days || [], total_calls: d.total_calls || 0 }))
+      .then((d) => setData({ total_calls: d.total_calls || 0, outcomes: d.outcomes || {} }))
       .finally(() => setLoading(false));
-  }, [from, to]);
+  }, [refreshKey]);
 
-  const maxCalls = Math.max(1, ...data.days.map((d) => Number(d.calls) || 0));
+  const total = Number(data.total_calls) || 0;
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-      <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
-        <History size={16} /> Your Progress
-      </h3>
-      <div className="flex items-center gap-2 mb-3 text-xs">
-        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 px-2 rounded-lg border border-gray-200 flex-1 min-w-0" />
-        <span className="text-gray-400">→</span>
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 px-2 rounded-lg border border-gray-200 flex-1 min-w-0" />
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+          <History size={16} /> Your Progress
+        </h3>
+        <span className="text-xs text-gray-500">Today</span>
       </div>
-      <div className="text-xs text-gray-500 mb-2">{data.total_calls} calls in range</div>
+
       {loading ? (
         <div className="text-gray-400 text-sm">Loading…</div>
-      ) : data.days.length === 0 ? (
-        <div className="text-gray-400 text-sm">No calls logged in this range.</div>
+      ) : total === 0 ? (
+        <div className="text-gray-400 text-sm py-2">No progress available for selected period.</div>
       ) : (
-        <ul className="space-y-1.5 max-h-[220px] overflow-y-auto">
-          {data.days.map((d) => (
-            <li key={d.day} className="flex items-center gap-2 text-sm">
-              <span className="w-24 shrink-0 text-gray-600">{new Date(d.day).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</span>
-              <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
-                <div className="bg-[#164FA3] h-full rounded-full" style={{ width: `${(Number(d.calls) / maxCalls) * 100}%` }} />
-              </div>
-              <span className="w-16 shrink-0 text-right font-semibold text-gray-900">{d.calls}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="text-sm font-semibold text-gray-900 mb-3">
+            Total Calls : <span className="text-[#164FA3]">{total.toLocaleString()}</span>
+          </div>
+          <ul className="space-y-2.5">
+            {OUTCOME_ROWS.map((row) => {
+              const count = Number(data.outcomes[row.key]) || 0;
+              const pct = total > 0 ? (count / total) * 100 : 0;
+              return (
+                <li key={row.key} className="text-sm">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-gray-600 text-xs font-medium">{row.label}</span>
+                    <span className="font-semibold text-gray-900 text-xs">{count.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: row.color }} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
-      <p className="text-[11px] text-gray-400 mt-2">Completed contacts don't reappear — start your next call to resume where you left off.</p>
+      <p className="text-[11px] text-gray-400 mt-3">Completed contacts don't reappear — start your next call to resume where you left off.</p>
     </div>
   );
 }
