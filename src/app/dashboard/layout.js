@@ -9,6 +9,7 @@ import Heartbeat from "@/components/Heartbeat";
 import InstallApp from "@/components/InstallApp";
 import TaskNotifier from "@/components/TaskNotifier";
 import SidebarNav from "@/components/SidebarNav";
+import SidebarGroupsNav from "@/components/SidebarGroupsNav";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 async function handleSignOut() {
@@ -238,8 +239,13 @@ export default function DashboardLayout({ children }) {
           <div className="text-base mt-2 font-medium">Chhattisgarh</div>
         </div>
 
-        {/* Navigation — customizable (drag/pin/favorite/search), per user */}
-        <SidebarNav items={navItems} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
+        {/* Navigation — admins get grouped accordion sections; other roles keep
+            the flat, customizable (drag/pin/favorite) list. Same routes/theme. */}
+        {isUserAdmin ? (
+          <SidebarGroupsNav items={navItems} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
+        ) : (
+          <SidebarNav items={navItems} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
+        )}
 
         {/* Bottom Area */}
         <div className="p-4 mt-auto space-y-1">
