@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
-import { isAdmin } from "@/lib/permissions";
+import Link from "next/link";
+import { Loader2, ArrowRight } from "lucide-react";
+import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import SummaryDashboard from "@/components/SummaryDashboard";
 
 // State Overview — the SAME dashboard as the Supervisor Overview (shared
@@ -38,11 +39,23 @@ export default function AdminDashboard() {
   };
   const title = scope ? (titleByLevel[scope.level] || "State Overview") : "State Overview";
 
+  // Cross-navigation to the Supervisor Overview — top-tier admins only (same
+  // gating and styling as before the redesign).
+  const supervisorView = [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN].includes(normalizeRole(session.user.role)) ? (
+    <Link
+      href="/dashboard/supervisor"
+      className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm"
+    >
+      Supervisor View <ArrowRight size={16} />
+    </Link>
+  ) : null;
+
   return (
     <SummaryDashboard
       summaryUrl="/api/admin/state-summary"
       exportUrl="/api/supervisor/export/summary"
       title={title}
+      headerAction={supervisorView}
     />
   );
 }

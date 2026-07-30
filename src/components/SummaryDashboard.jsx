@@ -70,6 +70,7 @@ export default function SummaryDashboard({
   exportUrl = "/api/supervisor/export/summary",
   title = "Supervisor Overview",
   subtitle = "Live calling performance",
+  headerAction = null, // optional top-right element (e.g. a cross-nav button)
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -143,8 +144,10 @@ export default function SummaryDashboard({
             {isToday && <span className="ml-2 inline-flex items-center gap-1 text-emerald-600 text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live</span>}
           </p>
         </div>
-        {/* Report date / range filter */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Right side: optional cross-nav action (top), then date filter + export */}
+        <div className="flex flex-col items-end gap-3">
+          {headerAction}
+          <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 h-10 shadow-sm">
             <Calendar size={16} className="text-[#164FA3]" />
             <select
@@ -172,6 +175,7 @@ export default function SummaryDashboard({
           >
             <Download size={16} /> Export PDF
           </a>
+          </div>
         </div>
       </div>
 
