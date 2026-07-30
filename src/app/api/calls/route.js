@@ -154,6 +154,13 @@ export async function POST(req) {
       return Response.json({ message: "Name, phone number, and status are required" }, { status: 400 });
     }
 
+    // Resolve the status name up front. Sentiment only applies to a connected
+    // ("Phone Picked") call — for every other status we store NULL, never a
+    // stale sentiment value.
+    const [statusRow] = await query("SELECT name FROM call_statuses WHERE id = ?", [status_id]);
+    const statusName = statusRow?.name;
+    const finalSentiment = statusName === "Phone Picked" ? (sentiment || null) : null;
+
     const res = await query(
       `INSERT INTO calls (
         destination, designation_id, person_name, address, phone_number,
@@ -179,7 +186,7 @@ export async function POST(req) {
         remarks || null,
         session.user.id,
         duration_seconds || null,
-        sentiment || null,
+        finalSentiment,
         is_follow_up_required ? 1 : 0,
         follow_up_date || null,
         is_vip ? 1 : 0,
@@ -198,8 +205,6 @@ export async function POST(req) {
     // follow-up state, and hand the contact back to the caller who scheduled the
     // follow-up so it lands in their queue on the right date.
     if (contact_id) {
-      const [statusRow] = await query("SELECT name FROM call_statuses WHERE id = ?", [status_id]);
-      const statusName = statusRow?.name;
       const finalStatuses = ["Phone Picked", "Wrong Number", "Rudely Behaved"];
       const isFinal = !!statusName && finalStatuses.includes(statusName);
       const isWrongNumber = statusName === "Wrong Number";

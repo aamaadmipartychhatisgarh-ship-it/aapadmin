@@ -254,8 +254,12 @@ function WorkspaceBody() {
     setSubmitting(true);
     setError("");
     try {
+      // Sentiment only applies to a connected ("Phone Picked") call — never save
+      // a stale sentiment for any other status.
+      const isPicked = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked";
       const payload = {
         ...form,
+        sentiment: isPicked ? (form.sentiment || null) : null,
         contact_id: active.id,
         designation_id: active.designation_id,
         zone_id: active.zone_id,
@@ -801,26 +805,43 @@ function WorkspaceBody() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Square size={16} /> Log Outcome</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Status *">
-                  <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value })} className={inputCls}>
-                    <option value="">Select…</option>
-                    {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </Field>
-                <Field label="Sentiment">
-                  <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls}>
-                    <option value="">—</option>
-                    <option value="positive">Positive</option>
-                    <option value="supporter">Supporter</option>
-                    <option value="neutral">Neutral</option>
-                    <option value="negative">Negative</option>
-                    <option value="opponent">Opponent</option>
-                    {/* "Not a Supporter" applies only when the call was actually picked. */}
-                    {(statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked" || form.sentiment === "not_supporter") && (
-                      <option value="not_supporter">Not a Supporter</option>
-                    )}
-                  </select>
-                </Field>
+                {/* Sentiment only makes sense for a connected call, so it shows
+                    only when the status is "Phone Picked". For every other
+                    status the field is hidden and Status takes the full width. */}
+                {(() => {
+                  const isPicked = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked";
+                  return (
+                    <>
+                      <Field label="Status *" className={isPicked ? "" : "md:col-span-2"}>
+                        <select
+                          value={form.status_id}
+                          onChange={(e) => {
+                            const picked = statuses.find((s) => String(s.id) === String(e.target.value))?.name === "Phone Picked";
+                            // Reset sentiment whenever the status is not Phone Picked.
+                            setForm({ ...form, status_id: e.target.value, sentiment: picked ? form.sentiment : "" });
+                          }}
+                          className={inputCls}
+                        >
+                          <option value="">Select…</option>
+                          {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      </Field>
+                      {isPicked && (
+                        <Field label="Sentiment">
+                          <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls}>
+                            <option value="">None</option>
+                            <option value="positive">Positive</option>
+                            <option value="supporter">Supporter</option>
+                            <option value="neutral">Neutral</option>
+                            <option value="negative">Negative</option>
+                            <option value="opponent">Opponent</option>
+                            <option value="not_supporter">Not a Supporter</option>
+                          </select>
+                        </Field>
+                      )}
+                    </>
+                  );
+                })()}
                 <div className="md:col-span-2">
                   <Field label="Remarks">
                     <textarea rows={3} value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={inputCls} placeholder="What did they say?" />
@@ -1159,9 +1180,9 @@ function fmtTime(s) {
 
 const inputCls = "w-full bg-gray-50 border border-gray-200 text-gray-900 h-10 rounded-lg px-3 focus:ring-2 focus:ring-[#FCB712] outline-none";
 
-function Field({ label, children }) {
+function Field({ label, children, className = "" }) {
   return (
-    <div>
+    <div className={className}>
       <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">{label}</label>
       {children}
     </div>

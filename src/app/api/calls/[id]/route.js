@@ -43,12 +43,17 @@ export async function PUT(req, { params }) {
 
     const { person_name, phone_number, status_id, remarks, sentiment, address } = data;
 
+    // Sentiment only applies to a connected ("Phone Picked") call — store NULL
+    // for any other status so a correction never leaves a stale sentiment.
+    const [statusRow] = await query("SELECT name FROM call_statuses WHERE id = ?", [status_id]);
+    const finalSentiment = statusRow?.name === "Phone Picked" ? (sentiment || null) : null;
+
     await query(
       `UPDATE calls
           SET person_name = ?, phone_number = ?, status_id = ?, remarks = ?,
               sentiment = ?, address = COALESCE(?, address)
         WHERE id = ?`,
-      [person_name, phone_number, status_id, remarks || null, sentiment || null, address ?? null, id]
+      [person_name, phone_number, status_id, remarks || null, finalSentiment, address ?? null, id]
     );
 
     // Keep the underlying contact in step so the correction sticks for future
