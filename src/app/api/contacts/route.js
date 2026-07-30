@@ -88,8 +88,11 @@ export async function GET(req) {
     where += " " + scope.where;
     params.push(...scope.params);
 
-    // Person-aware filtering resolves through the linked worker, so join it in.
-    const workerJoin = person.needsWorkerJoin ? "LEFT JOIN workers w ON w.id = c.worker_id" : "";
+    // Always join the linked worker: person-aware filtering resolves through it,
+    // AND the displayed designation must mirror Add Workers (the worker's full
+    // multi-role `position` text), which the contact's single designation_id
+    // often can't represent.
+    const workerJoin = "LEFT JOIN workers w ON w.id = c.worker_id";
 
     // Total matching the current filters (not capped by the list limit).
     const countRows = await query(`SELECT COUNT(*) AS total FROM contacts c ${workerJoin} ${where}`, params);
@@ -100,7 +103,9 @@ export async function GET(req) {
               u.username AS assigned_to_username,
               ld.name AS district_name,
               lw.name AS ward_name,
-              dsg.name AS designation_name
+              -- Mirror Add Workers: show the worker's position (source of truth)
+              -- when linked; fall back to the contact's own designation otherwise.
+              COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name
          FROM contacts c
          ${workerJoin}
          LEFT JOIN users u ON u.id = c.assigned_to_user_id
