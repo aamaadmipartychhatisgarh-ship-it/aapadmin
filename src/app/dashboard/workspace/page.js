@@ -932,6 +932,23 @@ const PRIORITY_BADGE = {
   urgent: "bg-red-100 text-red-700", high: "bg-orange-100 text-orange-700",
   medium: "bg-amber-100 text-amber-700", low: "bg-gray-100 text-gray-600",
 };
+// Task description: multi-line, wraps, preserves line breaks; clamps to 5 lines
+// with a Show More toggle only when the text is long. Renders nothing when empty.
+function TaskDescription({ text }) {
+  const [open, setOpen] = useState(false);
+  const longish = text.length > 200 || text.split(/\r?\n/).length > 5;
+  return (
+    <div className="mb-2">
+      <div className={`text-sm text-gray-700 whitespace-pre-wrap break-words ${open ? "" : "line-clamp-5"}`}>{text}</div>
+      {longish && (
+        <button onClick={() => setOpen(!open)} className="text-xs font-semibold text-[#164FA3] mt-0.5">
+          {open ? "Show Less" : "Show More"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function TodaysTaskPanel({ onLogComplaint }) {
   const [tasks, setTasks] = useState(undefined); // undefined = loading
   const [busy, setBusy] = useState({});
@@ -991,16 +1008,15 @@ function TodaysTaskPanel({ onLogComplaint }) {
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${PRIORITY_BADGE[t.priority] || "bg-gray-100 text-gray-600"}`}>{t.priority}</span>
               </div>
               <div className="text-[11px] text-gray-400 mt-0.5 mb-2">Deadline: {deadlineLabel(t.deadline)}{t.created_by_name ? ` · by ${t.created_by_name}` : ""}</div>
+              {/* Main description — always between the title/meta and the checklist. */}
+              {t.description && t.description.trim() && <TaskDescription text={t.description} />}
               {t.subtask_total > 0 ? (
                 <SubtaskChecklist compact subtasks={t.subtasks} onProgress={(done, total, status) => { if (status === "completed") setTimeout(load, 600); }} />
               ) : (
-                <>
-                  {t.description && <div className="text-sm text-gray-700 whitespace-pre-wrap mb-2">{t.description}</div>}
-                  <div className="flex flex-wrap gap-2">
-                    {t.status === "pending" && <button onClick={() => setStatus(t.id, "in_progress")} disabled={busy[t.id]} className="text-xs font-semibold border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50">Mark In Progress</button>}
-                    <button onClick={() => setStatus(t.id, "completed")} disabled={busy[t.id]} className="text-xs font-semibold border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50">Completed</button>
-                  </div>
-                </>
+                <div className="flex flex-wrap gap-2">
+                  {t.status === "pending" && <button onClick={() => setStatus(t.id, "in_progress")} disabled={busy[t.id]} className="text-xs font-semibold border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50">Mark In Progress</button>}
+                  <button onClick={() => setStatus(t.id, "completed")} disabled={busy[t.id]} className="text-xs font-semibold border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50">Completed</button>
+                </div>
               )}
             </div>
           ))}
