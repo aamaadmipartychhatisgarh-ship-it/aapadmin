@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import Heartbeat from "@/components/Heartbeat";
 import InstallApp from "@/components/InstallApp";
 import TaskNotifier from "@/components/TaskNotifier";
+import SidebarNav from "@/components/SidebarNav";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 async function handleSignOut() {
@@ -237,27 +238,8 @@ export default function DashboardLayout({ children }) {
           <div className="text-base mt-2 font-medium">Chhattisgarh</div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 py-4 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={`flex items-center gap-3 px-6 py-3 transition-all ${
-                  isActive 
-                    ? "bg-[#1d4c94] text-white border-l-4 border-white font-semibold" 
-                    : "text-blue-100 hover:text-white hover:bg-white/5 border-l-4 border-transparent font-medium"
-                }`}
-              >
-                <Icon size={20} className={isActive ? "text-white" : "text-blue-200"} />
-                <span className="flex-1">{item.name}</span>
-              </Link>
-            );
-          })}
-        </nav>
+        {/* Navigation — customizable (drag/pin/favorite/search), per user */}
+        <SidebarNav items={navItems} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
 
         {/* Bottom Area */}
         <div className="p-4 mt-auto space-y-1">
