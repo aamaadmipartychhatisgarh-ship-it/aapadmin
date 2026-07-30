@@ -78,12 +78,12 @@ export function MultiSelect({ options, value, onChange, allLabel = "All", classN
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search…"
-                className="w-full h-8 pl-7 pr-2 rounded-md border border-gray-200 text-xs outline-none focus:ring-2 focus:ring-[#164FA3]"
+                className="w-full h-8 pl-7 pr-2 rounded-md border border-gray-200 text-xs text-gray-900 placeholder:text-gray-400 outline-none focus:ring-2 focus:ring-[#164FA3]"
               />
             </div>
           </div>
           <div className="max-h-56 overflow-auto py-1">
-            <div onClick={toggleAll} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 font-medium">
+            <div onClick={toggleAll} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-900 cursor-pointer hover:bg-blue-50 font-medium">
               <span className={rowBox(allChecked)}>{allChecked && <Check size={12} strokeWidth={3} />}</span>
               <span className="truncate">{allLabel}</span>
             </div>
@@ -92,7 +92,7 @@ export function MultiSelect({ options, value, onChange, allLabel = "All", classN
             {filtered.map((o) => {
               const checked = sel.has(String(o.id));
               return (
-                <label key={o.id} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50">
+                <label key={o.id} className={`flex items-center gap-2 px-3 py-1.5 text-sm text-gray-900 cursor-pointer hover:bg-blue-50 ${checked ? "bg-blue-50" : ""}`}>
                   <input type="checkbox" className="hidden" checked={checked} onChange={() => toggle(o.id)} />
                   <span className={rowBox(checked)}>{checked && <Check size={12} strokeWidth={3} />}</span>
                   <span className="truncate">{o.name}</span>
