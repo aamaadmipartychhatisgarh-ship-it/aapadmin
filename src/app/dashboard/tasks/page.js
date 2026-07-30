@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
-import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search } from "lucide-react";
+import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown } from "lucide-react";
+import SubtaskChecklist from "@/components/SubtaskChecklist";
 
 const PRIORITY = {
   urgent: "bg-red-100 text-red-700", high: "bg-orange-100 text-orange-700",
@@ -39,6 +40,13 @@ function Body({ canManage }) {
   const [assignedTo, setAssignedTo] = useState("");
   const [districts, setDistricts] = useState([]);
   const [users, setUsers] = useState([]);
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleExpand = (id) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // Live-update a task's progress/status in place when its checklist changes.
+  const onSubProgress = (taskId, done, total, status) => setData((d) => ({
+    ...d,
+    tasks: d.tasks.map((t) => (t.id === taskId ? { ...t, subtask_done: done, subtask_total: total, status } : t)),
+  }));
 
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
@@ -152,12 +160,31 @@ function Body({ canManage }) {
               {data.tasks.map((t) => {
                 const overdue = t.deadline && t.deadline.slice(0, 10) < today && t.status !== "completed";
                 const next = STATUS_FLOW[STATUS_FLOW.indexOf(t.status) + 1];
+                const hasSubs = (t.subtask_total || 0) > 0;
+                const isOpen = expanded.has(t.id);
+                const pct = hasSubs ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0;
                 return (
-                  <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
+                  <Fragment key={t.id}>
+                  <tr className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{t.title}</div>
-                      {t.description && <div className="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{t.description}</div>}
-                      {t.district_name && <div className="text-xs text-gray-400">{t.district_name}</div>}
+                      <div className="flex items-start gap-2">
+                        {hasSubs && (
+                          <button onClick={() => toggleExpand(t.id)} className="mt-0.5 text-gray-400 hover:text-gray-700" aria-label="Toggle checklist">
+                            {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          </button>
+                        )}
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900">{t.title}</div>
+                          {t.description && <div className="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{t.description}</div>}
+                          {t.district_name && <div className="text-xs text-gray-400">{t.district_name}</div>}
+                          {hasSubs && (
+                            <div className="flex items-center gap-2 mt-1 max-w-[200px]">
+                              <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} /></div>
+                              <span className="text-[11px] font-semibold text-gray-500 shrink-0">{t.subtask_done}/{t.subtask_total}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${PRIORITY[t.priority]}`}>{t.priority}</span></td>
                     <td className="px-4 py-3 text-gray-600">{t.assignee_name || t.team_name || "Unassigned"}</td>
@@ -167,7 +194,12 @@ function Body({ canManage }) {
                     <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[t.status]}`}>{t.status.replace("_", " ")}</span></td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        {next && t.status !== "completed" ? (
+                        {/* Tasks WITH a checklist are auto-completed by ticking items — no manual status button. */}
+                        {hasSubs ? (
+                          <button onClick={() => toggleExpand(t.id)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200">
+                            {isOpen ? "Hide" : "Checklist"}
+                          </button>
+                        ) : next && t.status !== "completed" ? (
                           <button onClick={() => updateStatus(t.id, next)} className="text-xs px-2.5 py-1 rounded-lg bg-[#164FA3] text-white font-semibold hover:bg-blue-800">
                             Mark {next.replace("_", " ")}
                           </button>
@@ -178,6 +210,14 @@ function Body({ canManage }) {
                       </div>
                     </td>
                   </tr>
+                  {hasSubs && isOpen && (
+                    <tr className="bg-gray-50/60">
+                      <td colSpan={6} className="px-12 py-3">
+                        <SubtaskChecklist subtasks={t.subtasks} onProgress={(done, total, status) => onSubProgress(t.id, done, total, status)} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -208,6 +248,11 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     assigned_to_user_id: editing.assigned_to_user_id || "",
     assigned_to_team_id: editing.assigned_to_team_id || "",
   } : { title: "", description: "", priority: "medium", deadline: "", assigned_to_user_id: "", assigned_to_team_id: "" });
+  // Checklist builder — unlimited items. Keep ids on edit so completion state is
+  // preserved; new items have id null.
+  const [subtasks, setSubtasks] = useState(
+    editing?.subtasks?.length ? editing.subtasks.map((s) => ({ id: s.id, title: s.title })) : [{ id: null, title: "" }]
+  );
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -217,23 +262,49 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
   }, []);
 
+  const setSub = (i, title) => setSubtasks((s) => s.map((x, j) => (j === i ? { ...x, title } : x)));
+  const addSub = () => setSubtasks((s) => [...s, { id: null, title: "" }]);
+  const removeSub = (i) => setSubtasks((s) => (s.length === 1 ? [{ id: null, title: "" }] : s.filter((_, j) => j !== i)));
+
   async function save() {
     setSaving(true);
     const url = editing ? `/api/tasks/${editing.id}` : "/api/tasks";
     const method = editing ? "PUT" : "POST";
-    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    const cleanSubs = subtasks.map((s) => ({ id: s.id ?? null, title: s.title.trim() })).filter((s) => s.title);
+    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, subtasks: cleanSubs }) });
     if (r.ok) onSaved(); else setSaving(false);
   }
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-3">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-3 max-h-[90vh] overflow-auto">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-gray-900">{editing ? "Edit Task" : "Create Task"}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
         <input className={inp} placeholder="Task title *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
         <textarea className={inp} rows={2} placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+
+        {/* Sub-task builder — unlimited checklist items */}
+        <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Sub Tasks (checklist)</div>
+          {subtasks.map((s, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded-md border border-gray-300 shrink-0" />
+              <input
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
+                placeholder={`Checklist item ${i + 1}`}
+                value={s.title}
+                onChange={(e) => setSub(i, e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSub(); } }}
+              />
+              <button type="button" onClick={() => removeSub(i)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><X size={15} /></button>
+            </div>
+          ))}
+          <button type="button" onClick={addSub} className="inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline">
+            <Plus size={14} /> Add Another Task
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <select className={inp} value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
             <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>

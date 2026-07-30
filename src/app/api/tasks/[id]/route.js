@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { notifyTaskAssigned } from "@/lib/notify";
+import { recomputeTaskStatus, hasSubtasksTable } from "@/lib/tasks";
 
 export async function PUT(req, { params }) {
   try {
@@ -42,6 +43,24 @@ export async function PUT(req, { params }) {
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
     vals.push(id);
     await query(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`, vals);
+
+    // Reconcile the checklist (oversight edits only): keep items by id (update
+    // title/order, preserving completion), insert new ones, delete removed ones,
+    // then recompute the master status from the resulting checklist.
+    if (isOversight(session) && Array.isArray(d.subtasks) && (await hasSubtasksTable())) {
+      const incoming = d.subtasks
+        .map((s, i) => ({ id: s?.id ? Number(s.id) : null, title: String(s?.title || "").trim(), sort: i }))
+        .filter((s) => s.title);
+      const existing = await query("SELECT id FROM task_subtasks WHERE task_id = ?", [id]);
+      const keep = new Set(incoming.filter((s) => s.id).map((s) => s.id));
+      const toDelete = existing.map((r) => r.id).filter((eid) => !keep.has(eid));
+      if (toDelete.length) await query(`DELETE FROM task_subtasks WHERE id IN (${toDelete.map(() => "?").join(",")})`, toDelete);
+      for (const s of incoming) {
+        if (s.id) await query("UPDATE task_subtasks SET title = ?, sort_order = ? WHERE id = ? AND task_id = ?", [s.title, s.sort, s.id, id]);
+        else await query("INSERT INTO task_subtasks (task_id, title, sort_order) VALUES (?, ?, ?)", [id, s.title, s.sort]);
+      }
+      await recomputeTaskStatus(id);
+    }
 
     // If an oversight edit (re)assigned the task, alert the new assignee(s).
     if (isOversight(session) && (("assigned_to_user_id" in d && d.assigned_to_user_id) || ("assigned_to_team_id" in d && d.assigned_to_team_id))) {

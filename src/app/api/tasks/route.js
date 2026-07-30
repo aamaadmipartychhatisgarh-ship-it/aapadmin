@@ -6,6 +6,7 @@ import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
 import { notifyTaskAssigned } from "@/lib/notify";
+import { subtasksByTask, hasSubtasksTable } from "@/lib/tasks";
 
 // GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
 export async function GET(req) {
@@ -75,6 +76,14 @@ export async function GET(req) {
        FROM tasks t ${whereSql}`, params
     ).then((r) => [r]);
 
+    // Attach each master task's checklist (one query, grouped) + progress.
+    const subMap = await subtasksByTask(tasks.map((t) => t.id));
+    for (const t of tasks) {
+      t.subtasks = subMap[t.id] || [];
+      t.subtask_total = t.subtasks.length;
+      t.subtask_done = t.subtasks.filter((s) => s.is_completed).length;
+    }
+
     return NextResponse.json({ tasks, counts });
   } catch (err) {
     console.error("tasks GET error:", err);
@@ -96,6 +105,17 @@ export async function POST(req) {
        d.assigned_to_user_id || null, d.assigned_to_team_id || null, d.district_id || null,
        d.contact_id || null, session.user.id]
     );
+    // Persist the checklist (unlimited items). Accepts an array of strings or
+    // {title} objects; blank items are ignored.
+    const subs = Array.isArray(d.subtasks) ? d.subtasks : [];
+    const titles = subs.map((s) => (typeof s === "string" ? s : s?.title) || "").map((t) => t.trim()).filter(Boolean);
+    if (titles.length && (await hasSubtasksTable())) {
+      const values = titles.map(() => "(?, ?, ?)").join(", ");
+      const params = [];
+      titles.forEach((t, i) => params.push(res.insertId, t, i));
+      await query(`INSERT INTO task_subtasks (task_id, title, sort_order) VALUES ${values}`, params);
+    }
+
     // Alert the assigned caller(s). Don't notify the person who created it.
     if (d.assigned_to_user_id || d.assigned_to_team_id) {
       await notifyTaskAssigned({

@@ -7,6 +7,7 @@ import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
+import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { MultiSelect } from "@/components/MultiSelect";
 
 // Friendly labels for who assigned a contact.
@@ -932,25 +933,17 @@ const PRIORITY_BADGE = {
   medium: "bg-amber-100 text-amber-700", low: "bg-gray-100 text-gray-600",
 };
 function TodaysTaskPanel({ onLogComplaint }) {
-  const [task, setTask] = useState(undefined); // undefined = loading, null = none
-  const [expanded, setExpanded] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [tasks, setTasks] = useState(undefined); // undefined = loading
+  const [busy, setBusy] = useState({});
 
   async function load() {
     try {
       const r = await fetch("/api/tasks?view=mine");
-      if (!r.ok) { setTask(null); return; }
-      const tasks = (await r.json()).tasks || [];
-      const today = new Date().toISOString().slice(0, 10);
-      const open = tasks.filter((t) => t.status === "pending" || t.status === "in_progress");
-      const todays = open.filter((t) => t.deadline && t.deadline.slice(0, 10) === today);
-      const featured =
-        todays.find((t) => t.status === "pending") ||
-        todays.find((t) => t.status === "in_progress") ||
-        [...open].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] ||
-        null;
-      setTask(featured);
-    } catch { setTask(null); }
+      if (!r.ok) { setTasks([]); return; }
+      const all = (await r.json()).tasks || [];
+      // Show every OPEN master task assigned to this caller (all in one card).
+      setTasks(all.filter((t) => t.status === "pending" || t.status === "in_progress"));
+    } catch { setTasks([]); }
   }
   useEffect(() => {
     load();
@@ -960,12 +953,11 @@ function TodaysTaskPanel({ onLogComplaint }) {
     return () => { clearInterval(iv); window.removeEventListener("focus", onFocus); };
   }, []);
 
-  async function setStatus(s) {
-    if (!task) return;
-    setBusy(true);
-    await fetch(`/api/tasks/${task.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: s }) }).catch(() => {});
+  async function setStatus(id, s) {
+    setBusy((b) => ({ ...b, [id]: true }));
+    await fetch(`/api/tasks/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: s }) }).catch(() => {});
     await load();
-    setBusy(false);
+    setBusy((b) => ({ ...b, [id]: false }));
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -978,41 +970,40 @@ function TodaysTaskPanel({ onLogComplaint }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-bold text-gray-900 flex items-center gap-2"><ListChecks size={16} className="text-[#164FA3]" /> Today's Task</h3>
-        {task && <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${task.status === "in_progress" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{task.status.replace("_", " ")}</span>}
+        <h3 className="font-bold text-gray-900 flex items-center gap-2"><ListChecks size={16} className="text-[#164FA3]" /> Today's Tasks</h3>
+        {Array.isArray(tasks) && tasks.length > 0 && <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700">{tasks.length}</span>}
       </div>
 
-      {task === undefined ? (
+      {tasks === undefined ? (
         <div className="text-gray-400 text-sm py-4 text-center"><Loader2 className="inline animate-spin" /></div>
-      ) : task === null ? (
+      ) : tasks.length === 0 ? (
         <div className="text-center py-6">
           <CheckCircle2 size={32} className="mx-auto text-emerald-400 mb-2" />
-          <div className="font-semibold text-gray-800">No Task Assigned Today</div>
-          <p className="text-sm text-gray-500 mt-1">You&apos;re all caught up. New tasks assigned by your Supervisor will appear here automatically.</p>
+          <div className="font-semibold text-gray-800">No Tasks Assigned</div>
+          <p className="text-sm text-gray-500 mt-1">You&apos;re all caught up. New tasks from your Supervisor appear here automatically.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          <div className="text-lg font-bold text-gray-900">{task.title}</div>
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            <div><div className="text-gray-400 text-[11px] uppercase tracking-wide">Priority</div><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${PRIORITY_BADGE[task.priority] || "bg-gray-100 text-gray-600"}`}>{task.priority}</span></div>
-            <div><div className="text-gray-400 text-[11px] uppercase tracking-wide">Deadline</div><div className="text-sm font-medium text-gray-800">{deadlineLabel(task.deadline)}</div></div>
-            <div><div className="text-gray-400 text-[11px] uppercase tracking-wide">Assigned By</div><div className="text-sm font-medium text-gray-800">{task.created_by_name || "Supervisor"}</div></div>
-            <div><div className="text-gray-400 text-[11px] uppercase tracking-wide">Created</div><div className="text-sm font-medium text-gray-800">{task.created_at ? new Date(task.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "—"}</div></div>
-          </div>
-          {task.description && (
-            <div>
-              <div className="text-gray-400 text-[11px] uppercase tracking-wide mb-1">Description</div>
-              <div className={`text-sm text-gray-700 whitespace-pre-wrap ${expanded ? "" : "line-clamp-5"}`}>{task.description}</div>
-              {task.description.length > 160 && (
-                <button onClick={() => setExpanded(!expanded)} className="text-xs font-semibold text-[#164FA3] mt-1">{expanded ? "Show less" : "Read More"}</button>
+        <div className="space-y-3 max-h-[440px] overflow-y-auto">
+          {tasks.map((t) => (
+            <div key={t.id} className="border border-gray-100 rounded-xl p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-semibold text-gray-900 text-sm">{t.title}</div>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${PRIORITY_BADGE[t.priority] || "bg-gray-100 text-gray-600"}`}>{t.priority}</span>
+              </div>
+              <div className="text-[11px] text-gray-400 mt-0.5 mb-2">Deadline: {deadlineLabel(t.deadline)}{t.created_by_name ? ` · by ${t.created_by_name}` : ""}</div>
+              {t.subtask_total > 0 ? (
+                <SubtaskChecklist compact subtasks={t.subtasks} onProgress={(done, total, status) => { if (status === "completed") setTimeout(load, 600); }} />
+              ) : (
+                <>
+                  {t.description && <div className="text-sm text-gray-700 whitespace-pre-wrap mb-2">{t.description}</div>}
+                  <div className="flex flex-wrap gap-2">
+                    {t.status === "pending" && <button onClick={() => setStatus(t.id, "in_progress")} disabled={busy[t.id]} className="text-xs font-semibold border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50">Mark In Progress</button>}
+                    <button onClick={() => setStatus(t.id, "completed")} disabled={busy[t.id]} className="text-xs font-semibold border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50">Completed</button>
+                  </div>
+                </>
               )}
             </div>
-          )}
-          <div className="flex flex-wrap gap-2 pt-1">
-            <a href="/dashboard/tasks" className="text-xs font-semibold bg-[#164FA3] text-white px-3 py-1.5 rounded-lg hover:bg-blue-800">Open Task</a>
-            {task.status === "pending" && <button onClick={() => setStatus("in_progress")} disabled={busy} className="text-xs font-semibold border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50">Mark In Progress</button>}
-            {task.status !== "completed" && <button onClick={() => setStatus("completed")} disabled={busy} className="text-xs font-semibold border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50">Completed</button>}
-          </div>
+          ))}
         </div>
       )}
 
