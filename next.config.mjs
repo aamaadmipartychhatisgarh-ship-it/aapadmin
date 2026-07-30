@@ -10,6 +10,18 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
   },
+  // Serve runtime-uploaded images (profile photos) through a dynamic route that
+  // reads them off disk. `afterFiles` runs only when no static file matched, so
+  // build-time assets are still served directly and post-deploy uploads fall
+  // through to /api/media (which streams the file), fixing the 404s. Every stored
+  // `/uploads/...` URL keeps working — no DB change needed.
+  async rewrites() {
+    return {
+      afterFiles: [
+        { source: "/uploads/:file", destination: "/api/media/:file" },
+      ],
+    };
+  },
   async headers() {
     return [
       {
@@ -21,7 +33,7 @@ const nextConfig = {
         // markup that points at the CURRENT build's chunks. Hashed assets
         // under /_next/static keep their own immutable long cache (excluded),
         // and /api/ is excluded too — see the dedicated rule below.
-        source: "/((?!_next/|api/).*)",
+        source: "/((?!_next/|api/|uploads/).*)",
         headers: [
           { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
         ],
