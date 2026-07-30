@@ -54,7 +54,7 @@ export default function DashboardLayout({ children }) {
   const ADMIN_MENUS = {
     [ROLES.SUPER_ADMIN]: [
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Add Workers", href: "/dashboard/admin/workers", icon: UserCog },
+      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -77,7 +77,7 @@ export default function DashboardLayout({ children }) {
     [ROLES.STATE_ADMIN]: [
       // Same as super_admin except no Users management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Add Workers", href: "/dashboard/admin/workers", icon: UserCog },
+      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -99,7 +99,7 @@ export default function DashboardLayout({ children }) {
     [ROLES.ZONE_ADMIN]: [
       // Zone admins manage zone operations; no Users, Master Data, or Social Command (state-level)
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Add Workers", href: "/dashboard/admin/workers", icon: UserCog },
+      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -117,7 +117,7 @@ export default function DashboardLayout({ children }) {
     [ROLES.DISTRICT_ADMIN]: [
       // District admin: focused on field ops within one district
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Add Workers", href: "/dashboard/admin/workers", icon: UserCog },
+      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -132,7 +132,7 @@ export default function DashboardLayout({ children }) {
     [ROLES.ASSEMBLY_ADMIN]: [
       // Assembly admin: very narrow — booth & ward management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Add Workers", href: "/dashboard/admin/workers", icon: UserCog },
+      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -150,7 +150,7 @@ export default function DashboardLayout({ children }) {
       { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
       { name: "Caller Performance", href: "/dashboard/supervisor/callers", icon: TrendingUp },
       { name: "Live Status", href: "/dashboard/supervisor/live", icon: Activity },
-      { name: "Add Workers", href: "/dashboard/admin/workers", icon: UserCog },
+      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
       { name: "Map", href: "/dashboard/map", icon: Map },
