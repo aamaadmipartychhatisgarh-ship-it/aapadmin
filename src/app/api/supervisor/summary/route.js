@@ -32,12 +32,38 @@ export async function GET(req) {
 
     const tally = tallyBuckets(calls);
 
-    // Hourly buckets (today only if no range)
-    const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, calls: 0 }));
-    calls.forEach((c) => {
-      const h = new Date(c.called_at).getHours();
-      hourly[h].calls++;
-    });
+    // Hourly productivity — real-time, in the application timezone (Asia/Kolkata,
+    // a fixed +05:30, no DST). called_at is a UTC TIMESTAMP, so we CONVERT_TZ to
+    // IST for both bucketing and "today"/"now". Buckets are counted straight from
+    // the call records and NEVER go past the current hour (no future bars). With
+    // no date range the chart shows *today* (IST); a range buckets across it and
+    // is still capped at the current hour when the range reaches today.
+    const IST = "+05:30";
+    let hWhere = "WHERE 1=1";
+    const hParams = [];
+    if (date_from) { hWhere += ` AND DATE(CONVERT_TZ(c.called_at,'+00:00','${IST}')) >= ?`; hParams.push(date_from); }
+    if (date_to)   { hWhere += ` AND DATE(CONVERT_TZ(c.called_at,'+00:00','${IST}')) <= ?`; hParams.push(date_to); }
+    if (!date_from && !date_to) {
+      hWhere += ` AND DATE(CONVERT_TZ(c.called_at,'+00:00','${IST}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}'))`;
+    }
+    const hourRows = await query(
+      `SELECT HOUR(CONVERT_TZ(c.called_at,'+00:00','${IST}')) AS h, COUNT(*) AS n
+         FROM calls c ${hWhere} GROUP BY h`,
+      hParams
+    );
+    const [nowIST] = await query(
+      `SELECT HOUR(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}')) AS cur_hour,
+              DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}')) AS today`
+    );
+    const curHour = Number(nowIST?.cur_hour ?? 23);
+    // Cap at the current hour only when the view includes today; a purely
+    // historical range shows all 24 hours (they have all already elapsed).
+    const includesToday = !date_to || String(date_to) >= String(nowIST?.today ?? "");
+    const maxHour = includesToday ? curHour : 23;
+    const counts = {};
+    hourRows.forEach((r) => { counts[Number(r.h)] = Number(r.n); });
+    const hourly = [];
+    for (let h = 0; h <= maxHour; h++) hourly.push({ hour: h, calls: counts[h] || 0 });
 
     // Daily timeline
     const byDate = {};

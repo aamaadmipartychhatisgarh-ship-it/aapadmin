@@ -24,6 +24,15 @@ const BUCKET_COLORS = {
   other: "#A1A1AA",
 };
 
+// Hour label in 12-hour form (0 -> "12 AM", 13 -> "1 PM"). The hour values are
+// already in the application timezone (IST) from the API.
+function fmtHour(h) {
+  const hr = Number(h);
+  const period = hr < 12 ? "AM" : "PM";
+  const display = hr % 12 === 0 ? 12 : hr % 12;
+  return `${display} ${period}`;
+}
+
 export default function SupervisorOverview() {
   return (
     <SupervisorGuard>
@@ -37,10 +46,18 @@ function OverviewBody() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/supervisor/summary")
-      .then((r) => r.json())
-      .then((d) => setData(d))
-      .finally(() => setLoading(false));
+    let alive = true;
+    const load = () =>
+      fetch("/api/supervisor/summary")
+        .then((r) => r.json())
+        .then((d) => { if (alive) setData(d); })
+        .catch(() => {})
+        .finally(() => { if (alive) setLoading(false); });
+    load();
+    // Auto-refresh so the Hourly Productivity chart stays real-time and rolls
+    // over to the new hour as the day progresses.
+    const id = setInterval(load, 120000); // every 2 minutes
+    return () => { alive = false; clearInterval(id); };
   }, []);
 
   if (loading) {
@@ -133,7 +150,7 @@ function OverviewBody() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={hourly}>
                 <CartesianGrid stroke="#eee" strokeDasharray="5 5" vertical={false} />
-                <XAxis dataKey="hour" tick={{ fill: "#6B7280", fontSize: 12 }} tickFormatter={(h) => `${h}:00`} />
+                <XAxis dataKey="hour" tick={{ fill: "#6B7280", fontSize: 12 }} tickFormatter={fmtHour} />
                 <YAxis tick={{ fill: "#6B7280", fontSize: 12 }} />
                 <Tooltip />
                 <Bar dataKey="calls" fill="#164FA3" radius={[6, 6, 0, 0]} />
