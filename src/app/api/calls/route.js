@@ -25,9 +25,44 @@ export async function GET(req) {
     const user_id = searchParams.get("user_id");
     const search = searchParams.get("search");
 
-    let sql = `
-      SELECT 
-        c.*, 
+    // Build the WHERE once so the data query and the total count stay identical.
+    // Every clause references only c.* columns, so the count needs no joins.
+    let where = " WHERE 1=1";
+    const params = [];
+
+    // Supervisors/admins see all calls; everyone else sees only their own
+    if (!isSupervisor(session)) {
+      where += " AND c.user_id = ?";
+      params.push(session.user.id);
+    } else if (user_id) {
+      where += " AND c.user_id = ?";
+      params.push(user_id);
+    }
+
+    if (date_from) { where += " AND DATE(c.called_at) >= ?"; params.push(date_from); }
+    if (date_to) { where += " AND DATE(c.called_at) <= ?"; params.push(date_to); }
+    if (zone_id) { where += " AND c.zone_id = ?"; params.push(zone_id); }
+    if (lok_sabha_id) { where += " AND c.lok_sabha_id = ?"; params.push(lok_sabha_id); }
+    if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
+    if (assembly_id) { where += " AND c.assembly_id = ?"; params.push(assembly_id); }
+    if (status_id) { where += " AND c.status_id = ?"; params.push(status_id); }
+    if (designation_id) { where += " AND c.designation_id = ?"; params.push(designation_id); }
+    if (sentiment) { where += " AND c.sentiment = ?"; params.push(sentiment); }
+    if (search) {
+      where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    // Geographic scope from role (applies to oversight; callers already see only their own)
+    if (isSupervisor(session)) {
+      const scope = scopeFilterSync(session.user, "c");
+      where += " " + scope.where;
+      params.push(...scope.params);
+    }
+
+    const sql = `
+      SELECT
+        c.*,
         u.username as agent_name,
         cs.name as status_name,
         dsg.name as designation_name,
@@ -43,71 +78,13 @@ export async function GET(req) {
       LEFT JOIN locations lls ON c.lok_sabha_id = lls.id
       LEFT JOIN locations ld ON c.district_id = ld.id
       LEFT JOIN locations la ON c.assembly_id = la.id
-      WHERE 1=1
-    `;
-    const params = [];
-
-    // Supervisors/admins see all calls; everyone else sees only their own
-    if (!isSupervisor(session)) {
-      sql += " AND c.user_id = ?";
-      params.push(session.user.id);
-    } else if (user_id) {
-      sql += " AND c.user_id = ?";
-      params.push(user_id);
-    }
-
-    if (date_from) {
-      sql += " AND DATE(c.called_at) >= ?";
-      params.push(date_from);
-    }
-    if (date_to) {
-      sql += " AND DATE(c.called_at) <= ?";
-      params.push(date_to);
-    }
-    if (zone_id) {
-      sql += " AND c.zone_id = ?";
-      params.push(zone_id);
-    }
-    if (lok_sabha_id) {
-      sql += " AND c.lok_sabha_id = ?";
-      params.push(lok_sabha_id);
-    }
-    if (district_id) {
-      sql += " AND c.district_id = ?";
-      params.push(district_id);
-    }
-    if (assembly_id) {
-      sql += " AND c.assembly_id = ?";
-      params.push(assembly_id);
-    }
-    if (status_id) {
-      sql += " AND c.status_id = ?";
-      params.push(status_id);
-    }
-    if (designation_id) {
-      sql += " AND c.designation_id = ?";
-      params.push(designation_id);
-    }
-    if (sentiment) {
-      sql += " AND c.sentiment = ?";
-      params.push(sentiment);
-    }
-    if (search) {
-      sql += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
-      params.push(`%${search}%`, `%${search}%`);
-    }
-
-    // Geographic scope from role (applies to oversight; callers already see only their own)
-    if (isSupervisor(session)) {
-      const scope = scopeFilterSync(session.user, "c");
-      sql += " " + scope.where;
-      params.push(...scope.params);
-    }
-
-    sql += " ORDER BY c.called_at DESC LIMIT 1000";
+      ${where}
+      ORDER BY c.called_at DESC LIMIT 1000`;
 
     const calls = await query(sql, params);
-    return Response.json({ calls }, { status: 200 });
+    // Total matching the SAME filters (uncapped by the 1000 row display limit).
+    const [{ total }] = await query(`SELECT COUNT(*) AS total FROM calls c ${where}`, params);
+    return Response.json({ calls, total: Number(total) || 0 }, { status: 200 });
   } catch (error) {
     console.error("Error fetching calls:", error);
     return Response.json({ message: "Internal server error" }, { status: 500 });

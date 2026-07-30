@@ -31,6 +31,7 @@ export default function CallsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [calls, setCalls] = useState([]);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [designations, setDesignations] = useState([]);
   const [designationId, setDesignationId] = useState("");
@@ -73,7 +74,11 @@ export default function CallsPage() {
     if (dateTo) params.set("date_to", dateTo);
     try {
       const r = await fetch(`/api/calls?${params}`);
-      if (r.ok) setCalls((await r.json()).calls || []);
+      if (r.ok) {
+        const d = await r.json();
+        setCalls(d.calls || []);
+        setTotal(d.total ?? (d.calls || []).length);
+      }
     } finally {
       setLoading(false);
     }
@@ -119,6 +124,13 @@ export default function CallsPage() {
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="From date" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white" />
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="To date" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white" />
       </div>
+
+      {/* Total matching records for the current filters/search. */}
+      {!loading && (
+        <p className="text-sm font-medium text-gray-500 mt-2.5 mb-3">
+          Showing {total.toLocaleString()} {total === 1 ? "Call" : "Calls"}
+        </p>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (

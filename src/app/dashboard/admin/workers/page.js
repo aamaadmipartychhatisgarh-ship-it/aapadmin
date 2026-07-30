@@ -231,6 +231,13 @@ function Body({ session }) {
         </button>
       </div>
 
+      {/* Total matching records for the current filters/search. */}
+      {!loading && (
+        <p className="text-sm font-medium text-gray-500 mt-2.5 mb-3">
+          Showing {data.total.toLocaleString()} {data.total === 1 ? "Worker" : "Workers"}
+        </p>
+      )}
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="p-12 text-center text-gray-400"><Loader2 className="inline animate-spin" /></div>
