@@ -177,7 +177,13 @@ function Body() {
           mode: bulkMode,
           per_caller: bulkMode === "perCaller" ? Number(perCaller) : undefined,
           status: filter,
+          // Send EVERY active list filter so distribution acts on exactly the
+          // same people the filtered list shows (was only sending district +
+          // designation, so zone/Lok Sabha/assembly selections were ignored).
+          zone_id: zoneId || undefined,
+          lok_sabha_id: lokSabhaId || undefined,
           district_id: districtId || undefined,
+          assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
           designation_ids: designationIds.length ? designationIds.join(",") : undefined,
           search: search || undefined,
           reassign: reassignOthers,

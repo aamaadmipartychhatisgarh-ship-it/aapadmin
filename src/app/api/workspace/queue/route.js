@@ -5,7 +5,7 @@ import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildRulesOrMatch, zoneMatch, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
-import { geoFilter, zoneScope } from "@/lib/geoFilter";
+import { geoFilter } from "@/lib/geoFilter";
 import { dueClause, laterClause } from "@/lib/followup";
 
 // Returns:
@@ -45,20 +45,13 @@ export async function GET(req) {
     const qParams = [];
     if (search) { qFilters.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); qParams.push(`%${search}%`, `%${search}%`); }
 
-    // Auto-restrict to the caller's OWN zone. An explicit zone_id is authoritative
-    // (a contact in another zone is always excluded); when zone_id is NULL the
-    // district/assembly rolls up to the zone, and no-geo contacts are kept.
-    if (me?.scope_zone_id) {
-      const zs = zoneScope("c", me.scope_zone_id);
-      qFilters.push(zs.clause);
-      qParams.push(...zs.params);
-    } else if (me?.home_district_id) {
-      qFilters.push("(c.district_id = ? OR (c.district_id IS NULL AND c.assembly_id IS NULL))");
-      qParams.push(me.home_district_id);
-    }
+    // NOTE: contacts EXPLICITLY assigned to this caller (assigned_to_user_id =
+    // them) always appear here regardless of zone — an admin/supervisor
+    // deliberately assigned them, so a zone auto-filter must not hide them (that
+    // was causing "assigned 17, only 6 show"). The zone restriction applies only
+    // to the POOL the caller pulls from (see pool count + claim/topup below).
 
-    // User-selected hierarchical filters (Lok Sabha → District → Assembly) —
-    // applied on top of the automatic zone restriction.
+    // User-selected hierarchical filters (Lok Sabha → District → Assembly).
     const geo = geoFilter("c", {
       lok_sabha_id: searchParams.get("lok_sabha_id"),
       district_id: searchParams.get("district_id"),

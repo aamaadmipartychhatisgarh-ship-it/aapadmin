@@ -6,7 +6,6 @@ import { getPool } from "@/lib/db";
 import { zoneMatch } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
 import { dueClause } from "@/lib/followup";
-import { zoneScope } from "@/lib/geoFilter";
 
 // Body: { contact_id?: number }
 // If contact_id given: claim that specific contact (must be assigned to user OR in pool with same district).
@@ -70,11 +69,10 @@ export async function POST(req) {
         const terr = me.scope_zone_id
           ? zoneMatch(me.scope_zone_id, "")
           : { where: " AND district_id = ?", params: [me.home_district_id] };
-        // Strict zone scope for the caller's OWN assigned contacts (explicit
-        // zone_id authoritative), mirroring the Assigned-to-You list.
-        const assignedTerr = me.scope_zone_id
-          ? (() => { const zs = zoneScope("", me.scope_zone_id); return { where: " AND " + zs.clause, params: zs.params }; })()
-          : { where: " AND (district_id = ? OR (district_id IS NULL AND assembly_id IS NULL))", params: [me.home_district_id] };
+        // Explicit assignments are NOT zone-restricted: a contact assigned to
+        // this caller is always claimable by them (mirrors the Assigned-to-You
+        // list). The zone restriction applies only to the pool fallback (terr).
+        const assignedTerr = { where: "", params: [] };
         // Try caller's own assigned queue first (incl. due follow-ups), then fall back to the territory pool.
         const [assignedRows] = await conn.execute(
           `SELECT * FROM contacts
