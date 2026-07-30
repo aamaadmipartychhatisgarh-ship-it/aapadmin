@@ -32,51 +32,75 @@ export function zoneScope(alias, zoneId) {
   return { clause, params: [zoneId, zoneId, zoneId, zoneId] };
 }
 
+// Each of zone_id / lok_sabha_id / district_id / assembly_id may be a single id,
+// a comma-separated string ("1,3"), or an array ([1,3]) — multi-select. Within a
+// level the ids are OR'd (WHERE ... IN (…)); across levels the clauses are AND'd
+// by the caller, preserving the Lok Sabha → District → Assembly hierarchy.
 export function geoFilter(alias, { zone_id, lok_sabha_id, district_id, assembly_id } = {}) {
   const a = alias ? `${alias}.` : "";
   const clauses = [];
   const params = [];
+  const arr = (v) =>
+    (v == null ? [] : Array.isArray(v) ? v : String(v).split(","))
+      .map((x) => String(x).trim())
+      .filter(Boolean);
+  const ph = (n) => Array(n).fill("?").join(",");
 
-  if (zone_id) {
+  const zones = arr(zone_id), ls = arr(lok_sabha_id), ds = arr(district_id), asm = arr(assembly_id);
+
+  // Roll-up matching is STRICT on an explicitly-set id (mirrors zoneScope): a row
+  // whose own id at a level is set must be one of the selected ids; only when
+  // that id is NULL do we roll up through a more specific level. This keeps
+  // filtering predictable (a contact tagged to Lok Sabha X never shows when only
+  // Y/Z are selected) while still matching the many imported rows that carry only
+  // a district/assembly and no lok_sabha_id.
+  if (zones.length) {
+    const p = ph(zones.length);
     clauses.push(`(
-      ${a}zone_id = ?
-      OR ${a}lok_sabha_id IN (SELECT id FROM locations WHERE type='lok_sabha' AND parent_id = ?)
-      OR ${a}district_id IN (
-        SELECT d.id FROM locations d
-        JOIN locations ls ON ls.id = d.parent_id AND ls.type='lok_sabha'
-        WHERE ls.parent_id = ?)
-      OR ${a}assembly_id IN (
-        SELECT a2.id FROM locations a2
-        JOIN locations d ON d.id = a2.parent_id AND d.type='district'
-        JOIN locations ls ON ls.id = d.parent_id AND ls.type='lok_sabha'
-        WHERE ls.parent_id = ?)
+      ${a}zone_id IN (${p})
+      OR (${a}zone_id IS NULL AND (
+        ${a}lok_sabha_id IN (SELECT id FROM locations WHERE type='lok_sabha' AND parent_id IN (${p}))
+        OR ${a}district_id IN (
+          SELECT d.id FROM locations d
+          JOIN locations lz ON lz.id = d.parent_id AND lz.type='lok_sabha'
+          WHERE lz.parent_id IN (${p}))
+        OR ${a}assembly_id IN (
+          SELECT a2.id FROM locations a2
+          JOIN locations d ON d.id = a2.parent_id AND d.type='district'
+          JOIN locations lz ON lz.id = d.parent_id AND lz.type='lok_sabha'
+          WHERE lz.parent_id IN (${p}))
+      ))
     )`);
-    params.push(zone_id, zone_id, zone_id, zone_id);
+    params.push(...zones, ...zones, ...zones, ...zones);
   }
 
-  if (lok_sabha_id) {
+  if (ls.length) {
+    const p = ph(ls.length);
     clauses.push(`(
-      ${a}lok_sabha_id = ?
-      OR ${a}district_id IN (SELECT id FROM locations WHERE type='district' AND parent_id = ?)
-      OR ${a}assembly_id IN (
-        SELECT a2.id FROM locations a2
-        JOIN locations d ON d.id = a2.parent_id AND d.type='district'
-        WHERE d.parent_id = ?)
+      ${a}lok_sabha_id IN (${p})
+      OR (${a}lok_sabha_id IS NULL AND (
+        ${a}district_id IN (SELECT id FROM locations WHERE type='district' AND parent_id IN (${p}))
+        OR ${a}assembly_id IN (
+          SELECT a2.id FROM locations a2
+          JOIN locations d ON d.id = a2.parent_id AND d.type='district'
+          WHERE d.parent_id IN (${p}))
+      ))
     )`);
-    params.push(lok_sabha_id, lok_sabha_id, lok_sabha_id);
+    params.push(...ls, ...ls, ...ls);
   }
 
-  if (district_id) {
+  if (ds.length) {
+    const p = ph(ds.length);
     clauses.push(`(
-      ${a}district_id = ?
-      OR ${a}assembly_id IN (SELECT id FROM locations WHERE type='assembly' AND parent_id = ?)
+      ${a}district_id IN (${p})
+      OR (${a}district_id IS NULL AND ${a}assembly_id IN (SELECT id FROM locations WHERE type='assembly' AND parent_id IN (${p})))
     )`);
-    params.push(district_id, district_id);
+    params.push(...ds, ...ds);
   }
 
-  if (assembly_id) {
-    clauses.push(`${a}assembly_id = ?`);
-    params.push(assembly_id);
+  if (asm.length) {
+    clauses.push(`${a}assembly_id IN (${ph(asm.length)})`);
+    params.push(...asm);
   }
 
   return { clauses, params };

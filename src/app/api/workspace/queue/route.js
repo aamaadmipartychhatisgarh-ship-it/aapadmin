@@ -67,8 +67,17 @@ export async function GET(req) {
     qFilters.push(...geo.clauses);
     qParams.push(...geo.params);
 
-    if (designationId === "none") { qFilters.push("c.designation_id IS NULL"); }
-    else if (designationId) { qFilters.push("c.designation_id = ?"); qParams.push(designationId); }
+    // Designation is multi-select: comma-separated ids, with "none" meaning
+    // "no designation set". Match ANY selected id, plus NULLs when "none" chosen.
+    const desigSel = (designationId || "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (desigSel.length) {
+      const hasNone = desigSel.includes("none");
+      const ids = desigSel.filter((x) => x !== "none");
+      const parts = [];
+      if (ids.length) { parts.push(`c.designation_id IN (${ids.map(() => "?").join(",")})`); qParams.push(...ids); }
+      if (hasNone) parts.push("c.designation_id IS NULL");
+      if (parts.length) qFilters.push(`(${parts.join(" OR ")})`);
+    }
     const filterSql = qFilters.length ? " AND " + qFilters.join(" AND ") : "";
 
     // Wrong-number contacts belong only in the dedicated list, never the queue —

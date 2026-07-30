@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
+import { MultiSelect } from "@/components/MultiSelect";
 import { compressSquareImage } from "@/lib/imageCompress";
 
 export default function WorkspacePage() {
@@ -34,10 +35,11 @@ function WorkspaceBody() {
   // dropdown — it's the caller's own zone (shown in Your Queue) and auto-scopes
   // the Lok Sabha list.
   const [qSearch, setQSearch] = useState("");
-  const [qLokSabha, setQLokSabha] = useState("");
-  const [qDistrict, setQDistrict] = useState("");
-  const [qAssembly, setQAssembly] = useState("");
-  const [qDesignation, setQDesignation] = useState("");
+  // Multi-select filters — each holds an array of selected ids ([] = All).
+  const [qLokSabha, setQLokSabha] = useState([]);
+  const [qDistrict, setQDistrict] = useState([]);
+  const [qAssembly, setQAssembly] = useState([]);
+  const [qDesignation, setQDesignation] = useState([]);
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [statuses, setStatuses] = useState([]);
@@ -169,10 +171,10 @@ function WorkspaceBody() {
     setLoading(true);
     const params = new URLSearchParams();
     if (qSearch.trim()) params.set("search", qSearch.trim());
-    if (qLokSabha) params.set("lok_sabha_id", qLokSabha);
-    if (qDistrict) params.set("district_id", qDistrict);
-    if (qAssembly) params.set("assembly_id", qAssembly);
-    if (qDesignation) params.set("designation_id", qDesignation);
+    if (qLokSabha.length) params.set("lok_sabha_id", qLokSabha.join(","));
+    if (qDistrict.length) params.set("district_id", qDistrict.join(","));
+    if (qAssembly.length) params.set("assembly_id", qAssembly.join(","));
+    if (qDesignation.length) params.set("designation_id", qDesignation.join(","));
     const qs = params.toString();
     const r = await fetch(`/api/workspace/queue${qs ? `?${qs}` : ""}`);
     if (r.ok) setQueue(await r.json());
@@ -185,7 +187,26 @@ function WorkspaceBody() {
     const t = setTimeout(() => loadQueue(), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qSearch, qLokSabha, qDistrict, qAssembly, qDesignation]);
+  }, [qSearch, qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(",")]);
+
+  // Cascade pruning: when a parent's selection changes, drop any child selection
+  // that no longer belongs to a selected parent ([] parent = "All" → no pruning).
+  useEffect(() => {
+    if (!qLokSabha.length) return;
+    const ok = new Set(districts.filter((d) => qLokSabha.map(String).includes(String(d.parent_id))).map((d) => String(d.id)));
+    setQDistrict((prev) => { const nx = prev.filter((id) => ok.has(String(id))); return nx.length === prev.length ? prev : nx; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qLokSabha.join(",")]);
+  useEffect(() => {
+    if (!qDistrict.length && !qLokSabha.length) return;
+    const dLS = {}; districts.forEach((d) => { dLS[d.id] = d.parent_id; });
+    const ok = new Set(assemblies.filter((a) =>
+      qDistrict.length ? qDistrict.map(String).includes(String(a.parent_id))
+        : qLokSabha.map(String).includes(String(dLS[a.parent_id]))
+    ).map((a) => String(a.id)));
+    setQAssembly((prev) => { const nx = prev.filter((id) => ok.has(String(id))); return nx.length === prev.length ? prev : nx; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qLokSabha.join(","), qDistrict.join(",")]);
 
   function startActive(contact, startedAtMs = Date.now()) {
     setActive({ ...contact, started_at: startedAtMs });
@@ -346,14 +367,19 @@ function WorkspaceBody() {
   const lsZone = {}; lokSabhas.forEach((l) => { lsZone[l.id] = l.parent_id; });
   const distLS = {}; districts.forEach((d) => { distLS[d.id] = d.parent_id; });
   const eq = (a, b) => String(a) === String(b);
+  const has = (arr, v) => arr.map(String).includes(String(v));
   const lokSabhaOptions = callerZone ? lokSabhas.filter((l) => eq(l.parent_id, callerZone)) : lokSabhas;
-  const districtOptions = qLokSabha
-    ? districts.filter((d) => eq(d.parent_id, qLokSabha))
+  const districtOptions = qLokSabha.length
+    ? districts.filter((d) => has(qLokSabha, d.parent_id))
     : callerZone ? districts.filter((d) => eq(lsZone[d.parent_id], callerZone)) : districts;
-  const assemblyOptions = qDistrict
-    ? assemblies.filter((a) => eq(a.parent_id, qDistrict))
-    : qLokSabha ? assemblies.filter((a) => eq(distLS[a.parent_id], qLokSabha))
+  const assemblyOptions = qDistrict.length
+    ? assemblies.filter((a) => has(qDistrict, a.parent_id))
+    : qLokSabha.length ? assemblies.filter((a) => has(qLokSabha, distLS[a.parent_id]))
     : callerZone ? assemblies.filter((a) => eq(lsZone[distLS[a.parent_id]], callerZone)) : assemblies;
+
+  // Designation options include a synthetic "No Designation" entry so it can be
+  // selected/deselected like any other option in the multi-select.
+  const designationOptions = [...designations.map((d) => ({ id: String(d.id), name: d.name })), { id: "none", name: "No Designation" }];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
@@ -413,23 +439,10 @@ function WorkspaceBody() {
               )}
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <select value={qLokSabha} onChange={(e) => { setQLokSabha(e.target.value); setQDistrict(""); setQAssembly(""); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
-                <option value="">All Lok Sabhas</option>
-                {lokSabhaOptions.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-              <select value={qDistrict} onChange={(e) => { setQDistrict(e.target.value); setQAssembly(""); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
-                <option value="">All districts</option>
-                {districtOptions.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-              <select value={qAssembly} onChange={(e) => setQAssembly(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
-                <option value="">All assemblies</option>
-                {assemblyOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <select value={qDesignation} onChange={(e) => setQDesignation(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white">
-                <option value="">All designations</option>
-                {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
-                <option value="none">No Designation</option>
-              </select>
+              <MultiSelect options={lokSabhaOptions} value={qLokSabha} onChange={setQLokSabha} allLabel="All Lok Sabhas" />
+              <MultiSelect options={districtOptions} value={qDistrict} onChange={setQDistrict} allLabel="All Districts" />
+              <MultiSelect options={assemblyOptions} value={qAssembly} onChange={setQAssembly} allLabel="All Assemblies" />
+              <MultiSelect options={designationOptions} value={qDesignation} onChange={setQDesignation} allLabel="All Designations" />
             </div>
           </div>
 
@@ -437,7 +450,7 @@ function WorkspaceBody() {
             <div className="text-gray-400 text-sm">Loading…</div>
           ) : queue.assigned.length === 0 ? (
             <div className="text-gray-400 text-sm">
-              {qSearch || qLokSabha || qDistrict || qAssembly || qDesignation ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
+              {qSearch || qLokSabha.length || qDistrict.length || qAssembly.length || qDesignation.length ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
             </div>
           ) : (
             <>
