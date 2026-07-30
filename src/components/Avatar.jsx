@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { User } from "lucide-react";
 
 // Initials from a name: first + last word's first letter (e.g. "Dilip Patkar" -> DP).
@@ -21,6 +21,10 @@ export function initialsOf(name) {
 //   textClassName — classes for the initials/icon (color)
 export default function Avatar({ name, src, size = 64, square = false, className = "", textClassName = "", onClick, title }) {
   const [errored, setErrored] = useState(false);
+  // Reset the error flag whenever the image URL changes, so a freshly-uploaded
+  // photo replaces the initials immediately instead of staying stuck on a prior
+  // failed/placeholder load until the component remounts.
+  useEffect(() => { setErrored(false); }, [src]);
   const ini = initialsOf(name);
   const showImg = src && !errored;
   return (

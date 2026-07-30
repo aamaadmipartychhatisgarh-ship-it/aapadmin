@@ -563,7 +563,16 @@ function WorkspaceBody() {
                         className="bg-white/15 border-2 border-white/25"
                         textClassName="text-white"
                         persist={saveActivePhoto}
-                        onChange={(url) => setActive((a) => (a ? { ...a, photo_url: url } : a))}
+                        onChange={(url) => {
+                          // Update every on-page surface that shows this person's
+                          // avatar (active card + Assigned-to-You list + lock).
+                          setActive((a) => (a ? { ...a, photo_url: url } : a));
+                          setQueue((q) => ({
+                            ...q,
+                            assigned: (q.assigned || []).map((c) => (c.id === active.id ? { ...c, photo_url: url } : c)),
+                            active_lock: q.active_lock && q.active_lock.id === active.id ? { ...q.active_lock, photo_url: url } : q.active_lock,
+                          }));
+                        }}
                       />
                     </div>
                     <div className="min-w-0">
