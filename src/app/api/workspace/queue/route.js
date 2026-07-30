@@ -5,7 +5,7 @@ import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildRulesOrMatch, zoneMatch } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
-import { geoFilter } from "@/lib/geoFilter";
+import { geoFilter, zoneScope } from "@/lib/geoFilter";
 import { dueClause, laterClause } from "@/lib/followup";
 
 // Returns:
@@ -29,22 +29,8 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search");
     const designationId = searchParams.get("designation_id");
-    const qFilters = [];
-    const qParams = [];
-    if (search) { qFilters.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); qParams.push(`%${search}%`, `%${search}%`); }
-    // Hierarchical geography filters: Zone → Lok Sabha → District → Assembly.
-    const geo = geoFilter("c", {
-      zone_id: searchParams.get("zone_id"),
-      lok_sabha_id: searchParams.get("lok_sabha_id"),
-      district_id: searchParams.get("district_id"),
-      assembly_id: searchParams.get("assembly_id"),
-    });
-    qFilters.push(...geo.clauses);
-    qParams.push(...geo.params);
-    if (designationId === "none") { qFilters.push("c.designation_id IS NULL"); }
-    else if (designationId) { qFilters.push("c.designation_id = ?"); qParams.push(designationId); }
-    const filterSql = qFilters.length ? " AND " + qFilters.join(" AND ") : "";
 
+    // Load the caller's territory FIRST — the zone is applied automatically.
     const [me] = await query(
       `SELECT u.home_district_id, l.name AS home_district_name,
               u.scope_zone_id, lz.name AS scope_zone_name
@@ -54,6 +40,36 @@ export async function GET(req) {
         WHERE u.id = ?`,
       [userId]
     );
+
+    const qFilters = [];
+    const qParams = [];
+    if (search) { qFilters.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); qParams.push(`%${search}%`, `%${search}%`); }
+
+    // Auto-restrict to the caller's OWN zone. An explicit zone_id is authoritative
+    // (a contact in another zone is always excluded); when zone_id is NULL the
+    // district/assembly rolls up to the zone, and no-geo contacts are kept.
+    if (me?.scope_zone_id) {
+      const zs = zoneScope("c", me.scope_zone_id);
+      qFilters.push(zs.clause);
+      qParams.push(...zs.params);
+    } else if (me?.home_district_id) {
+      qFilters.push("(c.district_id = ? OR (c.district_id IS NULL AND c.assembly_id IS NULL))");
+      qParams.push(me.home_district_id);
+    }
+
+    // User-selected hierarchical filters (Lok Sabha → District → Assembly) —
+    // applied on top of the automatic zone restriction.
+    const geo = geoFilter("c", {
+      lok_sabha_id: searchParams.get("lok_sabha_id"),
+      district_id: searchParams.get("district_id"),
+      assembly_id: searchParams.get("assembly_id"),
+    });
+    qFilters.push(...geo.clauses);
+    qParams.push(...geo.params);
+
+    if (designationId === "none") { qFilters.push("c.designation_id IS NULL"); }
+    else if (designationId) { qFilters.push("c.designation_id = ?"); qParams.push(designationId); }
+    const filterSql = qFilters.length ? " AND " + qFilters.join(" AND ") : "";
 
     // Wrong-number contacts belong only in the dedicated list, never the queue —
     // exclude them explicitly (not just via is_completed) so a wrong number that
