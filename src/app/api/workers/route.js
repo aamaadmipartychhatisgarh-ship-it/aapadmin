@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { canManageWorkers, scopeFilterSync } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
 import { syncWorkerToContact } from "@/lib/workerSync";
+import { computeWorkerStatus } from "@/lib/workerStatus";
 
 // Always compute fresh — the Workers directory must reflect the latest contact
 // edits synced from My Workplace, never a cached response.
@@ -123,6 +124,9 @@ export async function POST(req) {
 
     const mobile = d.mobile ? String(d.mobile).trim().replace(/[^\d+]/g, "") : null;
 
+    // Status is derived from profile completeness — never taken from the client.
+    const status = computeWorkerStatus({ ...d, mobile });
+
     // One mobile number → one worker. Compare on the last 10 digits so
     // "+91 98765..." and "098765..." count as the same number.
     if (mobile) {
@@ -161,7 +165,7 @@ export async function POST(req) {
         [d.name, mobile, d.photo_url || null, d.address || null,
          d.zone_id || null, d.lok_sabha_id || null, d.district_id || null, d.assembly_id || null,
          d.ward_id || null, d.booth_id || null, d.position || null, d.skills || null,
-         d.status === "inactive" ? "inactive" : "active", Number(d.activity_score) || 0]
+         status, Number(d.activity_score) || 0]
       );
       workerId = res.insertId;
       await syncWorkerToContact(conn, workerId);

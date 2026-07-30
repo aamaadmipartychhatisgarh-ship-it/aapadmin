@@ -91,7 +91,10 @@ function Body({ id, canEdit, canDelete, router }) {
             {[w.zone_name, w.lok_sabha_name, w.district_name, w.assembly_name, w.ward_name, w.booth_name].filter(Boolean).join(" / ") || "—"}
           </Detail>
           <Detail icon={Activity} label="Status">
-            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${w.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{w.status}</span>
+            <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${w.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${w.status === "active" ? "bg-emerald-500" : "bg-amber-500"}`} />
+              {w.status === "active" ? "Active" : "Pending"}
+            </span>
           </Detail>
           <Detail icon={Activity} label="Activity Score">
             <div className="flex items-center gap-2">

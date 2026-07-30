@@ -224,7 +224,7 @@ function Body({ session }) {
         <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
           <option value="">All statuses</option>
           <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
+          <option value="pending">Pending</option>
         </select>
         <button onClick={() => { setDupOnly(!dupOnly); setPage(1); }} className={`h-9 px-3 rounded-lg text-xs font-semibold uppercase ${dupOnly ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
           Duplicates
@@ -288,8 +288,9 @@ function Body({ session }) {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${w.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
-                      {w.status}
+                    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full ${w.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${w.status === "active" ? "bg-emerald-500" : "bg-amber-500"}`} />
+                      {w.status === "active" ? "Active" : "Pending"}
                     </span>
                   </td>
                   {canEdit && (

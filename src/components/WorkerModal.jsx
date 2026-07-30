@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Users } from "lucide-react";
+import { Users, CheckCircle2, AlertCircle } from "lucide-react";
+import { computeWorkerStatus, missingWorkerFields } from "@/lib/workerStatus";
+
+// Human labels for the mandatory fields, so the editor can name what's missing.
+const FIELD_LABELS = {
+  name: "Name", mobile: "Mobile", position: "Designation", address: "Address",
+  zone_id: "Zone", lok_sabha_id: "Lok Sabha", district_id: "District",
+  assembly_id: "Assembly", ward_id: "Block / Ward",
+};
 
 // Shared Add/Edit worker form. Field labels: Sambhag (Zone), Block (ward),
 // Polling Station (booth) — DB column names unchanged.
@@ -168,11 +176,26 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
               {booths.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </Fld>
-          <Fld label="Status">
-            <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+          <Fld label="Status (auto)">
+            {(() => {
+              const st = computeWorkerStatus(form);
+              const missing = missingWorkerFields(form).map((f) => FIELD_LABELS[f] || f);
+              return st === "active" ? (
+                <div className="flex items-center gap-2 h-full">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                    <CheckCircle2 size={13} /> Active
+                  </span>
+                  <span className="text-xs text-gray-400">Profile complete</span>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-50 text-amber-700 w-fit">
+                    <AlertCircle size={13} /> Pending
+                  </span>
+                  <span className="text-[11px] text-gray-500">Missing: {missing.join(", ")}</span>
+                </div>
+              );
+            })()}
           </Fld>
           <div>
             <label className="text-xs text-gray-500">Activity score: {form.activity_score}</label>

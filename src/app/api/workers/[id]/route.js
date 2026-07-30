@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin, canManageWorkers } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
 import { syncWorkerToContact } from "@/lib/workerSync";
+import { recomputeWorkerStatus } from "@/lib/workerStatus";
 
 export async function GET(req, { params }) {
   try {
@@ -78,7 +79,9 @@ export async function PUT(req, { params }) {
       }
     }
 
-    const fields = ["name","mobile","photo_url","address","zone_id","lok_sabha_id","district_id","assembly_id","ward_id","booth_id","position","skills","status","activity_score"];
+    // Note: "status" is intentionally excluded — it's derived from profile
+    // completeness (recomputed below), never set directly by the client.
+    const fields = ["name","mobile","photo_url","address","zone_id","lok_sabha_id","district_id","assembly_id","ward_id","booth_id","position","skills","activity_score"];
     const sets = [], vals = [];
     for (const f of fields) {
       if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
@@ -96,6 +99,9 @@ export async function PUT(req, { params }) {
       await conn.beginTransaction();
       vals.push(id);
       await conn.query(`UPDATE workers SET ${sets.join(", ")} WHERE id = ?`, vals);
+      // Recompute status from the merged row (Active only if all mandatory
+      // fields are now filled; Pending otherwise) before mirroring to contacts.
+      await recomputeWorkerStatus(conn, id);
       await syncWorkerToContact(conn, id);
       const [rows] = await conn.query("SELECT * FROM workers WHERE id = ?", [id]);
       updated = rows[0];

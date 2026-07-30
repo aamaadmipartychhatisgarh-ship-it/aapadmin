@@ -183,9 +183,11 @@ export async function POST(req) {
           );
           workersUpdated++;
         } else {
+          // Imports carry only district + assembly (no zone / Lok Sabha / ward),
+          // so the profile is incomplete → Pending until an admin fills the rest.
           const res = await query(
             `INSERT INTO workers (name, mobile, address, district_id, assembly_id, position, status)
-             VALUES (?, ?, ?, ?, ?, 'Member', 'active')`,
+             VALUES (?, ?, ?, ?, ?, 'Member', 'pending')`,
             [name, phone, address, districtId, assemblyId]
           );
           // Track the new id so later rows in the same file dedupe to it.

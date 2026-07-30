@@ -10,6 +10,8 @@
 // the last-10 digits of the phone so the app keeps working until the deploy
 // migration (scripts/link-contacts-workers.mjs) runs.
 
+import { computeWorkerStatus } from "@/lib/workerStatus";
+
 const LAST10 = (c) =>
   `RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${c}, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10)`;
 const keyOf = (v) => { if (!v) return null; const d = String(v).replace(/\D/g, ""); return d ? d.slice(-10) : null; };
@@ -77,6 +79,16 @@ export async function syncContactToWorker(conn, contactId) {
 
   if (link && workerId && c.worker_id !== workerId) {
     await conn.query("UPDATE contacts SET worker_id = ? WHERE id = ?", [workerId, contactId]);
+  }
+
+  // A contact edit (My Workplace) just changed the worker's profile fields —
+  // recompute its Active/Pending status so completeness stays in step.
+  if (workerId) {
+    const [wr] = await conn.query("SELECT * FROM workers WHERE id = ?", [workerId]);
+    if (wr[0]) {
+      const st = computeWorkerStatus(wr[0]);
+      if (wr[0].status !== st) await conn.query("UPDATE workers SET status = ? WHERE id = ?", [st, workerId]);
+    }
   }
   return workerId;
 }

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { computeWorkerStatus } from "@/lib/workerStatus";
 
 // CSV header: name,mobile,address,district_name,assembly_name,position,skills,status
 function splitRow(line) {
@@ -43,11 +44,17 @@ export async function POST(req) {
       if (!row.name) continue;
       const districtId = await loc(row.district_name, "district");
       const assemblyId = await loc(row.assembly_name, "assembly");
+      // Status is derived from completeness — a CSV row carries no zone / Lok
+      // Sabha / ward, so it lands as Pending until the profile is finished.
+      const status = computeWorkerStatus({
+        name: row.name, mobile: row.mobile, address: row.address,
+        district_id: districtId, assembly_id: assemblyId, position: row.position,
+      });
       await query(
         `INSERT INTO workers (name, mobile, address, district_id, assembly_id, position, skills, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [row.name, row.mobile || null, row.address || null, districtId, assemblyId,
-         row.position || null, row.skills || null, row.status === "inactive" ? "inactive" : "active"]
+         row.position || null, row.skills || null, status]
       );
       inserted++;
     }
