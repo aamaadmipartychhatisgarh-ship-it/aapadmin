@@ -5,6 +5,7 @@ import { isAdmin, canManageWorkers } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
 import { syncWorkerToContact } from "@/lib/workerSync";
 import { recomputeWorkerStatus } from "@/lib/workerStatus";
+import { deleteLocalUpload } from "@/lib/uploadCleanup";
 
 export async function GET(req, { params }) {
   try {
@@ -95,8 +96,13 @@ export async function PUT(req, { params }) {
     const pool = getPool();
     const conn = await pool.getConnection();
     let updated;
+    let oldPhoto = null;
     try {
       await conn.beginTransaction();
+      if ("photo_url" in d) {
+        const [[prev]] = await conn.query("SELECT photo_url FROM workers WHERE id = ?", [id]);
+        oldPhoto = prev?.photo_url || null;
+      }
       vals.push(id);
       await conn.query(`UPDATE workers SET ${sets.join(", ")} WHERE id = ?`, vals);
       // Recompute status from the merged row (Active only if all mandatory
@@ -112,6 +118,9 @@ export async function PUT(req, { params }) {
     } finally {
       conn.release();
     }
+
+    // Clean up the replaced/removed photo file once the change is committed.
+    if (oldPhoto && oldPhoto !== (updated?.photo_url || null)) await deleteLocalUpload(oldPhoto);
 
     return NextResponse.json({ ok: true, worker: updated });
   } catch (err) {

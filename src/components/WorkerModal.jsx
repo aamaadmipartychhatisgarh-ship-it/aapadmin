@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { Users, CheckCircle2, AlertCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CheckCircle2, AlertCircle } from "lucide-react";
 import { computeWorkerStatus, missingWorkerFields } from "@/lib/workerStatus";
+import ProfilePhoto from "@/components/ProfilePhoto";
 
 // Human labels for the mandatory fields, so the editor can name what's missing.
 const FIELD_LABELS = {
@@ -20,9 +21,6 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
   const [assemblies, setAssemblies] = useState([]);
   const [wards, setWards] = useState([]);
   const [booths, setBooths] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
-  const photoRef = useRef(null);
 
   useEffect(() => {
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
@@ -53,24 +51,6 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
     else setBooths([]);
   }, [form.ward_id]);
 
-  async function uploadPhoto(file) {
-    setUploadError("");
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const r = await fetch("/api/uploads", { method: "POST", body: fd });
-      const d = await r.json();
-      if (r.ok) setForm((f) => ({ ...f, photo_url: d.url }));
-      else setUploadError(d.message || "Upload failed");
-    } catch {
-      setUploadError("Upload failed — network error.");
-    } finally {
-      setUploading(false);
-      if (photoRef.current) photoRef.current.value = "";
-    }
-  }
-
   // A worker can hold multiple designations — stored comma-separated in `position`.
   const selectedDesignations = (form.position || "").split(",").map((s) => s.trim()).filter(Boolean);
   const customDesignations = selectedDesignations.filter((n) => !designations.some((d) => d.name === n));
@@ -87,25 +67,18 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-3 max-h-[90vh] overflow-auto">
         <h2 className="text-xl font-bold text-gray-900">{title}</h2>
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
-        {uploadError && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{uploadError}</div>}
 
-        {/* Photo */}
-        <div className="flex items-center gap-3">
-          {form.photo_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={form.photo_url} alt="Worker photo" className="w-14 h-14 rounded-full object-cover border border-gray-200" />
-          ) : (
-            <div className="w-14 h-14 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400"><Users size={20} /></div>
-          )}
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => photoRef.current?.click()} disabled={uploading} className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-              {uploading ? "Uploading…" : form.photo_url ? "Change photo" : "Upload photo"}
-            </button>
-            {form.photo_url && (
-              <button type="button" onClick={() => setForm({ ...form, photo_url: "" })} className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">Remove</button>
-            )}
-            <input ref={photoRef} type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])} />
-          </div>
+        {/* Photo — shared crop/upload component */}
+        <div className="flex items-center gap-4">
+          <ProfilePhoto
+            name={form.name}
+            src={form.photo_url || null}
+            size={64}
+            onChange={(url) => setForm((f) => ({ ...f, photo_url: url || "" }))}
+            className="bg-gray-100"
+            textClassName="text-gray-400"
+          />
+          <p className="text-xs text-gray-500">Click <span className="font-semibold">+</span> to upload, crop and set the worker photo.</p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
