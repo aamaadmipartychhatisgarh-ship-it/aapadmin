@@ -2,7 +2,13 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { tallyBuckets } from "@/lib/supervisor";
+
+// Supervisor overview — every metric is calculated live from the calls table for
+// the SELECTED report date/range, defaulting to TODAY. All date/time math is in
+// the application timezone (Asia/Kolkata, a fixed +05:30 with no DST); called_at
+// is a UTC TIMESTAMP so we CONVERT_TZ it consistently. Nothing here is cached or
+// a lifetime total.
+const IST = "+05:30";
 
 export async function GET(req) {
   try {
@@ -15,81 +21,97 @@ export async function GET(req) {
     const date_from = searchParams.get("date_from");
     const date_to = searchParams.get("date_to");
 
+    // IST wall-clock date of a call, and "today" / "now" in IST.
+    const dateExpr = `DATE(CONVERT_TZ(c.called_at,'+00:00','${IST}'))`;
+    const [nowIST] = await query(
+      `SELECT DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}')) AS today,
+              HOUR(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}')) AS cur_hour`
+    );
+    const today = String(nowIST?.today ?? "");
+
+    // Effective range (inclusive). No selection → today only.
+    const from = date_from || (date_to ? null : today);
+    const to = date_to || (date_from ? null : today);
+
     let where = "WHERE 1=1";
     const params = [];
-    if (date_from) { where += " AND DATE(c.called_at) >= ?"; params.push(date_from); }
-    if (date_to)   { where += " AND DATE(c.called_at) <= ?"; params.push(date_to); }
+    if (from) { where += ` AND ${dateExpr} >= ?`; params.push(from); }
+    if (to)   { where += ` AND ${dateExpr} <= ?`; params.push(to); }
 
-    const calls = await query(
-      `SELECT c.id, c.called_at, cs.name AS status_name, c.user_id,
-              u.username AS agent_name, u.role AS agent_role
-         FROM calls c
-         LEFT JOIN call_statuses cs ON c.status_id = cs.id
-         LEFT JOIN users u ON c.user_id = u.id
-         ${where}`,
+    // ---- KPI tally (8 cards) — one grouped pass over the selected range ----
+    const [agg] = await query(
+      `SELECT
+         COUNT(*)                            AS total,
+         SUM(cs.name = 'Phone Picked')       AS connected,
+         SUM(cs.name = 'Not Picked')         AS no_answer,
+         SUM(cs.name = 'Switched Off')       AS switched_off,
+         SUM(cs.name = 'Busy')               AS busy,
+         SUM(cs.name = 'Wrong Number')       AS wrong_number,
+         SUM(cs.name = 'Rudely Behaved')     AS rejected,
+         SUM(c.follow_up_date IS NOT NULL)   AS follow_up
+       FROM calls c
+       LEFT JOIN call_statuses cs ON cs.id = c.status_id
+       ${where}`,
       params
     );
+    const n = (v) => Number(v) || 0;
+    const tally = {
+      total: n(agg?.total),
+      connected: n(agg?.connected),
+      no_answer: n(agg?.no_answer),
+      switched_off: n(agg?.switched_off),
+      busy: n(agg?.busy),
+      wrong_number: n(agg?.wrong_number),
+      rejected: n(agg?.rejected),
+      follow_up: n(agg?.follow_up),
+    };
+    // "other" = statuses not covered above (kept for the Status Breakdown pie).
+    tally.other = Math.max(
+      0,
+      tally.total - (tally.connected + tally.no_answer + tally.switched_off + tally.busy + tally.wrong_number + tally.rejected)
+    );
 
-    const tally = tallyBuckets(calls);
+    // ---- Calls over time (grouped by IST date across the range) ----
+    const timelineRows = await query(
+      `SELECT ${dateExpr} AS date, COUNT(*) AS count
+         FROM calls c ${where}
+        GROUP BY date ORDER BY date`,
+      params
+    );
+    const timeline = timelineRows.map((r) => ({ date: String(r.date), count: n(r.count) }));
 
-    // Hourly productivity — real-time, in the application timezone (Asia/Kolkata,
-    // a fixed +05:30, no DST). called_at is a UTC TIMESTAMP, so we CONVERT_TZ to
-    // IST for both bucketing and "today"/"now". Buckets are counted straight from
-    // the call records and NEVER go past the current hour (no future bars). With
-    // no date range the chart shows *today* (IST); a range buckets across it and
-    // is still capped at the current hour when the range reaches today.
-    const IST = "+05:30";
-    let hWhere = "WHERE 1=1";
-    const hParams = [];
-    if (date_from) { hWhere += ` AND DATE(CONVERT_TZ(c.called_at,'+00:00','${IST}')) >= ?`; hParams.push(date_from); }
-    if (date_to)   { hWhere += ` AND DATE(CONVERT_TZ(c.called_at,'+00:00','${IST}')) <= ?`; hParams.push(date_to); }
-    if (!date_from && !date_to) {
-      hWhere += ` AND DATE(CONVERT_TZ(c.called_at,'+00:00','${IST}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}'))`;
-    }
+    // ---- Hourly productivity (IST hour, capped at the current hour when the
+    //      range reaches today; a purely historical range shows all 24) ----
     const hourRows = await query(
       `SELECT HOUR(CONVERT_TZ(c.called_at,'+00:00','${IST}')) AS h, COUNT(*) AS n
-         FROM calls c ${hWhere} GROUP BY h`,
-      hParams
+         FROM calls c ${where} GROUP BY h`,
+      params
     );
-    const [nowIST] = await query(
-      `SELECT HOUR(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}')) AS cur_hour,
-              DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}')) AS today`
-    );
-    const curHour = Number(nowIST?.cur_hour ?? 23);
-    // Cap at the current hour only when the view includes today; a purely
-    // historical range shows all 24 hours (they have all already elapsed).
-    const includesToday = !date_to || String(date_to) >= String(nowIST?.today ?? "");
-    const maxHour = includesToday ? curHour : 23;
-    const counts = {};
-    hourRows.forEach((r) => { counts[Number(r.h)] = Number(r.n); });
+    const includesToday = !to || String(to) >= today;
+    const maxHour = includesToday ? Number(nowIST?.cur_hour ?? 23) : 23;
+    const hourCounts = {};
+    hourRows.forEach((r) => { hourCounts[Number(r.h)] = n(r.n); });
     const hourly = [];
-    for (let h = 0; h <= maxHour; h++) hourly.push({ hour: h, calls: counts[h] || 0 });
+    for (let h = 0; h <= maxHour; h++) hourly.push({ hour: h, calls: hourCounts[h] || 0 });
 
-    // Daily timeline
-    const byDate = {};
-    calls.forEach((c) => {
-      const d = new Date(c.called_at).toISOString().slice(0, 10);
-      byDate[d] = (byDate[d] || 0) + 1;
-    });
-    const timeline = Object.entries(byDate)
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    // Best caller — only count actual callers, not admin/supervisor accounts
-    const CALLER_ROLE_VALUES = ["caller", "user", "agent"];
-    const perAgent = {};
-    calls.forEach((c) => {
-      if (!c.agent_name) return;
-      if (!CALLER_ROLE_VALUES.includes(c.agent_role)) return;
-      perAgent[c.agent_name] = (perAgent[c.agent_name] || 0) + 1;
-    });
-    const bestCaller = Object.entries(perAgent).sort((a, b) => b[1] - a[1])[0];
+    // ---- Best caller (actual caller roles only) ----
+    const CALLER_ROLES = "('caller','user','agent')";
+    const [best] = await query(
+      `SELECT u.username AS name, COUNT(*) AS calls
+         FROM calls c JOIN users u ON u.id = c.user_id
+        ${where} AND u.role IN ${CALLER_ROLES}
+        GROUP BY u.id ORDER BY calls DESC LIMIT 1`,
+      params
+    );
 
     return Response.json({
       tally,
       hourly,
       timeline,
-      best_caller: bestCaller ? { name: bestCaller[0], calls: bestCaller[1] } : null,
+      best_caller: best ? { name: best.name, calls: n(best.calls) } : null,
+      range: { from, to },
+      is_today: from === today && to === today,
+      today,
     });
   } catch (err) {
     console.error("supervisor/summary error:", err);
