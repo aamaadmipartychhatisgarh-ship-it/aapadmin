@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin, normalizeRole, ROLES, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
+import { buildContactPersonFilter } from "@/lib/contactFilter";
 
 // Distribute contacts matching the given filters across MULTIPLE callers.
 //
@@ -58,14 +59,18 @@ export async function POST(req) {
     if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
     if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
-    if (body.district_id) { where += " AND c.district_id = ?"; params.push(body.district_id); }
-    // designation_ids ("1,2,3") or a single designation_id.
-    const designationIds = [...new Set(String(body.designation_ids ?? body.designation_id ?? "")
-      .split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
-    if (designationIds.length) {
-      where += ` AND c.designation_id IN (${designationIds.map(() => "?").join(",")})`;
-      params.push(...designationIds);
-    }
+    // Geo + designation via the SHARED person-aware filter, so Distribution acts
+    // on exactly the same people the Contacts list and Add Workers page show.
+    const idList = (v) => [...new Set(String(v ?? "").split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
+    const person = buildContactPersonFilter({
+      zone_id: body.zone_id,
+      lok_sabha_id: body.lok_sabha_id,
+      district_id: body.district_id,
+      assembly_ids: idList(body.assembly_ids ?? body.assembly_id),
+      designation_ids: idList(body.designation_ids ?? body.designation_id),
+    });
+    where += person.where;
+    params.push(...person.params);
     if (body.search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${body.search}%`, `%${body.search}%`);
@@ -73,6 +78,7 @@ export async function POST(req) {
     const scope = scopeFilterSync(session.user, "c");
     where += " " + scope.where;
     params.push(...scope.params);
+    const workerJoin = person.needsWorkerJoin ? "LEFT JOIN workers w ON w.id = c.worker_id" : "";
 
     // How many to fetch.
     const capacity = mode === "perCaller" ? perCaller * callers.length : null; // even = all matching
@@ -81,7 +87,7 @@ export async function POST(req) {
     // When reassigning, take the matching set straight by id (so contacts held
     // by other callers get moved). Otherwise hand out unassigned pool first.
     const rows = await query(
-      `SELECT c.id FROM contacts c ${where}
+      `SELECT c.id FROM contacts c ${workerJoin} ${where}
         ORDER BY ${reassign ? "c.id ASC" : "(c.assigned_to_user_id IS NOT NULL), c.id ASC"} ${limitSql}`,
       params
     );

@@ -4,6 +4,7 @@ import { authOptions, isSupervisor } from "@/lib/auth";
 import { isAdmin, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
+import { buildContactPersonFilter } from "@/lib/contactFilter";
 
 // Parse a "1,2,3" style query value into a de-duped list of positive integers.
 function idList(raw) {
@@ -43,33 +44,12 @@ export async function GET(req) {
     if (status === "done") where += " AND c.is_completed = 1";
     if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
     if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
-    // contacts.zone_id is not populated, so resolve zone via the location
-    // hierarchy: district -> lok_sabha -> zone (plus the one district that
-    // parents directly under a zone).
-    if (zone_id) {
-      where += ` AND c.district_id IN (
-        SELECT d.id FROM locations d
-         WHERE d.type = 'district'
-           AND (d.parent_id = ?
-                OR d.parent_id IN (SELECT ls.id FROM locations ls WHERE ls.type = 'lok_sabha' AND ls.parent_id = ?))
-      )`;
-      params.push(zone_id, zone_id);
-    }
-    // Lok Sabha: contacts don't reliably carry lok_sabha_id, so resolve through
-    // the district whose parent is this Lok Sabha.
-    if (lok_sabha_id) {
-      where += " AND c.district_id IN (SELECT id FROM locations WHERE type = 'district' AND parent_id = ?)";
-      params.push(lok_sabha_id);
-    }
-    if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
-    if (assembly_ids.length) {
-      where += ` AND c.assembly_id IN (${assembly_ids.map(() => "?").join(",")})`;
-      params.push(...assembly_ids);
-    }
-    if (designation_ids.length) {
-      where += ` AND c.designation_id IN (${designation_ids.map(() => "?").join(",")})`;
-      params.push(...designation_ids);
-    }
+    // Zone / Lok Sabha / District / Assembly / Designation — filter by the PERSON
+    // (their linked worker) via the shared helper, so the same selection returns
+    // the same people as the Add Workers page and the Distribution panel.
+    const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });
+    where += person.where;
+    params.push(...person.params);
     if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
     if (search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
@@ -108,8 +88,11 @@ export async function GET(req) {
     where += " " + scope.where;
     params.push(...scope.params);
 
+    // Person-aware filtering resolves through the linked worker, so join it in.
+    const workerJoin = person.needsWorkerJoin ? "LEFT JOIN workers w ON w.id = c.worker_id" : "";
+
     // Total matching the current filters (not capped by the list limit).
-    const countRows = await query(`SELECT COUNT(*) AS total FROM contacts c ${where}`, params);
+    const countRows = await query(`SELECT COUNT(*) AS total FROM contacts c ${workerJoin} ${where}`, params);
     const total = Number(countRows[0]?.total || 0);
 
     const contacts = await query(
@@ -119,6 +102,7 @@ export async function GET(req) {
               lw.name AS ward_name,
               dsg.name AS designation_name
          FROM contacts c
+         ${workerJoin}
          LEFT JOIN users u ON u.id = c.assigned_to_user_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
