@@ -64,6 +64,7 @@ export default function DashboardLayout({ children }) {
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+      { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
       { name: "Map", href: "/dashboard/map", icon: Map },

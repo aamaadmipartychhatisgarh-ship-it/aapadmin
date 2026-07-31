@@ -20,7 +20,7 @@ const DASHBOARD_HREF = "/dashboard/admin";
 const GROUPS = [
   { key: "people", label: "People Management", icon: Users, hrefs: ["/dashboard/admin/workers", "/dashboard/admin/teams", "/dashboard/admin/users"] },
   { key: "calling", label: "Calling Management", icon: PhoneCall, hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/caller-report", "/dashboard/admin/assignment-rules", "/dashboard/admin/wrong-numbers"] },
-  { key: "tasks", label: "Task Management", icon: ClipboardList, hrefs: ["/dashboard/tasks", "/dashboard/admin/complaints"] },
+  { key: "tasks", label: "Task Management", icon: ClipboardList, hrefs: ["/dashboard/tasks", "/dashboard/admin/events", "/dashboard/admin/complaints"] },
   { key: "analytics", label: "Analytics", icon: BarChart3, hrefs: ["/dashboard/analytics", "/dashboard/reports", "/dashboard/rankings", "/dashboard/strength"] },
   { key: "monitoring", label: "Monitoring", icon: Map, hrefs: ["/dashboard/map", "/dashboard/social", "/dashboard/social-management"] },
   { key: "content", label: "Content", icon: Newspaper, hrefs: ["/dashboard/media"] },
