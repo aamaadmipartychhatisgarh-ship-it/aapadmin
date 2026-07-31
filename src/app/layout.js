@@ -29,6 +29,7 @@ export default function RootLayout({ children }) {
     <html
       lang="en"
       className={`${inter.variable} font-sans h-full antialiased`}
+      suppressHydrationWarning
     >
       <head>
         {/* Apply the saved theme before paint to avoid a light/dark flash. */}

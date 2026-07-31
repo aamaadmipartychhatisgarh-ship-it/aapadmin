@@ -10,7 +10,8 @@ import InstallApp from "@/components/InstallApp";
 import ThemeToggle from "@/components/ThemeToggle";
 import TaskNotifier from "@/components/TaskNotifier";
 import SidebarNav from "@/components/SidebarNav";
-import SidebarGroupsNav from "@/components/SidebarGroupsNav";
+import SidebarIconNav from "@/components/SidebarIconNav";
+import SectionTabs from "@/components/SectionTabs";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 async function handleSignOut() {
@@ -221,51 +222,93 @@ export default function DashboardLayout({ children }) {
         />
       )}
 
-      {/* Sidebar — off-canvas drawer on mobile, fixed on desktop */}
+      {/* Sidebar — off-canvas drawer on mobile, fixed on desktop. Admins get a
+          compact icon-only rail (no accordion); other roles keep the flat,
+          customizable (drag/pin/favorite) list with labels. */}
       <aside
-        className={`w-[260px] flex-shrink-0 flex flex-col h-full bg-[#0B3A82] text-white
+        className={`${isUserAdmin ? "w-[76px]" : "w-[260px]"} flex-shrink-0 flex flex-col h-full bg-[#0B3A82] text-white
           fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 lg:static lg:transform-none
           ${mobileNavOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
-        {/* Close button (mobile only) */}
-        <button
-          onClick={() => setMobileNavOpen(false)}
-          className="lg:hidden absolute top-3 right-3 text-blue-200 hover:text-white p-1"
-          aria-label="Close menu"
-        >
-          <X size={22} />
-        </button>
+        {/* Close button (mobile only). Must stay INSIDE the aside's box — an
+            off-canvas translate moves the whole subtree, so anything
+            positioned outside the box (e.g. a negative offset) lands back
+            on-screen even while the drawer itself is off-screen. The narrow
+            admin rail has no room beside the logo, so it gets its own row
+            above the logo instead of overlapping it. */}
+        {isUserAdmin ? (
+          <div className="lg:hidden flex justify-center pt-3">
+            <button
+              onClick={() => setMobileNavOpen(false)}
+              className="text-blue-200 hover:text-white transition-colors p-1"
+              aria-label="Close menu"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setMobileNavOpen(false)}
+            className="lg:hidden absolute top-3 right-3 text-blue-200 hover:text-white p-1"
+            aria-label="Close menu"
+          >
+            <X size={22} />
+          </button>
+        )}
 
         {/* Logo */}
-        <div className="flex flex-col items-center py-6 border-b border-white/10">
-          <img src="/aap_logo.jpg" alt="AAP Logo" className="w-20 h-20 object-contain mb-2 rounded-full border-2 border-white/20 bg-white" />
-          <div className="text-base mt-2 font-medium">Chhattisgarh</div>
-        </div>
-
-        {/* Navigation — admins get grouped accordion sections; other roles keep
-            the flat, customizable (drag/pin/favorite) list. Same routes/theme. */}
         {isUserAdmin ? (
-          <SidebarGroupsNav items={navItems} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
+          <div className="flex flex-col items-center py-5 border-b border-white/10">
+            <img src="/aap_logo.jpg" alt="AAP Logo" className="w-10 h-10 object-contain rounded-full border-2 border-white/20 bg-white" />
+          </div>
+        ) : (
+          <div className="flex flex-col items-center py-6 border-b border-white/10">
+            <img src="/aap_logo.jpg" alt="AAP Logo" className="w-20 h-20 object-contain mb-2 rounded-full border-2 border-white/20 bg-white" />
+            <div className="text-base mt-2 font-medium">Chhattisgarh</div>
+          </div>
+        )}
+
+        {/* Navigation */}
+        {isUserAdmin ? (
+          <SidebarIconNav items={navItems} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
         ) : (
           <SidebarNav items={navItems} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
         )}
 
         {/* Bottom Area */}
-        <div className="p-4 mt-auto space-y-1">
-          <InstallApp variant="sidebar" />
-          <button
-            onClick={handleSignOut}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-md text-blue-200 hover:text-white hover:bg-white/10 w-full transition-all text-sm"
-          >
-            <LogOut size={18} />
-            <span>Sign out</span>
-          </button>
-          {appVersion && (
-            <div className="pt-2 text-center text-[11px] text-blue-300/70">
-              Version {appVersion}
+        {isUserAdmin ? (
+          <div className="p-3 mt-auto flex flex-col items-center gap-1.5">
+            <div className="relative group w-full flex justify-center">
+              <button
+                onClick={handleSignOut}
+                title="Sign out"
+                aria-label="Sign out"
+                className="w-11 h-11 rounded-xl flex items-center justify-center text-blue-200 hover:text-white hover:bg-white/10 transition-all"
+              >
+                <LogOut size={18} />
+              </button>
+              <span role="tooltip" className="pointer-events-none absolute left-full ml-2 top-1/2 -translate-y-1/2 whitespace-nowrap bg-gray-900 text-white text-xs font-medium px-2.5 py-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50 shadow-lg">
+                Sign out
+              </span>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="p-4 mt-auto space-y-1">
+            <InstallApp variant="sidebar" />
+            <button
+              onClick={handleSignOut}
+              className="flex items-center gap-3 px-4 py-2.5 rounded-md text-blue-200 hover:text-white hover:bg-white/10 w-full transition-all text-sm"
+            >
+              <LogOut size={18} />
+              <span>Sign out</span>
+            </button>
+            {appVersion && (
+              <div className="pt-2 text-center text-[11px] text-blue-300/70">
+                Version {appVersion}
+              </div>
+            )}
+          </div>
+        )}
       </aside>
 
       {/* Main Content Area */}
@@ -354,6 +397,10 @@ export default function DashboardLayout({ children }) {
             </div>
           </div>
         </header>
+
+        {/* Section tabs — sibling pages of the current section as plain text
+            links (replaces what the old sidebar accordion used to reveal) */}
+        <SectionTabs items={navItems} pathname={pathname} />
 
         {/* Scrollable Main Content */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8 relative">
