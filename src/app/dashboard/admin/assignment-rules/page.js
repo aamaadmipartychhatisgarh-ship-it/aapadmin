@@ -95,6 +95,7 @@ function Body() {
         ) : rules.length === 0 ? (
           <div className="p-8 text-gray-400">No rules yet. Add one above.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-gray-600">
               <tr>
@@ -113,6 +114,7 @@ function Body() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

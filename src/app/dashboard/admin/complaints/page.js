@@ -112,6 +112,7 @@ function Body() {
         ) : data.complaints.length === 0 ? (
           <div className="p-12 text-center text-gray-400"><MessageSquare size={36} className="mx-auto text-gray-300 mb-3" />No complaints.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -152,6 +153,7 @@ function Body() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

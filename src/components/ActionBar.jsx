@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Loader2, MoreHorizontal } from "lucide-react";
+import FloatingPopover from "@/components/FloatingPopover";
 
 // Reusable, configurable row of page actions. Each item:
 //   { key, label, icon, onClick|href, variant, disabled, loading }
@@ -42,14 +43,7 @@ function MenuRow({ a, onDone }) {
 export default function ActionBar({ items = [], className = "" }) {
   const visible = items.filter(Boolean);
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  const moreRef = useRef(null);
 
   if (!visible.length) return null;
 
@@ -67,23 +61,22 @@ export default function ActionBar({ items = [], className = "" }) {
   const overflow = visible.filter((_, i) => i !== inlineIdx);
 
   return (
-    <div className={`flex items-center gap-2 ${className}`} ref={ref}>
-      <div className="relative">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-label="More actions"
-          aria-expanded={open}
-          className="w-10 h-10 rounded-xl border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 flex items-center justify-center shadow-sm"
-        >
-          <MoreHorizontal size={18} />
-        </button>
-        {open && (
-          <div className="absolute right-0 mt-1.5 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50">
-            {overflow.map((a) => <MenuRow key={a.key} a={a} onDone={() => setOpen(false)} />)}
-          </div>
-        )}
-      </div>
+    <div className={`flex items-center gap-2 ${className}`}>
+      <button
+        ref={moreRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="More actions"
+        aria-expanded={open}
+        className="w-10 h-10 rounded-xl border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 flex items-center justify-center shadow-sm"
+      >
+        <MoreHorizontal size={18} />
+      </button>
+      <FloatingPopover anchorRef={moreRef} open={open} onClose={() => setOpen(false)} width={224} estimatedHeight={overflow.length * 40 + 16}>
+        <div className="py-1.5">
+          {overflow.map((a) => <MenuRow key={a.key} a={a} onDone={() => setOpen(false)} />)}
+        </div>
+      </FloatingPopover>
       <ActionButton a={inline} />
     </div>
   );

@@ -42,6 +42,7 @@ function Body() {
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-5 border-b border-gray-100 flex items-center gap-2"><Gauge size={18} className="text-[#164FA3]" /><h2 className="font-bold text-gray-900">District Strength Ranking</h2></div>
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
@@ -77,6 +78,7 @@ function Body() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

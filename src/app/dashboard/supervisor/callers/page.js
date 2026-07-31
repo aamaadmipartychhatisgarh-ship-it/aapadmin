@@ -83,6 +83,7 @@ function CallersBody() {
         ) : callers.length === 0 ? (
           <div className="p-8 text-gray-400">No callers found.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -117,6 +118,7 @@ function CallersBody() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

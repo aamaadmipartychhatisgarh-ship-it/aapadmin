@@ -64,6 +64,7 @@ function Body() {
         ) : visible.length === 0 ? (
           <div className="p-8 text-gray-400">No sessions {rows.length ? "match the filters" : `recorded for ${date}`}.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -86,6 +87,7 @@ function Body() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

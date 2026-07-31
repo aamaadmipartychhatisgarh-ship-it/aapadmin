@@ -487,6 +487,7 @@ function Body() {
         ) : contacts.length === 0 ? (
           <div className="p-8 text-gray-400">No contacts match.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -545,6 +546,7 @@ function Body() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

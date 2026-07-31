@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { ChevronDown, Search, Check } from "lucide-react";
+import FloatingPopover from "@/components/FloatingPopover";
 
 // Checkbox multi-select dropdown with a "Select All" row, an in-dropdown search
 // box, and a compact summary ("Raipur, Mahasamund (+3)").
@@ -15,16 +16,16 @@ import { ChevronDown, Search, Check } from "lucide-react";
 //
 // Semantics: an empty selection means "no filter" (all shown) and renders the
 // Select-All row as checked. Selecting every option is treated the same way.
+//
+// The dropdown itself renders via FloatingPopover (portal + viewport-clamped
+// fixed position) instead of `absolute` tied to the trigger's own box — this
+// filter is commonly one of several narrow fields packed into a filter bar,
+// where a plain `absolute` dropdown can clip against a scrolling ancestor or
+// run past the right edge on mobile.
 export function MultiSelect({ options, value, onChange, allLabel = "All", className = "" }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const ref = useRef(null);
-
-  useEffect(() => {
-    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+  const triggerRef = useRef(null);
 
   const ids = options.map((o) => String(o.id));
   const sel = new Set((value || []).map(String));
@@ -58,8 +59,9 @@ export function MultiSelect({ options, value, onChange, allLabel = "All", classN
     }`;
 
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={`h-9 w-full px-2 rounded-lg border border-gray-200 text-sm bg-white flex items-center justify-between gap-1 ${className}`}
@@ -68,8 +70,8 @@ export function MultiSelect({ options, value, onChange, allLabel = "All", classN
         <ChevronDown size={15} className="text-gray-400 shrink-0" />
       </button>
 
-      {open && (
-        <div className="absolute z-20 mt-1 w-full min-w-[12rem] bg-white border border-gray-200 rounded-lg shadow-lg">
+      <FloatingPopover anchorRef={triggerRef} open={open} onClose={() => setOpen(false)} width={224} estimatedHeight={280}>
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
           <div className="p-2 border-b border-gray-100">
             <div className="relative">
               <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -101,7 +103,7 @@ export function MultiSelect({ options, value, onChange, allLabel = "All", classN
             })}
           </div>
         </div>
-      )}
-    </div>
+      </FloatingPopover>
+    </>
   );
 }

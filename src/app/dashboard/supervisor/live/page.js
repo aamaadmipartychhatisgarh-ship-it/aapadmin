@@ -65,6 +65,7 @@ function LiveBody() {
         {loading ? (
           <div className="p-8 text-gray-400">Loading…</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -95,6 +96,7 @@ function LiveBody() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

@@ -89,6 +89,7 @@ function NewspapersTab({ data, onChange }) {
         {data.recentNotes.length === 0 ? (
           <div className="p-8 text-gray-400 text-sm text-center">No press notes yet.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -119,6 +120,7 @@ function NewspapersTab({ data, onChange }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -162,6 +164,7 @@ function ChannelsTab({ data, onChange }) {
         {data.upcomingDebates.length === 0 ? (
           <div className="p-8 text-gray-400 text-sm text-center">No debates scheduled.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -194,6 +197,7 @@ function ChannelsTab({ data, onChange }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

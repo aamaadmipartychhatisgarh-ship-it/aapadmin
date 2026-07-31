@@ -171,6 +171,7 @@ function Body({ canManage }) {
         ) : data.tasks.length === 0 ? (
           <div className="p-12 text-center text-gray-400"><ClipboardList size={36} className="mx-auto text-gray-300 mb-3" />No tasks.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -257,6 +258,7 @@ function Body({ canManage }) {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

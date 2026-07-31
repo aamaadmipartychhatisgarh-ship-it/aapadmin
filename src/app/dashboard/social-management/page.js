@@ -219,6 +219,7 @@ function ApprovalsTab({ data, setStatus, onEdit }) {
       {data.pending.length === 0 ? (
         <div className="p-12 text-center text-gray-400"><CheckCircle2 size={36} className="mx-auto text-emerald-300 mb-3" />No posts awaiting approval.</div>
       ) : (
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
@@ -251,6 +252,7 @@ function ApprovalsTab({ data, setStatus, onEdit }) {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
@@ -260,6 +262,7 @@ function ApprovalsTab({ data, setStatus, onEdit }) {
 function LogTab({ data, onEdit }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-left">
           <tr>
@@ -298,6 +301,7 @@ function LogTab({ data, onEdit }) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -306,6 +310,7 @@ function LogTab({ data, onEdit }) {
 function PerLsTab({ data }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-left">
           <tr>
@@ -328,6 +333,7 @@ function PerLsTab({ data }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

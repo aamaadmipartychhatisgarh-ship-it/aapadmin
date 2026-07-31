@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { X, Phone, MapPin, Activity, Award, Users as UsersIcon, Loader2, User, Shield, ExternalLink } from "lucide-react";
-import Avatar from "@/components/Avatar";
+import { X, Phone, MapPin, Activity, Award, Users as UsersIcon, Loader2, User, ExternalLink } from "lucide-react";
+import { initialsOf } from "@/components/Avatar";
 
 // Popup shown when a user clicks a person's name or photo in a list/table —
 // two modes:
@@ -15,6 +15,10 @@ import Avatar from "@/components/Avatar";
 //                                  loaded (username, role, district, status) —
 //                                  no extra fetch, since there's no separate
 //                                  user-detail endpoint today.
+//
+// Layout: a full-width photo "hero" on top (name/subtitle overlaid at the
+// bottom of the image, on a dark gradient scrim so text stays legible over
+// any photo), details grid below — matches how a phone contact card reads.
 export default function PersonDetailModal({ type, id, data, onClose }) {
   const [worker, setWorker] = useState(null);
   const [loading, setLoading] = useState(type === "worker");
@@ -32,7 +36,7 @@ export default function PersonDetailModal({ type, id, data, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         {type === "worker" ? (
           loading ? (
             <div className="p-10 flex items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
@@ -49,19 +53,47 @@ export default function PersonDetailModal({ type, id, data, onClose }) {
   );
 }
 
+// Full-size photo hero: image (or a big initials/icon tile when there's no
+// photo) filling the top of the card, name + subtitle overlaid at the bottom
+// on a gradient scrim, close button floating top-right.
+function Hero({ name, photo, subtitle, onClose }) {
+  const [errored, setErrored] = useState(false);
+  useEffect(() => { setErrored(false); }, [photo]);
+  const showImg = photo && !errored;
+  const ini = initialsOf(name);
+
+  return (
+    <div className="relative w-full h-64 bg-gradient-to-br from-[#164FA3] to-[#0B3A82] rounded-t-2xl overflow-hidden">
+      {showImg ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={photo} alt={name || "photo"} onError={() => setErrored(true)} className="w-full h-full object-cover" />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          {ini ? (
+            <span className="text-white font-bold text-6xl leading-none">{ini}</span>
+          ) : (
+            <User size={72} className="text-white/80" />
+          )}
+        </div>
+      )}
+      <button
+        onClick={onClose}
+        className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center text-white bg-black/30 hover:bg-black/50 backdrop-blur-sm"
+      >
+        <X size={18} />
+      </button>
+      <div className="absolute inset-x-0 bottom-0 px-5 py-3.5 bg-gradient-to-t from-black/70 via-black/30 to-transparent">
+        <h2 className="font-bold text-white text-lg truncate drop-shadow-sm">{name}</h2>
+        {subtitle && <p className="text-sm text-white/85 truncate">{subtitle}</p>}
+      </div>
+    </div>
+  );
+}
+
 function WorkerBody({ w, teams, badges, onClose }) {
   return (
     <div>
-      <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <Avatar name={w.name} src={w.photo_url} size={56} className="bg-[#164FA3] text-white ring-2 ring-[#164FA3]/20" textClassName="text-white" />
-          <div className="min-w-0">
-            <h2 className="font-bold text-gray-900 text-lg truncate">{w.name}</h2>
-            <p className="text-sm text-gray-500 truncate">{w.position || "—"}</p>
-          </div>
-        </div>
-        <button onClick={onClose} className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><X size={18} /></button>
-      </div>
+      <Hero name={w.name} photo={w.photo_url} subtitle={w.position || "—"} onClose={onClose} />
 
       <div className="p-5 space-y-4">
         <div className="grid grid-cols-2 gap-3">
@@ -110,18 +142,11 @@ function WorkerBody({ w, teams, badges, onClose }) {
 }
 
 function UserBody({ u, onClose }) {
+  const subtitle = u?.role ? String(u.role).replace(/_/g, " ") : null;
   return (
     <div>
-      <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <Avatar name={u?.username || u?.name} src={u?.photo_url} size={56} className="bg-[#164FA3] text-white" textClassName="text-white" />
-          <div className="min-w-0">
-            <h2 className="font-bold text-gray-900 text-lg truncate">{u?.username || u?.name}</h2>
-            {u?.role && <p className="text-sm text-gray-500 truncate flex items-center gap-1"><Shield size={12} /> {String(u.role).replace(/_/g, " ")}</p>}
-          </div>
-        </div>
-        <button onClick={onClose} className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><X size={18} /></button>
-      </div>
+      <Hero name={u?.username || u?.name} photo={u?.photo_url} subtitle={subtitle} onClose={onClose} />
+
       <div className="p-5 space-y-3">
         {u?.home_district_name && <MiniDetail icon={MapPin} label="District">{u.home_district_name}</MiniDetail>}
         {"is_active" in (u || {}) && (

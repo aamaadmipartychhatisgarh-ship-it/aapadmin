@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Phone, MessageCircle, ClipboardCheck, Loader2, Check, History, PhoneCall, PhoneMissed, Clock } from "lucide-react";
+import FloatingPopover from "@/components/FloatingPopover";
 
 // Indian 10-digit mobile → wa.me international format (91XXXXXXXXXX, no '+').
 // Falls back to stripping non-digits if the number already carries a prefix.
@@ -28,7 +29,12 @@ function fillTemplate(text, name) {
   return text.replace(/\{name\}/g, name || "");
 }
 
-// Call + WhatsApp icon buttons for a list row.
+// Call + WhatsApp icon buttons for a list row. Every popover is rendered via
+// FloatingPopover (portal + viewport-clamped fixed position) instead of
+// `absolute right-0` — inside a horizontally-scrolled table (common on
+// mobile) a plain `absolute` popover clips against the scroll container or
+// lands off-screen, since its "right: 0" is relative to the trigger's own
+// box, not the viewport.
 //   canLog    show an inline "log call result" popover (caller-only — the
 //             /api/calls endpoint 403s for admin/supervisor by design).
 //   workerId  show a "Call History" icon with a stats popover (Picked / Not
@@ -40,17 +46,6 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
   const logRef = useRef(null);
   const waRef = useRef(null);
   const historyRef = useRef(null);
-
-  useEffect(() => {
-    if (!logOpen && !waOpen && !historyOpen) return;
-    const onDoc = (e) => {
-      if (logRef.current && !logRef.current.contains(e.target)) setLogOpen(false);
-      if (waRef.current && !waRef.current.contains(e.target)) setWaOpen(false);
-      if (historyRef.current && !historyRef.current.contains(e.target)) setHistoryOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [logOpen, waOpen, historyOpen]);
 
   if (!phone) return null;
   const wa = toWhatsAppDigits(phone);
@@ -65,21 +60,23 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
         <Phone size={size} />
       </a>
 
-      <div className="relative" ref={waRef}>
-        <button
-          type="button"
-          onClick={() => setWaOpen((o) => !o)}
-          title={`WhatsApp ${personName || phone}`}
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-emerald-600 hover:bg-emerald-50"
-        >
-          <MessageCircle size={size} />
-        </button>
-        {waOpen && <WhatsAppTemplatePopover wa={wa} personName={personName} onClose={() => setWaOpen(false)} />}
-      </div>
+      <button
+        ref={waRef}
+        type="button"
+        onClick={() => setWaOpen((o) => !o)}
+        title={`WhatsApp ${personName || phone}`}
+        className="w-7 h-7 rounded-lg flex items-center justify-center text-emerald-600 hover:bg-emerald-50"
+      >
+        <MessageCircle size={size} />
+      </button>
+      <FloatingPopover anchorRef={waRef} open={waOpen} onClose={() => setWaOpen(false)} width={240} estimatedHeight={280}>
+        <WhatsAppTemplatePopover wa={wa} personName={personName} onClose={() => setWaOpen(false)} />
+      </FloatingPopover>
 
       {workerId && (
-        <div className="relative" ref={historyRef}>
+        <>
           <button
+            ref={historyRef}
             type="button"
             onClick={() => setHistoryOpen((o) => !o)}
             title="Call history"
@@ -87,13 +84,16 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
           >
             <History size={size} />
           </button>
-          {historyOpen && <CallHistoryPopover workerId={workerId} onClose={() => setHistoryOpen(false)} />}
-        </div>
+          <FloatingPopover anchorRef={historyRef} open={historyOpen} onClose={() => setHistoryOpen(false)} width={256} estimatedHeight={260}>
+            <CallHistoryPopover workerId={workerId} />
+          </FloatingPopover>
+        </>
       )}
 
       {canLog && (
-        <div className="relative" ref={logRef}>
+        <>
           <button
+            ref={logRef}
             type="button"
             onClick={() => setLogOpen((o) => !o)}
             title="Log call result"
@@ -101,7 +101,7 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
           >
             <ClipboardCheck size={size} />
           </button>
-          {logOpen && (
+          <FloatingPopover anchorRef={logRef} open={logOpen} onClose={() => setLogOpen(false)} width={256} estimatedHeight={220}>
             <QuickLogPopover
               phone={phone}
               personName={personName}
@@ -109,8 +109,8 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
               onClose={() => setLogOpen(false)}
               onLogged={onLogged}
             />
-          )}
-        </div>
+          </FloatingPopover>
+        </>
       )}
     </div>
   );
@@ -123,7 +123,7 @@ function WhatsAppTemplatePopover({ wa, personName, onClose }) {
     onClose();
   };
   return (
-    <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50">
+    <div className="py-1.5">
       <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide">Quick message</div>
       {WHATSAPP_TEMPLATES.map((t) => (
         <button
@@ -152,7 +152,7 @@ const STATUS_META = {
   "Switched Off": { icon: Phone, color: "text-sky-600" },
 };
 
-function CallHistoryPopover({ workerId, onClose }) {
+function CallHistoryPopover({ workerId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -166,7 +166,7 @@ function CallHistoryPopover({ workerId, onClose }) {
   };
 
   return (
-    <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-gray-100 p-3 z-50">
+    <div className="p-3">
       <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5"><History size={13} /> Call History</div>
       {loading ? (
         <div className="py-4 flex items-center justify-center text-gray-400"><Loader2 size={16} className="animate-spin" /></div>
@@ -246,7 +246,7 @@ function QuickLogPopover({ phone, personName, contactId, onClose, onLogged }) {
   }
 
   return (
-    <div className="absolute right-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-gray-100 p-3 z-50 space-y-2">
+    <div className="p-3 space-y-2">
       {done ? (
         <div className="flex items-center gap-2 text-emerald-600 text-sm font-medium py-2 justify-center"><Check size={16} /> Logged</div>
       ) : (

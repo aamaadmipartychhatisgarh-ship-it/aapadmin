@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Bell, AlertTriangle, AlertCircle, Info, X } from "lucide-react";
 import Link from "next/link";
+import FloatingPopover from "@/components/FloatingPopover";
 
 const SEV = {
   critical: { icon: AlertCircle, color: "text-red-600 bg-red-50" },
@@ -13,7 +14,7 @@ const SEV = {
 export default function NotificationBell() {
   const [alerts, setAlerts] = useState([]);
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const btnRef = useRef(null);
 
   useEffect(() => {
     const load = () => fetch("/api/notifications").then((r) => r.json()).then((d) => setAlerts(d.alerts || [])).catch(() => {});
@@ -22,22 +23,16 @@ export default function NotificationBell() {
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-
   return (
-    <div className="relative" ref={ref}>
-      <button onClick={() => setOpen(!open)} className="relative p-2 text-gray-600 hover:text-[#0B3A82] transition-colors rounded-full hover:bg-blue-50">
+    <>
+      <button ref={btnRef} onClick={() => setOpen(!open)} className="relative p-2 text-gray-600 hover:text-[#0B3A82] transition-colors rounded-full hover:bg-blue-50">
         <Bell size={22} />
         {alerts.length > 0 && (
           <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white text-[8px] text-white flex items-center justify-center font-bold">{alerts.length}</span>
         )}
       </button>
-      {open && (
-        <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+      <FloatingPopover anchorRef={btnRef} open={open} onClose={() => setOpen(false)} width={320} estimatedHeight={360}>
+        <div className="overflow-hidden rounded-2xl">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <span className="font-bold text-gray-900 text-sm">Notifications</span>
             <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
@@ -61,7 +56,7 @@ export default function NotificationBell() {
             })}
           </div>
         </div>
-      )}
-    </div>
+      </FloatingPopover>
+    </>
   );
 }

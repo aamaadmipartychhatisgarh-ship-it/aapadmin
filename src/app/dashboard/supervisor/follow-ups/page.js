@@ -64,6 +64,7 @@ function Body() {
         ) : visible.length === 0 ? (
           <div className="p-8 text-gray-400">No pending follow-ups{rows.length ? " match the filters" : ""}.</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
@@ -98,6 +99,7 @@ function Body() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

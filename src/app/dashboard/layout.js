@@ -4,13 +4,14 @@ import { useSession, signOut } from "next-auth/react";
 import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Heartbeat from "@/components/Heartbeat";
 import InstallApp from "@/components/InstallApp";
 import ThemeToggle from "@/components/ThemeToggle";
 import TaskNotifier from "@/components/TaskNotifier";
 import SidebarNav from "@/components/SidebarNav";
 import SectionTabs from "@/components/SectionTabs";
+import FloatingPopover from "@/components/FloatingPopover";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 import { primaryItems } from "@/lib/navGroups";
 
@@ -39,6 +40,7 @@ export default function DashboardLayout({ children }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [dashboardSwitcherOpen, setDashboardSwitcherOpen] = useState(false);
+  const switcherBtnRef = useRef(null);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -352,8 +354,9 @@ export default function DashboardLayout({ children }) {
           <div className="flex items-center gap-4 shrink-0">
             <ThemeToggle />
             {canonical === ROLES.SUPER_ADMIN ? (
-              <div className="relative">
+              <>
                 <button
+                  ref={switcherBtnRef}
                   onClick={() => setDashboardSwitcherOpen((o) => !o)}
                   aria-expanded={dashboardSwitcherOpen}
                   title="Switch dashboard"
@@ -372,28 +375,31 @@ export default function DashboardLayout({ children }) {
                   </div>
                   <span className={`hidden sm:inline text-gray-400 transition-transform ${dashboardSwitcherOpen ? "rotate-180" : ""}`}>▼</span>
                 </button>
-                {dashboardSwitcherOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setDashboardSwitcherOpen(false)} />
-                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50">
-                      <div className="px-3.5 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Switch dashboard</div>
-                      {DASHBOARD_SWITCHER.map((d) => {
-                        const Icon = d.icon;
-                        return (
-                          <Link
-                            key={d.href}
-                            href={d.href}
-                            onClick={() => setDashboardSwitcherOpen(false)}
-                            className={`flex items-center gap-2.5 px-3.5 py-2 text-sm hover:bg-gray-50 ${pathname === d.href ? "text-[#164FA3] font-semibold" : "text-gray-700"}`}
-                          >
-                            <Icon size={15} /> {d.name}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
+                <FloatingPopover
+                  anchorRef={switcherBtnRef}
+                  open={dashboardSwitcherOpen}
+                  onClose={() => setDashboardSwitcherOpen(false)}
+                  width={256}
+                  estimatedHeight={DASHBOARD_SWITCHER.length * 36 + 40}
+                >
+                  <div className="py-1.5">
+                    <div className="px-3.5 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Switch dashboard</div>
+                    {DASHBOARD_SWITCHER.map((d) => {
+                      const Icon = d.icon;
+                      return (
+                        <Link
+                          key={d.href}
+                          href={d.href}
+                          onClick={() => setDashboardSwitcherOpen(false)}
+                          className={`flex items-center gap-2.5 px-3.5 py-2 text-sm hover:bg-gray-50 ${pathname === d.href ? "text-[#164FA3] font-semibold" : "text-gray-700"}`}
+                        >
+                          <Icon size={15} /> {d.name}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </FloatingPopover>
+              </>
             ) : (
               <div className="flex items-center gap-3 lg:pl-4">
                 <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
