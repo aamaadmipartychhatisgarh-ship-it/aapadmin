@@ -175,6 +175,21 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
             <input type="range" min="0" max="100" value={form.activity_score} onChange={(e) => setForm({ ...form, activity_score: Number(e.target.value) })} className="w-full" />
           </div>
         </div>
+
+        {/* Membership lifecycle */}
+        <div className="border border-gray-200 rounded-lg p-3 grid grid-cols-2 gap-3">
+          <div className="col-span-2 text-xs font-semibold text-gray-600 uppercase tracking-wide">Membership</div>
+          <Fld label="Membership No."><input className={inp} placeholder="Auto (AAPCG…)" value={form.membership_no || ""} onChange={(e) => setForm({ ...form, membership_no: e.target.value })} /></Fld>
+          <Fld label="Status">
+            <select className={inp} value={form.membership_status || "active"} onChange={(e) => setForm({ ...form, membership_status: e.target.value })}>
+              <option value="prospect">Prospect</option>
+              <option value="active">Active</option>
+              <option value="lapsed">Lapsed</option>
+            </select>
+          </Fld>
+          <Fld label="Member Since"><input type="date" className={inp} value={form.member_since || ""} onChange={(e) => setForm({ ...form, member_since: e.target.value })} /></Fld>
+          <Fld label="Valid Till"><input type="date" className={inp} value={form.valid_till || ""} onChange={(e) => setForm({ ...form, valid_till: e.target.value })} /></Fld>
+        </div>
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
           <button onClick={() => onSave(form)} disabled={saving || !form.name || uploading} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Save"}</button>
@@ -226,6 +241,10 @@ export function EditWorkerModal({ worker, districts, designations, onClose, onSa
         ward_id: worker.ward_id || "",
         booth_id: worker.booth_id || "",
         status: worker.status || "active",
+        membership_no: worker.membership_no || "",
+        member_since: worker.member_since ? worker.member_since.slice(0, 10) : "",
+        membership_status: worker.membership_status || "active",
+        valid_till: worker.valid_till ? worker.valid_till.slice(0, 10) : "",
       }}
       districts={districts}
       designations={designations}
@@ -255,6 +274,7 @@ export function AddWorkerModal({ districts, designations, onClose, onSaved }) {
         name: "", mobile: "", photo_url: "", position: "", skills: "", address: "",
         zone_id: "", lok_sabha_id: "", district_id: "", assembly_id: "", ward_id: "", booth_id: "",
         status: "active", activity_score: 50,
+        membership_no: "", member_since: "", membership_status: "active", valid_till: "",
       }}
       districts={districts}
       designations={designations}

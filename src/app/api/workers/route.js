@@ -71,6 +71,8 @@ export async function GET(req) {
     if (districtId) { where.push("w.district_id = ?"); params.push(districtId); }
     if (assemblyId) { where.push("w.assembly_id = ?"); params.push(assemblyId); }
     if (status) { where.push("w.status = ?"); params.push(status); }
+    const membershipStatus = searchParams.get("membership_status");
+    if (membershipStatus) { where.push("w.membership_status = ?"); params.push(membershipStatus); }
     // position holds one or more comma-separated designations ("A, B") — match any.
     if (position) { where.push("(w.position = ? OR FIND_IN_SET(?, REPLACE(w.position, ', ', ',')))"); params.push(position, position); }
     // Duplicate workers = same mobile (last 10 digits) appearing more than once.
@@ -159,15 +161,22 @@ export async function POST(req) {
     let workerId;
     try {
       await conn.beginTransaction();
+      const memStatus = ["prospect", "active", "lapsed"].includes(d.membership_status) ? d.membership_status : "active";
       const [res] = await conn.query(
-        `INSERT INTO workers (name, mobile, photo_url, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO workers (name, mobile, photo_url, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score, member_since, membership_status, valid_till)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [d.name, mobile, d.photo_url || null, d.address || null,
          d.zone_id || null, d.lok_sabha_id || null, d.district_id || null, d.assembly_id || null,
          d.ward_id || null, d.booth_id || null, d.position || null, d.skills || null,
-         status, Number(d.activity_score) || 0]
+         status, Number(d.activity_score) || 0,
+         d.member_since || new Date().toISOString().slice(0, 10), memStatus, d.valid_till || null]
       );
       workerId = res.insertId;
+      // Auto-assign a stable membership number if none was provided.
+      await conn.query(
+        "UPDATE workers SET membership_no = COALESCE(?, CONCAT('AAPCG', LPAD(id, 6, '0'))) WHERE id = ?",
+        [d.membership_no || null, workerId]
+      );
       await syncWorkerToContact(conn, workerId);
       await conn.commit();
     } catch (e) {

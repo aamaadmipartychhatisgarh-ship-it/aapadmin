@@ -40,6 +40,7 @@ function Body({ session }) {
   const [assemblies, setAssemblies] = useState([]);
   const [assemblyId, setAssemblyId] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [membershipFilter, setMembershipFilter] = useState("");
   const [positionFilter, setPositionFilter] = useState("");
   const [dupOnly, setDupOnly] = useState(false);
   const [page, setPage] = useState(1);
@@ -77,7 +78,7 @@ function Body({ session }) {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, zoneId, lokSabhaId, districtId, assemblyId, statusFilter, positionFilter, dupOnly, page]);
+  }, [search, zoneId, lokSabhaId, districtId, assemblyId, statusFilter, membershipFilter, positionFilter, dupOnly, page]);
 
   // Refetch when the admin returns to this tab so worker edits made elsewhere
   // (e.g. a caller updating details in My Workplace) show without a manual refresh.
@@ -98,6 +99,7 @@ function Body({ session }) {
     if (districtId) p.set("district_id", districtId);
     if (assemblyId) p.set("assembly_id", assemblyId);
     if (statusFilter) p.set("status", statusFilter);
+    if (membershipFilter) p.set("membership_status", membershipFilter);
     if (positionFilter) p.set("position", positionFilter);
     if (dupOnly) p.set("duplicates", "1");
     const r = await fetch(`/api/workers?${p}`);
@@ -162,6 +164,7 @@ function Body({ session }) {
             if (districtId) ep.set("district_id", districtId);
             if (assemblyId) ep.set("assembly_id", assemblyId);
             if (statusFilter) ep.set("status", statusFilter);
+            if (membershipFilter) ep.set("membership_status", membershipFilter);
             if (positionFilter) ep.set("position", positionFilter);
             const qs = ep.toString() ? `?${ep}` : "";
             return (
@@ -226,6 +229,12 @@ function Body({ session }) {
           <option value="active">Active</option>
           <option value="pending">Pending</option>
         </select>
+        <select value={membershipFilter} onChange={(e) => { setMembershipFilter(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
+          <option value="">All memberships</option>
+          <option value="active">Members: Active</option>
+          <option value="prospect">Members: Prospect</option>
+          <option value="lapsed">Members: Lapsed</option>
+        </select>
         <button onClick={() => { setDupOnly(!dupOnly); setPage(1); }} className={`h-9 px-3 rounded-lg text-xs font-semibold uppercase ${dupOnly ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
           Duplicates
         </button>
@@ -275,7 +284,10 @@ function Body({ session }) {
                           {(w.name || "?")[0].toUpperCase()}
                         </div>
                       )}
-                      <span>{w.name}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate">{w.name}</span>
+                        {w.membership_no && <span className="block text-[10px] text-gray-400 font-mono">{w.membership_no}{w.membership_status && w.membership_status !== "active" ? ` · ${w.membership_status}` : ""}</span>}
+                      </span>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{w.mobile || "—"}</td>

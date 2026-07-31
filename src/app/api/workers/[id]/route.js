@@ -83,7 +83,7 @@ export async function PUT(req, { params }) {
 
     // Note: "status" is intentionally excluded — it's derived from profile
     // completeness (recomputed below), never set directly by the client.
-    const fields = ["name","mobile","photo_url","address","zone_id","lok_sabha_id","district_id","assembly_id","ward_id","booth_id","position","skills","activity_score"];
+    const fields = ["name","mobile","photo_url","address","zone_id","lok_sabha_id","district_id","assembly_id","ward_id","booth_id","position","skills","activity_score","membership_no","member_since","membership_status","valid_till"];
     const sets = [], vals = [];
     for (const f of fields) {
       if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
