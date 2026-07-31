@@ -28,6 +28,7 @@ export default function Page() {
 }
 
 function Body() {
+  const { data: session } = useSession();
   const [contacts, setContacts] = useState([]);
   const [total, setTotal] = useState(0);
   const [users, setUsers] = useState([]);
