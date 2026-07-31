@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, canManageWorkers, isSuperAdmin } from "@/lib/permissions";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -12,6 +12,12 @@ import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import CallActionIcons from "@/components/CallActionIcons";
+import CallingTab from "./CallingTab";
+
+const TABS = [
+  { key: "directory", label: "Directory" },
+  { key: "calling", label: "Calling", adminOnly: true },
+];
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -32,6 +38,27 @@ function Body({ session }) {
   const canEdit = canManageWorkers(session);
   const canImport = isAdmin(session);
   const canExport = isSuperAdmin(session);
+  // The Calling tab (the former standalone Contacts page) was always
+  // admin-only — stricter than canManageWorkers, which also lets in
+  // supervisors and callers. Keep that same boundary now that it's a tab.
+  const canSeeCalling = isAdmin(session);
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState(() => {
+    if (typeof window !== "undefined") {
+      const t = new URLSearchParams(window.location.search).get("tab");
+      if (t === "calling" && canSeeCalling) return "calling";
+    }
+    return "directory";
+  });
+  // The lazy initializer above only covers a hard page load. A client-side
+  // redirect (e.g. the old /dashboard/admin/contacts route bouncing here
+  // with ?tab=calling) mounts this component before window.location has
+  // caught up, so also react to the router-tracked search params directly.
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "calling" && canSeeCalling) setTab("calling");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, canSeeCalling]);
   const [data, setData] = useState({ workers: [], total: 0, page: 1, pages: 1 });
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
@@ -172,18 +199,44 @@ function Body({ session }) {
       <PageHeader
         icon={Users}
         title="Workers"
-        description={`${data.total} members across the organization.`}
+        description={tab === "calling" ? "Calling assignment for the team." : `${data.total} members across the organization.`}
         breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Administration" }, { label: "Workers" }]}
         actions={
-          <ActionBar items={[
-            canExport && { key: "xlsx", label: "Excel", icon: Download, href: `/api/workers/export/xlsx${exportQs}` },
-            canExport && { key: "pdf", label: "PDF", icon: FileText, href: `/api/workers/export/pdf${exportQs}` },
-            canImport && { key: "impx", label: importing ? "Importing…" : "Import Excel", icon: Upload, variant: "success", loading: importing, onClick: () => excelRef.current?.click() },
-            canImport && { key: "impc", label: "Import CSV", icon: Upload, onClick: () => fileRef.current?.click() },
-            canEdit && { key: "add", label: "Add Worker", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
-          ]} />
+          tab === "directory" && (
+            <ActionBar items={[
+              canExport && { key: "xlsx", label: "Excel", icon: Download, href: `/api/workers/export/xlsx${exportQs}` },
+              canExport && { key: "pdf", label: "PDF", icon: FileText, href: `/api/workers/export/pdf${exportQs}` },
+              canImport && { key: "impx", label: importing ? "Importing…" : "Import Excel", icon: Upload, variant: "success", loading: importing, onClick: () => excelRef.current?.click() },
+              canImport && { key: "impc", label: "Import CSV", icon: Upload, onClick: () => fileRef.current?.click() },
+              canEdit && { key: "add", label: "Add Worker", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
+            ]} />
+          )
         }
       />
+
+      {/* Directory / Calling tab switcher — Calling (the former standalone
+          Contacts page) only shows for admin tiers, matching its old
+          isAdmin-only page gate. */}
+      {canSeeCalling && (
+        <div className="flex items-center gap-1 border-b border-gray-200 -mb-2">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-3.5 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+                tab === t.key ? "border-[#164FA3] text-[#164FA3]" : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "calling" && canSeeCalling ? (
+        <CallingTab session={session} />
+      ) : (
+      <>
       {/* Hidden file inputs driven by the header's import actions */}
       <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
       <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
@@ -367,6 +420,8 @@ function Body({ session }) {
       )}
       {viewingWorkerId && (
         <PersonDetailModal type="worker" id={viewingWorkerId} onClose={() => setViewingWorkerId(null)} />
+      )}
+      </>
       )}
     </div>
   );

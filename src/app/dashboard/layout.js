@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield } from "lucide-react";
+import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -73,7 +73,6 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -97,7 +96,6 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -118,7 +116,6 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -135,7 +132,6 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -150,7 +146,6 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },

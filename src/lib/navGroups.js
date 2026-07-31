@@ -9,9 +9,11 @@ export const GROUPS = [
   { key: "people", label: "Administration", hrefs: ["/dashboard/admin/workers", "/dashboard/admin/teams", "/dashboard/admin/users"] },
   // People: the day-to-day calling/contact operations. Workers is cross-listed
   // here too (not just under Administration) so callers/ops staff can jump
-  // straight to it from Contacts — Daily Assignments has its own dedicated
-  // page now, so it's no longer a tab here (still reachable from the sidebar).
-  { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/workers", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers"] },
+  // straight to it — Contacts was merged into Workers' own "Calling" tab, so
+  // it's no longer a separate page here. Daily Assignments has its own
+  // dedicated page now, so it's no longer a tab here (still reachable from
+  // the sidebar).
+  { key: "calling", label: "People", hrefs: ["/dashboard/admin/workers", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers"] },
   { key: "tasks", label: "Task Management", hrefs: ["/dashboard/tasks", "/dashboard/admin/events", "/dashboard/admin/complaints"] },
   // Every report/analytics page links to every other one (and to the main
   // Reports Center) via this single group — a page only appears here if the
