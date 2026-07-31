@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isTopAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { logAudit } from "@/lib/audit";
 import bcrypt from "bcryptjs";
 
 export async function PUT(req, { params }) {
@@ -69,7 +70,9 @@ export async function DELETE(req, { params }) {
       return NextResponse.json({ message: "You can't delete your own account." }, { status: 400 });
     }
 
+    const [victim] = await query("SELECT username, role FROM users WHERE id = ?", [id]);
     await query("DELETE FROM users WHERE id = ?", [id]);
+    await logAudit(session, { action: "user.delete", entityType: "user", entityId: id, details: victim || null });
     return NextResponse.json({ ok: true });
   } catch (err) {
     // Foreign-key references (e.g. contacts assigned to this user) are SET NULL

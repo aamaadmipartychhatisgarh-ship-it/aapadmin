@@ -5,6 +5,7 @@ import { isAdmin, normalizeRole, ROLES, scopeFilterSync } from "@/lib/permission
 import { query, getPool } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
+import { logAudit } from "@/lib/audit";
 
 // Distribute contacts matching the given filters across MULTIPLE callers.
 //
@@ -134,6 +135,7 @@ export async function POST(req) {
       conn.release();
     }
 
+    await logAudit(session, { action: "contacts.distribute", entityType: "contacts", details: { assigned, per_caller_counts: perCounts, reassign } });
     return NextResponse.json({ assigned, per_caller_counts: perCounts });
   } catch (err) {
     console.error("contacts bulk-distribute error:", err);

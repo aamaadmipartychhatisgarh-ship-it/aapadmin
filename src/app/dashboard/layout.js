@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock } from "lucide-react";
+import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, UserCheck, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -75,6 +75,7 @@ export default function DashboardLayout({ children }) {
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
       { name: "Master Data", href: "/dashboard/admin/settings", icon: Settings },
       { name: "Users", href: "/dashboard/admin/users", icon: Users },
+      { name: "Audit Logs", href: "/dashboard/admin/audit", icon: Shield },
     ],
     [ROLES.STATE_ADMIN]: [
       // Same as super_admin except no Users management

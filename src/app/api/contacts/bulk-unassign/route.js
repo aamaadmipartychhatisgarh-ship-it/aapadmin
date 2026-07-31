@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { logAudit } from "@/lib/audit";
 
 // POST /api/contacts/bulk-unassign
 // Body: { caller_ids?: number[] }  — empty/omitted = recall from ALL callers.
@@ -37,6 +38,7 @@ export async function POST(req) {
         WHERE ${where}`,
       params
     );
+    await logAudit(session, { action: "contacts.unassign", entityType: "contacts", details: { unassigned: res.affectedRows, caller_ids: callerIds.length ? callerIds : "all" } });
     return NextResponse.json({ unassigned: res.affectedRows });
   } catch (err) {
     console.error("bulk-unassign error:", err);

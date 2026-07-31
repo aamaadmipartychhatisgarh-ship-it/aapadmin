@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
 import { syncContactToWorker } from "@/lib/workerSync";
+import { logAudit } from "@/lib/audit";
 
 // The contacts table has been extended over several migrations, and a given
 // deployment may not have every column yet (e.g. assembly_id/booth_id). Naming
@@ -137,7 +138,9 @@ export async function DELETE(req, { params }) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
+    const [existing] = await query("SELECT person_name, phone_number FROM contacts WHERE id = ?", [id]);
     await query("DELETE FROM contacts WHERE id = ?", [id]);
+    await logAudit(session, { action: "contact.delete", entityType: "contact", entityId: id, details: existing || null });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("contacts DELETE error:", err);

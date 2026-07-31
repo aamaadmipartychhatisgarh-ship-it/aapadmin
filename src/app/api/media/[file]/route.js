@@ -1,3 +1,5 @@
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
 import { readFile } from "fs/promises";
 import path from "path";
 
@@ -13,6 +15,9 @@ const TYPES = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "
 
 export async function GET(_req, { params }) {
   try {
+    // Uploaded photos are personal data — only serve them to signed-in users.
+    const session = await getServerSession(authOptions);
+    if (!session) return new Response("Unauthorized", { status: 401 });
     const { file } = await params;
     const name = path.basename(file || ""); // strip any path → no traversal
     if (!name || name.includes("..")) return new Response("Not found", { status: 404 });

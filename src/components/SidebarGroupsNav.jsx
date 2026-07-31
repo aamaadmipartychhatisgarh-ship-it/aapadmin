@@ -24,7 +24,7 @@ const GROUPS = [
   { key: "analytics", label: "Analytics", icon: BarChart3, hrefs: ["/dashboard/analytics", "/dashboard/reports", "/dashboard/rankings", "/dashboard/strength"] },
   { key: "monitoring", label: "Monitoring", icon: Map, hrefs: ["/dashboard/map", "/dashboard/social", "/dashboard/social-management"] },
   { key: "content", label: "Content", icon: Newspaper, hrefs: ["/dashboard/media"] },
-  { key: "admin", label: "Administration", icon: Settings, hrefs: ["/dashboard/admin/settings"] },
+  { key: "admin", label: "Administration", icon: Settings, hrefs: ["/dashboard/admin/settings", "/dashboard/admin/audit"] },
 ];
 
 export default function SidebarGroupsNav({ items, pathname, onNavigate }) {

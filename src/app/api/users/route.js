@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isTopAdmin, isOversight, ASSIGNABLE_ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { logAudit } from "@/lib/audit";
 import bcrypt from "bcryptjs";
 
 export async function POST(req) {
@@ -29,11 +30,12 @@ export async function POST(req) {
     const hashedPassword = await bcrypt.hash(password, 10);
     const userRole = ASSIGNABLE_ROLES.includes(role) ? role : "caller";
 
-    await query(
+    const ins = await query(
       `INSERT INTO users (username, password, role, home_district_id, scope_zone_id, scope_assembly_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [username, hashedPassword, userRole, home_district_id || null, scope_zone_id || null, scope_assembly_id || null]
     );
+    await logAudit(session, { action: "user.create", entityType: "user", entityId: ins.insertId, details: { username, role: userRole } });
 
     return Response.json({ message: "User created successfully" }, { status: 201 });
   } catch (error) {

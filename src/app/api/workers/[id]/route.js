@@ -6,6 +6,7 @@ import { query, getPool } from "@/lib/db";
 import { syncWorkerToContact } from "@/lib/workerSync";
 import { recomputeWorkerStatus } from "@/lib/workerStatus";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
+import { logAudit } from "@/lib/audit";
 
 export async function GET(req, { params }) {
   try {
@@ -136,7 +137,9 @@ export async function DELETE(req, { params }) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
+    const [w] = await query("SELECT name, mobile FROM workers WHERE id = ?", [id]);
     await query("DELETE FROM workers WHERE id = ?", [id]);
+    await logAudit(session, { action: "worker.delete", entityType: "worker", entityId: id, details: w || null });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("worker DELETE error:", err);

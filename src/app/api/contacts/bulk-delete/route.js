@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { logAudit } from "@/lib/audit";
 
 // Bulk-delete the "wrong number" contacts — those whose most recent call
 // outcome was "Wrong Number". By design this endpoint ONLY ever targets that
@@ -40,6 +41,7 @@ export async function POST(req) {
     params.push(...scope.params);
 
     const res = await query(`DELETE c FROM contacts c ${where}`, params);
+    await logAudit(session, { action: "contacts.delete_wrong_numbers", entityType: "contacts", details: { deleted: res.affectedRows || 0, district_id: body.district_id || null } });
     return NextResponse.json({ deleted: res.affectedRows || 0 });
   } catch (err) {
     console.error("contacts bulk-delete error:", err);
