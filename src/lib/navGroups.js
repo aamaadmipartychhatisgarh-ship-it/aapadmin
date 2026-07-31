@@ -31,3 +31,28 @@ export function groupForPath(pathname) {
     GROUPS.find((g) => g.hrefs.some((h) => pathname.startsWith(h + "/")))
   );
 }
+
+// Sibling pages of the current route's group — the same set SectionTabs and
+// the header quick-jump icons both surface (a page only appears if it's
+// actually present in `items`, since roles carry different item sets).
+export function siblingsForPath(pathname, items) {
+  const group = groupForPath(pathname);
+  if (!group) return [];
+  return group.hrefs.map((h) => items.find((i) => i.href === h)).filter(Boolean);
+}
+
+// Reduce a role's full nav item list down to one "primary" entry per group
+// (the group's first href that the role actually has) plus every item that
+// isn't part of any group at all (e.g. Dashboard). Used to keep the sidebar
+// short — the rest of each group is reachable from the primary page's header
+// (see SectionTabs / header quick-jump icons), not listed again in the sidebar.
+export function primaryItems(items) {
+  const allGroupedHrefs = new Set(GROUPS.flatMap((g) => g.hrefs));
+  const ungrouped = items.filter((i) => !allGroupedHrefs.has(i.href));
+  const primaries = GROUPS
+    .map((g) => g.hrefs.map((h) => items.find((i) => i.href === h)).find(Boolean))
+    .filter(Boolean);
+  // Preserve the original nav order rather than the group-definition order.
+  const keep = new Set([...ungrouped, ...primaries].map((i) => i.href));
+  return items.filter((i) => keep.has(i.href));
+}

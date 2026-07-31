@@ -182,18 +182,21 @@ function ReportsCenter() {
       />
 
       {/* Module picker */}
-      <div className="flex flex-wrap gap-2">
-        {modules.map((m) => {
-          const Icon = ICONS[m.icon] || FileText;
-          const active = m.key === moduleKey;
-          return (
-            <button key={m.key} onClick={() => setModuleKey(m.key)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                active ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"}`}>
-              <Icon size={16} /> {m.label}
-            </button>
-          );
-        })}
+      <div className="flex items-center gap-2">
+        {(() => {
+          const activeModule = modules.find((m) => m.key === moduleKey);
+          const ActiveIcon = activeModule ? ICONS[activeModule.icon] || FileText : FileText;
+          return <ActiveIcon size={18} className="text-[#164FA3] shrink-0" />;
+        })()}
+        <select
+          className="h-11 px-3.5 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-900 outline-none focus:border-[#164FA3] focus:ring-1 focus:ring-[#164FA3] min-w-[220px]"
+          value={moduleKey || ""}
+          onChange={(e) => setModuleKey(e.target.value)}
+        >
+          {modules.map((m) => (
+            <option key={m.key} value={m.key}>{m.label}</option>
+          ))}
+        </select>
       </div>
 
       {/* Filter bar */}
