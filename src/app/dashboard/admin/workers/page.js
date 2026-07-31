@@ -275,12 +275,12 @@ function Body({ session }) {
               {data.workers.map((w) => (
                 <tr key={w.id} className="border-t border-gray-100 hover:bg-blue-50/30 cursor-pointer" onClick={() => location.href = `/dashboard/admin/workers/${w.id}`}>
                   <td className="px-4 py-3 font-medium text-gray-900">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
                       {w.photo_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={w.photo_url} alt="" className="w-8 h-8 rounded-full object-cover border border-gray-200 shrink-0" />
+                        <img src={w.photo_url} alt="" className="w-12 h-12 rounded-full object-cover border border-gray-200 shrink-0" />
                       ) : (
-                        <div className="w-8 h-8 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-[10px] font-bold shrink-0">
+                        <div className="w-12 h-12 rounded-full bg-[#164FA3]/10 border border-gray-200 flex items-center justify-center text-[#164FA3] text-sm font-bold shrink-0">
                           {(w.name || "?")[0].toUpperCase()}
                         </div>
                       )}

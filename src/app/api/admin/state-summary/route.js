@@ -20,6 +20,7 @@ export async function GET(req) {
       date_from: searchParams.get("date_from"),
       date_to: searchParams.get("date_to"),
       scope,
+      includeTeams: true, // Media + Social team snapshots on the admin dashboard
     });
     return NextResponse.json(summary);
   } catch (err) {

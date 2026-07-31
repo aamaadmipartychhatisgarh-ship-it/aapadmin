@@ -62,9 +62,9 @@ function Body({ id, canEdit, canDelete, router }) {
           <div className="flex items-center gap-4">
             {w.photo_url ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={w.photo_url} alt={w.name} className="w-16 h-16 rounded-full object-cover border-2 border-[#164FA3]" />
+              <img src={w.photo_url} alt={w.name} className="w-24 h-24 rounded-full object-cover border-2 border-[#164FA3]" />
             ) : (
-              <div className="w-16 h-16 rounded-full bg-[#164FA3] text-white flex items-center justify-center text-2xl font-bold">
+              <div className="w-24 h-24 rounded-full bg-[#164FA3] text-white flex items-center justify-center text-3xl font-bold">
                 {w.name[0]?.toUpperCase()}
               </div>
             )}

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-import { PhoneCall, PhoneForwarded, PhoneOff, PowerOff, Clock, AlertTriangle, ThumbsDown, CalendarClock, Download, Award, Calendar } from "lucide-react";
+import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { PhoneCall, PhoneForwarded, PhoneOff, PowerOff, Clock, AlertTriangle, ThumbsDown, CalendarClock, Download, Award, Calendar, Newspaper, Share2 } from "lucide-react";
+import Avatar from "@/components/Avatar";
+import { formatDate, formatDateTimeDot } from "@/lib/dateFormat";
 
 // Shared overview dashboard used by BOTH the Supervisor Overview and the State
 // Overview. The layout, cards, charts, date filter and live refresh are
@@ -30,15 +32,6 @@ const BUCKET_COLORS = {
   other: "#A1A1AA",
 };
 
-// Hour label in 12-hour form (0 -> "12 AM", 13 -> "1 PM"). Hours arrive already
-// in the application timezone (IST) from the API.
-function fmtHour(h) {
-  const hr = Number(h);
-  const period = hr < 12 ? "AM" : "PM";
-  const display = hr % 12 === 0 ? 12 : hr % 12;
-  return `${display} ${period}`;
-}
-
 // Date helpers in the application timezone (Asia/Kolkata) so presets match the
 // server's notion of "today" regardless of the browser's timezone.
 const istFmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
@@ -57,12 +50,14 @@ const PRESETS = [
   { key: "custom", label: "Custom Range", range: null },
 ];
 
-// dd-MMM-yyyy for display.
-function prettyDate(iso) {
-  if (!iso) return "";
-  const [y, m, d] = iso.split("-");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${d}-${months[Number(m) - 1]}-${y}`;
+// Small stat tile used in the Media / Social team snapshots.
+function MiniStat({ label, value }) {
+  return (
+    <div className="bg-gray-50 rounded-xl p-3 text-center">
+      <div className="text-2xl font-bold text-gray-900">{(value ?? 0).toLocaleString()}</div>
+      <div className="text-[11px] font-medium text-gray-500 mt-0.5">{label}</div>
+    </div>
+  );
 }
 
 export default function SummaryDashboard({
@@ -124,15 +119,15 @@ export default function SummaryDashboard({
         .map(([k, v]) => ({ name: BUCKET_LABELS[k], value: v, color: BUCKET_COLORS[k] }))
     : [];
 
-  const timeline = data?.timeline ?? [];
-  const hourly = data?.hourly ?? [];
-  const best_caller = data?.best_caller;
+  const topCallers = data?.top_callers ?? [];
+  const media = data?.media || null;
+  const social = data?.social || null;
 
   const rangeLabel = isToday
     ? "Today"
     : range.from === range.to
-    ? prettyDate(range.from)
-    : `${prettyDate(range.from)} → ${prettyDate(range.to)}`;
+    ? formatDate(range.from)
+    : `${formatDate(range.from)} → ${formatDate(range.to)}`;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -218,24 +213,7 @@ export default function SummaryDashboard({
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-              <h2 className="font-bold text-lg text-gray-900 mb-6">Calls Over Time</h2>
-              <div className="h-[300px]">
-                {timeline.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-gray-400">No calls in range</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={timeline}>
-                      <CartesianGrid stroke="#eee" strokeDasharray="5 5" vertical={false} />
-                      <XAxis dataKey="date" tick={{ fill: "#6B7280", fontSize: 12 }} tickFormatter={prettyDate} />
-                      <YAxis tick={{ fill: "#6B7280", fontSize: 12 }} />
-                      <Tooltip labelFormatter={prettyDate} />
-                      <Line type="monotone" dataKey="count" stroke="#164FA3" strokeWidth={3} dot={{ r: 4 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
+            {/* Status Breakdown */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
               <h2 className="font-bold text-lg text-gray-900 mb-6">Status Breakdown</h2>
               <div className="h-[300px]">
@@ -254,44 +232,70 @@ export default function SummaryDashboard({
                 )}
               </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 lg:col-span-2">
-              <h2 className="font-bold text-lg text-gray-900 mb-6">Hourly Productivity</h2>
-              <div className="h-[260px]">
-                {hourly.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-gray-400">No calls in range</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={hourly}>
-                      <CartesianGrid stroke="#eee" strokeDasharray="5 5" vertical={false} />
-                      <XAxis dataKey="hour" tick={{ fill: "#6B7280", fontSize: 12 }} tickFormatter={fmtHour} />
-                      <YAxis tick={{ fill: "#6B7280", fontSize: 12 }} />
-                      <Tooltip labelFormatter={fmtHour} />
-                      <Bar dataKey="calls" fill="#164FA3" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
+            {/* Top 5 Callers (replaces Best Caller) */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center">
-                  <Award size={20} />
-                </div>
-                <span className="font-bold text-gray-900">Best Caller</span>
+                <div className="w-10 h-10 rounded-full bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center"><Award size={20} /></div>
+                <span className="font-bold text-lg text-gray-900">Top 5 Callers</span>
               </div>
-              {best_caller ? (
-                <>
-                  <h3 className="text-3xl font-bold text-gray-900 tracking-tighter">{best_caller.name}</h3>
-                  <p className="text-sm text-gray-500 mt-1 font-medium">{best_caller.calls.toLocaleString()} calls in range</p>
-                </>
-              ) : (
+              {topCallers.length === 0 ? (
                 <p className="text-gray-400 text-sm">No calls in range</p>
+              ) : (
+                <ul className="space-y-2">
+                  {topCallers.map((cc, i) => (
+                    <li key={cc.id} className="flex items-center gap-3 py-1.5">
+                      <span className="w-6 text-center text-sm font-bold shrink-0">{["🥇", "🥈", "🥉"][i] || (i + 1)}</span>
+                      <Avatar name={cc.name} src={cc.photo_url} size={40} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-gray-900 text-sm truncate">{cc.name}</div>
+                        <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · {cc.connected} connected · {cc.follow_ups} follow-ups</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-bold text-gray-900 text-sm">{cc.total.toLocaleString()}</div>
+                        <div className="text-[11px] text-emerald-600 font-semibold">{cc.completion}%</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
           </div>
+
+          {/* Team snapshots — Super Admin dashboard only */}
+          {(media || social) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {media && (
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center"><Newspaper size={20} /></div>
+                    <span className="font-bold text-lg text-gray-900">Media Team Updates</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <MiniStat label="Media Items" value={media.uploads} />
+                    <MiniStat label="Press Notes" value={media.press_notes} />
+                    <MiniStat label="Today" value={media.today} />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-3">Last activity: {media.last_activity ? formatDateTimeDot(media.last_activity) : "—"}</p>
+                </div>
+              )}
+              {social && (
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center"><Share2 size={20} /></div>
+                    <span className="font-bold text-lg text-gray-900">Social Media Team</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-3">
+                    <MiniStat label="Posts" value={social.total} />
+                    <MiniStat label="Scheduled" value={social.scheduled} />
+                    <MiniStat label="Published" value={social.published} />
+                    <MiniStat label="Pending" value={social.pending_approval} />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-3">Today: {social.today} · Last activity: {social.last_activity ? formatDateTimeDot(social.last_activity) : "—"}</p>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Phone, Plus, Search, Loader2, Star, X, Pencil, MapPin } from "lucide-react";
 import { isOversight } from "@/lib/permissions";
+import { formatDate } from "@/lib/dateFormat";
 
 const STATUS_PILL = {
   "Phone Picked":   "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -265,7 +266,7 @@ function CallDetailModal({ call, statuses, onClose, onSaved }) {
             <Detail label="Address" value={call.address} />
             <Detail label="Status" value={call.status_name} />
             <Detail label="Sentiment" value={call.sentiment ? SENTIMENT_LABEL[call.sentiment] || call.sentiment : ""} />
-            <Detail label="Follow-up" value={call.is_follow_up_required && call.follow_up_date ? `${call.follow_up_date.slice(0, 10)}${call.follow_up_time ? ` at ${String(call.follow_up_time).slice(0, 5)}` : ""}` : ""} />
+            <Detail label="Follow-up" value={call.is_follow_up_required && call.follow_up_date ? `${formatDate(call.follow_up_date)}${call.follow_up_time ? ` at ${String(call.follow_up_time).slice(0, 5)}` : ""}` : ""} />
             <Detail label="Remarks" value={call.remarks} />
           </div>
         ) : (

@@ -12,7 +12,7 @@ import { query } from "@/lib/db";
 // shape is identical either way, so both dashboards render from one component.
 const IST = "+05:30";
 
-export async function buildOverviewSummary({ date_from, date_to, scope } = {}) {
+export async function buildOverviewSummary({ date_from, date_to, scope, includeTeams = false } = {}) {
   const dateExpr = `DATE(CONVERT_TZ(c.called_at,'+00:00','${IST}'))`;
   const [nowIST] = await query(
     `SELECT DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}')) AS today,
@@ -92,19 +92,69 @@ export async function buildOverviewSummary({ date_from, date_to, scope } = {}) {
   for (let h = 0; h <= maxHour; h++) hourly.push({ hour: h, calls: hourCounts[h] || 0 });
 
   // ---- Best caller (actual caller roles only) ----
-  const [best] = await query(
-    `SELECT u.username AS name, COUNT(*) AS calls
-       FROM calls c JOIN users u ON u.id = c.user_id
+  // Top 5 callers for the range. Photo/designation come from the caller's linked
+  // worker (workers.user_id) when available; completion% = connected ÷ total.
+  const topRows = await query(
+    `SELECT u.id, u.username AS name, w.photo_url AS photo_url, w.position AS designation,
+            COUNT(*) AS total,
+            SUM(cs.name = 'Phone Picked') AS connected,
+            SUM(c.follow_up_date IS NOT NULL) AS follow_ups
+       FROM calls c
+       JOIN users u ON u.id = c.user_id
+       LEFT JOIN call_statuses cs ON cs.id = c.status_id
+       LEFT JOIN workers w ON w.user_id = u.id
       ${where} AND u.role IN ('caller','user','agent')
-      GROUP BY u.id ORDER BY calls DESC LIMIT 1`,
+      GROUP BY u.id ORDER BY total DESC, connected DESC LIMIT 5`,
     params
   );
+  const top_callers = topRows.map((r) => {
+    const total = n(r.total), connected = n(r.connected);
+    return {
+      id: r.id, name: r.name, photo_url: r.photo_url || null, designation: r.designation || null,
+      total, connected, follow_ups: n(r.follow_ups),
+      completion: total ? Math.round((connected / total) * 100) : 0,
+    };
+  });
+
+  // Optional team snapshots (Super Admin dashboard). Org-wide status, not
+  // date-filtered. Best-effort so a missing table never breaks the dashboard.
+  let media = null, social = null;
+  if (includeTeams) {
+    const istDay = `DATE(CONVERT_TZ(created_at,'+00:00','${IST}'))`;
+    try {
+      const [m] = await query(
+        `SELECT
+           (SELECT COUNT(*) FROM media_library) AS uploads,
+           (SELECT COUNT(*) FROM press_notes) AS press_notes,
+           (SELECT COUNT(*) FROM media_library WHERE ${istDay} = ?) +
+           (SELECT COUNT(*) FROM press_notes  WHERE ${istDay} = ?) AS today,
+           (SELECT MAX(created_at) FROM media_library) AS last_activity`,
+        [today, today]
+      );
+      media = { uploads: n(m?.uploads), press_notes: n(m?.press_notes), total: n(m?.uploads) + n(m?.press_notes), today: n(m?.today), last_activity: m?.last_activity || null };
+    } catch { media = null; }
+    try {
+      const [s] = await query(
+        `SELECT COUNT(*) AS total,
+                SUM(scheduled_at IS NOT NULL AND posted_at IS NULL) AS scheduled,
+                SUM(posted_at IS NOT NULL) AS published,
+                SUM(approval_status = 'pending') AS pending_approval,
+                SUM(${istDay} = ?) AS today,
+                MAX(created_at) AS last_activity
+           FROM social_posts`,
+        [today]
+      );
+      social = { total: n(s?.total), scheduled: n(s?.scheduled), published: n(s?.published), pending_approval: n(s?.pending_approval), today: n(s?.today), last_activity: s?.last_activity || null };
+    } catch { social = null; }
+  }
 
   return {
     tally,
     hourly,
     timeline,
-    best_caller: best ? { name: best.name, calls: n(best.calls) } : null,
+    top_callers,
+    media,
+    social,
     range: { from, to },
     is_today: from === today && to === today,
     today,

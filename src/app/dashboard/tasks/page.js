@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
 import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown } from "lucide-react";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
+import { formatDate } from "@/lib/dateFormat";
 
 const PRIORITY = {
   urgent: "bg-red-100 text-red-700", high: "bg-orange-100 text-orange-700",
@@ -26,12 +27,12 @@ const SORT_OPTIONS = [
   { k: "title_za", l: "Title Z–A" },
 ];
 
-// "30 Jul 2026 • 05:15 PM" in the application timezone (Asia/Kolkata).
+// "31/07/2026 • 05:15 PM" in the application timezone (Asia/Kolkata).
 function fmtAssignedOn(v) {
   if (!v) return "—";
   const d = new Date(v);
   if (isNaN(d.getTime())) return "—";
-  const date = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }).format(d);
+  const date = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
   const time = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }).format(d);
   return { date, time };
 }
@@ -222,7 +223,7 @@ function Body({ canManage }) {
                       ) : "—"}
                     </td>
                     <td className={`px-4 py-3 text-xs ${overdue ? "text-red-600 font-bold" : "text-gray-600"}`}>
-                      {t.deadline ? t.deadline.slice(0, 10) : "—"}{overdue ? " (overdue)" : ""}
+                      {t.deadline ? formatDate(t.deadline) : "—"}{overdue ? " (overdue)" : ""}
                     </td>
                     <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[t.status]}`}>{t.status.replace("_", " ")}</span></td>
                     <td className="px-4 py-3">
