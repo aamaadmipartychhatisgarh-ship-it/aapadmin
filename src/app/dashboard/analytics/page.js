@@ -9,6 +9,7 @@ import {
   CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { Loader2, Filter, BarChart3, PieChart as PieIcon, TrendingUp, Layers, Activity, Calendar, Radar as RadarIcon, GitBranch, Grid3x3 } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 
 const STATUS_COLORS = {
   "Phone Picked":   "#10B981",
@@ -145,12 +146,12 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end flex-wrap gap-4">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Analytics</h1>
-          <p className="text-gray-500 mt-2 font-medium">Visualize calling activity across every dimension.</p>
-        </div>
-      </div>
+      <PageHeader
+        icon={BarChart3}
+        title="Analytics"
+        description="Visualize calling activity across every dimension."
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Analytics" }]}
+      />
 
       {/* Shared filters */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap items-end gap-3">

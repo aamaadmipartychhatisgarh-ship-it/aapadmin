@@ -3,7 +3,9 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Upload, Plus, Search, UserPlus, UserMinus, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList } from "lucide-react";
+import { Upload, Plus, Search, UserPlus, UserMinus, UserCheck, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
+import ActionBar from "@/components/ActionBar";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 
 const PAGE_SIZE = 50; // contacts per page — keeps each query light on big tables
@@ -307,34 +309,29 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end gap-4 flex-wrap">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Contacts</h1>
-          <p className="text-gray-500 mt-2 font-medium">
+      <PageHeader
+        icon={UserCheck}
+        title="Contacts"
+        description={
+          <>
             <span className="font-bold text-[#164FA3]">{total.toLocaleString()}</span>{" "}
             {filter === "duplicates" ? "possible duplicate" : filter === "wrong" ? "wrong-number" : filter !== "all" ? filter : ""} contact{total === 1 ? "" : "s"}{districtId ? " in this district" : ""}.
             {filter === "duplicates" ? " Same phone number saved in different formats — review and delete the extras."
               : filter === "wrong" ? " Latest call outcome was “Wrong Number” — review and delete them from the calling list."
               : " Calling list for the team."}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => excelRef.current?.click()} disabled={importing} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
-            {importing ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-            {importing ? "Importing…" : "Import Excel"}
-          </button>
-          <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden"
-                 onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
-          <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
-            <Upload size={16} /> Upload CSV
-          </button>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
-                 onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
-          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md">
-            <Plus size={16} /> Add Contact
-          </button>
-        </div>
-      </div>
+          </>
+        }
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Contacts" }]}
+        actions={<ActionBar items={[
+          { key: "impx", label: importing ? "Importing…" : "Import Excel", icon: Upload, variant: "success", loading: importing, onClick: () => excelRef.current?.click() },
+          { key: "impc", label: "Upload CSV", icon: Upload, onClick: () => fileRef.current?.click() },
+          { key: "add", label: "Add Contact", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
+        ]} />}
+      />
+      <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden"
+             onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
+      <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+             onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
 
       {message && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex items-center gap-2"><CheckCircle2 size={16} />{message}</div>}
       {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3">{error}</div>}

@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
 import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 
 const TYPE_META = {
   water: { label: "Water", icon: Droplet, color: "text-sky-600 bg-sky-50" },
@@ -70,12 +71,12 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end gap-4 flex-wrap">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Complaints</h1>
-          <p className="text-gray-500 mt-2 font-medium">Review and resolve citizen civic issues. Complaints are logged by callers.</p>
-        </div>
-      </div>
+      <PageHeader
+        icon={MessageSquare}
+        title="Complaints"
+        description="Review and resolve citizen civic issues. Complaints are logged by callers."
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Task Management" }, { label: "Complaints" }]}
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <SumCard label="Total" value={c.total || 0} accent />

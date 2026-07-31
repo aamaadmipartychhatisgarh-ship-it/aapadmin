@@ -5,6 +5,8 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Search, Filter, RefreshCcw, Phone, MapPin, ChevronRight, Loader2, Download } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
+import ActionBar from "@/components/ActionBar";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 
 const STATUS_PILL = {
@@ -147,18 +149,13 @@ export default function AdminCallRecords() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Header */}
-      <div className="flex justify-between items-end gap-4 flex-wrap">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Call Records</h1>
-          <p className="text-gray-500 mt-2 font-medium">Detailed log of every call logged across the team.</p>
-        </div>
-        <div className="flex gap-2">
-          <a href="/api/supervisor/export/summary" className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
-            <Download size={16} /> Export PDF
-          </a>
-        </div>
-      </div>
+      <PageHeader
+        icon={Phone}
+        title="Call Records"
+        description="Detailed log of every call logged across the team."
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Calling Management" }, { label: "Call Records" }]}
+        actions={<ActionBar items={[{ key: "pdf", label: "Export PDF", icon: Download, href: "/api/supervisor/export/summary" }]} />}
+      />
 
       {/* Summary strip */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">

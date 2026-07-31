@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import { FileSpreadsheet, FileText, Download, Users, PhoneCall, MapPin, Building2 } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 
 export default function Page() {
   return <SupervisorGuard><Body /></SupervisorGuard>;
@@ -33,10 +34,12 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Reports</h1>
-        <p className="text-gray-500 mt-2 font-medium">Download organizational reports as Excel or PDF.</p>
-      </div>
+      <PageHeader
+        icon={FileText}
+        title="Reports"
+        description="Download organizational reports as Excel or PDF."
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Analytics" }, { label: "Reports" }]}
+      />
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-wrap items-end gap-3">
         <Field label="Date from"><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inp} /></Field>

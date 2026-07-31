@@ -5,6 +5,8 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight, isAdmin } from "@/lib/permissions";
 import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
+import ActionBar from "@/components/ActionBar";
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -92,16 +94,16 @@ function Body({ canDelete }) {
   const sel = "h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white";
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end gap-4 flex-wrap">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight flex items-center gap-2"><AlertCircle className="text-red-500" /> Wrong Numbers</h1>
-          <p className="text-gray-500 mt-2 font-medium">{rows.length} records marked wrong by callers. Restore, reassign, edit or export.</p>
-        </div>
-        <div className="flex gap-2">
-          <a href={`/api/admin/wrong-numbers/export/xlsx?${qs()}`} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm"><Download size={16} /> Excel</a>
-          <a href={`/api/admin/wrong-numbers/export/pdf?${qs()}`} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm"><FileText size={16} /> PDF</a>
-        </div>
-      </div>
+      <PageHeader
+        icon={AlertCircle}
+        title="Wrong Numbers"
+        description={`${rows.length} records marked wrong by callers. Restore, reassign, edit or export.`}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Calling Management" }, { label: "Wrong Numbers" }]}
+        actions={<ActionBar items={[
+          { key: "xlsx", label: "Excel", icon: Download, href: `/api/admin/wrong-numbers/export/xlsx?${qs()}` },
+          { key: "pdf", label: "PDF", icon: FileText, href: `/api/admin/wrong-numbers/export/pdf?${qs()}` },
+        ]} />}
+      />
 
       {msg && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 text-sm">{msg}</div>}
 

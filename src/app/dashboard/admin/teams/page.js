@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, isOversight } from "@/lib/permissions";
 import { Network, Plus, Users, Loader2, ChevronRight, Trophy, Pencil, Search } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
+import ActionBar from "@/components/ActionBar";
 
 const LEVELS = [
   { key: "state", label: "State" }, { key: "zone", label: "Zone" },
@@ -59,17 +61,13 @@ function Body({ canEdit }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end gap-4 flex-wrap">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Teams</h1>
-          <p className="text-gray-500 mt-2 font-medium">{teams.length} teams across the organization hierarchy.</p>
-        </div>
-        {canEdit && (
-          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md">
-            <Plus size={16} /> Create Team
-          </button>
-        )}
-      </div>
+      <PageHeader
+        icon={Network}
+        title="Teams"
+        description={`${teams.length} teams across the organization hierarchy.`}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Teams" }]}
+        actions={<ActionBar items={[canEdit && { key: "add", label: "Create Team", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) }]} />}
+      />
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />

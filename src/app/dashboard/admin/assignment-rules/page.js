@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, Trash2, CalendarClock, CheckCircle2, ToggleLeft, ToggleRight, ChevronRight, Users } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 
 export default function Page() {
@@ -59,14 +60,18 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Daily Assignments</h1>
-        <p className="text-gray-500 mt-2 font-medium">
-          Standing rules that keep a caller&apos;s queue topped up each day — e.g. give a caller all
-          <span className="font-semibold text-gray-700"> Lok Sabha Prabhari</span> contacts in a district, up to a daily limit.
-          Rules run when the caller opens their workspace: the queue is filled from the unassigned pool, and if it&apos;s still short of the quota, matching contacts that have been sitting with another caller longer than the window below are pulled in. A just-(re)assigned contact is left alone, so manual assignments stick.
-        </p>
-      </div>
+      <PageHeader
+        icon={CalendarClock}
+        title="Daily Assignments"
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Calling Management" }, { label: "Daily Assignments" }]}
+        description={
+          <>
+            Standing rules that keep a caller&apos;s queue topped up each day — e.g. give a caller all
+            <span className="font-semibold text-gray-700"> Lok Sabha Prabhari</span> contacts in a district, up to a daily limit.
+            Rules run when the caller opens their workspace: the queue is filled from the unassigned pool, and if it&apos;s still short of the quota, matching contacts that have been sitting with another caller longer than the window below are pulled in. A just-(re)assigned contact is left alone, so manual assignments stick.
+          </>
+        }
+      />
 
       {needsMigration && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 text-sm">

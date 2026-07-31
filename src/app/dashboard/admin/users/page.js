@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { ShieldAlert, Zap, Pencil, Trash2 } from "lucide-react";
+import { ShieldAlert, Zap, Pencil, Trash2, Users as UsersIcon } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 import { isAdmin, isTopAdmin, ASSIGNABLE_ROLES, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 export default function UsersManagement() {
@@ -118,13 +119,12 @@ export default function UsersManagement() {
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
 
-      {/* Header Area */}
-      <div className="flex justify-between items-end mb-8">
-        <div>
-          <h1 className="text-[2.5rem] font-bold text-gray-900 tracking-tight leading-none">User Management</h1>
-          <p className="text-gray-500 mt-3 font-medium">Provision and manage application accounts</p>
-        </div>
-      </div>
+      <PageHeader
+        icon={UsersIcon}
+        title="User Management"
+        description="Provision and manage application accounts"
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Users" }]}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 

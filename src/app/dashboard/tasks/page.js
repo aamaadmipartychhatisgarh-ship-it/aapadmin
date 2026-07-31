@@ -7,6 +7,8 @@ import { isOversight } from "@/lib/permissions";
 import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown } from "lucide-react";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { formatDate } from "@/lib/dateFormat";
+import PageHeader from "@/components/PageHeader";
+import ActionBar from "@/components/ActionBar";
 
 const PRIORITY = {
   urgent: "bg-red-100 text-red-700", high: "bg-orange-100 text-orange-700",
@@ -106,17 +108,13 @@ function Body({ canManage }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end gap-4 flex-wrap">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Tasks</h1>
-          <p className="text-gray-500 mt-2 font-medium">Assign, track and complete organizational work.</p>
-        </div>
-        {canManage && (
-          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md">
-            <Plus size={16} /> Create Task
-          </button>
-        )}
-      </div>
+      <PageHeader
+        icon={ClipboardList}
+        title="Tasks"
+        description="Assign, track and complete organizational work."
+        breadcrumb={[{ label: "Dashboard", href: canManage ? "/dashboard/admin" : "/dashboard" }, { label: "Task Management" }, { label: "Tasks" }]}
+        actions={<ActionBar items={[canManage && { key: "add", label: "Create Task", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) }]} />}
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <SumCard label="Total" value={c.total || 0} accent />

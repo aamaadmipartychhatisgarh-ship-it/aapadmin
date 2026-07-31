@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isAdmin } from "@/lib/permissions";
 import { Loader2, Shield, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 
 // Human labels for audit actions (kebab slugs -> readable).
 const ACTION_LABEL = {
@@ -62,10 +63,12 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h1 className="text-4xl font-bold text-gray-900 tracking-tight flex items-center gap-3"><Shield className="text-[#164FA3]" size={32} /> Audit Logs</h1>
-        <p className="text-gray-500 mt-2 font-medium">Who did what — assignments, deletions and account changes.</p>
-      </div>
+      <PageHeader
+        icon={Shield}
+        title="Audit Logs"
+        description="Who did what — assignments, deletions and account changes."
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Administration" }, { label: "Audit Logs" }]}
+      />
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[180px]">
