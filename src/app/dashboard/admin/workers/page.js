@@ -7,6 +7,8 @@ import Link from "next/link";
 import { isAdmin, canManageWorkers, isSuperAdmin } from "@/lib/permissions";
 import { AddWorkerModal, EditWorkerModal } from "@/components/WorkerModal";
 import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil, Trash2, Download, FileText } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
+import ActionBar from "@/components/ActionBar";
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -148,56 +150,39 @@ function Body({ session }) {
     }
   }
 
+  // Export links carry the current filters so the download matches the view.
+  const ep = new URLSearchParams();
+  if (search) ep.set("search", search);
+  if (zoneId) ep.set("zone_id", zoneId);
+  if (lokSabhaId) ep.set("lok_sabha_id", lokSabhaId);
+  if (districtId) ep.set("district_id", districtId);
+  if (assemblyId) ep.set("assembly_id", assemblyId);
+  if (statusFilter) ep.set("status", statusFilter);
+  if (membershipFilter) ep.set("membership_status", membershipFilter);
+  if (positionFilter) ep.set("position", positionFilter);
+  const exportQs = ep.toString() ? `?${ep}` : "";
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end gap-4 flex-wrap">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Workers</h1>
-          <p className="text-gray-500 mt-2 font-medium">{data.total} members across the organization.</p>
-        </div>
-        <div className="flex gap-2">
-          {canExport && (() => {
-            const ep = new URLSearchParams();
-            if (search) ep.set("search", search);
-            if (zoneId) ep.set("zone_id", zoneId);
-            if (lokSabhaId) ep.set("lok_sabha_id", lokSabhaId);
-            if (districtId) ep.set("district_id", districtId);
-            if (assemblyId) ep.set("assembly_id", assemblyId);
-            if (statusFilter) ep.set("status", statusFilter);
-            if (membershipFilter) ep.set("membership_status", membershipFilter);
-            if (positionFilter) ep.set("position", positionFilter);
-            const qs = ep.toString() ? `?${ep}` : "";
-            return (
-              <>
-                <a href={`/api/workers/export/xlsx${qs}`} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
-                  <Download size={16} /> Excel
-                </a>
-                <a href={`/api/workers/export/pdf${qs}`} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
-                  <FileText size={16} /> PDF
-                </a>
-              </>
-            );
-          })()}
-          {canImport && (
-            <>
-              <button onClick={() => excelRef.current?.click()} disabled={importing} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
-                {importing ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                {importing ? "Importing…" : "Import Excel"}
-              </button>
-              <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
-              <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
-                <Upload size={16} /> Import CSV
-              </button>
-              <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
-            </>
-          )}
-          {canEdit && (
-            <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md">
-              <Plus size={16} /> Add Worker
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Universal page header — single location for all page actions */}
+      <PageHeader
+        icon={Users}
+        title="Workers"
+        description={`${data.total} members across the organization.`}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Workers" }]}
+        actions={
+          <ActionBar items={[
+            canExport && { key: "xlsx", label: "Excel", icon: Download, href: `/api/workers/export/xlsx${exportQs}` },
+            canExport && { key: "pdf", label: "PDF", icon: FileText, href: `/api/workers/export/pdf${exportQs}` },
+            canImport && { key: "impx", label: importing ? "Importing…" : "Import Excel", icon: Upload, variant: "success", loading: importing, onClick: () => excelRef.current?.click() },
+            canImport && { key: "impc", label: "Import CSV", icon: Upload, onClick: () => fileRef.current?.click() },
+            canEdit && { key: "add", label: "Add Worker", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
+          ]} />
+        }
+      />
+      {/* Hidden file inputs driven by the header's import actions */}
+      <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
+      <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
 
       {message && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex items-center gap-2"><CheckCircle2 size={16} />{message}</div>}
 
