@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Users, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, Network, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -71,8 +71,8 @@ export default function DashboardLayout({ children }) {
   const ADMIN_MENUS = {
     [ROLES.SUPER_ADMIN]: [
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
-      { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
+      { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -88,14 +88,13 @@ export default function DashboardLayout({ children }) {
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
       { name: "Master Data", href: "/dashboard/admin/settings", icon: Settings },
-      { name: "Users", href: "/dashboard/admin/users", icon: Users },
       { name: "Audit Logs", href: "/dashboard/admin/audit", icon: Shield },
     ],
     [ROLES.STATE_ADMIN]: [
       // Same as super_admin except no Users management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
-      { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
+      { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -114,8 +113,8 @@ export default function DashboardLayout({ children }) {
     [ROLES.ZONE_ADMIN]: [
       // Zone admins manage zone operations; no Users, Master Data, or Social Command (state-level)
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
-      { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
+      { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -130,8 +129,8 @@ export default function DashboardLayout({ children }) {
     [ROLES.DISTRICT_ADMIN]: [
       // District admin: focused on field ops within one district
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
-      { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
+      { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -144,8 +143,8 @@ export default function DashboardLayout({ children }) {
     [ROLES.ASSEMBLY_ADMIN]: [
       // Assembly admin: very narrow — booth & ward management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
-      { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
-      { name: "Teams", href: "/dashboard/admin/teams", icon: Network },
+      { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },

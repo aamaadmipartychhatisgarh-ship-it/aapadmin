@@ -1,0 +1,357 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { ShieldAlert, Zap, Pencil, Trash2 } from "lucide-react";
+import PersonDetailModal from "@/components/PersonDetailModal";
+import { isTopAdmin, ASSIGNABLE_ROLES, roleLabel, normalizeRole } from "@/lib/permissions";
+
+// Administration's "Users" tab (Super Admin only) — the former standalone
+// Users page (src/app/dashboard/admin/users/page.js), relocated as-is.
+export default function UsersTab({ session }) {
+  const [users, setUsers] = useState([]);
+  const [zones, setZones] = useState([]);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState("caller");
+  const [zoneId, setZoneId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [viewingUser, setViewingUser] = useState(null);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const canManage = isTopAdmin(session);
+
+  // Directory filters (client-side — the full list is already loaded).
+  const visibleUsers = users.filter((u) =>
+    (!search || u.username.toLowerCase().includes(search.trim().toLowerCase())) &&
+    (!roleFilter || normalizeRole(u.role) === roleFilter) &&
+    (!zoneFilter || String(u.scope_zone_id || "") === zoneFilter)
+  );
+
+  useEffect(() => {
+    fetchUsers();
+    fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
+  }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch("/api/users");
+      const data = await res.json();
+      if (res.ok) {
+        setUsers(data.users);
+      }
+    } catch (err) {
+      console.error("Failed to fetch users");
+    }
+  };
+
+  const updateUser = async (id, patch) => {
+    const r = await fetch(`/api/users/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (r.ok) fetchUsers();
+  };
+
+  const deleteUser = async (u) => {
+    setError(""); setSuccess("");
+    if (!confirm(`Delete user "${u.username}"? This cannot be undone. Their assigned contacts/tasks return to the pool.`)) return;
+    const r = await fetch(`/api/users/${u.id}`, { method: "DELETE" });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { setSuccess(`Deleted ${u.username}.`); fetchUsers(); }
+    else setError(d.message || "Delete failed");
+  };
+
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password, role, scope_zone_id: zoneId || null }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setSuccess("User created successfully!");
+        setUsername("");
+        setPassword("");
+        setRole("caller");
+        setZoneId("");
+        fetchUsers();
+      } else {
+        setError(data.message || "Failed to create user");
+      }
+    } catch (err) {
+      setError("An unexpected error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Create User Form */}
+        <div className="lg:col-span-1 bg-white rounded-[2rem] p-7 shadow-sm flex flex-col h-fit border border-gray-100">
+          <div className="flex justify-between items-start mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-[#164FA3] border border-gray-100">
+                <ShieldAlert size={20} />
+              </div>
+              <span className="font-bold text-gray-900">Add Account</span>
+            </div>
+          </div>
+
+          <form onSubmit={handleCreateUser} className="space-y-4">
+            {error && <div className="text-red-500 text-xs font-medium bg-red-50 p-2 rounded-lg">{error}</div>}
+            {success && <div className="text-green-600 text-xs font-medium bg-green-50 p-2 rounded-lg">{success}</div>}
+
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              placeholder="Username"
+              className="w-full bg-gray-100 border border-gray-200 h-12 rounded-2xl px-4 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none transition-all placeholder:text-gray-500"
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              placeholder="Password"
+              className="w-full bg-gray-100 border border-gray-200 h-12 rounded-2xl px-4 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none transition-all placeholder:text-gray-500"
+            />
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="w-full bg-gray-100 border border-gray-200 h-12 rounded-2xl px-4 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none appearance-none"
+            >
+              {ASSIGNABLE_ROLES.map((r) => (
+                <option key={r} value={r}>{roleLabel(r)}</option>
+              ))}
+            </select>
+            <select
+              value={zoneId}
+              onChange={(e) => setZoneId(e.target.value)}
+              className="w-full bg-gray-100 border border-gray-200 h-12 rounded-2xl px-4 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none appearance-none"
+            >
+              <option value="">— No zone —</option>
+              {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+            </select>
+            <button type="submit" disabled={loading} className="w-full h-12 bg-[#164FA3] hover:bg-blue-800 text-white font-semibold rounded-2xl transition-all shadow-md mt-2">
+              {loading ? "Adding..." : "Add Account"}
+            </button>
+          </form>
+        </div>
+
+        {/* User Directory - Dark Card */}
+        <div className="lg:col-span-2 bg-[#164FA3] rounded-[2rem] p-8 shadow-xl flex flex-col text-white min-h-[400px]">
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-[#FCB712] border border-white/5">
+                <Zap size={20} />
+              </div>
+              <span className="font-bold text-white">User Directory</span>
+            </div>
+            <div className="text-xs font-semibold text-blue-100">
+              {visibleUsers.length} of {users.length} users
+            </div>
+          </div>
+
+          {/* Directory filters */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search username…"
+              className="flex-1 min-w-[160px] bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white placeholder-blue-200 outline-none focus:bg-white/20"
+            />
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white outline-none"
+            >
+              <option className="text-gray-900" value="">All roles</option>
+              {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r} className="text-gray-900">{roleLabel(r)}</option>)}
+            </select>
+            <select
+              value={zoneFilter}
+              onChange={(e) => setZoneFilter(e.target.value)}
+              className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm text-white outline-none"
+            >
+              <option className="text-gray-900" value="">All zones</option>
+              {zones.map((z) => <option key={z.id} value={String(z.id)} className="text-gray-900">{z.name}</option>)}
+            </select>
+          </div>
+
+          <div className="flex-1 overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead>
+                <tr className="text-blue-100 border-b border-white/10">
+                  <th className="pb-3 font-semibold">User</th>
+                  <th className="pb-3 font-semibold">Role</th>
+                  <th className="pb-3 font-semibold">Zone</th>
+                  <th className="pb-3 font-semibold">Joined</th>
+                  {canManage && <th className="pb-3 font-semibold text-right">Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleUsers.map((u) => (
+                  <tr key={u.id} className="border-b border-white/10 hover:bg-white/10 transition-colors group">
+                    <td className="py-4">
+                      <button onClick={() => setViewingUser(u)} className="flex items-center gap-3 hover:opacity-80" title="View details">
+                        <div className="w-8 h-8 rounded-full bg-white/20 text-white flex items-center justify-center font-bold text-xs">
+                          {u.username[0].toUpperCase()}
+                        </div>
+                        <span className="font-semibold text-white">{u.username}</span>
+                      </button>
+                    </td>
+                    <td className="py-4">
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        ["super_admin","state_admin","admin"].includes(u.role)
+                          ? 'bg-[#FCB712] text-[#164FA3]'
+                          : u.role === 'supervisor'
+                            ? 'bg-emerald-400 text-[#164FA3]'
+                            : ["zone_admin","district_admin","assembly_admin"].includes(u.role)
+                              ? 'bg-sky-300 text-[#164FA3]'
+                              : 'bg-white/20 text-white'
+                      }`}>
+                        {roleLabel(u.role)}
+                      </span>
+                    </td>
+                    <td className="py-4">
+                      <select
+                        value={u.scope_zone_id || ""}
+                        onChange={(e) => updateUser(u.id, { scope_zone_id: e.target.value || null })}
+                        className="bg-white/10 text-white text-xs rounded px-2 py-1 border border-white/20"
+                      >
+                        <option className="text-gray-900" value="">—</option>
+                        {zones.map((z) => <option key={z.id} value={z.id} className="text-gray-900">{z.name}</option>)}
+                      </select>
+                    </td>
+                    <td className="py-4 text-blue-100 font-medium">
+                      {new Date(u.created_at).toLocaleDateString(undefined, {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                      })}
+                    </td>
+                    {canManage && (
+                      <td className="py-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setEditing(u)} title="Edit" className="p-1.5 rounded-lg text-blue-100 hover:bg-white/15 hover:text-white">
+                            <Pencil size={16} />
+                          </button>
+                          <button onClick={() => deleteUser(u)} disabled={String(u.id) === String(session.user.id)} title={String(u.id) === String(session.user.id) ? "You can't delete yourself" : "Delete"} className="p-1.5 rounded-lg text-red-200 hover:bg-red-500/30 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {users.length === 0 && (
+                  <tr>
+                    <td colSpan={canManage ? 5 : 4} className="py-8 text-center text-blue-200 font-medium">
+                      No users found
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {editing && (
+        <EditUserModal
+          user={editing}
+          zones={zones}
+          onClose={() => setEditing(null)}
+          onSaved={(msg) => { setEditing(null); setSuccess(msg); fetchUsers(); }}
+        />
+      )}
+      {viewingUser && (
+        <PersonDetailModal
+          type="user"
+          data={{ username: viewingUser.username, role: viewingUser.role, is_active: viewingUser.is_active !== 0 }}
+          onClose={() => setViewingUser(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditUserModal({ user, zones, onClose, onSaved }) {
+  const [username, setUsername] = useState(user.username || "");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState(normalizeRole(user.role));
+  const [zoneId, setZoneId] = useState(user.scope_zone_id || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    setSaving(true); setError("");
+    const patch = { username, role, scope_zone_id: zoneId || null };
+    if (password) patch.password = password; // only change password if a new one is typed
+    const r = await fetch(`/api/users/${user.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) onSaved(`Updated ${username}.`);
+    else { setError(d.message || "Update failed"); setSaving(false); }
+  }
+
+  const inp = "w-full bg-gray-100 border border-gray-200 h-11 rounded-xl px-3 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none";
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+        <h2 className="text-xl font-bold text-gray-900">Edit User</h2>
+        {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
+        <div>
+          <label className="text-xs text-gray-500">Username</label>
+          <input className={inp} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500">New password <span className="text-gray-400">(leave blank to keep current)</span></label>
+          <input className={inp} type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep current" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500">Role</label>
+          <select className={inp + " appearance-none"} value={role} onChange={(e) => setRole(e.target.value)}>
+            {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500">Zone</label>
+          <select className={inp + " appearance-none"} value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
+            <option value="">— No zone —</option>
+            {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+          </select>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={save} disabled={saving || !username.trim()} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
