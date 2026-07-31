@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { ShieldAlert, Zap, Pencil, Trash2, Users as UsersIcon } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
+import PersonDetailModal from "@/components/PersonDetailModal";
 import { isAdmin, isTopAdmin, ASSIGNABLE_ROLES, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 
 export default function UsersManagement() {
@@ -21,6 +22,7 @@ export default function UsersManagement() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editing, setEditing] = useState(null);
+  const [viewingUser, setViewingUser] = useState(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [zoneFilter, setZoneFilter] = useState("");
@@ -237,12 +239,12 @@ export default function UsersManagement() {
                 {visibleUsers.map((u) => (
                   <tr key={u.id} className="border-b border-white/10 hover:bg-white/10 transition-colors group">
                     <td className="py-4">
-                      <div className="flex items-center gap-3">
+                      <button onClick={() => setViewingUser(u)} className="flex items-center gap-3 hover:opacity-80" title="View details">
                         <div className="w-8 h-8 rounded-full bg-white/20 text-white flex items-center justify-center font-bold text-xs">
                           {u.username[0].toUpperCase()}
                         </div>
                         <span className="font-semibold text-white">{u.username}</span>
-                      </div>
+                      </button>
                     </td>
                     <td className="py-4">
                       <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
@@ -307,6 +309,13 @@ export default function UsersManagement() {
           zones={zones}
           onClose={() => setEditing(null)}
           onSaved={(msg) => { setEditing(null); setSuccess(msg); fetchUsers(); }}
+        />
+      )}
+      {viewingUser && (
+        <PersonDetailModal
+          type="user"
+          data={{ username: viewingUser.username, role: viewingUser.role, is_active: viewingUser.is_active !== 0 }}
+          onClose={() => setViewingUser(null)}
         />
       )}
     </div>

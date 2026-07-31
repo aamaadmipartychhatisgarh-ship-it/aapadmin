@@ -34,6 +34,8 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const dateFrom = searchParams.get("date_from");
     const dateTo = searchParams.get("date_to");
+    const granularity = ["day", "week", "month"].includes(searchParams.get("granularity"))
+      ? searchParams.get("granularity") : "day";
 
     const cols = await getCallColumns();
     const has = (c) => cols.has(c);
@@ -124,13 +126,19 @@ export async function GET(req) {
     );
     totals.connect_rate = totals.total_calls ? Math.round((totals.connected / totals.total_calls) * 100) : 0;
 
-    // Combined calls per day across ALL callers, for the same window.
+    // Combined calls per day/week/month across ALL callers, for the same
+    // window. Grouping is done on the IST calendar day (calls timestamp is
+    // stored in UTC), matching the rest of the app's date handling.
     const dayParams = [];
     let dayWhere = "WHERE 1=1";
     if (dateFrom) { dayWhere += " AND DATE(c.called_at) >= ?"; dayParams.push(dateFrom); }
     if (dateTo) { dayWhere += " AND DATE(c.called_at) <= ?"; dayParams.push(dateTo); }
+    const istCalled = "CONVERT_TZ(c.called_at,'+00:00','+05:30')";
+    const bucketExpr = granularity === "month" ? `DATE_FORMAT(${istCalled},'%Y-%m-01')`
+      : granularity === "week" ? `DATE_SUB(DATE(${istCalled}), INTERVAL WEEKDAY(${istCalled}) DAY)`
+      : `DATE(${istCalled})`;
     const dailyRows = await query(
-      `SELECT DATE(c.called_at) AS day,
+      `SELECT ${bucketExpr} AS day,
               COUNT(*) AS total_calls,
               SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
               COUNT(DISTINCT c.user_id) AS active_callers
@@ -138,9 +146,9 @@ export async function GET(req) {
          LEFT JOIN call_statuses cs ON cs.id = c.status_id
          JOIN users u ON u.id = c.user_id AND u.role IN ('caller','user','agent')
          ${dayWhere}
-        GROUP BY DATE(c.called_at)
+        GROUP BY day
         ORDER BY day DESC
-        LIMIT 60`,
+        LIMIT ${granularity === "month" ? 24 : granularity === "week" ? 52 : 60}`,
       dayParams
     );
     const daily = dailyRows.map((d) => ({

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Loader2, Gauge, TrendingUp, TrendingDown, Minus, FileText, ChevronRight } from "lucide-react";
+import { Loader2, Gauge, TrendingUp, TrendingDown, Minus, FileText, ChevronRight, ClipboardList, MessageSquareWarning, Users } from "lucide-react";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import SummaryDashboard from "@/components/SummaryDashboard";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
@@ -40,6 +40,7 @@ export default function AdminDashboard() {
   const [scope, setScope] = useState(null);
   const [tab, setTab] = useState("overview");
   const [strength, setStrength] = useState(null);
+  const [reportsSummary, setReportsSummary] = useState(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -58,6 +59,19 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (status !== "authenticated" || !isAdmin(session)) return;
     fetch("/api/strength").then((r) => r.json()).then(setStrength).catch(() => {});
+  }, [status, session]);
+
+  // Reports summary — a snapshot of Tasks/Complaints/Workers straight from the
+  // Universal Reports Engine, so the dashboard reflects every module without
+  // requiring a trip to the Reports Center for the at-a-glance numbers.
+  useEffect(() => {
+    if (status !== "authenticated" || !isAdmin(session)) return;
+    const run = (module, group_by) =>
+      fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ module, time: "all", group_by }) })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+    Promise.all([run("tasks", "status"), run("complaints", "status"), run("workers", "membership_status")])
+      .then(([tasks, complaints, workers]) => setReportsSummary({ tasks, complaints, workers }));
   }, [status, session]);
 
   if (status !== "authenticated" || !isAdmin(session)) {
@@ -106,6 +120,10 @@ export default function AdminDashboard() {
           (not calling volume) is the primary thing the org tracks. */}
       {strength?.summary && <StrengthStrip summary={strength.summary} />}
 
+      {/* Reports summary — snapshot of Tasks / Complaints / Workers, sourced
+          live from the Reports Engine. */}
+      {reportsSummary && <ReportsSummaryRow summary={reportsSummary} />}
+
       {tab === "overview" && (
         <SummaryDashboard summaryUrl="/api/admin/state-summary" exportUrl="/api/supervisor/export/summary" title={title} />
       )}
@@ -142,6 +160,49 @@ function StrengthStrip({ summary }) {
       <a href="/dashboard/strength" className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-[#164FA3] hover:underline">
         Full ranking <ChevronRight size={14} />
       </a>
+    </div>
+  );
+}
+
+const SUMMARY_CARDS = [
+  { key: "tasks", label: "Tasks", icon: ClipboardList, color: "text-[#164FA3]", bg: "bg-blue-50" },
+  { key: "complaints", label: "Complaints", icon: MessageSquareWarning, color: "text-amber-600", bg: "bg-amber-50" },
+  { key: "workers", label: "Workers (membership)", icon: Users, color: "text-emerald-600", bg: "bg-emerald-50" },
+];
+
+function ReportsSummaryRow({ summary }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {SUMMARY_CARDS.map((c) => {
+        const r = summary[c.key];
+        const Icon = c.icon;
+        const rows = (r?.rows || []).slice(0, 4);
+        return (
+          <a
+            key={c.key}
+            href={`/dashboard/reports?module=${c.key}`}
+            className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center gap-2 mb-2.5">
+              <div className={`w-7 h-7 rounded-lg ${c.bg} ${c.color} flex items-center justify-center shrink-0`}><Icon size={15} /></div>
+              <span className="font-semibold text-gray-800 text-sm flex-1 truncate">{c.label}</span>
+              <span className="text-xs text-gray-400 font-medium">{r?.totalRecords?.toLocaleString("en-IN") ?? "—"}</span>
+            </div>
+            {rows.length === 0 ? (
+              <p className="text-xs text-gray-400">No data.</p>
+            ) : (
+              <div className="space-y-1">
+                {rows.map((row, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500 truncate">{row.group_key ?? "(none)"}</span>
+                    <span className="font-semibold text-gray-700">{Number(row.count).toLocaleString("en-IN")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </a>
+        );
+      })}
     </div>
   );
 }

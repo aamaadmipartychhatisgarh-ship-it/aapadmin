@@ -7,7 +7,8 @@ import { Upload, Plus, Search, UserPlus, UserMinus, UserCheck, Loader2, CheckCir
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
-import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
+import { isAdmin, isCaller, normalizeRole, ROLES } from "@/lib/permissions";
+import CallActionIcons from "@/components/CallActionIcons";
 
 const PAGE_SIZE = 50; // contacts per page — keeps each query light on big tables
 
@@ -494,7 +495,12 @@ function Body() {
               {contacts.map((c) => (
                 <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">{c.person_name}</td>
-                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{c.phone_number}</td>
+                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">
+                    <div className="flex items-center gap-2">
+                      <span>{c.phone_number}</span>
+                      <CallActionIcons phone={c.phone_number} personName={c.person_name} contactId={c.id} canLog={isCaller(session)} onLogged={load} />
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{c.designation_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.district_name || "—"}</td>
                   <td className="px-4 py-3">

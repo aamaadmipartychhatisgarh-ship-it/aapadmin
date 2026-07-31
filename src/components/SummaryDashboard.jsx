@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 import { PhoneCall, PhoneForwarded, PhoneOff, PowerOff, Clock, AlertTriangle, ThumbsDown, CalendarClock, Download, Award, Calendar, Newspaper, Share2 } from "lucide-react";
 import Avatar from "@/components/Avatar";
+import PersonDetailModal from "@/components/PersonDetailModal";
 import { formatDate, formatDateTimeDot } from "@/lib/dateFormat";
 
 // Shared overview dashboard used by BOTH the Supervisor Overview and the State
@@ -68,6 +69,7 @@ export default function SummaryDashboard({
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [viewingCaller, setViewingCaller] = useState(null);
   const [preset, setPreset] = useState("today");
   const [custom, setCustom] = useState({ from: istToday(), to: istToday() });
 
@@ -241,11 +243,13 @@ export default function SummaryDashboard({
                   {topCallers.map((cc, i) => (
                     <li key={cc.id} className="flex items-center gap-3 py-1.5">
                       <span className="w-6 text-center text-sm font-bold shrink-0">{["🥇", "🥈", "🥉"][i] || (i + 1)}</span>
-                      <Avatar name={cc.name} src={cc.photo_url} size={40} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-gray-900 text-sm truncate">{cc.name}</div>
-                        <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · {cc.connected} connected · {cc.follow_ups} follow-ups</div>
-                      </div>
+                      <button onClick={() => setViewingCaller(cc)} className="flex items-center gap-3 flex-1 min-w-0 text-left hover:bg-gray-50 rounded-lg -m-1 p-1">
+                        <Avatar name={cc.name} src={cc.photo_url} size={40} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-gray-900 text-sm truncate">{cc.name}</div>
+                          <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · {cc.connected} connected · {cc.follow_ups} follow-ups</div>
+                        </div>
+                      </button>
                       <div className="text-right shrink-0">
                         <div className="font-bold text-gray-900 text-sm">{cc.total.toLocaleString()}</div>
                         <div className="text-[11px] text-emerald-600 font-semibold">{cc.completion}%</div>
@@ -292,6 +296,20 @@ export default function SummaryDashboard({
             </div>
           )}
         </>
+      )}
+      {viewingCaller && (
+        <PersonDetailModal
+          type="user"
+          data={{
+            username: viewingCaller.name,
+            photo_url: viewingCaller.photo_url,
+            role: viewingCaller.designation || "Caller",
+            calls: viewingCaller.total,
+            connected: viewingCaller.connected,
+            follow_ups: viewingCaller.follow_ups,
+          }}
+          onClose={() => setViewingCaller(null)}
+        />
       )}
     </div>
   );

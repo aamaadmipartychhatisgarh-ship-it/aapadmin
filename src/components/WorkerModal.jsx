@@ -192,7 +192,7 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={() => onSave(form)} disabled={saving || !form.name || uploading} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Save"}</button>
+          <button onClick={() => onSave(form)} disabled={saving || !form.name} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Save"}</button>
         </div>
       </div>
     </div>

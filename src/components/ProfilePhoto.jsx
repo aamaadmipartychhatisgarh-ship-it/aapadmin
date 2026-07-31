@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Camera, Upload, Eye, Trash2, X, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Loader2, CheckCircle2 } from "lucide-react";
+import { Plus, Camera, Upload, Eye, Trash2, X, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Loader2, CheckCircle2, RectangleHorizontal, RectangleVertical } from "lucide-react";
 import Avatar from "@/components/Avatar";
 
 // ONE reusable profile-photo component for the whole app (Caller Dashboard,
@@ -26,8 +26,19 @@ import Avatar from "@/components/Avatar";
 
 const ACCEPT = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
-const OUT = 400; // output square px
-const VIEW = 288; // crop viewport px
+const MAX_OUT = 500;  // longer output side, px
+const MAX_VIEW = 288; // longer on-screen viewport side, px
+
+// Selectable crop ratios. w:h is the "portrait" reading (e.g. 4:5 = 4 wide,
+// 5 tall) — the Horizontal/Vertical toggle swaps them. 1:1 has no orientation.
+const RATIOS = [
+  { key: "1:1", label: "1:1", w: 1, h: 1 },
+  { key: "2:3", label: "2:3", w: 2, h: 3 },
+  { key: "3:4", label: "3:4", w: 3, h: 4 },
+  { key: "4:5", label: "4:5", w: 4, h: 5 },
+  { key: "9:16", label: "9:16", w: 9, h: 16 },
+  { key: "custom", label: "Custom", w: 1, h: 1 },
+];
 
 async function defaultUpload(blob) {
   const fd = new FormData();
@@ -189,7 +200,7 @@ function MenuItem({ icon: Icon, label, onClick, danger }) {
   );
 }
 
-// --- Crop dialog: drag + zoom + rotate, live circular preview, square output ---
+// --- Crop dialog: pick an aspect ratio + orientation, then drag/zoom/rotate ---
 function CropDialog({ src, onCancel, onSave, saving, error }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
@@ -197,7 +208,33 @@ function CropDialog({ src, onCancel, onSave, saving, error }) {
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [ratioKey, setRatioKey] = useState("1:1");
+  const [orientation, setOrientation] = useState("portrait"); // portrait | landscape
+  const [customW, setCustomW] = useState(1);
+  const [customH, setCustomH] = useState(1);
   const drag = useRef(null);
+
+  const ratioDef = RATIOS.find((r) => r.key === ratioKey) || RATIOS[0];
+  const isSquare = ratioKey === "1:1";
+  const isCustom = ratioKey === "custom";
+  // Preset ratios are stored "portrait" (w<h); the orientation toggle swaps
+  // them. Custom is entered literally as width:height, so it already encodes
+  // orientation directly — the toggle doesn't apply (and stays hidden for it).
+  const ratio = isSquare
+    ? 1
+    : isCustom
+    ? Math.max(1, Number(customW) || 1) / Math.max(1, Number(customH) || 1)
+    : orientation === "landscape" ? ratioDef.h / ratioDef.w : ratioDef.w / ratioDef.h;
+
+  // On-screen viewport size that fits MAX_VIEW while honoring the ratio.
+  const viewW = ratio >= 1 ? MAX_VIEW : Math.max(120, Math.round(MAX_VIEW * ratio));
+  const viewH = ratio >= 1 ? Math.max(120, Math.round(MAX_VIEW / ratio)) : MAX_VIEW;
+  // Output pixel size at the same ratio, capped to MAX_OUT on the long side.
+  const outW = ratio >= 1 ? MAX_OUT : Math.round(MAX_OUT * ratio);
+  const outH = ratio >= 1 ? Math.round(MAX_OUT / ratio) : MAX_OUT;
+
+  // Changing ratio/orientation invalidates the old pan offset (frame shape changed).
+  useEffect(() => { setOffset({ x: 0, y: 0 }); }, [ratioKey, orientation, customW, customH]);
 
   // Load the image (createImageBitmap corrects EXIF orientation when supported).
   useEffect(() => {
@@ -219,35 +256,37 @@ function CropDialog({ src, onCancel, onSave, saving, error }) {
     return () => { alive = false; };
   }, [src]);
 
-  // Base "cover" scale so the smaller image side fills the viewport (works for
-  // 90° rotations too, since it uses the min dimension).
-  const baseScale = useCallback(() => {
+  // "Cover" scale so the image always fills the crop rect regardless of its
+  // aspect ratio, accounting for 90°-multiple rotations swapping W/H.
+  const baseScale = useCallback((frameW, frameH) => {
     const img = imgRef.current;
     if (!img) return 1;
-    const w = img.width, h = img.height;
-    return VIEW / Math.min(w, h);
-  }, []);
+    const rotated = ((rotation / 90) % 2 + 2) % 2 === 1; // true for ±90, ±270…
+    const effW = rotated ? img.height : img.width;
+    const effH = rotated ? img.width : img.height;
+    return Math.max(frameW / effW, frameH / effH);
+  }, [rotation]);
 
-  const render = useCallback((ctx, dim) => {
+  const render = useCallback((ctx, dimW, dimH) => {
     const img = imgRef.current;
     if (!img) return;
-    const r = dim / VIEW;
-    const s = baseScale() * zoom * r;
-    ctx.clearRect(0, 0, dim, dim);
+    const r = dimW / viewW;
+    const s = baseScale(viewW, viewH) * zoom * r;
+    ctx.clearRect(0, 0, dimW, dimH);
     ctx.save();
-    ctx.translate(dim / 2 + offset.x * r, dim / 2 + offset.y * r);
+    ctx.translate(dimW / 2 + offset.x * r, dimH / 2 + offset.y * r);
     ctx.rotate((rotation * Math.PI) / 180);
     ctx.scale(s, s);
     ctx.drawImage(img, -img.width / 2, -img.height / 2);
     ctx.restore();
-  }, [zoom, rotation, offset, baseScale]);
+  }, [zoom, rotation, offset, baseScale, viewW, viewH]);
 
   // Redraw the live preview whenever anything changes.
   useEffect(() => {
     if (!ready) return;
     const cv = canvasRef.current;
-    if (cv) render(cv.getContext("2d"), VIEW);
-  }, [ready, render]);
+    if (cv) render(cv.getContext("2d"), viewW, viewH);
+  }, [ready, render, viewW, viewH]);
 
   // Pointer drag.
   const onDown = (e) => {
@@ -265,32 +304,76 @@ function CropDialog({ src, onCancel, onSave, saving, error }) {
 
   async function save() {
     const out = document.createElement("canvas");
-    out.width = OUT; out.height = OUT;
-    render(out.getContext("2d"), OUT);
+    out.width = outW; out.height = outH;
+    render(out.getContext("2d"), outW, outH);
     const blob = await toCompressedJpeg(out);
     if (blob) onSave(blob);
   }
 
   return createPortal(
     <div className="fixed inset-0 z-[65] bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-gray-900">Crop Photo</h3>
           <button onClick={onCancel} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
         </div>
 
-        {/* Crop viewport with a circular guide overlay */}
+        {/* Aspect ratio picker */}
+        <div className="mb-3">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Aspect ratio</div>
+          <div className="flex flex-wrap gap-1.5">
+            {RATIOS.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                onClick={() => setRatioKey(r.key)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                  ratioKey === r.key ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200 hover:border-[#164FA3]"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isCustom && (
+          <div className="mb-3 flex items-center gap-2">
+            <input type="number" min="1" value={customW} onChange={(e) => setCustomW(e.target.value)} className="w-16 h-8 px-2 rounded-lg border border-gray-200 text-sm text-center" />
+            <span className="text-gray-400 text-sm">:</span>
+            <input type="number" min="1" value={customH} onChange={(e) => setCustomH(e.target.value)} className="w-16 h-8 px-2 rounded-lg border border-gray-200 text-sm text-center" />
+            <span className="text-xs text-gray-400">width : height</span>
+          </div>
+        )}
+
+        {!isSquare && !isCustom && (
+          <div className="mb-3 flex items-center gap-2">
+            <button type="button" onClick={() => setOrientation("portrait")}
+              className={`flex-1 h-8 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1.5 ${orientation === "portrait" ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200"}`}>
+              <RectangleVertical size={14} /> Vertical
+            </button>
+            <button type="button" onClick={() => setOrientation("landscape")}
+              className={`flex-1 h-8 rounded-lg text-xs font-semibold border flex items-center justify-center gap-1.5 ${orientation === "landscape" ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200"}`}>
+              <RectangleHorizontal size={14} /> Horizontal
+            </button>
+          </div>
+        )}
+
+        {/* Crop viewport with a guide overlay matching the chosen ratio */}
         <div
           className="relative mx-auto rounded-xl overflow-hidden bg-gray-900 touch-none select-none"
-          style={{ width: VIEW, height: VIEW, maxWidth: "100%" }}
+          style={{ width: viewW, height: viewH, maxWidth: "100%" }}
           onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
           onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
         >
           {!ready && <div className="absolute inset-0 flex items-center justify-center text-white/70"><Loader2 className="animate-spin" /></div>}
-          <canvas ref={canvasRef} width={VIEW} height={VIEW} className="block cursor-move" />
-          {/* Circle preview guide */}
+          <canvas ref={canvasRef} width={viewW} height={viewH} className="block cursor-move" />
+          {/* Frame guide */}
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="rounded-full border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" style={{ width: VIEW - 8, height: VIEW - 8 }} />
+            <div
+              className={`border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] ${isSquare ? "rounded-full" : "rounded-md"}`}
+              style={{ width: viewW - 8, height: viewH - 8 }}
+            />
           </div>
         </div>
 

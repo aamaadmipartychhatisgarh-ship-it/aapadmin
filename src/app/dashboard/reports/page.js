@@ -65,7 +65,11 @@ function ReportsCenter() {
   useEffect(() => {
     fetch("/api/reports").then((r) => r.json()).then((d) => {
       setBoot(d);
-      if (d.modules?.length) setModuleKey(d.modules[0].key);
+      // Deep-link support: /dashboard/reports?module=tasks opens straight to
+      // that module (used by the Dashboard's Reports Summary tiles).
+      const requested = new URLSearchParams(window.location.search).get("module");
+      const initial = (requested && d.modules?.some((m) => m.key === requested)) ? requested : d.modules?.[0]?.key;
+      if (initial) setModuleKey(initial);
     }).catch(() => setErr("Failed to load reports"));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || [])).catch(() => {});
     try { setSaved(JSON.parse(localStorage.getItem(SAVED_KEY) || "[]")); } catch {}

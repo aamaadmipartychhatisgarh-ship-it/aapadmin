@@ -10,6 +10,8 @@ import { AddWorkerModal, EditWorkerModal } from "@/components/WorkerModal";
 import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil, Trash2, Download, FileText } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
+import PersonDetailModal from "@/components/PersonDetailModal";
+import CallActionIcons from "@/components/CallActionIcons";
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -49,6 +51,7 @@ function Body({ session }) {
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [editingWorker, setEditingWorker] = useState(null);
+  const [viewingWorkerId, setViewingWorkerId] = useState(null);
   const [message, setMessage] = useState("");
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
@@ -263,7 +266,11 @@ function Body({ session }) {
               {data.workers.map((w) => (
                 <tr key={w.id} className="border-t border-gray-100 hover:bg-blue-50/30 cursor-pointer" onClick={() => location.href = `/dashboard/admin/workers/${w.id}`}>
                   <td className="px-4 py-3 font-medium text-gray-900">
-                    <div className="flex items-center gap-3">
+                    <div
+                      className="flex items-center gap-3 -m-1 p-1 rounded-lg hover:bg-blue-50"
+                      onClick={(e) => { e.stopPropagation(); setViewingWorkerId(w.id); }}
+                      title="View details"
+                    >
                       {w.photo_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={w.photo_url} alt="" className="w-12 h-12 rounded-full object-cover border border-gray-200 shrink-0" />
@@ -278,7 +285,12 @@ function Body({ session }) {
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{w.mobile || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">
+                    <div className="flex items-center gap-2">
+                      <span>{w.mobile || "—"}</span>
+                      <CallActionIcons phone={w.mobile} personName={w.name} />
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{w.position || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{w.zone_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{w.lok_sabha_name || "—"}</td>
@@ -340,6 +352,9 @@ function Body({ session }) {
           onClose={() => setEditingWorker(null)}
           onSaved={() => { setEditingWorker(null); load(); }}
         />
+      )}
+      {viewingWorkerId && (
+        <PersonDetailModal type="worker" id={viewingWorkerId} onClose={() => setViewingWorkerId(null)} />
       )}
     </div>
   );

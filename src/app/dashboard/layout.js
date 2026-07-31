@@ -21,6 +21,16 @@ async function handleSignOut() {
   signOut();
 }
 
+// Super admin only: quick "view as" links to jump straight into each role's
+// dashboard/workspace without needing a separate login for that role.
+const DASHBOARD_SWITCHER = [
+  { name: "State Overview (Admin)", href: "/dashboard/admin", icon: LayoutDashboard },
+  { name: "Calling Workspace", href: "/dashboard/workspace", icon: Headphones },
+  { name: "Media Center", href: "/dashboard/media", icon: Newspaper },
+  { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
+  { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
+];
+
 export default function DashboardLayout({ children }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
@@ -28,6 +38,7 @@ export default function DashboardLayout({ children }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [dashboardSwitcherOpen, setDashboardSwitcherOpen] = useState(false);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -340,20 +351,64 @@ export default function DashboardLayout({ children }) {
           {/* Header Right - User */}
           <div className="flex items-center gap-4 shrink-0">
             <ThemeToggle />
-            <div className="flex items-center gap-3 lg:pl-4">
-              <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
-                <User size={20} />
+            {canonical === ROLES.SUPER_ADMIN ? (
+              <div className="relative">
+                <button
+                  onClick={() => setDashboardSwitcherOpen((o) => !o)}
+                  aria-expanded={dashboardSwitcherOpen}
+                  title="Switch dashboard"
+                  className="flex items-center gap-3 lg:pl-4 rounded-lg hover:bg-gray-50 py-1 pr-1"
+                >
+                  <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
+                    <User size={20} />
+                  </div>
+                  <div className="hidden sm:flex text-left flex-col justify-center mr-2 min-w-0 max-w-[140px]">
+                    <div className="text-sm font-bold text-gray-900 leading-tight truncate">
+                      {session.user.name}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5 truncate">
+                      {roleLabel(role)}
+                    </div>
+                  </div>
+                  <span className={`hidden sm:inline text-gray-400 transition-transform ${dashboardSwitcherOpen ? "rotate-180" : ""}`}>▼</span>
+                </button>
+                {dashboardSwitcherOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setDashboardSwitcherOpen(false)} />
+                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50">
+                      <div className="px-3.5 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Switch dashboard</div>
+                      {DASHBOARD_SWITCHER.map((d) => {
+                        const Icon = d.icon;
+                        return (
+                          <Link
+                            key={d.href}
+                            href={d.href}
+                            onClick={() => setDashboardSwitcherOpen(false)}
+                            className={`flex items-center gap-2.5 px-3.5 py-2 text-sm hover:bg-gray-50 ${pathname === d.href ? "text-[#164FA3] font-semibold" : "text-gray-700"}`}
+                          >
+                            <Icon size={15} /> {d.name}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="hidden sm:flex text-left flex-col justify-center mr-2 min-w-0 max-w-[140px]">
-                <div className="text-sm font-bold text-gray-900 leading-tight truncate">
-                  {session.user.name}
+            ) : (
+              <div className="flex items-center gap-3 lg:pl-4">
+                <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
+                  <User size={20} />
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5 truncate">
-                  {roleLabel(role)}
+                <div className="hidden sm:flex text-left flex-col justify-center mr-2 min-w-0 max-w-[140px]">
+                  <div className="text-sm font-bold text-gray-900 leading-tight truncate">
+                    {session.user.name}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5 truncate">
+                    {roleLabel(role)}
+                  </div>
                 </div>
               </div>
-              <span className="hidden sm:inline text-gray-400">▼</span>
-            </div>
+            )}
           </div>
         </header>
 

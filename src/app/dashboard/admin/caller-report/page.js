@@ -37,6 +37,7 @@ function Body() {
   const [preset, setPreset] = useState("30d");
   const [from, setFrom] = useState(isoDaysAgo(29));
   const [to, setTo] = useState(TODAY());
+  const [granularity, setGranularity] = useState("day");
   const [data, setData] = useState({ callers: [], totals: {}, daily: [] });
   const [loading, setLoading] = useState(true);
 
@@ -45,11 +46,12 @@ function Body() {
     const p = new URLSearchParams();
     if (from) p.set("date_from", from);
     if (to) p.set("date_to", to);
+    p.set("granularity", granularity);
     const r = await fetch(`/api/admin/caller-report?${p}`);
     if (r.ok) setData(await r.json());
     setLoading(false);
   }
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [from, to]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [from, to, granularity]);
 
   function applyPreset(pk) {
     setPreset(pk);
@@ -94,9 +96,19 @@ function Body() {
 
       {/* Daily combined calls */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center gap-2 mb-4 text-gray-900">
-          <CalendarDays size={18} className="text-[#164FA3]" />
-          <h2 className="font-bold">Calls per day (all callers combined)</h2>
+        <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+          <div className="flex items-center gap-2 text-gray-900">
+            <CalendarDays size={18} className="text-[#164FA3]" />
+            <h2 className="font-bold">Calls per {granularity} (all callers combined)</h2>
+          </div>
+          <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+            {[["day", "Daily"], ["week", "Weekly"], ["month", "Monthly"]].map(([k, l]) => (
+              <button key={k} onClick={() => setGranularity(k)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${granularity === k ? "bg-[#164FA3] text-white" : "text-gray-600 hover:bg-gray-200"}`}>
+                {l}
+              </button>
+            ))}
+          </div>
         </div>
         {loading ? (
           <div className="text-gray-400 text-sm flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
@@ -106,7 +118,7 @@ function Body() {
           <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-2">
             {data.daily.map((d) => (
               <div key={d.day} className="flex items-center gap-3 text-sm">
-                <div className="w-24 shrink-0 text-gray-600 font-medium">{fmtDay(d.day)}</div>
+                <div className="w-24 shrink-0 text-gray-600 font-medium">{fmtDay(d.day, granularity)}</div>
                 <div className="flex-1 bg-gray-100 rounded-full h-6 relative overflow-hidden">
                   <div className="bg-[#164FA3] h-full rounded-full flex items-center justify-end px-2" style={{ width: `${Math.max(6, (d.total_calls / maxDay) * 100)}%` }}>
                     <span className="text-[11px] font-bold text-white">{d.total_calls}</span>
@@ -208,8 +220,10 @@ function fmtDur(s) {
   const m = Math.floor(s / 60), sec = s % 60;
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
-function fmtDay(d) {
+function fmtDay(d, granularity = "day") {
   const dt = new Date(d);
+  if (granularity === "month") return dt.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+  if (granularity === "week") return `Wk of ${dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}`;
   return dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 function fmtDateTime(d) {
