@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, canManageWorkers, isSuperAdmin } from "@/lib/permissions";
+import CollapsibleSection from "@/components/CollapsibleSection";
 import { AddWorkerModal, EditWorkerModal } from "@/components/WorkerModal";
 import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Activity, Pencil, Trash2, Download, FileText } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
@@ -186,7 +187,8 @@ function Body({ session }) {
 
       {message && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex items-center gap-2"><CheckCircle2 size={16} />{message}</div>}
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+      <CollapsibleSection title="Search & Filters">
+      <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Search name or mobile" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
         <select value={zoneId} onChange={(e) => { setZoneId(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
@@ -224,6 +226,7 @@ function Body({ session }) {
           Duplicates
         </button>
       </div>
+      </CollapsibleSection>
 
       {/* Total matching records for the current filters/search. */}
       {!loading && (

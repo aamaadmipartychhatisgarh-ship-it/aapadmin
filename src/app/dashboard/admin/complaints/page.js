@@ -85,7 +85,8 @@ function Body() {
         <SumCard label="Resolved" value={c.resolved || 0} />
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+      <CollapsibleSection title="Search & Filters">
+      <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search citizen name or phone" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
@@ -103,6 +104,7 @@ function Body() {
           <button key={s || "all"} onClick={() => setFilter(s)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase ${filter === s ? "bg-[#164FA3] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{s || "all"}</button>
         ))}
       </div>
+      </CollapsibleSection>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (

@@ -7,6 +7,7 @@ import { isOversight, isAdmin } from "@/lib/permissions";
 import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
+import CollapsibleSection from "@/components/CollapsibleSection";
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -107,7 +108,8 @@ function Body({ canDelete }) {
 
       {msg && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 text-sm">{msg}</div>}
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+      <CollapsibleSection title="Search & Filters">
+      <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or mobile" className="flex-1 min-w-[160px] outline-none text-sm py-2" />
         <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className={sel}><option value="">All zones</option>{zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}</select>
@@ -119,6 +121,7 @@ function Body({ canDelete }) {
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} title="Marked from" className={sel} />
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="Marked to" className={sel} />
       </div>
+      </CollapsibleSection>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (

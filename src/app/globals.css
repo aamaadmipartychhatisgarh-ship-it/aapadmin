@@ -194,3 +194,8 @@
 /* inputs / placeholders */
 .dark input, .dark textarea, .dark select { background-color: #0f172a !important; color: #f1f5f9 !important; border-color: #334155 !important; }
 .dark input::placeholder, .dark textarea::placeholder { color: #64748b !important; }
+/* Header leader photo: mix-blend-multiply only reads correctly against a
+   white header background — against the dark header it renders the photo
+   almost solid black (multiply darkens everything). Use normal blending
+   in dark mode instead, with a light backing chip so it still reads. */
+.dark .leader-photo { mix-blend-mode: normal; background: rgba(255,255,255,0.9); border-radius: 9999px; }

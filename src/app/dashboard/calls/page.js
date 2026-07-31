@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Phone, Plus, Search, Loader2, Star, X, Pencil, MapPin } from "lucide-react";
 import { isOversight } from "@/lib/permissions";
 import { formatDate } from "@/lib/dateFormat";
+import CollapsibleSection from "@/components/CollapsibleSection";
 
 const STATUS_PILL = {
   "Phone Picked":   "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -101,7 +102,8 @@ export default function CallsPage() {
         </Link>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+      <CollapsibleSection title="Search & Filters">
+      <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input
           type="text"
@@ -125,6 +127,7 @@ export default function CallsPage() {
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="From date" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white" />
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="To date" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white" />
       </div>
+      </CollapsibleSection>
 
       {/* Total matching records for the current filters/search. */}
       {!loading && (

@@ -65,7 +65,6 @@ export default function SummaryDashboard({
   exportUrl = "/api/supervisor/export/summary",
   title = "Supervisor Overview",
   subtitle = "Live calling performance",
-  headerAction = null, // optional top-right element (e.g. a cross-nav button)
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -130,21 +129,18 @@ export default function SummaryDashboard({
     : `${formatDate(range.from)} → ${formatDate(range.to)}`;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-wrap justify-between items-end gap-4">
-        <div>
-          <h1 className="text-[2.5rem] font-bold text-gray-900 tracking-tight leading-none">{title}</h1>
-          <p className="text-gray-500 mt-3 font-medium">
-            {subtitle} · <span className="font-semibold text-gray-700">{rangeLabel}</span>
-            {isToday && <span className="ml-2 inline-flex items-center gap-1 text-emerald-600 text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live</span>}
-          </p>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="text-xl font-bold text-gray-900 tracking-tight truncate">{title}</h1>
+          <span className="hidden md:inline text-sm text-gray-400 font-medium truncate">
+            — {subtitle} · <span className="font-semibold text-gray-600">{rangeLabel}</span>
+          </span>
+          {isToday && <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-semibold shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live</span>}
         </div>
-        {/* Right side: optional cross-nav action (top), then date filter + export */}
-        <div className="flex flex-col items-end gap-3">
-          {headerAction}
-          <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 h-10 shadow-sm">
-            <Calendar size={16} className="text-[#164FA3]" />
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 h-9 shadow-sm">
+            <Calendar size={14} className="text-[#164FA3]" />
             <select
               value={preset}
               onChange={(e) => setPreset(e.target.value)}
@@ -154,7 +150,7 @@ export default function SummaryDashboard({
             </select>
           </div>
           {preset === "custom" && (
-            <div className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 h-10 shadow-sm">
+            <div className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 h-9 shadow-sm">
               <input type="date" value={custom.from} max={custom.to || istToday()}
                 onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))}
                 className="text-sm text-gray-900 bg-transparent outline-none" />
@@ -166,11 +162,10 @@ export default function SummaryDashboard({
           )}
           <a
             href={`${exportUrl}?date_from=${range.from}&date_to=${range.to}`}
-            className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 h-10 rounded-lg text-sm font-medium shadow-sm"
+            className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 h-9 rounded-lg text-sm font-medium shadow-sm"
           >
-            <Download size={16} /> Export PDF
+            <Download size={14} /> Export PDF
           </a>
-          </div>
         </div>
       </div>
 

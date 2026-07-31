@@ -11,11 +11,11 @@ import {
   verticalListSortingStrategy, sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, MoreVertical, Pin, PinOff, Star, Lock, RotateCcw, Search, X } from "lucide-react";
+import { GripVertical, MoreVertical, Pin, PinOff, Star, Lock, Search, X } from "lucide-react";
 
 // Customizable sidebar navigation. Preserves the exact AAP link markup and adds:
 // drag-to-reorder (dnd-kit — pointer/touch/keyboard), pin to top/bottom, favourites,
-// locked items, search, reset, and per-user persistence. Layout is keyed by the
+// locked items, search, and per-user persistence. Layout is keyed by the
 // stable menu href (never array indexes) and merged with the role default so new
 // menu items appear and removed ones drop out.
 const GROUPS = ["fav", "top", "main", "bottom"];
@@ -99,12 +99,6 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
   };
   const toggleFav = (href) => (groupOf(href) === "fav" ? moveTo(href, "main") : moveTo(href, "fav"));
 
-  async function reset() {
-    await fetch("/api/sidebar/preferences", { method: "DELETE" }).catch(() => {});
-    const { groups } = reconcile(items, null, lockedHref);
-    setGroups(groups);
-  }
-
   // Search mode: flat filtered list, no drag.
   const query = q.trim().toLowerCase();
   const searching = query.length > 0;
@@ -173,13 +167,6 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
           </SortableContext>
         </DndContext>
       ) : null}
-
-      {/* Reset */}
-      <div className="mt-auto px-4 pt-3">
-        <button onClick={reset} className="flex items-center gap-2 text-[11px] text-blue-300 hover:text-white transition-colors">
-          <RotateCcw size={12} /> Reset sidebar
-        </button>
-      </div>
     </nav>
   );
 }

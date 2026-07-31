@@ -68,7 +68,6 @@ export default function DashboardLayout({ children }) {
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
       { name: "Map", href: "/dashboard/map", icon: Map },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
@@ -92,7 +91,6 @@ export default function DashboardLayout({ children }) {
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
       { name: "Map", href: "/dashboard/map", icon: Map },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
@@ -114,7 +112,6 @@ export default function DashboardLayout({ children }) {
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
       { name: "Map", href: "/dashboard/map", icon: Map },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
@@ -292,7 +289,7 @@ export default function DashboardLayout({ children }) {
               <img
                 src="/kejriwal_new.png"
                 alt="Arvind Kejriwal"
-                className="w-full h-full object-contain scale-125 mix-blend-multiply drop-shadow-sm"
+                className="leader-photo w-full h-full object-contain scale-125 mix-blend-multiply drop-shadow-sm"
                 onError={(e) => {
                   e.target.style.display = 'none';
                   e.target.parentElement.innerHTML = '<span class="text-gray-400 font-bold text-xl">AK</span>';

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import PageHeader from "@/components/PageHeader";
+import CollapsibleSection from "@/components/CollapsibleSection";
 import { formatDate, formatDateTime } from "@/lib/dateFormat";
 import {
   FileText, Search, Download, Printer, Table as TableIcon, BarChart3,
@@ -53,6 +54,13 @@ function ReportsCenter() {
   const [err, setErr] = useState("");
   const [saved, setSaved] = useState([]);
 
+  // Filter panel: expanded by default so it's visible on arrival, then
+  // auto-collapses ONCE the first result for this module loads — so it
+  // stops covering the report — without fighting the user if they reopen
+  // it and keep adjusting filters. Re-expands + re-arms on module switch.
+  const [filtersExpanded, setFiltersExpanded] = useState(true);
+  const autoCollapsedRef = useRef(false);
+
   // ---- bootstrap ---------------------------------------------------------
   useEffect(() => {
     fetch("/api/reports").then((r) => r.json()).then((d) => {
@@ -69,6 +77,7 @@ function ReportsCenter() {
     setMeta(null); setResult(null);
     setFilters({}); setGeo({ district_id: "", assembly_id: "" }); setSearch("");
     setGroupBy(""); setSort(null); setPage(1); setView("table");
+    setFiltersExpanded(true); autoCollapsedRef.current = false;
     fetch(`/api/reports?module=${moduleKey}`).then((r) => r.json()).then((d) => setMeta(d.meta)).catch(() => setErr("Failed to load module"));
   }, [moduleKey]);
 
@@ -105,7 +114,13 @@ function ReportsCenter() {
     setLoading(true); setErr("");
     fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(async (r) => { if (!r.ok) throw new Error((await r.json()).message || "Failed"); return r.json(); })
-      .then(setResult)
+      .then((r) => {
+        setResult(r);
+        // Auto-hide the filter panel the first time this module's results
+        // land, so it stops covering the report. Only once per module —
+        // reopening it afterward (the up/down button) won't auto-close again.
+        if (!autoCollapsedRef.current) { autoCollapsedRef.current = true; setFiltersExpanded(false); }
+      })
       .catch((e) => { setErr(e.message); setResult(null); })
       .finally(() => setLoading(false));
   }, [moduleKey, meta, view, groupBy, body]);
@@ -199,8 +214,9 @@ function ReportsCenter() {
         </select>
       </div>
 
-      {/* Filter bar */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+      {/* Filter bar — expands/hides so it doesn't cover the report below;
+          auto-hides once results load (see the run() callback above). */}
+      <CollapsibleSection title="Search & Filters" expanded={filtersExpanded} onToggle={setFiltersExpanded}>
         <div className="flex flex-wrap items-end gap-3">
           {view !== "calendar" && (
           <Field label="Time range">
@@ -262,9 +278,11 @@ function ReportsCenter() {
             </div>
           </Field>
         </div>
+      </CollapsibleSection>
 
-        {/* View + group + actions */}
-        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-100">
+      {/* View + group + actions — always visible, even while filters are collapsed */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-lg border border-gray-200 overflow-hidden">
             {[["table", "Table", TableIcon], ["summary", "Summary", ListFilter], ["chart", "Chart", BarChart3], ["calendar", "Calendar", CalendarIcon]].map(([v, label, Icon]) => (
               <button key={v} onClick={() => { setView(v); setPage(1); }}

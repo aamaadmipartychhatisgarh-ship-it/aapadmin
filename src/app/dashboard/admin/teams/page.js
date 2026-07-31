@@ -8,6 +8,7 @@ import { isAdmin, isOversight } from "@/lib/permissions";
 import { Network, Plus, Users, Loader2, ChevronRight, Trophy, Pencil, Search } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
+import CollapsibleSection from "@/components/CollapsibleSection";
 
 const LEVELS = [
   { key: "state", label: "State" }, { key: "zone", label: "Zone" },
@@ -69,7 +70,8 @@ function Body({ canEdit }) {
         actions={<ActionBar items={[canEdit && { key: "add", label: "Create Team", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) }]} />}
       />
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+      <CollapsibleSection title="Search & Filters">
+      <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search team name" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
         <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
@@ -77,6 +79,7 @@ function Body({ canEdit }) {
           {LEVELS.map((lv) => <option key={lv.key} value={lv.key}>{lv.label}</option>)}
         </select>
       </div>
+      </CollapsibleSection>
 
       {loading ? (
         <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>

@@ -8,6 +8,7 @@ import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Cl
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { formatDate } from "@/lib/dateFormat";
 import PageHeader from "@/components/PageHeader";
+import CollapsibleSection from "@/components/CollapsibleSection";
 import ActionBar from "@/components/ActionBar";
 
 const PRIORITY = {
@@ -130,7 +131,8 @@ function Body({ canManage }) {
         ))}
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+      <CollapsibleSection title="Search & Filters">
+      <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title or description" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
@@ -161,6 +163,7 @@ function Body({ canManage }) {
           {SORT_OPTIONS.map((s) => <option key={s.k} value={s.k}>{s.l}</option>)}
         </select>
       </div>
+      </CollapsibleSection>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (

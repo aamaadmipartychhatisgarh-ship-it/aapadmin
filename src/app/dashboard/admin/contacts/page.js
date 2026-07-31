@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Upload, Plus, Search, UserPlus, UserMinus, UserCheck, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
+import CollapsibleSection from "@/components/CollapsibleSection";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 
 const PAGE_SIZE = 50; // contacts per page — keeps each query light on big tables
@@ -336,7 +337,8 @@ function Body() {
       {message && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex items-center gap-2"><CheckCircle2 size={16} />{message}</div>}
       {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3">{error}</div>}
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">
+      <CollapsibleSection title="Search & Filters">
+      <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
         <input type="text" placeholder="Search by name or phone" value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1 min-w-[180px] outline-none text-sm py-2" />
         <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
@@ -368,6 +370,7 @@ function Body() {
           ))}
         </div>
       </div>
+      </CollapsibleSection>
 
       {/* Wrong-number cleanup bar — bulk-delete everything in this filtered view */}
       {filter === "wrong" && (
@@ -388,7 +391,12 @@ function Body() {
 
       {/* Bulk distribute — share matching contacts across several callers (hidden in duplicates/wrong views) */}
       {filter !== "duplicates" && filter !== "wrong" && (
-      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3">
+      <CollapsibleSection
+        title={`Distribute contacts across callers (${total.toLocaleString()})`}
+        defaultExpanded={false}
+        storageKey="contacts_bulk_distribute"
+        className="bg-blue-50 border-blue-100"
+      >
         <div className="flex items-center gap-2">
           <UserPlus size={18} className="text-[#164FA3]" />
           <span className="text-sm text-gray-800 font-semibold">
@@ -461,7 +469,7 @@ function Body() {
           </button>
           <span className="text-xs text-gray-500">Contacts go back to the pool — nothing is deleted from the database.</span>
         </div>
-      </div>
+      </CollapsibleSection>
       )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
