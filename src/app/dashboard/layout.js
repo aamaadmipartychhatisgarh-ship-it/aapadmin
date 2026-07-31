@@ -385,11 +385,11 @@ export default function DashboardLayout({ children }) {
               <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
                 <User size={20} />
               </div>
-              <div className="hidden sm:flex text-left flex-col justify-center mr-2">
-                <div className="text-sm font-bold text-gray-900 leading-tight">
+              <div className="hidden sm:flex text-left flex-col justify-center mr-2 min-w-0 max-w-[140px]">
+                <div className="text-sm font-bold text-gray-900 leading-tight truncate">
                   {session.user.name}
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">
+                <div className="text-xs text-gray-500 mt-0.5 truncate">
                   {roleLabel(role)}
                 </div>
               </div>

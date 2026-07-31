@@ -44,12 +44,12 @@ export default function UserDashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Welcome, {session.user.name}</h1>
+      <div className="flex justify-between items-end flex-wrap gap-4">
+        <div className="min-w-0">
+          <h1 className="text-4xl font-bold text-gray-900 tracking-tight truncate">Welcome, {session.user.name}</h1>
           <p className="text-gray-500 mt-2 font-medium">Your personal calling dashboard</p>
         </div>
-        <Link href="/dashboard/workspace" className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-5 py-2.5 rounded-xl font-semibold shadow-md">
+        <Link href="/dashboard/workspace" className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-5 py-2.5 rounded-xl font-semibold shadow-md shrink-0">
           Start Calling <ArrowRight size={16} />
         </Link>
       </div>

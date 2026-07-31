@@ -5,9 +5,19 @@
 // Groups are keyed by href so they're robust to label changes.
 export const GROUPS = [
   { key: "people", label: "People Management", hrefs: ["/dashboard/admin/workers", "/dashboard/admin/teams", "/dashboard/admin/users"] },
-  { key: "calling", label: "Calling Management", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/caller-report", "/dashboard/admin/assignment-rules", "/dashboard/admin/wrong-numbers"] },
+  { key: "calling", label: "Calling Management", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/assignment-rules", "/dashboard/admin/wrong-numbers"] },
   { key: "tasks", label: "Task Management", hrefs: ["/dashboard/tasks", "/dashboard/admin/events", "/dashboard/admin/complaints"] },
-  { key: "analytics", label: "Analytics", hrefs: ["/dashboard/analytics", "/dashboard/reports", "/dashboard/rankings", "/dashboard/strength"] },
+  // Every report/analytics page links to every other one (and to the main
+  // Reports Center) via this single group — a page only appears here if the
+  // signed-in role actually has it in their nav (see SectionTabs).
+  {
+    key: "analytics", label: "Reports & Analytics", hrefs: [
+      "/dashboard/analytics", "/dashboard/reports", "/dashboard/rankings", "/dashboard/strength",
+      "/dashboard/admin/caller-report",
+      "/dashboard/supervisor/areas", "/dashboard/supervisor/sentiment", "/dashboard/supervisor/remarks",
+      "/dashboard/supervisor/attendance", "/dashboard/supervisor/callers",
+    ],
+  },
   { key: "monitoring", label: "Monitoring", hrefs: ["/dashboard/map", "/dashboard/social", "/dashboard/social-management"] },
   { key: "content", label: "Content", hrefs: ["/dashboard/media"] },
   { key: "admin", label: "Administration", hrefs: ["/dashboard/admin/settings", "/dashboard/admin/audit"] },

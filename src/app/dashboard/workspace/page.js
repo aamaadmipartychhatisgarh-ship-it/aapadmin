@@ -527,9 +527,9 @@ function WorkspaceBody() {
                     title="Call back now — reopens this contact so you can log the call and update the reminder"
                     className="w-full text-left p-3 rounded-lg border border-gray-100 hover:bg-blue-50 disabled:opacity-60 disabled:hover:bg-white"
                   >
-                    <div className="font-medium text-gray-900 text-sm flex items-center gap-1">
-                      {c.person_name}
-                      {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712]" /> : null}
+                    <div className="font-medium text-gray-900 text-sm flex items-center gap-1 min-w-0">
+                      <span className="truncate">{c.person_name}</span>
+                      {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712] shrink-0" /> : null}
                     </div>
                     <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
                     <div className="text-[11px] font-semibold text-[#164FA3] mt-1">Follow up on {c.follow_up_date?.slice(0, 10)}{c.follow_up_time ? ` at ${String(c.follow_up_time).slice(0, 5)}` : ""} · tap to call back</div>
@@ -589,8 +589,9 @@ function WorkspaceBody() {
                     )}
                     <a href={`tel:${active.phone_number}`} className="text-xl font-mono mt-1 inline-block hover:underline">{active.phone_number}</a>
                     {(active.district_name || active.ward_name) && (
-                      <div className="flex items-center gap-1 mt-3 text-blue-200 text-sm">
-                        <MapPin size={14} /> {[active.district_name, active.ward_name].filter(Boolean).join(" / ")}
+                      <div className="flex items-center gap-1 mt-3 text-blue-200 text-sm min-w-0">
+                        <MapPin size={14} className="shrink-0" />
+                        <span className="truncate">{[active.district_name, active.ward_name].filter(Boolean).join(" / ")}</span>
                       </div>
                     )}
                     {active.address && <div className="text-sm text-blue-200 mt-1">{active.address}</div>}
@@ -739,8 +740,8 @@ function WorkspaceBody() {
                 <ul className="space-y-2">
                   {contactTasks.map((t) => (
                     <li key={t.id} className="flex items-start justify-between gap-3 border border-gray-100 rounded-xl p-3">
-                      <div className="flex-1">
-                        <div className="font-medium text-gray-900 text-sm">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-900 text-sm break-words">
                           {t.title}
                           <span className={`ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
                             t.priority === "urgent" ? "bg-red-100 text-red-700" :
@@ -1014,7 +1015,7 @@ function TodaysTaskPanel({ onLogComplaint }) {
           {tasks.map((t) => (
             <div key={t.id} className="border border-gray-100 rounded-xl p-3">
               <div className="flex items-center justify-between gap-2">
-                <div className="font-semibold text-gray-900 text-sm">{t.title}</div>
+                <div className="font-semibold text-gray-900 text-sm min-w-0 truncate">{t.title}</div>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${PRIORITY_BADGE[t.priority] || "bg-gray-100 text-gray-600"}`}>{t.priority}</span>
               </div>
               <div className="text-[11px] text-gray-400 mt-0.5 mb-2">

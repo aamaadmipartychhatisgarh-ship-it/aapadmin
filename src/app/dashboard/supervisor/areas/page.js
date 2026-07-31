@@ -32,12 +32,12 @@ function AreasBody() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex justify-between items-end">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Area Reports</h1>
+      <div className="flex justify-between items-end flex-wrap gap-4">
+        <div className="min-w-0">
+          <h1 className="text-4xl font-bold text-gray-900 tracking-tight truncate">Area Reports</h1>
           <p className="text-gray-500 mt-2 font-medium">Group calling activity by political geography.</p>
         </div>
-        <a href="/api/supervisor/export/areas" className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded text-sm font-medium shadow-sm">
+        <a href="/api/supervisor/export/areas" className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded text-sm font-medium shadow-sm shrink-0">
           <Download size={16} /> Export PDF (Districts)
         </a>
       </div>

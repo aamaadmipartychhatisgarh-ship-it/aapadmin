@@ -8,7 +8,7 @@ import {
   FileText, Search, Download, Printer, Table as TableIcon, BarChart3,
   ListFilter, Save, ChevronLeft, ChevronRight, X, ArrowUpDown, Loader2,
   PhoneCall, Contact, Users, ClipboardList, MessageSquareWarning, Clock,
-  UserCog, Network, Bell, ScrollText,
+  UserCog, Network, Bell, ScrollText, Calendar as CalendarIcon,
 } from "lucide-react";
 
 const ICONS = {
@@ -27,8 +27,12 @@ function ReportsCenter() {
   const [boot, setBoot] = useState(null);        // { modules, timePresets, users }
   const [moduleKey, setModuleKey] = useState(null);
   const [meta, setMeta] = useState(null);        // per-module meta
-  const [view, setView] = useState("table");     // table | summary | chart
+  const [view, setView] = useState("table");     // table | summary | chart | calendar
   const [groupBy, setGroupBy] = useState("");
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
 
   // Filters
   const [time, setTime] = useState("all");
@@ -74,20 +78,30 @@ function ReportsCenter() {
     fetch(`/api/locations?type=assembly&parent_id=${geo.district_id}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || [])).catch(() => setAssemblies([]));
   }, [geo.district_id]);
 
+  // Calendar view groups by day over the selected month, independent of the
+  // Time Range filter (which stays available for the other views).
+  const monthBounds = useMemo(() => {
+    const [y, m] = calendarMonth.split("-").map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    return { from: `${calendarMonth}-01`, to: `${calendarMonth}-${String(daysInMonth).padStart(2, "0")}`, daysInMonth };
+  }, [calendarMonth]);
+
   const body = useMemo(() => ({
     module: moduleKey,
-    time, date_from: dateFrom, date_to: dateTo,
+    time: view === "calendar" ? "custom" : time,
+    date_from: view === "calendar" ? monthBounds.from : dateFrom,
+    date_to: view === "calendar" ? monthBounds.to : dateTo,
     filters,
     geo: { district_id: geo.district_id || undefined, assembly_id: geo.assembly_id || undefined },
     search,
-    group_by: view === "table" ? "" : groupBy,
+    group_by: view === "table" ? "" : view === "calendar" ? "day" : groupBy,
     sort, page, pageSize,
-  }), [moduleKey, time, dateFrom, dateTo, filters, geo, search, view, groupBy, sort, page]);
+  }), [moduleKey, time, dateFrom, dateTo, filters, geo, search, view, groupBy, sort, page, monthBounds]);
 
   // ---- run report (debounced) --------------------------------------------
   const run = useCallback(() => {
     if (!moduleKey || !meta) return;
-    if (view !== "table" && !groupBy) { setResult(null); return; }
+    if ((view === "summary" || view === "chart") && !groupBy) { setResult(null); return; }
     setLoading(true); setErr("");
     fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then(async (r) => { if (!r.ok) throw new Error((await r.json()).message || "Failed"); return r.json(); })
@@ -185,12 +199,14 @@ function ReportsCenter() {
       {/* Filter bar */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
+          {view !== "calendar" && (
           <Field label="Time range">
             <select className={inp} value={time} onChange={(e) => { setTime(e.target.value); setPage(1); }}>
               {(boot?.timePresets || []).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
             </select>
           </Field>
-          {time === "custom" && (
+          )}
+          {view !== "calendar" && time === "custom" && (
             <>
               <Field label="From"><input type="date" className={inp} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></Field>
               <Field label="To"><input type="date" className={inp} value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></Field>
@@ -247,7 +263,7 @@ function ReportsCenter() {
         {/* View + group + actions */}
         <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-100">
           <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-            {[["table", "Table", TableIcon], ["summary", "Summary", ListFilter], ["chart", "Chart", BarChart3]].map(([v, label, Icon]) => (
+            {[["table", "Table", TableIcon], ["summary", "Summary", ListFilter], ["chart", "Chart", BarChart3], ["calendar", "Calendar", CalendarIcon]].map(([v, label, Icon]) => (
               <button key={v} onClick={() => { setView(v); setPage(1); }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-sm ${view === v ? "bg-[#164FA3] text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
                 <Icon size={15} /> {label}
@@ -255,11 +271,19 @@ function ReportsCenter() {
             ))}
           </div>
 
-          {view !== "table" && (
+          {(view === "summary" || view === "chart") && (
             <select className={inp} value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
               <option value="">Group by…</option>
               {(meta?.groupBy || []).map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
             </select>
+          )}
+
+          {view === "calendar" && (
+            <div className="flex items-center gap-1 h-9 px-1 rounded-lg border border-gray-200 bg-white">
+              <button onClick={() => setCalendarMonth((m) => shiftMonth(m, -1))} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><ChevronLeft size={15} /></button>
+              <span className="text-sm font-medium text-gray-700 px-1.5 min-w-[8rem] text-center">{monthLabel(calendarMonth)}</span>
+              <button onClick={() => setCalendarMonth((m) => shiftMonth(m, 1))} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><ChevronRight size={15} /></button>
+            </div>
           )}
 
           <div className="ml-auto flex items-center gap-2">
@@ -287,7 +311,7 @@ function ReportsCenter() {
         {err && <div className="p-6 text-sm text-red-600">{err}</div>}
         {loading && <div className="p-10 flex items-center justify-center text-gray-400"><Loader2 className="animate-spin mr-2" size={18} /> Loading…</div>}
 
-        {!loading && view !== "table" && !groupBy && (
+        {!loading && (view === "summary" || view === "chart") && !groupBy && (
           <div className="p-10 text-center text-gray-400 text-sm">Choose a “Group by” dimension to see the {view}.</div>
         )}
 
@@ -368,7 +392,78 @@ function ReportsCenter() {
             )}
           </div>
         )}
+
+        {!loading && !err && result?.mode === "summary" && view === "calendar" && (
+          <MonthCalendar month={calendarMonth} rows={result.rows} daysInMonth={monthBounds.daysInMonth} />
+        )}
       </div>
+    </div>
+  );
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function shiftMonth(ym, delta) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+}
+
+// Month-grid heatmap: one cell per day, colored by call/record volume for that
+// day (darker = busier). Data comes from the engine's day-grouped summary —
+// group_key is the 'YYYY-MM-DD' string the SQL DATE(...) produces.
+function MonthCalendar({ month, rows, daysInMonth }) {
+  const [y, m] = month.split("-").map(Number);
+  const firstWeekday = new Date(y, m - 1, 1).getDay();
+  const counts = {};
+  let max = 1;
+  for (const r of rows) {
+    const day = Number(String(r.group_key).slice(-2));
+    counts[day] = r.count;
+    if (r.count > max) max = r.count;
+  }
+  const todayKey = new Date();
+  const isToday = (day) => todayKey.getFullYear() === y && todayKey.getMonth() + 1 === m && todayKey.getDate() === day;
+
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day++) cells.push(day);
+
+  return (
+    <div className="p-4">
+      <div className="grid grid-cols-7 gap-2 mb-2">
+        {WEEKDAYS.map((w) => (
+          <div key={w} className="text-center text-xs font-semibold text-gray-400 py-1">{w}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-2">
+        {cells.map((day, i) => {
+          if (day === null) return <div key={`e${i}`} />;
+          const count = counts[day] || 0;
+          const intensity = count === 0 ? 0 : Math.max(0.12, count / max);
+          return (
+            <div
+              key={day}
+              title={`${count.toLocaleString("en-IN")} records`}
+              className={`aspect-square rounded-lg border flex flex-col items-center justify-center gap-0.5 ${
+                isToday(day) ? "border-[#164FA3]" : "border-gray-100"
+              }`}
+              style={count > 0 ? { backgroundColor: `rgba(22, 79, 163, ${intensity})` } : undefined}
+            >
+              <span className={`text-xs font-semibold ${intensity > 0.5 ? "text-white" : "text-gray-500"}`}>{day}</span>
+              {count > 0 && (
+                <span className={`text-[11px] font-bold ${intensity > 0.5 ? "text-white" : "text-[#164FA3]"}`}>{count}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {rows.length === 0 && <div className="py-10 text-center text-gray-400 text-sm">No data this month.</div>}
     </div>
   );
 }
