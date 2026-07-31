@@ -67,7 +67,7 @@ function Body() {
         icon={Shield}
         title="Audit Logs"
         description="Who did what — assignments, deletions and account changes."
-        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Administration" }, { label: "Audit Logs" }]}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "System" }, { label: "Audit Logs" }]}
       />
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3 flex-wrap">

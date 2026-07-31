@@ -170,7 +170,8 @@ function Body() {
       : `evenly across ${bulkCallers.length} caller(s): ${names}`;
     const desigNames = designations.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
     const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
-    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${desigLabel} — ${desc}? (Already-called contacts are skipped.)`)) return;
+    const skipNote = filter === "pending" ? " (Already-called contacts are excluded — you're viewing Pending only.)" : "";
+    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${desigLabel} — ${desc}?${skipNote}`)) return;
     setBulkBusy(true);
     try {
       const r = await fetch("/api/contacts/bulk-distribute", {
@@ -196,7 +197,13 @@ function Body() {
       const d = await r.json();
       if (!r.ok) { setError(d.message || "Distribute failed"); return; }
       const breakdown = Object.entries(d.per_caller_counts || {}).map(([u, n]) => `${u}: ${n}`).join(", ");
-      setMessage(`Distributed ${d.assigned} contacts — ${breakdown || "none matched"}.`);
+      // Surface the full picture — matched vs. assigned — so a capacity cap
+      // (N-per-caller × callers, the only intentional shortfall) is visible
+      // instead of the admin just seeing a number smaller than expected.
+      const capNote = d.matched_total > d.assigned
+        ? ` (${d.matched_total} contacts matched your filters; ${d.matched_total - d.assigned} weren't included because "N per caller" × callers is smaller than the match — raise the per-caller count or add callers to cover them all.)`
+        : "";
+      setMessage(`Distributed ${d.assigned} of ${d.matched_total} matching contacts — ${breakdown || "none matched"}.${capNote}`);
       load();
     } catch {
       setError("Distribute failed — network error.");

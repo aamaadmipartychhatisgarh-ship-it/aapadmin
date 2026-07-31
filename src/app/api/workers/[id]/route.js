@@ -110,7 +110,22 @@ export async function PUT(req, { params }) {
       // fields are now filled; Pending otherwise) before mirroring to contacts.
       await recomputeWorkerStatus(conn, id);
       await syncWorkerToContact(conn, id);
-      const [rows] = await conn.query("SELECT * FROM workers WHERE id = ?", [id]);
+      // Return the same joined shape as GET/list (district_name, assembly_name,
+      // etc.) so the client can merge this response straight into its table
+      // row without a second round-trip or a full list refetch.
+      const [rows] = await conn.query(
+        `SELECT w.*, ld.name AS district_name, la.name AS assembly_name, lz.name AS zone_name,
+                lls.name AS lok_sabha_name, lw.name AS ward_name, lb.name AS booth_name
+           FROM workers w
+           LEFT JOIN locations ld ON ld.id = w.district_id
+           LEFT JOIN locations la ON la.id = w.assembly_id
+           LEFT JOIN locations lz ON lz.id = w.zone_id
+           LEFT JOIN locations lls ON lls.id = w.lok_sabha_id
+           LEFT JOIN locations lw ON lw.id = w.ward_id
+           LEFT JOIN locations lb ON lb.id = w.booth_id
+          WHERE w.id = ?`,
+        [id]
+      );
       updated = rows[0];
       await conn.commit();
     } catch (e) {

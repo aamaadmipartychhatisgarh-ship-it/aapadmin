@@ -66,7 +66,7 @@ function Body({ canEdit }) {
         icon={Network}
         title="Teams"
         description={`${teams.length} teams across the organization hierarchy.`}
-        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Teams" }]}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Administration" }, { label: "Teams" }]}
         actions={<ActionBar items={[canEdit && { key: "add", label: "Create Team", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) }]} />}
       />
 

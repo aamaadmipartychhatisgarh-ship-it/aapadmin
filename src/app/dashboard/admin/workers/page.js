@@ -173,7 +173,7 @@ function Body({ session }) {
         icon={Users}
         title="Workers"
         description={`${data.total} members across the organization.`}
-        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Workers" }]}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Administration" }, { label: "Workers" }]}
         actions={
           <ActionBar items={[
             canExport && { key: "xlsx", label: "Excel", icon: Download, href: `/api/workers/export/xlsx${exportQs}` },
@@ -350,7 +350,19 @@ function Body({ session }) {
           districts={districts}
           designations={designations}
           onClose={() => setEditingWorker(null)}
-          onSaved={() => { setEditingWorker(null); load(); }}
+          onSaved={(updatedWorker) => {
+            setEditingWorker(null);
+            // Merge the edited row in place — no refetch, so filters,
+            // pagination, sort and scroll position are all untouched. The
+            // PUT response already carries the joined district/assembly/zone/
+            // lok-sabha/ward names, so every displayed field (including geo
+            // labels and the photo) reflects the edit immediately.
+            setData((prev) => ({
+              ...prev,
+              workers: prev.workers.map((w) => (w.id === updatedWorker.id ? { ...w, ...updatedWorker } : w)),
+            }));
+            setMessage("Worker updated successfully.");
+          }}
         />
       )}
       {viewingWorkerId && (

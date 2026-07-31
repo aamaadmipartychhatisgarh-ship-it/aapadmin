@@ -125,7 +125,7 @@ export default function UsersManagement() {
         icon={UsersIcon}
         title="User Management"
         description="Provision and manage application accounts"
-        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Users" }]}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Administration" }, { label: "Users" }]}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

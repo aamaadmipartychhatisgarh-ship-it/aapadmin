@@ -4,8 +4,14 @@
 //
 // Groups are keyed by href so they're robust to label changes.
 export const GROUPS = [
-  { key: "people", label: "People Management", hrefs: ["/dashboard/admin/workers", "/dashboard/admin/teams", "/dashboard/admin/users"] },
-  { key: "calling", label: "Calling Management", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/assignment-rules", "/dashboard/admin/wrong-numbers"] },
+  // Administration: Workers / Teams / Users. Future modules (Roles,
+  // Permissions, Departments, Designations, …) belong here too.
+  { key: "people", label: "Administration", hrefs: ["/dashboard/admin/workers", "/dashboard/admin/teams", "/dashboard/admin/users"] },
+  // People: the day-to-day calling/contact operations. Workers is cross-listed
+  // here too (not just under Administration) so callers/ops staff can jump
+  // straight to it from Contacts — Daily Assignments has its own dedicated
+  // page now, so it's no longer a tab here (still reachable from the sidebar).
+  { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/workers", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers"] },
   { key: "tasks", label: "Task Management", hrefs: ["/dashboard/tasks", "/dashboard/admin/events", "/dashboard/admin/complaints"] },
   // Every report/analytics page links to every other one (and to the main
   // Reports Center) via this single group — a page only appears here if the
@@ -20,7 +26,9 @@ export const GROUPS = [
   },
   { key: "monitoring", label: "Monitoring", hrefs: ["/dashboard/map", "/dashboard/social", "/dashboard/social-management"] },
   { key: "content", label: "Content", hrefs: ["/dashboard/media"] },
-  { key: "admin", label: "Administration", hrefs: ["/dashboard/admin/settings", "/dashboard/admin/audit"] },
+  // Renamed from "Administration" to "System" — that label now belongs to
+  // the Workers/Teams/Users group above, per the nav restructure.
+  { key: "admin", label: "System", hrefs: ["/dashboard/admin/settings", "/dashboard/admin/audit"] },
 ];
 
 // Find the group that owns a given pathname (exact match, or a dynamic child

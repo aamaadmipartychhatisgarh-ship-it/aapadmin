@@ -220,7 +220,7 @@ export function EditWorkerModal({ worker, districts, designations, onClose, onSa
       body: JSON.stringify(form),
     });
     const d = await r.json();
-    if (r.ok) onSaved(); else { setError(d.message || "Failed"); setSaving(false); }
+    if (r.ok) onSaved(d.worker); else { setError(d.message || "Failed"); setSaving(false); }
   }
 
   return (

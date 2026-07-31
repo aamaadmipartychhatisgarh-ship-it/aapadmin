@@ -153,7 +153,7 @@ export default function AdminCallRecords() {
         icon={Phone}
         title="Call Records"
         description="Detailed log of every call logged across the team."
-        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Calling Management" }, { label: "Call Records" }]}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Call Records" }]}
         actions={<ActionBar items={[{ key: "pdf", label: "Export PDF", icon: Download, href: "/api/supervisor/export/summary" }]} />}
       />
 

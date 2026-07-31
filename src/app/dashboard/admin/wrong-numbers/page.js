@@ -99,7 +99,7 @@ function Body({ canDelete }) {
         icon={AlertCircle}
         title="Wrong Numbers"
         description={`${rows.length} records marked wrong by callers. Restore, reassign, edit or export.`}
-        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Calling Management" }, { label: "Wrong Numbers" }]}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Wrong Numbers" }]}
         actions={<ActionBar items={[
           { key: "xlsx", label: "Excel", icon: Download, href: `/api/admin/wrong-numbers/export/xlsx?${qs()}` },
           { key: "pdf", label: "PDF", icon: FileText, href: `/api/admin/wrong-numbers/export/pdf?${qs()}` },
