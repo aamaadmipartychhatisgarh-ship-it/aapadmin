@@ -44,6 +44,9 @@ export default function SidebarGroupsNav({ items, pathname, onNavigate }) {
   // Which group (if any) owns the current route.
   const activeGroupKey = groups.find((g) => g.children.some((c) => c.href === pathname))?.key || null;
 
+  // Menu search box state.
+  const [q, setQ] = useState("");
+
   // Minimalist: at most ONE group open at a time. Starts fully collapsed;
   // remembers the last-opened group across navigations (localStorage).
   const [openKey, setOpenKey] = useState(null);
