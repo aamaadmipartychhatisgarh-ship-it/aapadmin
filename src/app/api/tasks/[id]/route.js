@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { notifyTaskAssigned } from "@/lib/notify";
-import { recomputeTaskStatus, hasSubtasksTable } from "@/lib/tasks";
+import { recomputeTaskStatus, hasSubtasksTable, hasTaskAssignedAt } from "@/lib/tasks";
 
 export async function PUT(req, { params }) {
   try {
@@ -40,6 +40,11 @@ export async function PUT(req, { params }) {
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     if ("status" in d && d.status === "completed") sets.push("completed_at = NOW()");
+    // Reassigning (changing the assignee/team) refreshes assigned_at to now, so
+    // the list re-sorts the task to the top by latest assignment.
+    if (isOversight(session) && (("assigned_to_user_id" in d && d.assigned_to_user_id) || ("assigned_to_team_id" in d && d.assigned_to_team_id)) && (await hasTaskAssignedAt())) {
+      sets.push("assigned_at = NOW()");
+    }
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
     vals.push(id);
     await query(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`, vals);

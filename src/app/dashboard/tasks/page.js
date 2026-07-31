@@ -16,6 +16,25 @@ const STATUS = {
   completed: "bg-emerald-100 text-emerald-700", cancelled: "bg-gray-100 text-gray-400",
 };
 const STATUS_FLOW = ["pending", "in_progress", "completed"];
+const SORT_OPTIONS = [
+  { k: "newest", l: "Newest Assigned" },
+  { k: "oldest", l: "Oldest Assigned" },
+  { k: "priority", l: "Priority" },
+  { k: "deadline", l: "Deadline" },
+  { k: "status", l: "Status" },
+  { k: "title_az", l: "Title A–Z" },
+  { k: "title_za", l: "Title Z–A" },
+];
+
+// "30 Jul 2026 • 05:15 PM" in the application timezone (Asia/Kolkata).
+function fmtAssignedOn(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "—";
+  const date = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }).format(d);
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }).format(d);
+  return { date, time };
+}
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -38,6 +57,7 @@ function Body({ canManage }) {
   const [priorityFilter, setPriorityFilter] = useState("");
   const [districtId, setDistrictId] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
+  const [sort, setSort] = useState("newest");
   const [districts, setDistricts] = useState([]);
   const [users, setUsers] = useState([]);
   const [expanded, setExpanded] = useState(() => new Set());
@@ -58,7 +78,7 @@ function Body({ canManage }) {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, search, statusFilter, priorityFilter, districtId, assignedTo]);
+  }, [view, search, statusFilter, priorityFilter, districtId, assignedTo, sort]);
   async function load() {
     setLoading(true);
     const p = new URLSearchParams({ view });
@@ -67,6 +87,7 @@ function Body({ canManage }) {
     if (priorityFilter) p.set("priority", priorityFilter);
     if (districtId) p.set("district_id", districtId);
     if (assignedTo) p.set("assigned_to", assignedTo);
+    if (sort) p.set("sort", sort);
     const r = await fetch(`/api/tasks?${p}`);
     if (r.ok) setData(await r.json());
     setLoading(false);
@@ -137,6 +158,9 @@ function Body({ canManage }) {
             {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
           </select>
         )}
+        <select value={sort} onChange={(e) => setSort(e.target.value)} title="Sort by" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          {SORT_OPTIONS.map((s) => <option key={s.k} value={s.k}>{s.l}</option>)}
+        </select>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -148,24 +172,28 @@ function Body({ canManage }) {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
+                <th className="px-4 py-3 font-semibold text-gray-600 w-12">S.No.</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Task</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Priority</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assignee</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Assigned On</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Deadline</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Action</th>
               </tr>
             </thead>
             <tbody>
-              {data.tasks.map((t) => {
+              {data.tasks.map((t, idx) => {
                 const overdue = t.deadline && t.deadline.slice(0, 10) < today && t.status !== "completed";
                 const next = STATUS_FLOW[STATUS_FLOW.indexOf(t.status) + 1];
                 const hasSubs = (t.subtask_total || 0) > 0;
                 const isOpen = expanded.has(t.id);
                 const pct = hasSubs ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0;
+                const assignedOn = fmtAssignedOn(t.assigned_at || t.created_at);
                 return (
                   <Fragment key={t.id}>
                   <tr className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3 text-gray-500 font-medium tabular-nums">{idx + 1}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-start gap-2">
                         {hasSubs && (
@@ -188,6 +216,11 @@ function Body({ canManage }) {
                     </td>
                     <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${PRIORITY[t.priority]}`}>{t.priority}</span></td>
                     <td className="px-4 py-3 text-gray-600">{t.assignee_name || t.team_name || "Unassigned"}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
+                      {typeof assignedOn === "object" ? (
+                        <><div className="font-medium text-gray-800">{assignedOn.date}</div><div className="text-gray-400">{assignedOn.time}</div></>
+                      ) : "—"}
+                    </td>
                     <td className={`px-4 py-3 text-xs ${overdue ? "text-red-600 font-bold" : "text-gray-600"}`}>
                       {t.deadline ? t.deadline.slice(0, 10) : "—"}{overdue ? " (overdue)" : ""}
                     </td>
@@ -212,7 +245,7 @@ function Body({ canManage }) {
                   </tr>
                   {hasSubs && isOpen && (
                     <tr className="bg-gray-50/60">
-                      <td colSpan={6} className="px-12 py-3">
+                      <td colSpan={8} className="px-12 py-3">
                         <SubtaskChecklist subtasks={t.subtasks} onProgress={(done, total, status) => onSubProgress(t.id, done, total, status)} />
                       </td>
                     </tr>

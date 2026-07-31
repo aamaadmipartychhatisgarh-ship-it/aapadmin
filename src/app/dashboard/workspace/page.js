@@ -932,6 +932,16 @@ const PRIORITY_BADGE = {
   urgent: "bg-red-100 text-red-700", high: "bg-orange-100 text-orange-700",
   medium: "bg-amber-100 text-amber-700", low: "bg-gray-100 text-gray-600",
 };
+// "30 Jul 2026 • 05:15 PM" in IST for the task's assignment time.
+function fmtTaskAssigned(v) {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  const date = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }).format(d);
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }).format(d);
+  return `${date} • ${time}`;
+}
+
 // Task description: multi-line, wraps, preserves line breaks; clamps to 5 lines
 // with a Show More toggle only when the text is long. Renders nothing when empty.
 function TaskDescription({ text }) {
@@ -1007,7 +1017,9 @@ function TodaysTaskPanel({ onLogComplaint }) {
                 <div className="font-semibold text-gray-900 text-sm">{t.title}</div>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${PRIORITY_BADGE[t.priority] || "bg-gray-100 text-gray-600"}`}>{t.priority}</span>
               </div>
-              <div className="text-[11px] text-gray-400 mt-0.5 mb-2">Deadline: {deadlineLabel(t.deadline)}{t.created_by_name ? ` · by ${t.created_by_name}` : ""}</div>
+              <div className="text-[11px] text-gray-400 mt-0.5 mb-2">
+                Assigned: {fmtTaskAssigned(t.assigned_at || t.created_at) || "—"}{t.created_by_name ? ` · by ${t.created_by_name}` : ""} · Deadline: {deadlineLabel(t.deadline)}
+              </div>
               {/* Main description — always between the title/meta and the checklist. */}
               {t.description && t.description.trim() && <TaskDescription text={t.description} />}
               {t.subtask_total > 0 ? (

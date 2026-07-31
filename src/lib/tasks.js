@@ -14,6 +14,18 @@ export async function hasSubtasksTable() {
   return hasSubtasksPromise;
 }
 
+// Whether tasks.assigned_at exists yet (added by add-task-assigned-at). Cached.
+let hasAssignedAtPromise;
+export async function hasTaskAssignedAt() {
+  if (!hasAssignedAtPromise) {
+    hasAssignedAtPromise = query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'assigned_at'`
+    ).then((r) => Number(r[0]?.n || 0) > 0).catch(() => { hasAssignedAtPromise = undefined; return false; });
+  }
+  return hasAssignedAtPromise;
+}
+
 // Fetch checklist items for a set of task ids in ONE query (no N+1), grouped by
 // task_id and ordered by sort_order.
 export async function subtasksByTask(taskIds) {

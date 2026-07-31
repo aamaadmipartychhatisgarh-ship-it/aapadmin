@@ -6,7 +6,7 @@ import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
 import { notifyTaskAssigned } from "@/lib/notify";
-import { subtasksByTask, hasSubtasksTable } from "@/lib/tasks";
+import { subtasksByTask, hasSubtasksTable, hasTaskAssignedAt } from "@/lib/tasks";
 
 // GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
 export async function GET(req) {
@@ -50,6 +50,20 @@ export async function GET(req) {
     }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
+    // Default sort = most recently ASSIGNED first (assigned_at, not created_at).
+    const sort = searchParams.get("sort") || "newest";
+    const assignedExpr = (await hasTaskAssignedAt()) ? "COALESCE(t.assigned_at, t.created_at)" : "t.created_at";
+    const ORDER = {
+      newest: `${assignedExpr} DESC`,
+      oldest: `${assignedExpr} ASC`,
+      priority: `FIELD(t.priority,'urgent','high','medium','low'), ${assignedExpr} DESC`,
+      deadline: `t.deadline IS NULL, t.deadline ASC, ${assignedExpr} DESC`,
+      status: `FIELD(t.status,'in_progress','pending','completed','cancelled'), ${assignedExpr} DESC`,
+      title_az: "t.title ASC",
+      title_za: "t.title DESC",
+    };
+    const orderBy = ORDER[sort] || ORDER.newest;
+
     const tasks = await query(
       `SELECT t.*, u.username AS assignee_name, tm.name AS team_name, ld.name AS district_name,
               cu.username AS created_by_name
@@ -59,9 +73,7 @@ export async function GET(req) {
          LEFT JOIN locations ld ON ld.id = t.district_id
          LEFT JOIN users cu ON cu.id = t.created_by_user_id
          ${whereSql}
-         ORDER BY FIELD(t.status,'in_progress','pending','completed','cancelled'),
-                  FIELD(t.priority,'urgent','high','medium','low'),
-                  t.deadline IS NULL, t.deadline ASC`,
+         ORDER BY ${orderBy}`,
       params
     );
 
@@ -98,9 +110,11 @@ export async function POST(req) {
     const d = await req.json();
     if (!d.title) return NextResponse.json({ message: "Title required" }, { status: 400 });
     await ensureTaskContactColumn();
+    // Stamp assigned_at at creation (this is the initial assignment time).
+    const stampAssigned = await hasTaskAssignedAt();
     const res = await query(
-      `INSERT INTO tasks (title, description, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id)
-       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (title, description, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id${stampAssigned ? ", assigned_at" : ""})
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?${stampAssigned ? ", NOW()" : ""})`,
       [d.title, d.description || null, d.priority || "medium", d.deadline || null,
        d.assigned_to_user_id || null, d.assigned_to_team_id || null, d.district_id || null,
        d.contact_id || null, session.user.id]
