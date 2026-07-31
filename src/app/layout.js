@@ -28,9 +28,17 @@ export default function RootLayout({ children }) {
   return (
     <html
       lang="en"
-      className={`${inter.variable} font-sans h-full antialiased dark`}
+      className={`${inter.variable} font-sans h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-50 font-sans">
+      <head>
+        {/* Apply the saved theme before paint to avoid a light/dark flash. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem('theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}`,
+          }}
+        />
+      </head>
+      <body className="min-h-full flex flex-col bg-white text-gray-900 font-sans">
         <Providers>{children}</Providers>
       </body>
     </html>

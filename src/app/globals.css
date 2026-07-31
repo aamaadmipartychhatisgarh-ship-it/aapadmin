@@ -151,3 +151,23 @@
     color: #111827;
   }
 }
+/* ============================================================
+   Dark mode — applied when <html> (or an ancestor) has .dark.
+   The app's pages use hard-coded utility colors, so we remap the
+   common surfaces globally instead of editing every page. Brand
+   blue (#0B3A82 sidebar / #164FA3 accents) stays as-is on dark.
+   ============================================================ */
+.dark body { background-color: #0f172a; color: #e2e8f0; }
+.dark .bg-\[\#f4f6f8\] { background-color: #0f172a !important; }
+.dark .bg-white { background-color: #1e293b !important; }
+.dark .bg-gray-50 { background-color: #172033 !important; }
+.dark .bg-gray-100 { background-color: #334155 !important; }
+.dark .text-gray-900, .dark .text-gray-800 { color: #f1f5f9 !important; }
+.dark .text-gray-700, .dark .text-gray-600 { color: #cbd5e1 !important; }
+.dark .text-gray-500, .dark .text-gray-400 { color: #94a3b8 !important; }
+.dark .border-gray-100, .dark .border-gray-200, .dark .border-gray-300 { border-color: #334155 !important; }
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #334155 !important; }
+.dark .hover\:bg-gray-50:hover, .dark .hover\:bg-gray-100:hover { background-color: #334155 !important; }
+.dark .hover\:bg-blue-50:hover { background-color: #1e3a5f !important; }
+/* keep dropdown option text readable on dark */
+.dark select option { color: #f1f5f9; background-color: #1e293b; }

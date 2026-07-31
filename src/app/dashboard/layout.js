@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Heartbeat from "@/components/Heartbeat";
 import InstallApp from "@/components/InstallApp";
+import ThemeToggle from "@/components/ThemeToggle";
 import TaskNotifier from "@/components/TaskNotifier";
 import SidebarNav from "@/components/SidebarNav";
 import SidebarGroupsNav from "@/components/SidebarGroupsNav";
@@ -336,6 +337,7 @@ export default function DashboardLayout({ children }) {
 
           {/* Header Right - User */}
           <div className="flex items-center gap-4 shrink-0">
+            <ThemeToggle />
             <div className="flex items-center gap-3 lg:pl-4">
               <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
                 <User size={20} />

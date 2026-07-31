@@ -44,24 +44,18 @@ export default function SidebarGroupsNav({ items, pathname, onNavigate }) {
   // Which group (if any) owns the current route.
   const activeGroupKey = groups.find((g) => g.children.some((c) => c.href === pathname))?.key || null;
 
-  const [open, setOpen] = useState(() => new Set());
-  const [q, setQ] = useState("");
+  // Minimalist: at most ONE group open at a time. Starts fully collapsed;
+  // remembers the last-opened group across navigations (localStorage).
+  const [openKey, setOpenKey] = useState(null);
 
-  // Restore saved expanded groups, then always ensure the active group is open.
   useEffect(() => {
-    let saved = [];
-    try { saved = JSON.parse(localStorage.getItem("sidebar_groups_admin") || "[]"); } catch {}
-    const next = new Set(Array.isArray(saved) ? saved : []);
-    if (activeGroupKey) next.add(activeGroupKey);
-    setOpen(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGroupKey]);
+    try { setOpenKey(localStorage.getItem("sidebar_group_open") || null); } catch {}
+  }, []);
 
   const toggle = (key) => {
-    setOpen((prev) => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      try { localStorage.setItem("sidebar_groups_admin", JSON.stringify([...next])); } catch {}
+    setOpenKey((prev) => {
+      const next = prev === key ? null : key; // clicking the open one closes it
+      try { next ? localStorage.setItem("sidebar_group_open", next) : localStorage.removeItem("sidebar_group_open"); } catch {}
       return next;
     });
   };
@@ -111,7 +105,7 @@ export default function SidebarGroupsNav({ items, pathname, onNavigate }) {
         ? // Flat filtered results across all groups
           groups.flatMap((g) => g.children.filter((c) => matches(c.name) || matches(g.label))).map((c) => childLink(c, false))
         : groups.map((g) => {
-            const isOpen = open.has(g.key);
+            const isOpen = openKey === g.key;
             const groupActive = g.key === activeGroupKey;
             const GIcon = g.icon;
             return (
