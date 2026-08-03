@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, canManageWorkers } from "@/lib/permissions";
 import { EditWorkerModal } from "@/components/WorkerModal";
+import Avatar from "@/components/Avatar";
 import { ArrowLeft, User, Phone, MapPin, Activity, Award, Users as UsersIcon, Loader2, Trash2 } from "lucide-react";
 
 export default function Page({ params }) {
@@ -60,14 +61,7 @@ function Body({ id, canEdit, canDelete, router }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-4">
-            {w.photo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={w.photo_url} alt={w.name} className="w-24 h-24 rounded-full object-cover border-2 border-[#164FA3]" />
-            ) : (
-              <div className="w-24 h-24 rounded-full bg-[#164FA3] text-white flex items-center justify-center text-3xl font-bold">
-                {w.name[0]?.toUpperCase()}
-              </div>
-            )}
+            <Avatar name={w.name} src={w.photo_url} size={96} className="bg-[#164FA3] border-2 border-[#164FA3]" textClassName="text-white" />
             <div>
               <h1 className="text-2xl font-bold text-gray-900">{w.name}</h1>
               <p className="text-gray-500">{w.position || "—"}</p>

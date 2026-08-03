@@ -8,6 +8,7 @@ import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, Chevro
 import ActionBar from "@/components/ActionBar";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import CallActionIcons from "@/components/CallActionIcons";
+import Avatar from "@/components/Avatar";
 import WorkerActivityPanel from "@/components/administration/WorkerActivityPanel";
 
 // Administration's "Workers" tab — worker management (the former standalone
@@ -254,14 +255,7 @@ export default function WorkersTab({ session }) {
                         onClick={(e) => { e.stopPropagation(); setViewingWorkerId(w.id); }}
                         title="View details"
                       >
-                        {w.photo_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={w.photo_url} alt="" className="w-12 h-12 rounded-full object-cover border border-gray-200 shrink-0" />
-                        ) : (
-                          <div className="w-12 h-12 rounded-full bg-[#164FA3]/10 border border-gray-200 flex items-center justify-center text-[#164FA3] text-sm font-bold shrink-0">
-                            {(w.name || "?")[0].toUpperCase()}
-                          </div>
-                        )}
+                        <Avatar name={w.name} src={w.photo_url} size={48} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
                         <span className="min-w-0">
                           <span className="block truncate">{w.name}</span>
                           {w.membership_no && <span className="block text-[10px] text-gray-400 font-mono">{w.membership_no}{w.membership_status && w.membership_status !== "active" ? ` · ${w.membership_status}` : ""}</span>}
