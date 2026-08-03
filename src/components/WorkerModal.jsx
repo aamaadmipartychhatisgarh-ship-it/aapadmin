@@ -5,6 +5,22 @@ import { CheckCircle2, AlertCircle } from "lucide-react";
 import { computeWorkerStatus, missingWorkerFields } from "@/lib/workerStatus";
 import ProfilePhoto from "@/components/ProfilePhoto";
 
+// Worker photos go through a dedicated DB-backed upload endpoint instead of
+// ProfilePhoto's default /api/uploads (which writes to local disk — wiped on
+// every redeploy on Hostinger, see scripts/add-worker-photos-schema.mjs).
+// Same persist(blob|null) => url|null contract ProfilePhoto expects — called
+// with null on "remove" (nothing to upload; the modal's own save clears
+// photo_url via onChange(null), same as when no persist override is given).
+async function persistWorkerPhoto(blob) {
+  if (!blob) return null;
+  const fd = new FormData();
+  fd.append("file", new File([blob], "photo.jpg", { type: "image/jpeg" }));
+  const r = await fetch("/api/workers/photo", { method: "POST", body: fd });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.message || "Upload failed");
+  return d.url;
+}
+
 // Human labels for the mandatory fields, so the editor can name what's missing.
 const FIELD_LABELS = {
   name: "Name", mobile: "Mobile", position: "Designation", address: "Address",
@@ -74,6 +90,7 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
             name={form.name}
             src={form.photo_url || null}
             size={64}
+            persist={persistWorkerPhoto}
             onChange={(url) => setForm((f) => ({ ...f, photo_url: url || "" }))}
             className="bg-gray-100"
             textClassName="text-gray-400"
