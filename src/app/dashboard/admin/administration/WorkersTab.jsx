@@ -8,12 +8,12 @@ import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, Chevro
 import ActionBar from "@/components/ActionBar";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import CallActionIcons from "@/components/CallActionIcons";
-import ContactDistributionPanel from "@/components/administration/ContactDistributionPanel";
 import WorkerActivityPanel from "@/components/administration/WorkerActivityPanel";
 
-// Administration's "Workers" tab — three stacked sections on one page:
-// Worker Management (the former standalone Workers page, unchanged),
-// Contact Distribution, and Worker Activity.
+// Administration's "Workers" tab — worker management (the former standalone
+// Workers page, unchanged) plus Worker Activity stats. Contact assignment/
+// distribution lives on the Contacts page, not here — Administration is
+// worker management only, no duplicate assignment panel.
 export default function WorkersTab({ session }) {
   // Callers can add/edit workers; bulk imports stay admin-only; export is
   // restricted to the Super Admin.
@@ -346,14 +346,6 @@ export default function WorkersTab({ session }) {
         {viewingWorkerId && (
           <PersonDetailModal type="worker" id={viewingWorkerId} onClose={() => setViewingWorkerId(null)} />
         )}
-      </section>
-
-      <div className="border-t border-gray-200" />
-
-      {/* ------------------------------------------------ Contact Distribution */}
-      <section className="space-y-4">
-        <h2 className="text-lg font-bold text-gray-900">Contact Distribution</h2>
-        <ContactDistributionPanel />
       </section>
 
       <div className="border-t border-gray-200" />

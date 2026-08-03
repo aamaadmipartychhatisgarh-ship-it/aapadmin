@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList, UserCheck } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -14,13 +14,9 @@ import CallActionIcons from "@/components/CallActionIcons";
 
 const PAGE_SIZE = 50; // contacts per page — keeps each query light on big tables
 
-// Contact records only — search, filters, edit/delete, task shortcut,
-// status, assigned caller. The bulk assignment/distribution system moved to
-// Administration's Contact Distribution panel
-// (src/components/administration/ContactDistributionPanel.jsx); this page
-// no longer has bulk-distribute/recall controls, but the per-row Assigned
-// Caller dropdown (a single-contact reassignment, not a bulk "assignment
-// system" control) stays here alongside the rest of contact management.
+// Contacts is the central place for both contact records AND contact
+// assignment/distribution — Administration is worker management only, no
+// duplicate assignment panel there.
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -71,9 +67,22 @@ function Body({ session }) {
   const [taskFor, setTaskFor] = useState(null); // contact to create a task for
   const [viewingWorkerId, setViewingWorkerId] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
+  const [teams, setTeams] = useState([]);
+  const [bulkTeam, setBulkTeam] = useState("");
+  const [bulkMode, setBulkMode] = useState("even"); // even | perCaller
+  const [perCaller, setPerCaller] = useState(100);
+  const [reassignOthers, setReassignOthers] = useState(true); // pull contacts off other callers
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // Filter-independent status breakdown for the Assignment Summary — always
+  // shows the full picture (Pending/Assigned/Pool/Done) regardless of which
+  // status pill is currently active, scoped by the same geo/designation filters.
+  const [counts, setCounts] = useState({ pending: 0, assigned: 0, pool: 0, done: 0 });
+  const [countsLoading, setCountsLoading] = useState(true);
   const fileRef = useRef(null);
   const excelRef = useRef(null);
   const loadSeq = useRef(0);
+  const countSeq = useRef(0);
 
   // Reload the page of results whenever a filter or the page number changes.
   useEffect(() => { load(); }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page]);
@@ -84,7 +93,133 @@ function Body({ session }) {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)));
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
   }, []);
+
+  // Assignment Summary counts — independent of the active status pill.
+  useEffect(() => { loadCounts(); }, [zoneId, lokSabhaId, districtId, assemblyIds, designationIds]);
+  async function loadCounts() {
+    const seq = ++countSeq.current;
+    setCountsLoading(true);
+    const base = new URLSearchParams();
+    if (zoneId) base.set("zone_id", zoneId);
+    if (lokSabhaId) base.set("lok_sabha_id", lokSabhaId);
+    if (districtId) base.set("district_id", districtId);
+    if (assemblyIds.length) base.set("assembly_ids", assemblyIds.join(","));
+    if (designationIds.length) base.set("designation_ids", designationIds.join(","));
+    base.set("page_size", "1");
+    const fetchCount = async (status) => {
+      const p = new URLSearchParams(base);
+      p.set("status", status);
+      const r = await fetch(`/api/contacts?${p}`, { cache: "no-store" });
+      return r.ok ? (await r.json()).total ?? 0 : 0;
+    };
+    const [pending, assigned, pool, done] = await Promise.all([
+      fetchCount("pending"), fetchCount("assigned"), fetchCount("pool"), fetchCount("done"),
+    ]);
+    if (seq !== countSeq.current) return;
+    setCounts({ pending, assigned, pool, done });
+    setCountsLoading(false);
+  }
+
+  // Selecting a team pre-selects all its caller members for distribution.
+  async function loadTeamCallers(teamId) {
+    setBulkTeam(teamId);
+    if (!teamId) return;
+    const r = await fetch(`/api/teams/${teamId}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const callerIds = users.map((u) => u.id);
+    const memberCallerIds = (d.members || [])
+      .filter((m) => m.member_type === "user" && callerIds.includes(m.user_id))
+      .map((m) => m.user_id);
+    setBulkCallers(memberCallerIds);
+    if (memberCallerIds.length === 0) setError("This team has no caller accounts as members. Add users to the team first.");
+    else setError("");
+  }
+
+  function toggleBulkCaller(id) {
+    setBulkCallers((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  }
+
+  // Distribute matching contacts across the selected callers (even split or N each).
+  async function bulkDistribute() {
+    setMessage(""); setError("");
+    if (bulkCallers.length === 0) { setError("Select at least one caller to distribute to."); return; }
+    const names = bulkCallers.map((id) => users.find((u) => u.id === id)?.username).filter(Boolean).join(", ");
+    const desc = bulkMode === "perCaller"
+      ? `${perCaller} contacts each to ${bulkCallers.length} caller(s): ${names}`
+      : `evenly across ${bulkCallers.length} caller(s): ${names}`;
+    const desigNames = designations.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
+    const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
+    const skipNote = filter === "pending" ? " (Already-called contacts are excluded — you're viewing Pending only.)" : "";
+    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${desigLabel} — ${desc}?${skipNote}`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await fetch("/api/contacts/bulk-distribute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caller_ids: bulkCallers,
+          mode: bulkMode,
+          per_caller: bulkMode === "perCaller" ? Number(perCaller) : undefined,
+          status: filter,
+          // Send EVERY active list filter so distribution acts on exactly the
+          // same people the filtered list shows (was only sending district +
+          // designation, so zone/Lok Sabha/assembly selections were ignored).
+          zone_id: zoneId || undefined,
+          lok_sabha_id: lokSabhaId || undefined,
+          district_id: districtId || undefined,
+          assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
+          designation_ids: designationIds.length ? designationIds.join(",") : undefined,
+          search: search || undefined,
+          reassign: reassignOthers,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.message || "Distribute failed"); return; }
+      const breakdown = Object.entries(d.per_caller_counts || {}).map(([u, n]) => `${u}: ${n}`).join(", ");
+      // Surface the full picture — matched vs. assigned — so a capacity cap
+      // (N-per-caller × callers, the only intentional shortfall) is visible
+      // instead of the admin just seeing a number smaller than expected.
+      const capNote = d.matched_total > d.assigned
+        ? ` (${d.matched_total} contacts matched your filters; ${d.matched_total - d.assigned} weren't included because "N per caller" × callers is smaller than the match — raise the per-caller count or add callers to cover them all.)`
+        : "";
+      setMessage(`Distributed ${d.assigned} of ${d.matched_total} matching contacts — ${breakdown || "none matched"}.${capNote}`);
+      load();
+      loadCounts();
+    } catch {
+      setError("Distribute failed — network error.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // Recall contacts from callers' workspaces — back to the pool, nothing deleted.
+  async function bulkRecall() {
+    setMessage(""); setError("");
+    const target = bulkCallers.length > 0
+      ? `${bulkCallers.length} selected caller(s)`
+      : "ALL callers";
+    if (!confirm(`Remove assigned contacts from ${target}? Contacts stay in the database and return to the pool; completed calls are not touched.`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await fetch("/api/contacts/bulk-unassign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caller_ids: bulkCallers }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.message || "Recall failed"); return; }
+      setMessage(`Removed ${d.unassigned} contact(s) from ${target} — they are back in the pool.`);
+      load();
+      loadCounts();
+    } catch {
+      setError("Recall failed — network error.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   // Cascading location filters. Lok Sabha follows Zone. Selecting a Lok Sabha
   // shows ALL of its Vidhan Sabhas (assemblies) directly — the "pick a district
@@ -281,6 +416,107 @@ function Body({ session }) {
         </div>
       </div>
       </CollapsibleSection>
+
+      {/* Distribute Contacts Across Callers — hidden in duplicates/wrong views,
+          same as before (those views aren't assignable scopes). */}
+      {filter !== "duplicates" && filter !== "wrong" && (
+      <CollapsibleSection
+        title="Distribute Contacts Across Callers"
+        defaultExpanded={false}
+        storageKey="contacts_bulk_distribute"
+        className="bg-blue-50 border-blue-100"
+      >
+        {/* Assignment Summary — dynamic counters */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {[
+            { label: "Pending", value: counts.pending },
+            { label: "Assigned", value: counts.assigned },
+            { label: "Pool", value: counts.pool },
+            { label: "Done", value: counts.done },
+            { label: "Selected Contacts", value: total },
+            { label: "Selected Callers", value: bulkCallers.length },
+          ].map((s) => (
+            <div key={s.label} className="bg-white rounded-xl border border-gray-200 px-3 py-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{s.label}</div>
+              <div className="text-lg font-bold text-gray-900">{countsLoading && s.label !== "Selected Contacts" && s.label !== "Selected Callers" ? "…" : Number(s.value).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <UserPlus size={18} className="text-[#164FA3]" />
+          <span className="text-sm text-gray-800 font-semibold">
+            Distribute the {total.toLocaleString()} {filter !== "all" ? filter + " " : ""}contacts
+            {districtId ? ` in ${districts.find((d) => String(d.id) === String(districtId))?.name || "this district"}` : ""}
+            {designationIds.length ? ` — ${designationIds.length} designation${designationIds.length === 1 ? "" : "s"}` : ""} across callers
+          </span>
+        </div>
+
+        {/* team shortcut — selects all caller accounts in the team */}
+        {teams.length > 0 && (
+          <div className="flex items-center gap-2">
+            <select value={bulkTeam} onChange={(e) => loadTeamCallers(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+              <option value="">Pick callers from a team…</option>
+              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <span className="text-xs text-gray-500">or pick callers individually below</span>
+          </div>
+        )}
+
+        {/* caller multi-select */}
+        <div className="flex flex-wrap gap-2">
+          {users.length === 0 && <span className="text-xs text-gray-500">No callers exist yet. Create caller users first.</span>}
+          {users.map((u) => {
+            const on = bulkCallers.includes(u.id);
+            return (
+              <button key={u.id} onClick={() => toggleBulkCaller(u.id)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${on ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200 hover:border-[#164FA3]"}`}>
+                {on ? "✓ " : ""}{u.username}
+              </button>
+            );
+          })}
+          {users.length > 1 && (
+            <button onClick={() => setBulkCallers(bulkCallers.length === users.length ? [] : users.map((u) => u.id))}
+              className="px-3 py-1.5 rounded-full text-xs font-medium text-[#164FA3] underline">
+              {bulkCallers.length === users.length ? "clear all" : "select all"}
+            </button>
+          )}
+        </div>
+
+        {/* mode + action */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex gap-1 bg-white rounded-lg border border-gray-200 p-1">
+            <button onClick={() => setBulkMode("even")} className={`px-3 py-1.5 rounded-md text-xs font-semibold ${bulkMode === "even" ? "bg-[#164FA3] text-white" : "text-gray-600"}`}>Split evenly</button>
+            <button onClick={() => setBulkMode("perCaller")} className={`px-3 py-1.5 rounded-md text-xs font-semibold ${bulkMode === "perCaller" ? "bg-[#164FA3] text-white" : "text-gray-600"}`}>N per caller</button>
+          </div>
+          {bulkMode === "perCaller" && (
+            <input type="number" min="1" value={perCaller} onChange={(e) => setPerCaller(e.target.value)} className="h-9 w-24 px-3 rounded-lg border border-gray-200 text-sm" placeholder="per caller" />
+          )}
+          <button onClick={bulkDistribute} disabled={bulkBusy || bulkCallers.length === 0} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
+            {bulkBusy ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+            {bulkBusy ? "Distributing…" : bulkMode === "even"
+              ? `Split evenly to ${bulkCallers.length || 0} caller(s)`
+              : `Give ${perCaller || 0} each to ${bulkCallers.length || 0} caller(s)`}
+          </button>
+          <span className="text-xs text-gray-500">Already-called (Done) contacts are never reassigned.</span>
+        </div>
+
+        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <input type="checkbox" checked={reassignOthers} onChange={(e) => setReassignOthers(e.target.checked)} />
+          Take contacts already assigned to other callers
+          <span className="text-xs text-gray-400 font-normal">(off = only hand out unassigned pool)</span>
+        </label>
+
+        {/* Recall — pull assigned contacts back out of caller workspaces (no deletion) */}
+        <div className="flex items-center gap-3 flex-wrap pt-2 border-t border-blue-100">
+          <button onClick={bulkRecall} disabled={bulkBusy} className="inline-flex items-center gap-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-semibold">
+            <UserMinus size={16} />
+            {bulkCallers.length > 0 ? `Remove contacts from ${bulkCallers.length} selected caller(s)` : "Remove contacts from ALL callers"}
+          </button>
+          <span className="text-xs text-gray-500">Contacts go back to the pool — nothing is deleted from the database.</span>
+        </div>
+      </CollapsibleSection>
+      )}
 
       {/* Wrong-number cleanup bar — bulk-delete everything in this filtered view */}
       {filter === "wrong" && (
