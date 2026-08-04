@@ -18,6 +18,7 @@ import { scopeFilterSync, roleOf, OVERSIGHT_ROLES } from "@/lib/permissions";
 
 const MAX_PAGE_SIZE = 200;
 const MAX_SUMMARY_ROWS = 500;
+const MAX_EXPORT_ROWS = 20000;
 
 // Who can run a module's report: descriptor.access(role) if defined, else any
 // oversight role (admins + supervisor).
@@ -42,6 +43,12 @@ export async function moduleMeta(module) {
     if (f.options) out.options = f.options;
     if (f.optionsFrom === "call_statuses") {
       const rows = await query("SELECT id, name FROM call_statuses ORDER BY id");
+      out.options = rows.map((r) => ({ value: String(r.id), label: r.name }));
+    } else if (f.optionsFrom === "designations") {
+      const rows = await query("SELECT id, name FROM designations ORDER BY name");
+      out.options = rows.map((r) => ({ value: String(r.id), label: r.name }));
+    } else if (f.optionsFrom === "teams") {
+      const rows = await query("SELECT id, name FROM teams ORDER BY name");
       out.options = rows.map((r) => ({ value: String(r.id), label: r.name }));
     }
     filters.push(out);
@@ -99,6 +106,14 @@ function buildWhere(module, session, body) {
     } else if (f.type === "search-eq") {
       where += ` AND ${f.column} = ?`;
       params.push(String(raw));
+    } else if (f.type === "m2m") {
+      // Many-to-many relationship (e.g. worker <-> team via team_members) —
+      // existsSql carries a %IN% placeholder the engine fills with bound `?`s.
+      const vals = (Array.isArray(raw) ? raw : String(raw).split(",")).map((v) => String(v).trim()).filter(Boolean);
+      if (vals.length) {
+        where += ` AND ${f.existsSql.replace("%IN%", vals.map(() => "?").join(","))}`;
+        params.push(...vals);
+      }
     }
   }
 
@@ -118,7 +133,10 @@ function buildWhere(module, session, body) {
   return { where, params };
 }
 
-export async function runReport({ moduleKey, session, body }) {
+// opts.exportAll — skip pagination and fetch up to MAX_EXPORT_ROWS in one
+// shot (Export/Print use this so the file matches every filtered row, not
+// just whatever page happens to be on screen — the old CSV button's bug).
+export async function runReport({ moduleKey, session, body, opts = {} }) {
   const module = getModule(moduleKey);
   if (!module) return { error: "Unknown module", status: 404 };
 
@@ -143,6 +161,7 @@ export async function runReport({ moduleKey, session, body }) {
     const totalRecords = rows.reduce((s, r) => s + Number(r.count || 0), 0);
     return {
       mode: "summary",
+      module: module.label,
       group_by: gb.key,
       group_label: gb.label,
       rows: rows.map((r) => ({ group_key: r.group_key ?? "(none)", count: Number(r.count) })),
@@ -151,7 +170,7 @@ export async function runReport({ moduleKey, session, body }) {
     };
   }
 
-  // ---- Detail (paginated rows) mode ---------------------------------------
+  // ---- Detail (paginated, or exportAll up to MAX_EXPORT_ROWS) mode --------
   const requested = Array.isArray(body.columns) ? body.columns : null;
   const cols = module.columns.filter((c) =>
     requested ? requested.includes(c.key) : module.defaultColumns.includes(c.key)
@@ -165,6 +184,23 @@ export async function runReport({ moduleKey, session, body }) {
   if (sortKeyDef) sortCol = sortKeyDef.sql;
   const dir = String(body.sort?.dir).toLowerCase() === "asc" ? "ASC" : "DESC";
 
+  const [{ total }] = await query(`SELECT COUNT(*) AS total ${from} ${where}`, params);
+
+  if (opts.exportAll) {
+    const rows = await query(
+      `SELECT ${selectList} ${from} ${where} ORDER BY ${sortCol} ${dir} LIMIT ${MAX_EXPORT_ROWS}`,
+      params
+    );
+    return {
+      mode: "detail",
+      module: module.label,
+      columns: useCols.map((c) => ({ key: c.key, label: c.label, type: c.type })),
+      rows,
+      total: Number(total),
+      truncated: Number(total) > rows.length,
+    };
+  }
+
   const pageSize = clampInt(body.pageSize, 1, MAX_PAGE_SIZE, 50);
   const page = clampInt(body.page, 1, 1e9, 1);
   const offset = (page - 1) * pageSize;
@@ -173,10 +209,10 @@ export async function runReport({ moduleKey, session, body }) {
     `SELECT ${selectList} ${from} ${where} ORDER BY ${sortCol} ${dir} LIMIT ${pageSize} OFFSET ${offset}`,
     params
   );
-  const [{ total }] = await query(`SELECT COUNT(*) AS total ${from} ${where}`, params);
 
   return {
     mode: "detail",
+    module: module.label,
     columns: useCols.map((c) => ({ key: c.key, label: c.label, type: c.type })),
     rows,
     total: Number(total),

@@ -26,8 +26,15 @@ import { WORKER_TYPES } from "@/lib/workerTypes";
 //                (enables the hierarchical location filter)
 //   access       (role) => boolean — who may run this report. Default: oversight.
 //   columns      [{ key, label, sql, type }]  — selectable/detail columns
-//   filters      [{ key, label, type, column?, options? }] — universal filters
-//                types: enum | bool | user | search (time+geo are implicit)
+//   filters      [{ key, label, type, column?, options?, optionsFrom?, existsSql? }]
+//                types: enum | bool | user | search-eq | m2m (time+geo are implicit)
+//                  enum/bool/user/search-eq  — column is a direct expression on the base row
+//                  m2m   — many-to-many relationship (e.g. worker<->team via a
+//                          join table); existsSql is a SQL fragment with a
+//                          %IN% placeholder the engine fills with bound params,
+//                          wrapped as `AND <existsSql>` (write it as an EXISTS(...))
+//                  optionsFrom  — DB-backed option list (call_statuses | designations | teams)
+//                                 instead of a hardcoded `options` array
 //   searchCols   columns the universal keyword search scans (LIKE)
 //   groupBy      [{ key, label, sql }] — dimensions for Summary/Chart views
 //   defaultColumns  column keys shown by default
@@ -93,6 +100,7 @@ export const MODULES = [
       { key: "is_follow_up_required", label: "Follow-up required", type: "bool", column: "c.is_follow_up_required" },
       { key: "is_vip", label: "VIP", type: "bool", column: "c.is_vip" },
       { key: "user_id", label: "Caller", type: "user", column: "c.user_id" },
+      { key: "designation_id", label: "Designation", type: "enum", column: "c.designation_id", optionsFrom: "designations" },
     ],
     searchCols: ["c.person_name", "c.phone_number", "c.remarks"],
     groupBy: [
@@ -141,6 +149,7 @@ export const MODULES = [
       { key: "is_wrong_number", label: "Wrong number", type: "bool", column: "c.is_wrong_number" },
       { key: "is_vip", label: "VIP", type: "bool", column: "c.is_vip" },
       { key: "assigned_to_user_id", label: "Assigned caller", type: "user", column: "c.assigned_to_user_id" },
+      { key: "designation_id", label: "Designation", type: "enum", column: "c.designation_id", optionsFrom: "designations" },
     ],
     searchCols: ["c.person_name", "c.phone_number", "c.address"],
     groupBy: [
@@ -195,6 +204,10 @@ export const MODULES = [
         key: "worker_type", label: "Worker Type", type: "enum", column: "w.worker_type",
         options: WORKER_TYPES,
       },
+      {
+        key: "team_id", label: "Team", type: "m2m", optionsFrom: "teams",
+        existsSql: "EXISTS (SELECT 1 FROM team_members tmm WHERE tmm.worker_id = w.id AND tmm.team_id IN (%IN%))",
+      },
     ],
     searchCols: ["w.name", "w.mobile", "w.membership_no", "w.position"],
     groupBy: [
@@ -247,6 +260,7 @@ export const MODULES = [
         options: ["low", "medium", "high", "urgent"].map((v) => ({ value: v, label: v })),
       },
       { key: "assigned_to_user_id", label: "Assigned to", type: "user", column: "t.assigned_to_user_id" },
+      { key: "assigned_to_team_id", label: "Team", type: "enum", column: "t.assigned_to_team_id", optionsFrom: "teams" },
     ],
     searchCols: ["t.title", "t.description"],
     groupBy: [
@@ -294,6 +308,7 @@ export const MODULES = [
         key: "status", label: "Status", type: "enum", column: "cp.status",
         options: ["open", "in_progress", "resolved", "closed"].map((v) => ({ value: v, label: v.replace(/_/g, " ") })),
       },
+      { key: "assigned_team_id", label: "Team", type: "enum", column: "cp.assigned_team_id", optionsFrom: "teams" },
     ],
     searchCols: ["cp.citizen_name", "cp.citizen_phone", "cp.description"],
     groupBy: [

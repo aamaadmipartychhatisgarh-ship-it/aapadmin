@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
+import FilterMultiSelect from "@/components/FilterMultiSelect";
 import { formatDate, formatDateTime } from "@/lib/dateFormat";
 import {
-  FileText, Search, Download, Printer, Table as TableIcon, BarChart3,
+  FileText, Search, Download, FileSpreadsheet, FileOutput, Printer, Table as TableIcon, BarChart3,
   ListFilter, Save, ChevronLeft, ChevronRight, X, ArrowUpDown, Loader2,
   PhoneCall, Contact, Users, ClipboardList, MessageSquareWarning, Clock,
   UserCog, Network, Bell, ScrollText, Calendar as CalendarIcon,
@@ -22,7 +23,24 @@ export default function Page() {
 }
 
 const inp = "h-9 px-3 rounded-lg border border-gray-200 bg-white text-sm text-gray-900 outline-none focus:border-[#164FA3] focus:ring-1 focus:ring-[#164FA3]";
-const SAVED_KEY = "reports_saved_v1";
+const PRINT_PAYLOAD_KEY = "reports_print_payload";
+const emptyGeo = () => ({ zone_id: [], lok_sabha_id: [], district_id: [], assembly_id: [], ward_id: [], booth_id: [] });
+
+// Fetch a level's location options, narrowed to children of `parentIds` when
+// any are selected — otherwise the full list. Multi-select-aware version of
+// the single-parent cascades used elsewhere (WorkersTab, Contacts).
+async function fetchLocations(type, parentIds) {
+  if (!parentIds || parentIds.length === 0) {
+    const d = await fetch(`/api/locations?type=${type}`).then((r) => r.json()).catch(() => ({}));
+    return d.locations || [];
+  }
+  const lists = await Promise.all(
+    parentIds.map((id) => fetch(`/api/locations?parent_id=${id}`).then((r) => r.json()).then((d) => d.locations || []).catch(() => []))
+  );
+  const merged = new Map();
+  for (const list of lists) for (const loc of list) if (loc.type === type) merged.set(loc.id, loc);
+  return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
 
 function ReportsCenter() {
   const [boot, setBoot] = useState(null);        // { modules, timePresets, users }
@@ -40,17 +58,22 @@ function ReportsCenter() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [filters, setFilters] = useState({});
-  const [geo, setGeo] = useState({ district_id: "", assembly_id: "" });
+  const [geo, setGeo] = useState(emptyGeo());
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState(null);
   const [page, setPage] = useState(1);
   const pageSize = 50;
 
+  const [zones, setZones] = useState([]);
+  const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [assemblies, setAssemblies] = useState([]);
+  const [wards, setWards] = useState([]);
+  const [booths, setBooths] = useState([]);
 
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState("");
   const [err, setErr] = useState("");
   const [saved, setSaved] = useState([]);
 
@@ -71,25 +94,57 @@ function ReportsCenter() {
       const initial = (requested && d.modules?.some((m) => m.key === requested)) ? requested : d.modules?.[0]?.key;
       if (initial) setModuleKey(initial);
     }).catch(() => setErr("Failed to load reports"));
-    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || [])).catch(() => {});
-    try { setSaved(JSON.parse(localStorage.getItem(SAVED_KEY) || "[]")); } catch {}
+    fetchLocations("zone", []).then(setZones);
   }, []);
 
   // ---- module meta (resets filters) --------------------------------------
   useEffect(() => {
     if (!moduleKey) return;
     setMeta(null); setResult(null);
-    setFilters({}); setGeo({ district_id: "", assembly_id: "" }); setSearch("");
+    setFilters({}); setGeo(emptyGeo()); setSearch("");
     setGroupBy(""); setSort(null); setPage(1); setView("table");
     setFiltersExpanded(true); autoCollapsedRef.current = false;
     fetch(`/api/reports?module=${moduleKey}`).then((r) => r.json()).then((d) => setMeta(d.meta)).catch(() => setErr("Failed to load module"));
+    fetch(`/api/reports/saved-filters?module=${moduleKey}`).then((r) => r.json()).then((d) => setSaved(d.saved || [])).catch(() => setSaved([]));
   }, [moduleKey]);
 
-  // ---- assemblies cascade on district ------------------------------------
+  // ---- geo cascade (multi-select: narrows to children of selected parents,
+  // drops any selection that's no longer a valid child when the parent changes) ----
   useEffect(() => {
-    if (!geo.district_id) { setAssemblies([]); return; }
-    fetch(`/api/locations?type=assembly&parent_id=${geo.district_id}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || [])).catch(() => setAssemblies([]));
+    fetchLocations("lok_sabha", geo.zone_id).then((list) => {
+      setLokSabhas(list);
+      setGeo((g) => ({ ...g, lok_sabha_id: g.lok_sabha_id.filter((id) => list.some((l) => String(l.id) === String(id))) }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geo.zone_id]);
+  useEffect(() => {
+    fetchLocations("district", geo.lok_sabha_id).then((list) => {
+      setDistricts(list);
+      setGeo((g) => ({ ...g, district_id: g.district_id.filter((id) => list.some((l) => String(l.id) === String(id))) }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geo.lok_sabha_id]);
+  useEffect(() => {
+    fetchLocations("assembly", geo.district_id).then((list) => {
+      setAssemblies(list);
+      setGeo((g) => ({ ...g, assembly_id: g.assembly_id.filter((id) => list.some((l) => String(l.id) === String(id))) }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geo.district_id]);
+  useEffect(() => {
+    fetchLocations("ward", geo.assembly_id).then((list) => {
+      setWards(list);
+      setGeo((g) => ({ ...g, ward_id: g.ward_id.filter((id) => list.some((l) => String(l.id) === String(id))) }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geo.assembly_id]);
+  useEffect(() => {
+    fetchLocations("booth", geo.ward_id).then((list) => {
+      setBooths(list);
+      setGeo((g) => ({ ...g, booth_id: g.booth_id.filter((id) => list.some((l) => String(l.id) === String(id))) }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geo.ward_id]);
 
   // Calendar view groups by day over the selected month, independent of the
   // Time Range filter (which stays available for the other views).
@@ -105,7 +160,7 @@ function ReportsCenter() {
     date_from: view === "calendar" ? monthBounds.from : dateFrom,
     date_to: view === "calendar" ? monthBounds.to : dateTo,
     filters,
-    geo: { district_id: geo.district_id || undefined, assembly_id: geo.assembly_id || undefined },
+    geo,
     search,
     group_by: view === "table" ? "" : view === "calendar" ? "day" : groupBy,
     sort, page, pageSize,
@@ -147,49 +202,65 @@ function ReportsCenter() {
     return String(v);
   };
 
-  const exportCSV = () => {
-    if (!result) return;
-    let head, lines;
-    if (result.mode === "summary") {
-      head = [result.group_label, "Count"];
-      lines = result.rows.map((r) => [r.group_key, r.count]);
-    } else {
-      head = result.columns.map((c) => c.label);
-      lines = result.rows.map((row) => result.columns.map((c) => row[c.key] ?? ""));
+  // ---- export: CSV / Excel / PDF, always the FULL filtered result set ----
+  const downloadExport = async (format) => {
+    if (!moduleKey) return;
+    setExporting(format); setErr("");
+    try {
+      const r = await fetch(`/api/reports/export?format=${format}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || "Export failed");
+      const blob = await r.blob();
+      const cd = r.headers.get("Content-Disposition") || "";
+      const filename = cd.match(/filename="([^"]+)"/)?.[1] || `${moduleKey}-report.${format}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setExporting("");
     }
-    const esc = (s) => `"${String(s).replace(/"/g, '""')}"`;
-    const csv = [head.map(esc).join(","), ...lines.map((l) => l.map(esc).join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${moduleKey}-report.csv`;
-    a.click();
   };
 
-  const saveCurrent = () => {
+  // Print opens a dedicated, chrome-free print view in a new tab — the
+  // filter config is handed off via sessionStorage (not the URL: a
+  // multi-select filter set is too big/awkward for a query string).
+  const openPrint = () => {
+    try { sessionStorage.setItem(PRINT_PAYLOAD_KEY, JSON.stringify({ body, orientation: "landscape" })); } catch {}
+    window.open("/reports-print", "_blank");
+  };
+
+  const saveCurrent = async () => {
     const name = prompt("Save this report as:");
     if (!name) return;
-    const entry = { name, moduleKey, view, groupBy, time, dateFrom, dateTo, filters, geo, search };
-    const next = [...saved.filter((s) => s.name !== name), entry];
-    setSaved(next);
-    try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)); } catch {}
+    const config = { view, groupBy, time, dateFrom, dateTo, filters, geo, search };
+    const r = await fetch("/api/reports/saved-filters", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ module: moduleKey, name, config }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      setSaved((prev) => [...prev.filter((s) => s.name !== name), d.saved].sort((a, b) => a.name.localeCompare(b.name)));
+    } else {
+      setErr((await r.json().catch(() => ({}))).message || "Save failed");
+    }
   };
   const loadSaved = (s) => {
-    setModuleKey(s.moduleKey);
-    // apply the rest after meta loads
-    setTimeout(() => {
-      setView(s.view); setGroupBy(s.groupBy); setTime(s.time);
-      setDateFrom(s.dateFrom); setDateTo(s.dateTo); setFilters(s.filters || {});
-      setGeo(s.geo || { district_id: "", assembly_id: "" }); setSearch(s.search || ""); setPage(1);
-    }, 300);
+    const c = s.config || {};
+    setView(c.view || "table"); setGroupBy(c.groupBy || ""); setTime(c.time || "all");
+    setDateFrom(c.dateFrom || ""); setDateTo(c.dateTo || ""); setFilters(c.filters || {});
+    setGeo({ ...emptyGeo(), ...(c.geo || {}) }); setSearch(c.search || ""); setPage(1);
   };
-  const deleteSaved = (name) => {
-    const next = saved.filter((s) => s.name !== name);
-    setSaved(next);
-    try { localStorage.setItem(SAVED_KEY, JSON.stringify(next)); } catch {}
+  const deleteSaved = async (s) => {
+    const r = await fetch(`/api/reports/saved-filters/${s.id}`, { method: "DELETE" });
+    if (r.ok) setSaved((prev) => prev.filter((x) => x.id !== s.id));
   };
 
   const totalPages = result?.mode === "detail" ? Math.max(1, Math.ceil(result.total / pageSize)) : 1;
+
+  const asItems = (options) => (options || []).map((o) => ({ id: o.value, name: o.label }));
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500">
@@ -238,17 +309,23 @@ function ReportsCenter() {
 
           {meta?.geo && (
             <>
+              <Field label="Zone">
+                <FilterMultiSelect label="zones" items={zones.map((z) => ({ id: z.id, name: z.name }))} selected={geo.zone_id} onChange={(v) => { setGeo((g) => ({ ...g, zone_id: v })); setPage(1); }} />
+              </Field>
+              <Field label="Lok Sabha">
+                <FilterMultiSelect label="Lok Sabhas" items={lokSabhas.map((l) => ({ id: l.id, name: l.name }))} selected={geo.lok_sabha_id} onChange={(v) => { setGeo((g) => ({ ...g, lok_sabha_id: v })); setPage(1); }} />
+              </Field>
               <Field label="District">
-                <select className={inp} value={geo.district_id} onChange={(e) => { setGeo({ district_id: e.target.value, assembly_id: "" }); setPage(1); }}>
-                  <option value="">All districts</option>
-                  {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
+                <FilterMultiSelect label="districts" items={districts.map((d) => ({ id: d.id, name: d.name }))} selected={geo.district_id} onChange={(v) => { setGeo((g) => ({ ...g, district_id: v })); setPage(1); }} />
               </Field>
               <Field label="Assembly">
-                <select className={inp} value={geo.assembly_id} disabled={!geo.district_id} onChange={(e) => { setGeo((g) => ({ ...g, assembly_id: e.target.value })); setPage(1); }}>
-                  <option value="">All assemblies</option>
-                  {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <FilterMultiSelect label="assemblies" items={assemblies.map((a) => ({ id: a.id, name: a.name }))} selected={geo.assembly_id} onChange={(v) => { setGeo((g) => ({ ...g, assembly_id: v })); setPage(1); }} />
+              </Field>
+              <Field label="Block">
+                <FilterMultiSelect label="blocks" items={wards.map((w) => ({ id: w.id, name: w.name }))} selected={geo.ward_id} onChange={(v) => { setGeo((g) => ({ ...g, ward_id: v })); setPage(1); }} />
+              </Field>
+              <Field label="Booth">
+                <FilterMultiSelect label="booths" items={booths.map((b) => ({ id: b.id, name: b.name }))} selected={geo.booth_id} onChange={(v) => { setGeo((g) => ({ ...g, booth_id: v })); setPage(1); }} />
               </Field>
             </>
           )}
@@ -260,15 +337,9 @@ function ReportsCenter() {
                   <option value="">Any</option><option value="1">Yes</option><option value="0">No</option>
                 </select>
               ) : f.type === "user" ? (
-                <select className={inp} value={filters[f.key] ?? ""} onChange={(e) => setFilter(f.key, e.target.value)}>
-                  <option value="">All</option>
-                  {(boot?.users || []).map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
-                </select>
-              ) : f.type === "enum" ? (
-                <select className={inp} value={filters[f.key] ?? ""} onChange={(e) => setFilter(f.key, e.target.value)}>
-                  <option value="">All</option>
-                  {(f.options || []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                <FilterMultiSelect label={f.label.toLowerCase()} items={(boot?.users || []).map((u) => ({ id: u.id, name: u.username }))} selected={filters[f.key] || []} onChange={(v) => setFilter(f.key, v)} />
+              ) : (f.type === "enum" || f.type === "m2m") ? (
+                <FilterMultiSelect label={f.label.toLowerCase()} items={asItems(f.options)} selected={filters[f.key] || []} onChange={(v) => setFilter(f.key, v)} />
               ) : (
                 <input className={inp} placeholder={f.label} value={filters[f.key] ?? ""} onChange={(e) => setFilter(f.key, e.target.value)} />
               )}
@@ -311,10 +382,18 @@ function ReportsCenter() {
             </div>
           )}
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
             <button onClick={saveCurrent} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50"><Save size={15} /> Save</button>
-            <button onClick={exportCSV} disabled={!result} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"><Download size={15} /> CSV</button>
-            <button onClick={() => window.print()} disabled={!result} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"><Printer size={15} /> Print</button>
+            <button onClick={() => downloadExport("csv")} disabled={!result || !!exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40">
+              {exporting === "csv" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} CSV
+            </button>
+            <button onClick={() => downloadExport("xlsx")} disabled={!result || !!exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40">
+              {exporting === "xlsx" ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} />} Excel
+            </button>
+            <button onClick={() => downloadExport("pdf")} disabled={!result || !!exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40">
+              {exporting === "pdf" ? <Loader2 size={15} className="animate-spin" /> : <FileOutput size={15} />} PDF
+            </button>
+            <button onClick={openPrint} disabled={!result} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"><Printer size={15} /> Print</button>
           </div>
         </div>
 
@@ -322,9 +401,9 @@ function ReportsCenter() {
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <span className="text-xs text-gray-400">Saved:</span>
             {saved.map((s) => (
-              <span key={s.name} className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-gray-100 text-xs text-gray-700">
+              <span key={s.id} className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full bg-gray-100 text-xs text-gray-700">
                 <button onClick={() => loadSaved(s)} className="hover:text-[#164FA3]">{s.name}</button>
-                <button onClick={() => deleteSaved(s.name)} className="text-gray-400 hover:text-red-500"><X size={12} /></button>
+                <button onClick={() => deleteSaved(s)} className="text-gray-400 hover:text-red-500"><X size={12} /></button>
               </span>
             ))}
           </div>
@@ -413,6 +492,15 @@ function ReportsCenter() {
                   })}
                   {result.rows.length === 0 && <tr><td colSpan={3} className="px-4 py-10 text-center text-gray-400">No data.</td></tr>}
                 </tbody>
+                {result.rows.length > 0 && (
+                  <tfoot>
+                    <tr className="bg-gray-50 font-semibold text-gray-900">
+                      <td className="px-4 py-2.5">Total — {result.rows.length} groups</td>
+                      <td className="px-4 py-2.5 text-right">{result.totalRecords.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-2.5" />
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             )}
           </div>

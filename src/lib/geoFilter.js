@@ -32,11 +32,14 @@ export function zoneScope(alias, zoneId) {
   return { clause, params: [zoneId, zoneId, zoneId, zoneId] };
 }
 
-// Each of zone_id / lok_sabha_id / district_id / assembly_id may be a single id,
-// a comma-separated string ("1,3"), or an array ([1,3]) — multi-select. Within a
-// level the ids are OR'd (WHERE ... IN (…)); across levels the clauses are AND'd
-// by the caller, preserving the Lok Sabha → District → Assembly hierarchy.
-export function geoFilter(alias, { zone_id, lok_sabha_id, district_id, assembly_id } = {}) {
+// Each of zone_id / lok_sabha_id / district_id / assembly_id / ward_id / booth_id
+// may be a single id, a comma-separated string ("1,3"), or an array ([1,3]) —
+// multi-select. Within a level the ids are OR'd (WHERE ... IN (…)); across
+// levels the clauses are AND'd by the caller, preserving the Zone → Lok Sabha →
+// District → Assembly → Ward (Block) → Booth hierarchy. "Ward" is what the
+// rest of the app labels "Block" (see WorkerModal.jsx) — same location type
+// and column, just a different display label depending on screen.
+export function geoFilter(alias, { zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id } = {}) {
   const a = alias ? `${alias}.` : "";
   const clauses = [];
   const params = [];
@@ -47,6 +50,7 @@ export function geoFilter(alias, { zone_id, lok_sabha_id, district_id, assembly_
   const ph = (n) => Array(n).fill("?").join(",");
 
   const zones = arr(zone_id), ls = arr(lok_sabha_id), ds = arr(district_id), asm = arr(assembly_id);
+  const wards = arr(ward_id), booths = arr(booth_id);
 
   // Roll-up matching is STRICT on an explicitly-set id (mirrors zoneScope): a row
   // whose own id at a level is set must be one of the selected ids; only when
@@ -99,8 +103,26 @@ export function geoFilter(alias, { zone_id, lok_sabha_id, district_id, assembly_
   }
 
   if (asm.length) {
-    clauses.push(`${a}assembly_id IN (${ph(asm.length)})`);
-    params.push(...asm);
+    const p = ph(asm.length);
+    clauses.push(`(
+      ${a}assembly_id IN (${p})
+      OR (${a}assembly_id IS NULL AND ${a}ward_id IN (SELECT id FROM locations WHERE type='ward' AND parent_id IN (${p})))
+    )`);
+    params.push(...asm, ...asm);
+  }
+
+  if (wards.length) {
+    const p = ph(wards.length);
+    clauses.push(`(
+      ${a}ward_id IN (${p})
+      OR (${a}ward_id IS NULL AND ${a}booth_id IN (SELECT id FROM locations WHERE type='booth' AND parent_id IN (${p})))
+    )`);
+    params.push(...wards, ...wards);
+  }
+
+  if (booths.length) {
+    clauses.push(`${a}booth_id IN (${ph(booths.length)})`);
+    params.push(...booths);
   }
 
   return { clauses, params };
