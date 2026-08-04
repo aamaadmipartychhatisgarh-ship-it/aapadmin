@@ -5,7 +5,12 @@ import { isAdmin, normalizeRole, ROLES, scopeFilterSync } from "@/lib/permission
 import { query, getPool } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
+import { statusWhere } from "@/lib/contactStatus";
 import { logAudit } from "@/lib/audit";
+
+// UPDATE ... WHERE id IN (...) is chunked at this size so one caller taking
+// thousands of contacts never builds a single enormous IN() list.
+const UPDATE_CHUNK_SIZE = 1000;
 
 // Distribute contacts matching the given filters across MULTIPLE callers.
 //
@@ -16,8 +21,10 @@ import { logAudit } from "@/lib/audit";
 //   status?, district_id?, search?   // same filters as the contacts list
 // }
 //
-// Pulls from ALL matching contacts (except already-called Done ones), ordered
-// so unassigned contacts go out first. Round-robin so any remainder is spread.
+// Pulls from every contact matching the given status/filters (the status
+// filter, if any, controls whether Done contacts are included — see
+// src/lib/contactStatus.js), ordered so unassigned contacts go out first
+// when not reassigning. Round-robin so any remainder is spread.
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -62,10 +69,8 @@ export async function POST(req) {
     let where = " WHERE 1=1";
     const params = [];
     const status = body.status;
-    if (status === "pending") where += " AND c.is_completed = 0";
-    if (status === "done") where += " AND c.is_completed = 1";
-    if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
-    if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
+    const statusCond = statusWhere(status);
+    if (statusCond) where += ` AND ${statusCond}`;
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
     // Geo + designation via the SHARED person-aware filter, so Distribution acts
     // on exactly the same people the Contacts list and Add Workers page show.
@@ -88,71 +93,91 @@ export async function POST(req) {
     params.push(...scope.params);
     const workerJoin = person.needsWorkerJoin ? "LEFT JOIN workers w ON w.id = c.worker_id" : "";
 
-    // Total rows the filters match, independent of any per-caller cap below —
-    // this is the "Selected" count the UI can compare assigned against, so a
-    // capacity cap (N-per-caller × callers) is a visible, explained number
-    // instead of a silent shortfall.
-    const [{ matchedTotal }] = await query(
-      `SELECT COUNT(*) AS matchedTotal FROM contacts c ${workerJoin} ${where}`,
-      params
-    );
-
     // How many to fetch. "even" mode takes every matching row (no cap); only
     // "perCaller" imposes a deliberate, admin-specified capacity.
     const capacity = mode === "perCaller" ? perCaller * callers.length : null;
     const limitSql = capacity ? " LIMIT " + capacity : "";
-
-    // When reassigning, take the matching set straight by id (so contacts held
-    // by other callers get moved). Otherwise hand out unassigned pool first.
-    const rows = await query(
-      `SELECT c.id FROM contacts c ${workerJoin} ${where}
-        ORDER BY ${reassign ? "c.id ASC" : "(c.assigned_to_user_id IS NOT NULL), c.id ASC"} ${limitSql}`,
-      params
-    );
-    if (rows.length === 0) {
-      return NextResponse.json({ assigned: 0, matched_total: Number(matchedTotal), per_caller_counts: {} });
-    }
-
-    // Round-robin the ids across callers.
-    const buckets = new Map(callers.map((c) => [c.id, []]));
-    rows.forEach((row, i) => {
-      const callerId = callers[i % callers.length].id;
-      buckets.get(callerId).push(row.id);
-    });
-
-    // One bulk UPDATE per caller (id IN (...)) — no N+1, scales to 1000s of ids.
-    // Wrapped in a single transaction so the whole distribution is atomic:
-    // either every contact is (re)assigned or none is — never a partial result.
     const stampAssignedAt = await contactsHaveAssignedAt();
     const stampAssignedBy = await contactsHaveAssignedBy();
+
+    let matchedTotal = 0;
     let assigned = 0;
     let dbUpdatedTotal = 0;
     const perCounts = {};
     const mismatches = [];
+
+    // Everything below runs on ONE connection inside ONE transaction — the
+    // match count, the id selection, and the update. Previously the count
+    // and the id-select were two separate, unlocked pool.query() calls, so
+    // anything that changed the matching rows in between (a caller finishing
+    // a call, another admin distributing/recalling, a top-up) could shrink
+    // the second read below the first count — "assigned" landing under
+    // "matched_total" for no visible reason, by an amount that depended on
+    // how much concurrent activity happened in that window. The id-select
+    // below is a locking read (FOR UPDATE), so once we've picked the rows
+    // no other transaction can touch them until we commit — no double-
+    // assignment race between selection and the update either.
     const conn = await getPool().getConnection();
     try {
       await conn.beginTransaction();
+
+      const [countRows] = await conn.query(
+        `SELECT COUNT(*) AS matchedTotal FROM contacts c ${workerJoin} ${where}`,
+        params
+      );
+      matchedTotal = Number(countRows[0].matchedTotal);
+
+      // When reassigning, take the matching set straight by id (so contacts
+      // held by other callers get moved). Otherwise hand out unassigned pool
+      // first.
+      const [idRows] = await conn.query(
+        `SELECT c.id FROM contacts c ${workerJoin} ${where}
+          ORDER BY ${reassign ? "c.id ASC" : "(c.assigned_to_user_id IS NOT NULL), c.id ASC"} ${limitSql}
+          FOR UPDATE`,
+        params
+      );
+
+      if (idRows.length === 0) {
+        await conn.commit();
+        return NextResponse.json({ assigned: 0, matched_total: matchedTotal, per_caller_counts: {} });
+      }
+
+      // Round-robin the ids across callers.
+      const buckets = new Map(callers.map((c) => [c.id, []]));
+      idRows.forEach((row, i) => {
+        const callerId = callers[i % callers.length].id;
+        buckets.get(callerId).push(row.id);
+      });
+
+      // One bulk UPDATE per caller (id IN (...)), chunked so a single caller
+      // taking thousands of contacts never builds one enormous IN() list.
       for (const c of callers) {
         const ids = buckets.get(c.id);
         perCounts[c.username] = ids.length;
         if (ids.length === 0) continue;
-        const ph = ids.map(() => "?").join(",");
-        // Clear any lock so a reassigned contact leaves the previous caller's queue,
-        // and record WHO assigned it (for the caller's "Assigned by" line).
-        const [result] = await conn.query(
-          `UPDATE contacts SET assigned_to_user_id = ?${stampAssignedAt ? ", assigned_at = NOW()" : ""}${stampAssignedBy ? ", assigned_by_user_id = ?" : ""},
-                  locked_by_user_id = NULL, locked_at = NULL WHERE id IN (${ph})`,
-          stampAssignedBy ? [c.id, session.user.id, ...ids] : [c.id, ...ids]
-        );
-        // Verify the DB actually touched as many rows as we intended to move —
-        // MySQL's affectedRows counts matched rows even when values are
-        // unchanged (no ON DUPLICATE/IGNORE involved here), so this should
-        // always equal ids.length; if it ever doesn't, surface it instead of
-        // silently trusting the intended count.
-        if (result.affectedRows !== ids.length) mismatches.push({ caller: c.username, intended: ids.length, dbAffected: result.affectedRows });
-        dbUpdatedTotal += result.affectedRows;
+        for (let i = 0; i < ids.length; i += UPDATE_CHUNK_SIZE) {
+          const chunk = ids.slice(i, i + UPDATE_CHUNK_SIZE);
+          const ph = chunk.map(() => "?").join(",");
+          // Clear any lock so a reassigned contact leaves the previous caller's
+          // queue, and record WHO assigned it (for the caller's "Assigned by" line).
+          const [result] = await conn.query(
+            `UPDATE contacts SET assigned_to_user_id = ?${stampAssignedAt ? ", assigned_at = NOW()" : ""}${stampAssignedBy ? ", assigned_by_user_id = ?" : ""},
+                    locked_by_user_id = NULL, locked_at = NULL WHERE id IN (${ph})`,
+            stampAssignedBy ? [c.id, session.user.id, ...chunk] : [c.id, ...chunk]
+          );
+          // Verify the DB actually touched as many rows as we intended to move —
+          // MySQL's affectedRows counts matched rows even when values are
+          // unchanged (no ON DUPLICATE/IGNORE involved here), so this should
+          // always equal chunk.length; if it ever doesn't, surface it instead
+          // of silently trusting the intended count.
+          if (result.affectedRows !== chunk.length) {
+            mismatches.push({ caller: c.username, intended: chunk.length, dbAffected: result.affectedRows, ids: chunk });
+          }
+          dbUpdatedTotal += result.affectedRows;
+        }
         assigned += ids.length;
       }
+
       await conn.commit();
     } catch (e) {
       await conn.rollback();
@@ -167,9 +192,9 @@ export async function POST(req) {
       action: "contacts.distribute",
       entityType: "contacts",
       details: {
-        matched_total: Number(matchedTotal), // rows the filters matched, before any per-caller cap
-        assigned,                            // rows we intended to update (sum of per-caller buckets)
-        db_updated: dbUpdatedTotal,           // rows MySQL actually reports as affected
+        matched_total: matchedTotal,          // rows the filters matched, before any per-caller cap
+        assigned,                             // rows we intended to update (sum of per-caller buckets)
+        db_updated: dbUpdatedTotal,            // rows MySQL actually reports as affected
         per_caller_counts: perCounts,
         mode, per_caller: mode === "perCaller" ? perCaller : undefined,
         reassign, status: status || "all",
@@ -178,9 +203,10 @@ export async function POST(req) {
     });
     return NextResponse.json({
       assigned,
-      matched_total: Number(matchedTotal),
+      matched_total: matchedTotal,
       db_updated: dbUpdatedTotal,
       per_caller_counts: perCounts,
+      failed: assigned - dbUpdatedTotal,
     });
   } catch (err) {
     console.error("contacts bulk-distribute error:", err);

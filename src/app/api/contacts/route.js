@@ -5,6 +5,7 @@ import { isAdmin, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
+import { statusWhere } from "@/lib/contactStatus";
 
 // Parse a "1,2,3" style query value into a de-duped list of positive integers.
 function idList(raw) {
@@ -40,10 +41,8 @@ export async function GET(req) {
     // Build the shared WHERE clause once (used for both the count and the list).
     let where = " WHERE 1=1";
     const params = [];
-    if (status === "pending") where += " AND c.is_completed = 0";
-    if (status === "done") where += " AND c.is_completed = 1";
-    if (status === "assigned") where += " AND c.assigned_to_user_id IS NOT NULL";
-    if (status === "pool") where += " AND c.assigned_to_user_id IS NULL";
+    const statusCond = statusWhere(status);
+    if (statusCond) where += ` AND ${statusCond}`;
     // Zone / Lok Sabha / District / Assembly / Designation — filter by the PERSON
     // (their linked worker) via the shared helper, so the same selection returns
     // the same people as the Add Workers page and the Distribution panel.

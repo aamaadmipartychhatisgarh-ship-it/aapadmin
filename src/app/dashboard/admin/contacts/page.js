@@ -179,13 +179,15 @@ function Body({ session }) {
       const d = await r.json();
       if (!r.ok) { setError(d.message || "Distribute failed"); return; }
       const breakdown = Object.entries(d.per_caller_counts || {}).map(([u, n]) => `${u}: ${n}`).join(", ");
-      // Surface the full picture — matched vs. assigned — so a capacity cap
-      // (N-per-caller × callers, the only intentional shortfall) is visible
-      // instead of the admin just seeing a number smaller than expected.
-      const capNote = d.matched_total > d.assigned
+      // A matched/assigned gap only ever has one legitimate cause: "N per
+      // caller" × callers capping the batch below the full match. In "even"
+      // mode there's no cap at all, so matched should always equal assigned —
+      // if it doesn't there, that's a real failure, not a capacity note.
+      const capNote = bulkMode === "perCaller" && d.matched_total > d.assigned
         ? ` (${d.matched_total} contacts matched your filters; ${d.matched_total - d.assigned} weren't included because "N per caller" × callers is smaller than the match — raise the per-caller count or add callers to cover them all.)`
         : "";
-      setMessage(`Distributed ${d.assigned} of ${d.matched_total} matching contacts — ${breakdown || "none matched"}.${capNote}`);
+      const failed = d.failed > 0 ? ` ⚠ ${d.failed} failed to save — check the server log.` : "";
+      setMessage(`✓ Distributed ${d.assigned} of ${d.matched_total} matching contacts — ${breakdown || "none matched"}.${capNote}${failed}`);
       load();
       loadCounts();
     } catch {
@@ -498,7 +500,13 @@ function Body({ session }) {
               ? `Split evenly to ${bulkCallers.length || 0} caller(s)`
               : `Give ${perCaller || 0} each to ${bulkCallers.length || 0} caller(s)`}
           </button>
-          <span className="text-xs text-gray-500">Already-called (Done) contacts are never reassigned.</span>
+          <span className="text-xs text-gray-500">
+            {filter === "pending"
+              ? "Already-called (Done) contacts are excluded — you're viewing Pending only."
+              : filter === "done"
+              ? "Only already-called (Done) contacts will be distributed — you're viewing Done only."
+              : "Distributes every contact matching the current status filter, including Done ones — switch to \"Pending\" to exclude them."}
+          </span>
         </div>
 
         <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
