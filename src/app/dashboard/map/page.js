@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
-import { Map as MapIcon, Loader2, Users, Network, PhoneCall, Activity, X } from "lucide-react";
+import { Map as MapIcon, Loader2, Users, Network, PhoneCall, Activity, X, Contact, UserCog, TrendingUp, TrendingDown, Minus, ExternalLink } from "lucide-react";
+import FloatingPopover from "@/components/FloatingPopover";
 
 export default function Page() {
   return <SupervisorGuard><Body /></SupervisorGuard>;
@@ -18,9 +19,21 @@ function Body() {
   const [districts, setDistricts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
+  const [hoveredId, setHoveredId] = useState(null);
+  const tileRefs = useRef({});
 
+  useEffect(() => { load(); }, []);
+  async function load() {
+    const r = await fetch("/api/map");
+    if (r.ok) setDistricts((await r.json()).districts || []);
+    setLoading(false);
+  }
+  // Keep the map current without a manual refresh.
   useEffect(() => {
-    fetch("/api/map").then((r) => r.json()).then((d) => setDistricts(d.districts || [])).finally(() => setLoading(false));
+    const onFocus = () => { if (document.visibilityState === "visible") load(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
   }, []);
 
   const zones = useMemo(() => {
@@ -29,13 +42,15 @@ function Body() {
     return Object.entries(m);
   }, [districts]);
 
+  const hovered = hoveredId ? districts.find((d) => d.id === hoveredId) : null;
+
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div>
         <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Organization Map</h1>
-        <p className="text-gray-500 mt-2 font-medium">Chhattisgarh districts colored by organizational strength. Click a tile to drill down.</p>
+        <p className="text-gray-500 mt-2 font-medium">Chhattisgarh districts colored by organizational strength. Hover for a quick look, click a tile to drill down.</p>
       </div>
 
       <div className="flex items-center gap-4 text-sm">
@@ -53,7 +68,10 @@ function Body() {
                 {items.map((d) => (
                   <button
                     key={d.id}
+                    ref={(el) => { tileRefs.current[d.id] = el; }}
                     onClick={() => setSelected(d)}
+                    onMouseEnter={() => setHoveredId(d.id)}
+                    onMouseLeave={() => setHoveredId((cur) => (cur === d.id ? null : cur))}
                     className={`${BAND_COLOR[d.band]} ${selected?.id === d.id ? "ring-4 ring-[#164FA3]/30" : ""} text-white rounded-xl p-4 text-left transition-all shadow-sm`}
                   >
                     <div className="font-bold text-sm leading-tight">{d.name}</div>
@@ -87,22 +105,50 @@ function Body() {
                   {selected.band} · {selected.score}/100
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-6">
-                  <Detail icon={Users} label="Workers" value={selected.worker_count} />
+                  <Detail icon={Users} label="Total Members" value={selected.worker_count} />
                   <Detail icon={Activity} label="Active" value={selected.active_workers} />
+                  <Detail icon={Activity} label="Pending" value={selected.pending_workers} />
+                  <Detail icon={Activity} label="Inactive" value={selected.inactive_workers} />
                   <Detail icon={Network} label="Teams" value={selected.team_count} />
-                  <Detail icon={PhoneCall} label="Calls" value={selected.call_count} />
+                  <Detail icon={UserCog} label="Callers" value={selected.caller_count} />
+                  <Detail icon={Contact} label="Contacts" value={selected.contact_count} />
+                  <Detail icon={PhoneCall} label="Call Completion" value={`${selected.call_completion_pct}%`} />
                   <Detail icon={Activity} label="Avg Activity" value={selected.avg_activity} />
+                  <GrowthDetail value={selected.membership_growth_pct} />
                 </div>
                 {selected.band === "weak" && (
                   <div className="mt-5 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
                     ⚠ Weak area — needs more workers and team coverage.
                   </div>
                 )}
+                <a href="/dashboard/reports?module=workers" className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-[#164FA3] hover:underline">
+                  View full report <ExternalLink size={13} />
+                </a>
               </>
             )}
           </div>
         </div>
       </div>
+
+      <FloatingPopover
+        anchorRef={{ current: hoveredId ? tileRefs.current[hoveredId] : null }}
+        open={!!hovered}
+        onClose={() => setHoveredId(null)}
+        width={220}
+        estimatedHeight={190}
+      >
+        {hovered && (
+          <div className="p-3 text-sm space-y-1">
+            <div className="font-bold text-gray-900">{hovered.name}</div>
+            <div className="text-xs text-gray-400 mb-1.5">{hovered.zone_name} Division · score {hovered.score}/100</div>
+            <div className="flex justify-between"><span className="text-gray-500">Members</span><strong className="text-gray-800">{hovered.worker_count}</strong></div>
+            <div className="flex justify-between"><span className="text-gray-500">Active / Pending</span><strong className="text-gray-800">{hovered.active_workers} / {hovered.pending_workers}</strong></div>
+            <div className="flex justify-between"><span className="text-gray-500">Contacts</span><strong className="text-gray-800">{hovered.contact_count}</strong></div>
+            <div className="flex justify-between"><span className="text-gray-500">Callers</span><strong className="text-gray-800">{hovered.caller_count}</strong></div>
+            <div className="flex justify-between"><span className="text-gray-500">Call completion</span><strong className="text-gray-800">{hovered.call_completion_pct}%</strong></div>
+          </div>
+        )}
+      </FloatingPopover>
     </div>
   );
 }
@@ -115,6 +161,16 @@ function Detail({ icon: Icon, label, value }) {
     <div>
       <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1"><Icon size={13} /> {label}</div>
       <div className="text-2xl font-bold text-gray-900">{value}</div>
+    </div>
+  );
+}
+function GrowthDetail({ value }) {
+  const Icon = value > 0 ? TrendingUp : value < 0 ? TrendingDown : Minus;
+  const color = value > 0 ? "text-emerald-600" : value < 0 ? "text-red-500" : "text-gray-400";
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1"><Icon size={13} /> Growth (30d)</div>
+      <div className={`text-2xl font-bold ${color}`}>{value > 0 ? "+" : ""}{value}%</div>
     </div>
   );
 }

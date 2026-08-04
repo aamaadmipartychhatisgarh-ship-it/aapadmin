@@ -31,9 +31,17 @@ export async function GET() {
               lz.name AS zone_name,
               (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id) AS worker_count,
               (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='active') AS active_workers,
+              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='pending') AS pending_workers,
+              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='inactive') AS inactive_workers,
               (SELECT COALESCE(ROUND(AVG(w.activity_score)),0) FROM workers w WHERE w.district_id = ld.id) AS avg_activity,
               (SELECT COUNT(*) FROM teams t WHERE t.location_id = ld.id) AS team_count,
-              (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count
+              (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
+              (SELECT COUNT(*) FROM contacts ct WHERE ct.district_id = ld.id) AS contact_count,
+              (SELECT COUNT(*) FROM users u WHERE u.role='caller' AND u.home_district_id = ld.id) AS caller_count,
+              (SELECT ROUND(COALESCE(SUM(ct.is_completed) / NULLIF(COUNT(*), 0) * 100, 0))
+                 FROM contacts ct WHERE ct.district_id = ld.id) AS call_completion_pct,
+              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS new_workers_30d,
+              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.created_at >= DATE_SUB(NOW(), INTERVAL 60 DAY) AND w.created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)) AS new_workers_prev_30d
          FROM locations ld
          LEFT JOIN locations lls ON lls.id = ld.parent_id
          LEFT JOIN locations lz ON lz.id = lls.parent_id
@@ -50,11 +58,17 @@ export async function GET() {
         r.avg_activity * 0.4 +
         (r.call_count / maxCall) * 100 * 0.2
       );
+      // Membership growth — workers added in the last 30 days vs the 30
+      // days before that. No new column: derived from workers.created_at.
+      const prev = Number(r.new_workers_prev_30d) || 0;
+      const curr = Number(r.new_workers_30d) || 0;
+      const membership_growth_pct = prev === 0 ? (curr > 0 ? 100 : 0) : Math.round(((curr - prev) / prev) * 100);
       return {
         ...r,
         zone_name: r.zone_name || "Unzoned",
         score,
         band: score >= 60 ? "strong" : score >= 35 ? "medium" : "weak",
+        membership_growth_pct,
       };
     });
 
