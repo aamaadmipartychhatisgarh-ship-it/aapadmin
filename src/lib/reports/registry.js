@@ -1,3 +1,5 @@
+import { WORKER_TYPES } from "@/lib/workerTypes";
+
 // Universal Reports Engine — module registry (the "plugin" layer).
 //
 // Every module the engine can report on is described here as a pure-data
@@ -170,6 +172,7 @@ export const MODULES = [
       { key: "name", label: "Name", sql: "w.name", type: "string" },
       { key: "mobile", label: "Mobile", sql: "w.mobile", type: "string" },
       { key: "position", label: "Position", sql: "w.position", type: "string" },
+      { key: "worker_type", label: "Worker Type", sql: "w.worker_type", type: "string" },
       { key: "membership_no", label: "Membership #", sql: "w.membership_no", type: "string" },
       { key: "membership_status", label: "Membership", sql: "w.membership_status", type: "string" },
       { key: "status", label: "Status", sql: "w.status", type: "string" },
@@ -188,6 +191,10 @@ export const MODULES = [
         key: "membership_status", label: "Membership", type: "enum", column: "w.membership_status",
         options: ["prospect", "active", "lapsed"].map((v) => ({ value: v, label: v })),
       },
+      {
+        key: "worker_type", label: "Worker Type", type: "enum", column: "w.worker_type",
+        options: WORKER_TYPES,
+      },
     ],
     searchCols: ["w.name", "w.mobile", "w.membership_no", "w.position"],
     groupBy: [
@@ -196,6 +203,7 @@ export const MODULES = [
       { key: "status", label: "Status", sql: "w.status" },
       { key: "membership_status", label: "Membership", sql: "w.membership_status" },
       { key: "position", label: "Position", sql: "w.position" },
+      { key: "worker_type", label: "Worker Type", sql: "w.worker_type" },
       ...timeGroupBys("w.created_at"),
     ],
     defaultColumns: ["name", "mobile", "position", "membership_status", "status", "district"],

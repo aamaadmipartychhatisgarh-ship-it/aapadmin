@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSuperAdmin, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { WORKER_TYPE_LABELS } from "@/lib/workerTypes";
 import * as XLSX from "xlsx";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
@@ -29,6 +30,7 @@ export async function GET(req, { params }) {
     const assemblyId = searchParams.get("assembly_id");
     const status = searchParams.get("status");
     const position = searchParams.get("position");
+    const workerType = searchParams.get("worker_type");
 
     const where = [];
     const qp = [];
@@ -58,13 +60,15 @@ export async function GET(req, { params }) {
     if (districtId) { where.push("w.district_id = ?"); qp.push(districtId); }
     if (assemblyId) { where.push("w.assembly_id = ?"); qp.push(assemblyId); }
     if (status) { where.push("w.status = ?"); qp.push(status); }
+    if (workerType) { where.push("w.worker_type = ?"); qp.push(workerType); }
     if (position) { where.push("(w.position = ? OR FIND_IN_SET(?, REPLACE(w.position, ', ', ',')))"); qp.push(position, position); }
     const scope = scopeFilterSync(session.user, "w"); // super_admin → no filter
     if (scope.where) { where.push(scope.where.replace(/^AND /, "")); qp.push(...scope.params); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const rows = await query(
-      `SELECT w.name, w.mobile, w.position, w.skills, w.activity_score, w.status,
+      `SELECT w.name, w.mobile, w.position, w.skills, w.activity_score, w.status, w.worker_type,
+              w.membership_no, w.membership_status,
               lz.name AS zone_name, lls.name AS lok_sabha_name, ld.name AS district_name,
               la.name AS assembly_name, lw.name AS ward_name, w.address
          FROM workers w
@@ -86,6 +90,7 @@ export async function GET(req, { params }) {
         Name: r.name || "",
         Mobile: r.mobile || "",
         Designation: r.position || "",
+        "Worker Type": WORKER_TYPE_LABELS[r.worker_type] || "",
         Zone: r.zone_name || "",
         "Lok Sabha": r.lok_sabha_name || "",
         District: r.district_name || "",
@@ -94,6 +99,8 @@ export async function GET(req, { params }) {
         Skills: r.skills || "",
         Activity: r.activity_score ?? 0,
         Status: r.status || "",
+        "Membership No": r.membership_no || "",
+        Membership: r.membership_status || "",
         Address: r.address || "",
       }));
       const ws = XLSX.utils.json_to_sheet(data);
@@ -110,8 +117,9 @@ export async function GET(req, { params }) {
     }
 
     // PDF
+    const pdfRows = rows.map((r) => ({ ...r, worker_type_label: WORKER_TYPE_LABELS[r.worker_type] || "—" }));
     const buffer = await renderToBuffer(
-      React.createElement(WorkersDoc, { rows, subtitle: `${rows.length} workers · ${new Date().toLocaleString("en-GB")}` })
+      React.createElement(WorkersDoc, { rows: pdfRows, subtitle: `${rows.length} workers · ${new Date().toLocaleString("en-GB")}` })
     );
     return new Response(buffer, {
       status: 200,
@@ -140,6 +148,7 @@ const COLS = [
   { key: "name", label: "Name", flex: 2 },
   { key: "mobile", label: "Mobile", flex: 1.5 },
   { key: "position", label: "Designation", flex: 2 },
+  { key: "worker_type_label", label: "Worker Type", flex: 1.5 },
   { key: "district_name", label: "District", flex: 1.5 },
   { key: "assembly_name", label: "Assembly", flex: 1.5 },
   { key: "status", label: "Status", flex: 1 },

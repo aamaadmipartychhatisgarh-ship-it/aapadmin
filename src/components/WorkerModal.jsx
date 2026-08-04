@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 import { computeWorkerStatus, missingWorkerFields } from "@/lib/workerStatus";
+import { WORKER_TYPES } from "@/lib/workerTypes";
 import ProfilePhoto from "@/components/ProfilePhoto";
 
 // Worker photos go through a dedicated DB-backed upload endpoint instead of
@@ -127,6 +128,12 @@ export function WorkerModal({ title, initial, districts, designations, onClose, 
             </Fld>
           </div>
           <Fld label="Skills"><input className={inp} placeholder="Skills (comma-sep)" value={form.skills || ""} onChange={(e) => setForm({ ...form, skills: e.target.value })} /></Fld>
+          <Fld label="Worker Type">
+            <select className={inp} value={form.worker_type || ""} onChange={(e) => setForm({ ...form, worker_type: e.target.value })}>
+              <option value="">Not set</option>
+              {WORKER_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </Fld>
           <div className="col-span-2">
             <Fld label="Address"><input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Fld>
           </div>
@@ -249,6 +256,7 @@ export function EditWorkerModal({ worker, districts, designations, onClose, onSa
         photo_url: worker.photo_url || "",
         position: worker.position || "",
         skills: worker.skills || "",
+        worker_type: worker.worker_type || "",
         activity_score: worker.activity_score ?? 50,
         address: worker.address || "",
         zone_id: worker.zone_id || "",
@@ -288,7 +296,7 @@ export function AddWorkerModal({ districts, designations, onClose, onSaved }) {
     <WorkerModal
       title="Add Worker"
       initial={{
-        name: "", mobile: "", photo_url: "", position: "", skills: "", address: "",
+        name: "", mobile: "", photo_url: "", position: "", skills: "", worker_type: "", address: "",
         zone_id: "", lok_sabha_id: "", district_id: "", assembly_id: "", ward_id: "", booth_id: "",
         status: "active", activity_score: 50,
         membership_no: "", member_since: "", membership_status: "active", valid_till: "",

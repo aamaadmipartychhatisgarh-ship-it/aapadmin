@@ -10,7 +10,16 @@ import { computeWorkerStatus } from "@/lib/workerStatus";
 // edits synced from My Workplace, never a cached response.
 export const dynamic = "force-dynamic";
 
-// GET /api/workers?search=&zone_id=&lok_sabha_id=&district_id=&assembly_id=&status=&position=&page=&limit=
+// Allowlist of sortable columns — client sends the KEY, never raw SQL, so a
+// sort request can only ever select among these expressions.
+const SORTABLE = {
+  name: "w.name", mobile: "w.mobile", position: "w.position", worker_type: "w.worker_type",
+  district: "ld.name", assembly: "la.name", ward: "lw.name",
+  activity_score: "w.activity_score", status: "w.status", membership_status: "w.membership_status",
+  created_at: "w.created_at",
+};
+
+// GET /api/workers?search=&zone_id=&lok_sabha_id=&district_id=&assembly_id=&status=&position=&page=&limit=&sort=&dir=
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -25,6 +34,7 @@ export async function GET(req) {
     const assemblyId = searchParams.get("assembly_id");
     const status = searchParams.get("status");
     const position = searchParams.get("position");
+    const workerType = searchParams.get("worker_type");
     const duplicates = searchParams.get("duplicates"); // "1" → only same-mobile duplicates
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
@@ -71,6 +81,7 @@ export async function GET(req) {
     if (districtId) { where.push("w.district_id = ?"); params.push(districtId); }
     if (assemblyId) { where.push("w.assembly_id = ?"); params.push(assemblyId); }
     if (status) { where.push("w.status = ?"); params.push(status); }
+    if (workerType) { where.push("w.worker_type = ?"); params.push(workerType); }
     const membershipStatus = searchParams.get("membership_status");
     if (membershipStatus) { where.push("w.membership_status = ?"); params.push(membershipStatus); }
     // position holds one or more comma-separated designations ("A, B") — match any.
@@ -91,6 +102,19 @@ export async function GET(req) {
 
     const [[{ total }]] = await query(`SELECT COUNT(*) AS total FROM workers w ${whereSql}`, params).then((r) => [r]);
 
+    // Sort: an explicit ?sort= wins; otherwise keep the existing defaults
+    // (duplicate-grouping order when viewing dupes, else activity score).
+    const sortKey = searchParams.get("sort");
+    const sortDir = searchParams.get("dir") === "asc" ? "ASC" : "DESC";
+    let orderBy;
+    if (sortKey && SORTABLE[sortKey]) {
+      orderBy = `${SORTABLE[sortKey]} ${sortDir}, w.id ASC`;
+    } else if (duplicates === "1") {
+      orderBy = "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(w.mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, w.id ASC";
+    } else {
+      orderBy = "w.activity_score DESC, w.id DESC";
+    }
+
     const workers = await query(
       `SELECT w.*, ld.name AS district_name, la.name AS assembly_name,
               lz.name AS zone_name, lls.name AS lok_sabha_name, lw.name AS ward_name
@@ -101,9 +125,7 @@ export async function GET(req) {
          LEFT JOIN locations lls ON lls.id = w.lok_sabha_id
          LEFT JOIN locations lw ON lw.id = w.ward_id
          ${whereSql}
-         ORDER BY ${duplicates === "1"
-           ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(w.mobile, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, w.id ASC"
-           : "w.activity_score DESC, w.id DESC"}
+         ORDER BY ${orderBy}
          LIMIT ${limit} OFFSET ${offset}`,
       params
     );
@@ -163,13 +185,14 @@ export async function POST(req) {
       await conn.beginTransaction();
       const memStatus = ["prospect", "active", "lapsed"].includes(d.membership_status) ? d.membership_status : "active";
       const [res] = await conn.query(
-        `INSERT INTO workers (name, mobile, photo_url, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score, member_since, membership_status, valid_till)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO workers (name, mobile, photo_url, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, position, skills, status, activity_score, member_since, membership_status, valid_till, worker_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [d.name, mobile, d.photo_url || null, d.address || null,
          d.zone_id || null, d.lok_sabha_id || null, d.district_id || null, d.assembly_id || null,
          d.ward_id || null, d.booth_id || null, d.position || null, d.skills || null,
          status, Number(d.activity_score) || 0,
-         d.member_since || new Date().toISOString().slice(0, 10), memStatus, d.valid_till || null]
+         d.member_since || new Date().toISOString().slice(0, 10), memStatus, d.valid_till || null,
+         d.worker_type || null]
       );
       workerId = res.insertId;
       // Auto-assign a stable membership number if none was provided.

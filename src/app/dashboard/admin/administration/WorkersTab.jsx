@@ -1,15 +1,44 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { isAdmin, canManageWorkers, isSuperAdmin } from "@/lib/permissions";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import { AddWorkerModal, EditWorkerModal } from "@/components/WorkerModal";
-import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, Pencil, Trash2, Download, FileText } from "lucide-react";
+import { Users, Plus, Search, Upload, Loader2, CheckCircle2, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Pencil, Trash2, Download, FileText } from "lucide-react";
 import ActionBar from "@/components/ActionBar";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
 import WorkerActivityPanel from "@/components/administration/WorkerActivityPanel";
+import ImportPreviewModal from "@/components/administration/ImportPreviewModal";
+import { WORKER_TYPES, WORKER_TYPE_LABELS } from "@/lib/workerTypes";
+
+const PAGE_SIZE = 100;
+
+// Columns whose header can be clicked to sort — key must match a column the
+// API's SORTABLE allowlist understands (src/app/api/workers/route.js).
+const SORT_COLUMNS = [
+  { key: "name", label: "Name" },
+  { key: "mobile", label: "Mobile" },
+  { key: "position", label: "Designation" },
+  { key: "worker_type", label: "Worker Type" },
+  { key: "district", label: "District" },
+  { key: "assembly", label: "Assembly" },
+  { key: "ward", label: "Block" },
+  { key: null, label: "Address" }, // not sortable — free text, low value
+  { key: "activity_score", label: "Activity" },
+  { key: "status", label: "Status" },
+];
+
+function pageWindow(current, total) {
+  const delta = 2;
+  const range = [];
+  for (let i = Math.max(1, current - delta); i <= Math.min(total, current + delta); i++) range.push(i);
+  if (range[0] > 1) { if (range[0] > 2) range.unshift("…"); range.unshift(1); }
+  if (range[range.length - 1] < total) { if (range[range.length - 1] < total - 1) range.push("…"); range.push(total); }
+  return range;
+}
 
 // Administration's "Workers" tab — worker management (the former standalone
 // Workers page, unchanged) plus Worker Activity stats. Contact assignment/
@@ -21,28 +50,59 @@ export default function WorkersTab({ session }) {
   const canEdit = canManageWorkers(session);
   const canImport = isAdmin(session);
   const canExport = isSuperAdmin(session);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Restore filters/page/sort from the URL (?w_*) on mount, so switching to
+  // the Teams/Users tab and back — which unmounts this component — or a full
+  // page reload both land back exactly where the admin left off, instead of
+  // resetting to page 1 with no filters.
+  const initial = useRef(null);
+  if (initial.current === null) {
+    const sp = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+    initial.current = {
+      search: sp.get("w_search") || "",
+      zoneId: sp.get("w_zone") || "",
+      lokSabhaId: sp.get("w_ls") || "",
+      districtId: sp.get("w_district") || "",
+      assemblyId: sp.get("w_assembly") || "",
+      statusFilter: sp.get("w_status") || "",
+      membershipFilter: sp.get("w_membership") || "",
+      positionFilter: sp.get("w_position") || "",
+      workerTypeFilter: sp.get("w_type") || "",
+      dupOnly: sp.get("w_dup") === "1",
+      page: Math.max(1, parseInt(sp.get("w_page") || "1", 10) || 1),
+      sort: sp.get("w_sort") || "",
+      dir: sp.get("w_dir") === "asc" ? "asc" : "desc",
+    };
+  }
+
   const [data, setData] = useState({ workers: [], total: 0, page: 1, pages: 1 });
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initial.current.search);
   const [zones, setZones] = useState([]);
-  const [zoneId, setZoneId] = useState("");
+  const [zoneId, setZoneId] = useState(initial.current.zoneId);
   const [lokSabhas, setLokSabhas] = useState([]);
-  const [lokSabhaId, setLokSabhaId] = useState("");
-  const [districtId, setDistrictId] = useState("");
+  const [lokSabhaId, setLokSabhaId] = useState(initial.current.lokSabhaId);
+  const [districtId, setDistrictId] = useState(initial.current.districtId);
   const [assemblies, setAssemblies] = useState([]);
-  const [assemblyId, setAssemblyId] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [membershipFilter, setMembershipFilter] = useState("");
-  const [positionFilter, setPositionFilter] = useState("");
-  const [dupOnly, setDupOnly] = useState(false);
-  const [page, setPage] = useState(1);
+  const [assemblyId, setAssemblyId] = useState(initial.current.assemblyId);
+  const [statusFilter, setStatusFilter] = useState(initial.current.statusFilter);
+  const [membershipFilter, setMembershipFilter] = useState(initial.current.membershipFilter);
+  const [positionFilter, setPositionFilter] = useState(initial.current.positionFilter);
+  const [workerTypeFilter, setWorkerTypeFilter] = useState(initial.current.workerTypeFilter);
+  const [dupOnly, setDupOnly] = useState(initial.current.dupOnly);
+  const [page, setPage] = useState(initial.current.page);
+  const [sort, setSort] = useState(initial.current.sort);
+  const [dir, setDir] = useState(initial.current.dir);
   const [showAdd, setShowAdd] = useState(false);
   const [editingWorker, setEditingWorker] = useState(null);
   const [viewingWorkerId, setViewingWorkerId] = useState(null);
   const [message, setMessage] = useState("");
   const [importing, setImporting] = useState(false);
+  const [preview, setPreview] = useState(null); // import-preview response, or null
   const fileRef = useRef(null);
   const excelRef = useRef(null);
 
@@ -53,27 +113,36 @@ export default function WorkersTab({ session }) {
   }, []);
 
   // Lok Sabha options follow the selected zone (all when no zone picked).
+  // Guarded so restoring zoneId from the URL on mount doesn't immediately
+  // wipe out a restored lokSabhaId too.
+  const zoneMounted = useRef(false);
   useEffect(() => {
     const url = zoneId ? `/api/locations?parent_id=${zoneId}` : "/api/locations?type=lok_sabha";
     fetch(url).then((r) => r.json()).then((d) => setLokSabhas(d.locations || []));
-    setLokSabhaId("");
+    if (zoneMounted.current) setLokSabhaId("");
+    zoneMounted.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoneId]);
 
   // Assembly filter is independent of district: imported workers can carry an
   // assembly without a matching district, so requiring a district first made
   // assembly-wise search miss them. Show all assemblies unless a district is
-  // picked (then narrow the options to that district's assemblies).
+  // picked (then narrow the options to that district's assemblies). Guarded
+  // the same way as the zone effect above.
+  const districtMounted = useRef(false);
   useEffect(() => {
     const url = districtId ? `/api/locations?parent_id=${districtId}` : "/api/locations?type=assembly";
     fetch(url).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
-    setAssemblyId("");
+    if (districtMounted.current) setAssemblyId("");
+    districtMounted.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [districtId]);
 
   useEffect(() => {
-    const t = setTimeout(load, search ? 300 : 0);
+    const t = setTimeout(() => { load(); syncUrl(); }, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, zoneId, lokSabhaId, districtId, assemblyId, statusFilter, membershipFilter, positionFilter, dupOnly, page]);
+  }, [search, zoneId, lokSabhaId, districtId, assemblyId, statusFilter, membershipFilter, positionFilter, workerTypeFilter, dupOnly, page, sort, dir]);
 
   // Refetch when the admin returns to this tab so worker edits made elsewhere
   // (e.g. a caller updating details in My Workplace) show without a manual refresh.
@@ -85,9 +154,39 @@ export default function WorkersTab({ session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Mirror the current filters/page/sort onto the URL (?w_*) — the "memory"
+  // that survives a tab switch or a reload. Uses replace() so typing in
+  // Search doesn't spam browser history.
+  function syncUrl() {
+    const p = new URLSearchParams(Array.from(searchParams.entries()));
+    const set = (k, v) => { if (v) p.set(k, v); else p.delete(k); };
+    set("w_search", search);
+    set("w_zone", zoneId);
+    set("w_ls", lokSabhaId);
+    set("w_district", districtId);
+    set("w_assembly", assemblyId);
+    set("w_status", statusFilter);
+    set("w_membership", membershipFilter);
+    set("w_position", positionFilter);
+    set("w_type", workerTypeFilter);
+    set("w_dup", dupOnly ? "1" : "");
+    set("w_page", page > 1 ? String(page) : "");
+    set("w_sort", sort);
+    set("w_dir", sort ? dir : "");
+    const qs = p.toString();
+    router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false });
+  }
+
+  function toggleSort(key) {
+    if (!key) return;
+    if (sort === key) setDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSort(key); setDir("asc"); }
+    setPage(1);
+  }
+
   async function load() {
     setLoading(true);
-    const p = new URLSearchParams({ page: String(page), limit: "20" });
+    const p = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
     if (search) p.set("search", search);
     if (zoneId) p.set("zone_id", zoneId);
     if (lokSabhaId) p.set("lok_sabha_id", lokSabhaId);
@@ -96,7 +195,9 @@ export default function WorkersTab({ session }) {
     if (statusFilter) p.set("status", statusFilter);
     if (membershipFilter) p.set("membership_status", membershipFilter);
     if (positionFilter) p.set("position", positionFilter);
+    if (workerTypeFilter) p.set("worker_type", workerTypeFilter);
     if (dupOnly) p.set("duplicates", "1");
+    if (sort) { p.set("sort", sort); p.set("dir", dir); }
     const r = await fetch(`/api/workers?${p}`);
     if (r.ok) setData(await r.json());
     setLoading(false);
@@ -118,23 +219,20 @@ export default function WorkersTab({ session }) {
     else setMessage(d.message || "Upload failed");
   }
 
-  // Import from an Excel (.xlsx/.xls/.csv) file — handles the MEMBER LIST format.
+  // Import from an Excel (.xlsx/.xls/.csv) file. Step 1: parse + validate
+  // WITHOUT writing anything, and show a preview (valid/invalid counts, a
+  // sample of row errors, a downloadable full error report). The admin
+  // confirms from the preview modal before anything is committed.
   async function importExcel(file) {
     setMessage("");
     setImporting(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const r = await fetch("/api/workers/import-excel", { method: "POST", body: fd });
+      const r = await fetch("/api/workers/import-excel?dry_run=1", { method: "POST", body: fd });
       const d = await r.json();
-      if (r.ok) {
-        let msg = `Members: ${d.workers_inserted} new, ${d.workers_updated} updated → Contacts: ${d.contacts_inserted} new, ${d.contacts_updated} updated.`;
-        if (d.unmatched_assemblies?.length) msg += ` Unmatched assemblies: ${d.unmatched_assemblies.slice(0, 5).join(", ")}${d.unmatched_assemblies.length > 5 ? "…" : ""}.`;
-        setMessage(msg);
-        load();
-      } else {
-        setMessage(d.message || "Import failed");
-      }
+      if (r.ok) setPreview({ ...d, file });
+      else setMessage(d.message || "Import failed");
     } catch {
       setMessage("Import failed — file too large or network error.");
     } finally {
@@ -153,6 +251,7 @@ export default function WorkersTab({ session }) {
   if (statusFilter) ep.set("status", statusFilter);
   if (membershipFilter) ep.set("membership_status", membershipFilter);
   if (positionFilter) ep.set("position", positionFilter);
+  if (workerTypeFilter) ep.set("worker_type", workerTypeFilter);
   const exportQs = ep.toString() ? `?${ep}` : "";
 
   return (
@@ -164,7 +263,7 @@ export default function WorkersTab({ session }) {
           <ActionBar items={[
             canExport && { key: "xlsx", label: "Excel", icon: Download, href: `/api/workers/export/xlsx${exportQs}` },
             canExport && { key: "pdf", label: "PDF", icon: FileText, href: `/api/workers/export/pdf${exportQs}` },
-            canImport && { key: "impx", label: importing ? "Importing…" : "Import Excel", icon: Upload, variant: "success", loading: importing, onClick: () => excelRef.current?.click() },
+            canImport && { key: "impx", label: importing ? "Checking…" : "Import Excel", icon: Upload, variant: "success", loading: importing, onClick: () => excelRef.current?.click() },
             canImport && { key: "impc", label: "Import CSV", icon: Upload, onClick: () => fileRef.current?.click() },
             canEdit && { key: "add", label: "Add Worker", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
           ]} />
@@ -199,6 +298,10 @@ export default function WorkersTab({ session }) {
             <option value="">All designations</option>
             {designations.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
           </select>
+          <select value={workerTypeFilter} onChange={(e) => { setWorkerTypeFilter(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
+            <option value="">All worker types</option>
+            {WORKER_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
           <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-gray-200 text-sm">
             <option value="">All statuses</option>
             <option value="active">Active</option>
@@ -232,17 +335,16 @@ export default function WorkersTab({ session }) {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left">
                 <tr>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Mobile</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Zone</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">District</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Block</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Address</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Activity</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
+                  {SORT_COLUMNS.map((c) => (
+                    <th key={c.label} className="px-4 py-3 font-semibold text-gray-600 select-none whitespace-nowrap">
+                      {c.key ? (
+                        <button onClick={() => toggleSort(c.key)} className={`inline-flex items-center gap-1 hover:text-gray-900 ${sort === c.key ? "text-[#164FA3]" : ""}`}>
+                          {c.label}
+                          {sort === c.key && (dir === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
+                        </button>
+                      ) : c.label}
+                    </th>
+                  ))}
                   {canEdit && <th className="px-4 py-3 font-semibold text-gray-600 text-right">Edit</th>}
                 </tr>
               </thead>
@@ -269,8 +371,7 @@ export default function WorkersTab({ session }) {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{w.position || "—"}</td>
-                    <td className="px-4 py-3 text-gray-600 text-xs">{w.zone_name || "—"}</td>
-                    <td className="px-4 py-3 text-gray-600 text-xs">{w.lok_sabha_name || "—"}</td>
+                    <td className="px-4 py-3 text-gray-600 text-xs">{WORKER_TYPE_LABELS[w.worker_type] || "—"}</td>
                     <td className="px-4 py-3 text-gray-600">{w.district_name || "—"}</td>
                     <td className="px-4 py-3 text-gray-600 text-xs">{w.assembly_name || "—"}</td>
                     <td className="px-4 py-3 text-gray-600 text-xs">{w.ward_name || "—"}</td>
@@ -310,11 +411,20 @@ export default function WorkersTab({ session }) {
             </div>
           )}
           {!loading && data.pages > 1 && (
-            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between text-sm bg-gray-50">
-              <span className="text-gray-500">Page {data.page} of {data.pages}</span>
-              <div className="flex gap-2">
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between text-sm bg-gray-50 flex-wrap gap-2">
+              <span className="text-gray-500">
+                Showing {((data.page - 1) * PAGE_SIZE + 1).toLocaleString()}–{Math.min(data.page * PAGE_SIZE, data.total).toLocaleString()} of {data.total.toLocaleString()}
+              </span>
+              <div className="flex items-center gap-1">
+                <button disabled={page <= 1} onClick={() => setPage(1)} className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40 text-xs font-medium">First</button>
                 <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40"><ChevronLeft size={16} /></button>
+                {pageWindow(data.page, data.pages).map((p, i) => p === "…" ? (
+                  <span key={`e${i}`} className="px-1.5 text-gray-400">…</span>
+                ) : (
+                  <button key={p} onClick={() => setPage(p)} className={`w-8 h-8 rounded text-xs font-semibold ${p === data.page ? "bg-[#164FA3] text-white" : "border border-gray-200 text-gray-600 hover:bg-gray-100"}`}>{p}</button>
+                ))}
                 <button disabled={page >= data.pages} onClick={() => setPage(page + 1)} className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40"><ChevronRight size={16} /></button>
+                <button disabled={page >= data.pages} onClick={() => setPage(data.pages)} className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40 text-xs font-medium">Last</button>
               </div>
             </div>
           )}
@@ -339,6 +449,22 @@ export default function WorkersTab({ session }) {
         )}
         {viewingWorkerId && (
           <PersonDetailModal type="worker" id={viewingWorkerId} onClose={() => setViewingWorkerId(null)} />
+        )}
+        {preview && (
+          <ImportPreviewModal
+            preview={preview}
+            onClose={() => setPreview(null)}
+            onImported={(d) => {
+              setPreview(null);
+              let msg = `Members: ${d.workers_inserted} new, ${d.workers_updated} updated → Contacts: ${d.contacts_inserted} new, ${d.contacts_updated} updated.`;
+              const skipped = d.row_errors?.filter((e) => e.severity === "error").length || 0;
+              const warned = d.row_errors?.filter((e) => e.severity === "warning").length || 0;
+              if (skipped) msg += ` ${skipped} row(s) skipped — see the error report.`;
+              if (warned) msg += ` ${warned} row(s) imported with a warning (unresolved geo/designation) — see the error report.`;
+              setMessage(msg);
+              load();
+            }}
+          />
         )}
       </section>
 

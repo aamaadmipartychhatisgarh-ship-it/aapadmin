@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
-import { query } from "@/lib/db";
+import { getPool } from "@/lib/db";
 import * as XLSX from "xlsx";
+import { parseAndValidateWorkbook, norm } from "@/lib/workerImport";
 
 // Unified member import from Excel/CSV. Each member is added to BOTH:
 //   - workers  (the org member record — always, phone optional)
@@ -11,76 +12,14 @@ import * as XLSX from "xlsx";
 // so imported members show in the Workers list AND in Contact Records and can
 // be assigned to callers.
 //
-// Handles the MEMBER LIST format:
-//   S.NO | DATE | NAME | CONTACT NO | JILA | VIDHANSABHA | BLOCK | WARD
-const COLUMN_MAP = {
-  name: ["name", "member name", "full name"],
-  mobile: ["contact no", "contact", "mobile", "phone", "phone number", "mobile no", "contact number"],
-  district: ["jila", "district", "zila"],
-  assembly: ["vidhansabha", "vidhan sabha", "assembly", "constituency"],
-  block: ["block", "mandal"],
-  ward: ["ward", "ward no", "ward number"],
-  address: ["address", "village", "gram", "city"],
-};
-
-function buildHeaderIndex(headerRow) {
-  const idx = {};
-  headerRow.forEach((h, i) => {
-    const key = String(h || "").trim().toLowerCase();
-    if (!key) return;
-    for (const [field, names] of Object.entries(COLUMN_MAP)) {
-      if (names.includes(key)) idx[field] = i;
-    }
-  });
-  return idx;
-}
-
-function norm(s) {
-  return String(s || "").trim().replace(/\s+/g, " ").toUpperCase();
-}
-
-// Map common spelling variants in member lists -> the canonical DB name (normalized).
-const DISTRICT_ALIASES = {
-  "BALODABAJAR": "BALODABAZAR-BHATAPARA",
-  "BALODA BAZAR": "BALODABAZAR-BHATAPARA",
-  "BALRAMPUR": "BALRAMPUR-RAMANUJGANJ",
-  "GORELA-PENDRA-MARWAHI": "GAURELA-PENDRA-MARWAHI",
-  "GORELLA-PENDRA-MARWAHI": "GAURELA-PENDRA-MARWAHI",
-  "KHAIRGARH": "KHAIRAGARH-CHHUIKHADAN-GANDAI",
-  "KORIYA": "KOREA",
-  "RAIGADH": "RAIGARH",
-  "SARGUJA": "SURGUJA",
-  "SHAKTI": "SAKTI",
-  "KAWARDHA": "KABEERDHAM",
-  "KABIRDHAM": "KABEERDHAM",
-  "DANTEWADA": "DAKSHIN BASTAR DANTEWADA",
-  "KANKER": "UTTAR BASTAR KANKER",
-};
-const ASSEMBLY_ALIASES = {
-  "BRINDANAWAGARH": "BINDRAWAGARH",
-  "BINDRANAWAGARH": "BINDRAWAGARH",
-  "DHARAMJAYGARH": "DHARAMJAIGARH",
-  "DURG GRAMIN": "DURG RURAL",
-  "KHARSIYA": "KHARSIA",
-  "PALITANAKHAR": "PALI-TANAKHAR",
-  "PALI TANAKHAR": "PALI-TANAKHAR",
-  "RAIGADH": "RAIGARH",
-  "RAIPUR NORTH": "RAIPUR CITY NORTH",
-  "RAIPUR WEST": "RAIPUR CITY WEST",
-  "RAIPUR SOUTH": "RAIPUR CITY SOUTH",
-  "RAIPUR RURAL": "RAIPUR CITY RURAL",
-  "RAMANUJAGANJ": "RAMANUJGANJ",
-  "SARAYPALI": "SARAIPALI",
-  "PRATAPUR": "PRATAPPUR",
-};
-
-function resolveLoc(name, byName, aliases) {
-  if (!name) return null;
-  if (byName.has(name)) return byName.get(name);
-  const aliased = aliases[name];
-  if (aliased && byName.has(aliased)) return byName.get(aliased);
-  return null;
-}
+// Two modes, same validation logic (src/lib/workerImport.js) so the preview
+// and the real import can never disagree:
+//   ?dry_run=1  parse + validate only, write nothing, return counts + a
+//               sample of row errors for the preview modal.
+//   (default)   commit — bulk INSERT new workers/contacts in chunks (so
+//               10,000+ row files don't take one round-trip per row and
+//               time out), everything in one transaction.
+const INSERT_CHUNK = 500;
 
 export async function POST(req) {
   try {
@@ -88,6 +27,9 @@ export async function POST(req) {
     if (!session || !isAdmin(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
+
+    const { searchParams } = new URL(req.url);
+    const dryRun = searchParams.get("dry_run") === "1";
 
     const form = await req.formData();
     const file = form.get("file");
@@ -109,131 +51,137 @@ export async function POST(req) {
       return NextResponse.json({ message: "Sheet has no data rows." }, { status: 400 });
     }
 
-    const headerIdx = buildHeaderIndex(rows[0]);
-    if (headerIdx.name === undefined) {
-      return NextResponse.json({ message: "Could not find a NAME column in the sheet." }, { status: 400 });
+    const parsed = await parseAndValidateWorkbook(rows);
+    if (parsed.error) {
+      return NextResponse.json({ message: parsed.error }, { status: 400 });
+    }
+    const { validRows, rowErrors, summary, totalRows, unmatchedDistricts, unmatchedAssemblies, workerByMobile, workerByName, existingContactByPhone } = parsed;
+    const errorRows = rowErrors.filter((e) => e.severity === "error");
+    const warningRows = rowErrors.filter((e) => e.severity === "warning");
+
+    if (dryRun) {
+      return NextResponse.json({
+        total_rows: totalRows,
+        valid_count: validRows.length,
+        error_count: errorRows.length,
+        warning_count: warningRows.length,
+        summary,
+        unmatched_districts: unmatchedDistricts,
+        unmatched_assemblies: unmatchedAssemblies,
+        row_errors: rowErrors,
+      });
     }
 
-    const districtRows = await query("SELECT id, name FROM locations WHERE type = 'district'");
-    const assemblyRows = await query("SELECT id, name FROM locations WHERE type = 'assembly'");
-    const districtByName = new Map(districtRows.map((r) => [norm(r.name), r.id]));
-    const assemblyByName = new Map(assemblyRows.map((r) => [norm(r.name), r.id]));
-    const existingContactByPhone = new Map(
-      (await query("SELECT id, phone_number FROM contacts")).map((r) => [String(r.phone_number), r.id])
-    );
-
-    // Existing workers keyed by mobile (for upsert). Rows with no mobile fall
-    // back to matching by normalized name.
-    const workerRows = await query("SELECT id, name, mobile FROM workers");
-    const workerByMobile = new Map();
-    const workerByName = new Map();
-    for (const w of workerRows) {
-      if (w.mobile) workerByMobile.set(String(w.mobile).replace(/[^\d+]/g, ""), w.id);
-      else workerByName.set(norm(w.name), w.id);
+    // ---------------------------------------------------------- COMMIT ----
+    if (validRows.length === 0) {
+      return NextResponse.json({
+        total_rows: totalRows, workers_inserted: 0, workers_updated: 0,
+        contacts_inserted: 0, contacts_updated: 0, contacts_skipped_no_phone: 0,
+        row_errors: rowErrors, summary,
+        unmatched_districts: unmatchedDistricts, unmatched_assemblies: unmatchedAssemblies,
+      });
     }
 
-    const get = (row, field) => (headerIdx[field] !== undefined ? row[headerIdx[field]] : "");
+    const toInsert = [];
+    const toUpdate = [];
+    for (const r of validRows) {
+      const existingId = r.phone ? workerByMobile.get(r.phone) : workerByName.get(norm(r.name));
+      if (existingId) toUpdate.push({ ...r, workerId: existingId });
+      else toInsert.push(r);
+    }
 
     let workersInserted = 0;
     let workersUpdated = 0;
     let contactsInserted = 0;
     let contactsUpdated = 0;
-    let skippedNoName = 0;
-    let contactsSkippedNoPhone = 0;
-    const seenPhones = new Set();
-    const seenWorkerKeys = new Set();
-    const unmatchedDistricts = new Set();
-    const unmatchedAssemblies = new Set();
+    const insertedWithIds = [];
+    const conn = await getPool().getConnection();
+    try {
+      await conn.beginTransaction();
 
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      const name = String(get(row, "name") || "").trim();
-      if (!name) { skippedNoName++; continue; }
+      // Bulk INSERT new workers, chunked — one round trip per 500 rows
+      // instead of one per row, so a 10,000-row file is ~20 statements.
+      // MariaDB assigns contiguous auto-increment ids to a single multi-row
+      // INSERT, so insertId..insertId+n-1 map onto the chunk in order —
+      // that's how each new worker's id is known for the contacts link
+      // below without a second query per row.
+      for (let i = 0; i < toInsert.length; i += INSERT_CHUNK) {
+        const chunk = toInsert.slice(i, i + INSERT_CHUNK);
+        const placeholders = chunk.map(() => "(?,?,?,?,?,?,?,?,'pending',?,?)").join(",");
+        const vals = [];
+        for (const r of chunk) vals.push(r.name, r.phone, r.address, r.districtId, r.assemblyId, r.wardId, r.boothId, r.position, r.workerType, r.membershipNo);
+        const [result] = await conn.query(
+          `INSERT INTO workers (name, mobile, address, district_id, assembly_id, ward_id, booth_id, position, status, worker_type, membership_no)
+           VALUES ${placeholders}`,
+          vals
+        );
+        const firstId = result.insertId;
+        chunk.forEach((r, idx) => insertedWithIds.push({ ...r, workerId: firstId + idx }));
+        workersInserted += chunk.length;
+      }
 
-      const phone = String(get(row, "mobile") || "").trim().replace(/[^\d+]/g, "") || null;
+      // Updates to existing workers — one statement per row (typically a
+      // much smaller set than fresh-import inserts), inside the same
+      // transaction. COALESCE so a file without worker_type/membership_no
+      // columns never blanks out what's already saved.
+      for (const r of toUpdate) {
+        await conn.query(
+          `UPDATE workers SET name=?, mobile=?, address=?, district_id=?, assembly_id=?, ward_id=?, booth_id=?, position=?,
+                  worker_type=COALESCE(?, worker_type), membership_no=COALESCE(?, membership_no)
+            WHERE id=?`,
+          [r.name, r.phone, r.address, r.districtId, r.assemblyId, r.wardId, r.boothId, r.position, r.workerType, r.membershipNo, r.workerId]
+        );
+        workersUpdated++;
+      }
 
-      const districtName = norm(get(row, "district"));
-      const assemblyName = norm(get(row, "assembly"));
-      const districtId = resolveLoc(districtName, districtByName, DISTRICT_ALIASES);
-      const assemblyId = resolveLoc(assemblyName, assemblyByName, ASSEMBLY_ALIASES);
-      if (districtName && !districtId) unmatchedDistricts.add(districtName);
-      if (assemblyName && !assemblyId) unmatchedAssemblies.add(assemblyName);
+      // Auto-assign a stable membership number to anyone who still has none
+      // (new inserts with no Membership No column, or pre-existing gaps).
+      await conn.query("UPDATE workers SET membership_no = CONCAT('AAPCG', LPAD(id, 6, '0')) WHERE membership_no IS NULL");
 
-      const block = String(get(row, "block") || "").trim();
-      const ward = String(get(row, "ward") || "").trim();
-      const addrCol = String(get(row, "address") || "").trim();
-      const addressParts = [];
-      if (addrCol) addressParts.push(addrCol);
-      if (block) addressParts.push(`Block: ${block}`);
-      if (ward) addressParts.push(`Ward: ${ward}`);
-      const address = addressParts.join(", ") || null;
-
-      // ---- WORKERS upsert (key = mobile, else name) ----
-      const wKey = phone ? `m:${phone}` : `n:${norm(name)}`;
-      // Skip exact duplicate rows within the same file.
-      if (seenWorkerKeys.has(wKey)) {
-        // still consider contacts below
-      } else {
-        seenWorkerKeys.add(wKey);
-        const existingWorkerId = phone ? workerByMobile.get(phone) : workerByName.get(norm(name));
-        if (existingWorkerId) {
-          await query(
-            `UPDATE workers SET name = ?, mobile = ?, address = ?, district_id = ?, assembly_id = ? WHERE id = ?`,
-            [name, phone, address, districtId, assemblyId, existingWorkerId]
-          );
-          workersUpdated++;
-        } else {
-          // Imports carry only district + assembly (no zone / Lok Sabha / ward),
-          // so the profile is incomplete → Pending until an admin fills the rest.
-          const res = await query(
-            `INSERT INTO workers (name, mobile, address, district_id, assembly_id, position, status)
-             VALUES (?, ?, ?, ?, ?, 'Member', 'pending')`,
-            [name, phone, address, districtId, assemblyId]
-          );
-          // Track the new id so later rows in the same file dedupe to it.
-          if (phone) workerByMobile.set(phone, res.insertId);
-          else workerByName.set(norm(name), res.insertId);
-          workersInserted++;
+      // Contacts — bulk upsert keyed on the UNIQUE phone_number, chunked the
+      // same way. ON DUPLICATE KEY UPDATE folds insert+update into one
+      // statement per chunk; existingContactByPhone (read before any writes)
+      // is only used to report which rows were which, not to decide the SQL.
+      const allWritten = [...insertedWithIds, ...toUpdate];
+      const withPhone = allWritten.filter((r) => r.phone);
+      const contactsSkippedNoPhone = allWritten.length - withPhone.length;
+      for (let i = 0; i < withPhone.length; i += INSERT_CHUNK) {
+        const chunk = withPhone.slice(i, i + INSERT_CHUNK);
+        const placeholders = chunk.map(() => "(?,?,?,?,?,?)").join(",");
+        const vals = [];
+        for (const r of chunk) vals.push(r.name, r.phone, r.address, r.districtId, r.assemblyId, r.workerId);
+        await conn.query(
+          `INSERT INTO contacts (person_name, phone_number, address, district_id, assembly_id, worker_id)
+           VALUES ${placeholders}
+           ON DUPLICATE KEY UPDATE person_name=VALUES(person_name), address=VALUES(address),
+             district_id=VALUES(district_id), assembly_id=VALUES(assembly_id), worker_id=VALUES(worker_id)`,
+          vals
+        );
+        for (const r of chunk) {
+          if (existingContactByPhone.has(r.phone)) contactsUpdated++; else contactsInserted++;
         }
       }
 
-      // ---- CONTACTS upsert (key = phone; UNIQUE) ----
-      if (!phone) {
-        contactsSkippedNoPhone++;
-      } else if (seenPhones.has(phone)) {
-        // duplicate within this file — already handled
-      } else {
-        seenPhones.add(phone);
-        if (existingContactByPhone.has(phone)) {
-          // Update existing contact's details, but DON'T touch assignment/completion.
-          await query(
-            `UPDATE contacts SET person_name = ?, address = ?, district_id = ?, assembly_id = ? WHERE id = ?`,
-            [name, address, districtId, assemblyId, existingContactByPhone.get(phone)]
-          );
-          contactsUpdated++;
-        } else {
-          const res = await query(
-            `INSERT INTO contacts (person_name, phone_number, address, district_id, assembly_id)
-             VALUES (?, ?, ?, ?, ?)`,
-            [name, phone, address, districtId, assemblyId]
-          );
-          existingContactByPhone.set(phone, res.insertId);
-          contactsInserted++;
-        }
-      }
+      await conn.commit();
+
+      return NextResponse.json({
+        total_rows: totalRows,
+        workers_inserted: workersInserted,
+        workers_updated: workersUpdated,
+        contacts_inserted: contactsInserted,
+        contacts_updated: contactsUpdated,
+        contacts_skipped_no_phone: contactsSkippedNoPhone,
+        row_errors: rowErrors,
+        summary,
+        unmatched_districts: unmatchedDistricts,
+        unmatched_assemblies: unmatchedAssemblies,
+      });
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
     }
-
-    return NextResponse.json({
-      total_rows: rows.length - 1,
-      workers_inserted: workersInserted,
-      workers_updated: workersUpdated,
-      contacts_inserted: contactsInserted,
-      contacts_updated: contactsUpdated,
-      contacts_skipped_no_phone: contactsSkippedNoPhone,
-      skipped_no_name: skippedNoName,
-      unmatched_districts: [...unmatchedDistricts],
-      unmatched_assemblies: [...unmatchedAssemblies],
-    });
   } catch (err) {
     console.error("import-excel error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
