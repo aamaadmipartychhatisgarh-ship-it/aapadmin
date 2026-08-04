@@ -4,15 +4,17 @@ import { useEffect, useState, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessMedia } from "@/lib/permissions";
 import {
-  Newspaper, Tv, Mic, UserCheck, BarChart3, Upload, Plus, Loader2, X,
+  LayoutDashboard, Newspaper, Tv, Mic, UserCheck, BarChart3, Upload, Plus, Loader2, X,
   Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil,
 } from "lucide-react";
+import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 
 export default function Page() {
   return <SupervisorGuard allow={canAccessMedia}><Body /></SupervisorGuard>;
 }
 
 const TABS = [
+  { k: "dashboard", l: "Dashboard", icon: LayoutDashboard },
   { k: "newspapers", l: "Newspapers", icon: Newspaper },
   { k: "channels", l: "News Channels", icon: Tv },
   { k: "conferences", l: "Press Conferences", icon: Mic },
@@ -23,7 +25,7 @@ const TABS = [
 function Body() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("newspapers");
+  const [tab, setTab] = useState("dashboard");
 
   useEffect(() => { load(); }, []);
   async function load() {
@@ -53,6 +55,7 @@ function Body() {
         })}
       </div>
 
+      {tab === "dashboard" && <MediaDashboardTab />}
       {tab === "newspapers" && <NewspapersTab data={data} onChange={load} />}
       {tab === "channels" && <ChannelsTab data={data} onChange={load} />}
       {tab === "conferences" && <ConferencesTab data={data} onChange={load} />}

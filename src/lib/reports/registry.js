@@ -462,6 +462,119 @@ export const MODULES = [
     ],
     defaultColumns: ["actor_name", "action", "entity_type", "entity_id", "created_at"],
   },
+
+  // Media modules: default (oversight-only) access, same as calls/contacts/
+  // workers — the /api/reports route itself gates to OVERSIGHT_ROLES before
+  // any module-level `access` is even consulted, so press_media (who can see
+  // the Media Center page but aren't an oversight role) can't reach the
+  // Reports Center regardless of what a module declares here; the Media
+  // Dashboard's own KPI numbers are fetched through a separate endpoint
+  // gated by canAccessMedia instead, precisely so press_media still works.
+  // ----------------------------------------------------------- PRESS NOTES ---
+  {
+    key: "press_notes",
+    label: "Press Notes & Coverage",
+    icon: "Newspaper",
+    table: "press_notes",
+    alias: "pn",
+    dateField: "pn.coverage_date",
+    joins: `
+      LEFT JOIN newspapers np ON np.id = pn.newspaper_id
+      LEFT JOIN users cb ON cb.id = pn.created_by_user_id`,
+    columns: [
+      { key: "id", label: "ID", sql: "pn.id", type: "number" },
+      { key: "title", label: "Title", sql: "pn.title", type: "string" },
+      { key: "newspaper", label: "Newspaper", sql: "np.name", type: "string" },
+      { key: "kind", label: "Type", sql: "pn.kind", type: "string" },
+      { key: "sentiment", label: "Sentiment", sql: "pn.sentiment", type: "string" },
+      { key: "created_by", label: "Logged by", sql: "cb.username", type: "string" },
+      { key: "coverage_date", label: "Coverage date", sql: "pn.coverage_date", type: "date" },
+      { key: "created_at", label: "Logged at", sql: "pn.created_at", type: "datetime" },
+    ],
+    filters: [
+      {
+        key: "kind", label: "Type", type: "enum", column: "pn.kind",
+        options: ["press_note", "newspaper_scan", "article_pdf"].map((v) => ({ value: v, label: v.replace(/_/g, " ") })),
+      },
+      {
+        key: "sentiment", label: "Sentiment", type: "enum", column: "pn.sentiment",
+        options: ["positive", "neutral", "negative"].map((v) => ({ value: v, label: v })),
+      },
+    ],
+    searchCols: ["pn.title", "pn.summary"],
+    groupBy: [
+      { key: "kind", label: "Type", sql: "pn.kind" },
+      { key: "sentiment", label: "Sentiment", sql: "pn.sentiment" },
+      { key: "newspaper", label: "Newspaper", sql: "np.name" },
+      ...timeGroupBys("pn.coverage_date"),
+    ],
+    defaultColumns: ["title", "newspaper", "kind", "sentiment", "coverage_date"],
+  },
+
+  // -------------------------------------------------------------- DEBATES ---
+  {
+    key: "debates",
+    label: "TV Debates",
+    icon: "Tv",
+    table: "debates",
+    alias: "de",
+    dateField: "de.debate_date",
+    joins: `LEFT JOIN news_channels ch ON ch.id = de.channel_id`,
+    columns: [
+      { key: "id", label: "ID", sql: "de.id", type: "number" },
+      { key: "topic", label: "Topic", sql: "de.topic", type: "string" },
+      { key: "channel", label: "Channel", sql: "ch.name", type: "string" },
+      { key: "status", label: "Status", sql: "de.status", type: "string" },
+      { key: "viral_score", label: "Viral score", sql: "de.viral_score", type: "number" },
+      { key: "debate_date", label: "Debate date", sql: "de.debate_date", type: "date" },
+      { key: "created_at", label: "Logged at", sql: "de.created_at", type: "datetime" },
+    ],
+    filters: [
+      {
+        key: "status", label: "Status", type: "enum", column: "de.status",
+        options: ["scheduled", "live", "aired", "cancelled"].map((v) => ({ value: v, label: v })),
+      },
+    ],
+    searchCols: ["de.topic", "de.talking_points"],
+    groupBy: [
+      { key: "status", label: "Status", sql: "de.status" },
+      { key: "channel", label: "Channel", sql: "ch.name" },
+      ...timeGroupBys("de.debate_date"),
+    ],
+    defaultColumns: ["topic", "channel", "status", "debate_date"],
+  },
+
+  // ------------------------------------------------------- PRESS CONFERENCES ---
+  {
+    key: "press_conferences",
+    label: "Press Conferences",
+    icon: "Mic",
+    table: "press_conferences",
+    alias: "pc",
+    dateField: "pc.conference_date",
+    joins: "",
+    columns: [
+      { key: "id", label: "ID", sql: "pc.id", type: "number" },
+      { key: "title", label: "Title", sql: "pc.title", type: "string" },
+      { key: "venue", label: "Venue", sql: "pc.venue", type: "string" },
+      { key: "status", label: "Status", sql: "pc.status", type: "string" },
+      { key: "conference_date", label: "Conference date", sql: "pc.conference_date", type: "datetime" },
+      { key: "created_at", label: "Logged at", sql: "pc.created_at", type: "datetime" },
+    ],
+    filters: [
+      {
+        key: "status", label: "Status", type: "enum", column: "pc.status",
+        options: ["scheduled", "completed", "cancelled"].map((v) => ({ value: v, label: v })),
+      },
+    ],
+    searchCols: ["pc.title", "pc.agenda"],
+    groupBy: [
+      { key: "status", label: "Status", sql: "pc.status" },
+      { key: "venue", label: "Venue", sql: "pc.venue" },
+      ...timeGroupBys("pc.conference_date"),
+    ],
+    defaultColumns: ["title", "venue", "status", "conference_date"],
+  },
 ];
 
 export function getModule(key) {
