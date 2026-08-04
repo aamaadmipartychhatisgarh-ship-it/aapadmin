@@ -92,7 +92,7 @@ export async function POST(req) {
     // this is the "Selected" count the UI can compare assigned against, so a
     // capacity cap (N-per-caller × callers) is a visible, explained number
     // instead of a silent shortfall.
-    const [[{ matchedTotal }]] = await query(
+    const [{ matchedTotal }] = await query(
       `SELECT COUNT(*) AS matchedTotal FROM contacts c ${workerJoin} ${where}`,
       params
     );
