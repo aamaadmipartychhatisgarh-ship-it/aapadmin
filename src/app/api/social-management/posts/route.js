@@ -14,15 +14,15 @@ export async function POST(req) {
     const res = await query(
       `INSERT INTO social_posts (
          page_id, title, caption, post_type, media_url, external_url,
-         scheduled_at, posted_at, approval_status,
+         scheduled_at, posted_at, approval_status, publish_status,
          views, likes, comments, shares, reach, viral,
          created_by_user_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         d.page_id, d.title || null, d.caption || null, d.post_type || "post",
         d.media_url || null, d.external_url || null,
         d.scheduled_at || null, d.posted_at || null,
-        d.approval_status || "pending",
+        d.approval_status || "pending", d.publish_status || "published",
         Number(d.views) || 0, Number(d.likes) || 0, Number(d.comments) || 0,
         Number(d.shares) || 0, Number(d.reach) || 0,
         d.viral ? 1 : 0,

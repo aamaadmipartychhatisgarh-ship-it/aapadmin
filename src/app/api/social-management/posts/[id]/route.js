@@ -11,7 +11,7 @@ export async function PUT(req, { params }) {
     const { id } = await params;
     const d = await req.json();
     const fields = ["title", "caption", "post_type", "media_url", "external_url",
-      "scheduled_at", "posted_at", "approval_status",
+      "scheduled_at", "posted_at", "approval_status", "publish_status",
       "views", "likes", "comments", "shares", "reach", "viral"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }

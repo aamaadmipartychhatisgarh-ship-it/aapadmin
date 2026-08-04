@@ -6,13 +6,21 @@ import { canAccessSocial } from "@/lib/permissions";
 import {
   Share2, Loader2, Plus, X, Upload, CheckCircle2, XCircle, Eye, Heart, MessageCircle,
   TrendingUp, AlertCircle, Clock, ThumbsUp, Camera, PlayCircle, ChevronRight, FileText, Pencil,
+  Bird, Briefcase, Send,
 } from "lucide-react";
+import SocialDashboardTab from "@/components/social/SocialDashboardTab";
 
+// Adding a further platform later is one more entry here (icon + brand
+// color) plus one more enum value in social_pages.platform (see
+// scripts/expand-social-platform-enum.mjs) — no other redesign needed.
 const PLATFORM = {
   facebook:  { label: "Facebook",  icon: ThumbsUp,      color: "#1877F2" },
   instagram: { label: "Instagram", icon: Camera,        color: "#E4405F" },
   whatsapp:  { label: "WhatsApp",  icon: MessageCircle, color: "#25D366" },
   youtube:   { label: "YouTube",   icon: PlayCircle,    color: "#FF0000" },
+  twitter:   { label: "Twitter/X", icon: Bird,          color: "#000000" },
+  linkedin:  { label: "LinkedIn",  icon: Briefcase,     color: "#0A66C2" },
+  telegram:  { label: "Telegram",  icon: Send,          color: "#26A5E4" },
 };
 const POST_TYPE = ["post", "reel", "story", "video", "poster"];
 const APPROVAL = {
@@ -23,6 +31,7 @@ const APPROVAL = {
 };
 
 const TABS = [
+  { k: "dashboard", l: "Dashboard" },
   { k: "overview", l: "Overview" },
   { k: "pages", l: "Pages" },
   { k: "approvals", l: "Approvals" },
@@ -44,7 +53,7 @@ function fmt(n) {
 function Body() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState("dashboard");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
 
@@ -91,6 +100,7 @@ function Body() {
         ))}
       </div>
 
+      {tab === "dashboard" && <SocialDashboardTab PLATFORM={PLATFORM} />}
       {tab === "overview"  && <OverviewTab data={data} />}
       {tab === "pages"     && <PagesTab data={data} />}
       {tab === "approvals" && <ApprovalsTab data={data} setStatus={setStatus} onEdit={setEditing} />}
@@ -349,6 +359,7 @@ function PostModal({ pages, onClose, onSaved, editing }) {
     external_url: editing.external_url || "",
     posted_at: editing.posted_at ? new Date(editing.posted_at).toISOString().slice(0, 16) : "",
     approval_status: editing.approval_status || "pending",
+    publish_status: editing.publish_status || "published",
     views: editing.views || 0, likes: editing.likes || 0,
     comments: editing.comments || 0, shares: editing.shares || 0,
     reach: editing.reach || 0,
@@ -357,6 +368,7 @@ function PostModal({ pages, onClose, onSaved, editing }) {
     page_id: "", title: "", caption: "", post_type: "post",
     media_url: "", external_url: "", posted_at: new Date().toISOString().slice(0, 16),
     approval_status: "pending",
+    publish_status: "published",
     views: 0, likes: 0, comments: 0, shares: 0, reach: 0,
   });
   const [saving, setSaving] = useState(false);
@@ -399,6 +411,11 @@ function PostModal({ pages, onClose, onSaved, editing }) {
           </select>
           <input type="datetime-local" className={inp} value={form.posted_at} onChange={(e) => setForm({ ...form, posted_at: e.target.value })} />
         </div>
+        <select className={inp} value={form.publish_status} onChange={(e) => setForm({ ...form, publish_status: e.target.value })}>
+          <option value="published">Published</option>
+          <option value="scheduled">Scheduled</option>
+          <option value="failed">Failed</option>
+        </select>
         <div className="flex items-center gap-2">
           <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={uploadFile} />
           <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-1">
