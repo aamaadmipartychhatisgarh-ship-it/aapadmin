@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -15,6 +15,7 @@ import SectionTabs from "@/components/SectionTabs";
 import FloatingPopover from "@/components/FloatingPopover";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 import { primaryItems } from "@/lib/navGroups";
+import { VIEW_AS_KEY, getDashboardViewAs } from "@/lib/dashboardView";
 
 async function handleSignOut() {
   try {
@@ -23,17 +24,65 @@ async function handleSignOut() {
   signOut();
 }
 
-// Super admin only: quick "view as" links to jump straight into each role's
-// dashboard/workspace without needing a separate login for that role. "My
-// Profile" rides along here too since the super_admin avatar button already
-// opens this popover (other roles link straight to it from the plain avatar).
+// Super admin only: plain quick-links, unrelated to the role preview below
+// (Super Admin already has its own full nav; these just save a couple of
+// clicks to tools outside that nav).
 const DASHBOARD_SWITCHER = [
   { name: "My Profile", href: "/dashboard/profile", icon: User },
-  { name: "State Overview (Admin)", href: "/dashboard/admin", icon: LayoutDashboard },
-  { name: "Calling Workspace", href: "/dashboard/workspace", icon: Headphones },
   { name: "Media Center", href: "/dashboard/media", icon: Newspaper },
   { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
   { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
+];
+
+// The Supervisor and Caller nav arrays — module-level (not session-derived)
+// so both the real role AND a Super Admin's "Quick Dashboard Switch" preview
+// (see VIEW_OPTIONS / viewAs below) render the IDENTICAL list, not a
+// re-derived approximation of it.
+const SUPERVISOR_NAV = [
+  { name: "Overview", href: "/dashboard/supervisor", icon: LayoutDashboard },
+  { name: "Contacts", href: "/dashboard/supervisor/contacts", icon: UserCheck },
+  { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+  { name: "Caller Performance", href: "/dashboard/supervisor/callers", icon: TrendingUp },
+  { name: "Live Status", href: "/dashboard/supervisor/live", icon: Activity },
+  { name: "Teams", href: "/dashboard/admin/administration?tab=teams", icon: UserCog },
+  { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+  { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
+  { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
+  { name: "Map", href: "/dashboard/map", icon: Map },
+  { name: "Strength", href: "/dashboard/strength", icon: Gauge },
+  { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
+  { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+  { name: "Sentiment", href: "/dashboard/supervisor/sentiment", icon: MessageSquare },
+  { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
+  { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
+  { name: "Attendance", href: "/dashboard/supervisor/attendance", icon: Clock },
+  { name: "Media", href: "/dashboard/media", icon: Newspaper },
+  { name: "Reports", href: "/dashboard/reports", icon: FileText },
+  { name: "Alerts", href: "/dashboard/supervisor/alerts", icon: AlertCircle },
+];
+const CALLER_NAV = [
+  { name: "My Workspace", href: "/dashboard/workspace", icon: Headphones },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Log a Call", href: "/dashboard/calls/new", icon: PhoneCall },
+  { name: "My Calls", href: "/dashboard/calls", icon: Database },
+  { name: "Complaints", href: "/dashboard/complaints", icon: MessageSquare },
+  { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+];
+
+// Quick Dashboard Switch — Super Admin only. Sets which nav/layout renders
+// (see `viewAs` below) and jumps straight to that role's home page. This
+// changes ONLY navigation/layout chrome — the signed-in session, and every
+// page's own server-side permission check, are completely untouched; a
+// Super Admin previewing Supervisor/Caller still has full Super Admin
+// backend access (see the two known, deliberate exceptions noted where
+// `viewAs` is read: workspace/page.js's oversight-redirect bypass, and
+// supervisor/contacts/page.js's preview notice, neither of which grants any
+// NEW privilege — both just avoid bouncing an already-fully-privileged user
+// away from a page they're allowed to look at).
+const VIEW_OPTIONS = [
+  { key: "super_admin", name: "Super Admin Dashboard", homeHref: "/dashboard/admin", icon: Shield },
+  { key: "supervisor", name: "Supervisor Dashboard", homeHref: "/dashboard/supervisor", icon: Users },
+  { key: "caller", name: "Caller Dashboard", homeHref: "/dashboard/workspace", icon: Headphones },
 ];
 
 export default function DashboardLayout({ children }) {
@@ -45,6 +94,17 @@ export default function DashboardLayout({ children }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [dashboardSwitcherOpen, setDashboardSwitcherOpen] = useState(false);
   const switcherBtnRef = useRef(null);
+  // Quick Dashboard Switch — which role's nav/layout to render (Super Admin
+  // only; see VIEW_OPTIONS above). Persisted so a refresh keeps the preview
+  // active instead of silently dropping back to the real role's own view.
+  const [viewAs, setViewAsState] = useState("super_admin");
+  useEffect(() => {
+    setViewAsState(getDashboardViewAs());
+  }, []);
+  function setViewAs(v) {
+    setViewAsState(v);
+    if (typeof window !== "undefined") window.localStorage.setItem(VIEW_AS_KEY, v);
+  }
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -160,32 +220,22 @@ export default function DashboardLayout({ children }) {
     ],
   };
 
+  // A Super Admin previewing another role's dashboard (Quick Dashboard
+  // Switch) gets that role's exact nav array — same constants a REAL
+  // Supervisor/Caller renders below, so "preview" can never drift from the
+  // genuine article.
+  const isSuper = canonical === ROLES.SUPER_ADMIN;
+  const previewing = isSuper && viewAs !== "super_admin";
+
   let navItems;
-  if (isUserAdmin) {
+  if (previewing && viewAs === "supervisor") {
+    navItems = SUPERVISOR_NAV;
+  } else if (previewing && viewAs === "caller") {
+    navItems = CALLER_NAV;
+  } else if (isUserAdmin) {
     navItems = ADMIN_MENUS[canonical] || ADMIN_MENUS[ROLES.SUPER_ADMIN];
   } else if (isSupervisor) {
-    navItems = [
-      { name: "Overview", href: "/dashboard/supervisor", icon: LayoutDashboard },
-      { name: "Contacts", href: "/dashboard/supervisor/contacts", icon: UserCheck },
-      { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-      { name: "Caller Performance", href: "/dashboard/supervisor/callers", icon: TrendingUp },
-      { name: "Live Status", href: "/dashboard/supervisor/live", icon: Activity },
-      { name: "Teams", href: "/dashboard/admin/administration?tab=teams", icon: UserCog },
-      { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
-      { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
-      { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
-      { name: "Map", href: "/dashboard/map", icon: Map },
-      { name: "Strength", href: "/dashboard/strength", icon: Gauge },
-      { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
-      { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
-      { name: "Sentiment", href: "/dashboard/supervisor/sentiment", icon: MessageSquare },
-      { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
-      { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
-      { name: "Attendance", href: "/dashboard/supervisor/attendance", icon: Clock },
-      { name: "Media", href: "/dashboard/media", icon: Newspaper },
-      { name: "Reports", href: "/dashboard/reports", icon: FileText },
-      { name: "Alerts", href: "/dashboard/supervisor/alerts", icon: AlertCircle },
-    ];
+    navItems = SUPERVISOR_NAV;
   } else if (canonical === ROLES.WORKER) {
     // Workers: org members on the ground. No calling UI.
     navItems = [
@@ -207,14 +257,7 @@ export default function DashboardLayout({ children }) {
     ];
   } else {
     // Caller (and legacy 'user'/'agent') — the calling workspace
-    navItems = [
-      { name: "My Workspace", href: "/dashboard/workspace", icon: Headphones },
-      { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { name: "Log a Call", href: "/dashboard/calls/new", icon: PhoneCall },
-      { name: "My Calls", href: "/dashboard/calls", icon: Database },
-      { name: "Complaints", href: "/dashboard/complaints", icon: MessageSquare },
-      { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
-    ];
+    navItems = CALLER_NAV;
   }
 
   // Every role gets a profile link — appended once here instead of in each
@@ -231,7 +274,11 @@ export default function DashboardLayout({ children }) {
 
   // Admins get a short sidebar (one primary page per section); other roles
   // keep their full list as-is (already short, no accordion/grouping to trim).
-  const sidebarItems = isUserAdmin ? primaryItems(navItems) : navItems;
+  // A previewing Super Admin uses the FULL list too — primaryItems() only
+  // makes sense for the admin's own grouped nav (navGroups.js), and applying
+  // it to a Supervisor/Caller preview would trim it into something a real
+  // Supervisor/Caller never sees.
+  const sidebarItems = (isUserAdmin && !previewing) ? primaryItems(navItems) : navItems;
 
   return (
     <div className="h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
@@ -387,10 +434,31 @@ export default function DashboardLayout({ children }) {
                   open={dashboardSwitcherOpen}
                   onClose={() => setDashboardSwitcherOpen(false)}
                   width={256}
-                  estimatedHeight={DASHBOARD_SWITCHER.length * 36 + 40}
+                  estimatedHeight={(VIEW_OPTIONS.length + DASHBOARD_SWITCHER.length) * 36 + 80}
                 >
                   <div className="py-1.5">
-                    <div className="px-3.5 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Switch dashboard</div>
+                    <div className="px-3.5 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Quick Dashboard Switch</div>
+                    {VIEW_OPTIONS.map((opt) => {
+                      const Icon = opt.icon;
+                      const active = viewAs === opt.key;
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => {
+                            setViewAs(opt.key);
+                            setDashboardSwitcherOpen(false);
+                            router.push(opt.homeHref);
+                          }}
+                          className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-sm text-left ${active ? "bg-blue-50 text-[#164FA3] font-semibold" : "text-gray-700 hover:bg-gray-50"}`}
+                        >
+                          <Icon size={15} className="shrink-0" />
+                          <span className="flex-1">{opt.name}</span>
+                          {active && <Check size={15} className="shrink-0 text-[#164FA3]" />}
+                        </button>
+                      );
+                    })}
+                    <div className="my-1.5 border-t border-gray-100" />
                     {DASHBOARD_SWITCHER.map((d) => {
                       const Icon = d.icon;
                       return (
@@ -422,6 +490,28 @@ export default function DashboardLayout({ children }) {
             )}
           </div>
         </header>
+
+        {/* Quick Dashboard Switch preview banner — only ever shown to the real
+            Super Admin (viewAs is never set for other roles), so this can
+            never be spoofed into claiming a lesser role has admin access. */}
+        {previewing && (
+          <div className="flex items-center justify-center gap-2 bg-amber-50 border-b border-amber-200 px-4 py-1.5 text-xs sm:text-sm text-amber-800 shrink-0">
+            <span>
+              Current User: <strong>Super Admin</strong> &middot; Current View:{" "}
+              <strong>{VIEW_OPTIONS.find((o) => o.key === viewAs)?.name}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setViewAs("super_admin");
+                router.push("/dashboard/admin");
+              }}
+              className="ml-1 font-semibold text-[#164FA3] hover:underline"
+            >
+              Back to Super Admin
+            </button>
+          </div>
+        )}
 
         {/* Section tabs — sibling pages of the current section as plain text
             links (replaces what the old sidebar accordion used to reveal) */}

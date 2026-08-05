@@ -4,7 +4,8 @@ import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound, Flag, Check } from "lucide-react";
-import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
+import { isAdmin, isOversight, normalizeRole, ROLES, isPressMedia, isSocialMedia } from "@/lib/permissions";
+import { getDashboardViewAs } from "@/lib/dashboardView";
 import Avatar from "@/components/Avatar";
 import CallActionIcons, { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -27,10 +28,23 @@ function fmtAssigned(v) {
 export default function WorkspacePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-
+  // Quick Dashboard Switch (src/app/dashboard/layout.js): a Super Admin
+  // previewing the Caller Dashboard must NOT be bounced back to
+  // /dashboard/admin by the oversight-redirect below. Computed and used
+  // within ONE effect (not split across two, and not read from state that
+  // hasn't committed yet) — splitting them caused a real race: on first
+  // mount the redirect effect ran with the previous, stale `previewingCaller`
+  // (still false) before the sibling effect's setState had committed, firing
+  // the oversight redirect a render early. Read after mount only
+  // (localStorage is browser-scoped, not session-scoped) and re-checked
+  // against the real role so a stale value from a previous session on the
+  // same browser can never bypass a non-super_admin's redirect.
+  const [previewingCaller, setPreviewingCaller] = useState(false);
   useEffect(() => {
+    const previewing = normalizeRole(session?.user?.role) === ROLES.SUPER_ADMIN && getDashboardViewAs() === "caller";
+    setPreviewingCaller(previewing);
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && isOversight(session)) {
+    else if (status === "authenticated" && isOversight(session) && !previewing) {
       // The workspace is for callers only. Send oversight roles to their landing page.
       router.push(isAdmin(session) ? "/dashboard/admin" : "/dashboard/supervisor");
     } else if (status === "authenticated" && (isPressMedia(session) || isSocialMedia(session))) {
@@ -38,13 +52,19 @@ export default function WorkspacePage() {
     }
   }, [status, session, router]);
 
-  if (status === "loading" || !session || isOversight(session) || isPressMedia(session) || isSocialMedia(session)) {
+  if (
+    status === "loading" ||
+    !session ||
+    (isOversight(session) && !previewingCaller) ||
+    isPressMedia(session) ||
+    isSocialMedia(session)
+  ) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
-  return <WorkspaceBody />;
+  return <WorkspaceBody previewingCaller={previewingCaller} />;
 }
 
-function WorkspaceBody() {
+function WorkspaceBody({ previewingCaller }) {
   const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], pool_count: 0, home_district: null, active_lock: null });
   // Queue search / hierarchical geography + designation filters. Zone is not a
   // dropdown — it's the caller's own zone (shown in Your Queue) and auto-scopes
@@ -426,6 +446,11 @@ function WorkspaceBody() {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
       {/* LEFT: queue */}
       <div className="lg:col-span-1 space-y-4">
+        {previewingCaller && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3">
+            Previewing the Caller Dashboard as Super Admin — this queue reflects your own Super Admin account, so it's expected to be empty unless contacts are directly assigned to you.
+          </div>
+        )}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <div className="flex items-center gap-2 mb-3 text-[#164FA3]">
             <ListChecks size={18} />
