@@ -81,6 +81,11 @@ function Body({ session }) {
   // status pill is currently active, scoped by the same geo/designation filters.
   const [counts, setCounts] = useState({ pending: 0, assigned: 0, pool: 0, done: 0 });
   const [countsLoading, setCountsLoading] = useState(true);
+  // Bulk checkbox selection — an explicit set of contact ids. Empty means
+  // "act on everything matching the current filters" (the original,
+  // unchanged behavior); non-empty means "act on exactly these contacts".
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [selectingAll, setSelectingAll] = useState(false);
   const fileRef = useRef(null);
   const excelRef = useRef(null);
   const loadSeq = useRef(0);
@@ -88,8 +93,10 @@ function Body({ session }) {
 
   // Reload the page of results whenever a filter or the page number changes.
   useEffect(() => { load(); }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page]);
-  // Any filter change (not a page change) jumps back to page 1.
-  useEffect(() => { setPage(1); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search]);
+  // Any filter change (not a page change) jumps back to page 1 and drops any
+  // bulk selection — a selection made under one filter view shouldn't silently
+  // carry over and get acted on under a different one.
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search]);
 
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)));
@@ -144,7 +151,43 @@ function Body({ session }) {
     setBulkCallers((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   }
 
-  // Distribute matching contacts across the selected callers (even split or N each).
+  // Bulk checkbox selection — individual toggle, toggle the whole loaded
+  // page, fetch+select every id matching the current filters (across every
+  // page), or clear.
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  const pageIds = contacts.map((c) => c.id);
+  const pageFullySelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  function toggleSelectPage() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (pageFullySelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+  async function selectAllMatching() {
+    setSelectingAll(true);
+    try {
+      const r = await fetch(`/api/contacts/ids?${buildParams(1)}`);
+      const d = await r.json();
+      setSelectedIds(new Set(d.ids || []));
+    } catch {
+      setError("Couldn't select all — network error.");
+    } finally {
+      setSelectingAll(false);
+    }
+  }
+  function clearSelection() { setSelectedIds(new Set()); }
+
+  // Distribute contacts across the selected callers (even split or N each) —
+  // either exactly the checked contacts (if any are selected), or everything
+  // matching the current filters (the original, unchanged default).
   async function bulkDistribute() {
     setMessage(""); setError("");
     if (bulkCallers.length === 0) { setError("Select at least one caller to distribute to."); return; }
@@ -152,10 +195,14 @@ function Body({ session }) {
     const desc = bulkMode === "perCaller"
       ? `${perCaller} contacts each to ${bulkCallers.length} caller(s): ${names}`
       : `evenly across ${bulkCallers.length} caller(s): ${names}`;
+    const hasSelection = selectedIds.size > 0;
     const desigNames = designations.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
     const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
-    const skipNote = filter === "pending" ? " (Already-called contacts are excluded — you're viewing Pending only.)" : "";
-    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${desigLabel} — ${desc}?${skipNote}`)) return;
+    const skipNote = !hasSelection && filter === "pending" ? " (Already-called contacts are excluded — you're viewing Pending only.)" : "";
+    const targetDesc = hasSelection
+      ? `${selectedIds.size} selected contact${selectedIds.size === 1 ? "" : "s"}`
+      : `${filter !== "all" ? filter + " " : ""}contacts${districtId ? " in this district" : ""}${desigLabel}`;
+    if (!confirm(`Distribute ${targetDesc} — ${desc}?${skipNote}`)) return;
     setBulkBusy(true);
     try {
       const r = await fetch("/api/contacts/bulk-distribute", {
@@ -165,17 +212,19 @@ function Body({ session }) {
           caller_ids: bulkCallers,
           mode: bulkMode,
           per_caller: bulkMode === "perCaller" ? Number(perCaller) : undefined,
-          status: filter,
-          // Send EVERY active list filter so distribution acts on exactly the
-          // same people the filtered list shows (was only sending district +
-          // designation, so zone/Lok Sabha/assembly selections were ignored).
-          zone_id: zoneId || undefined,
-          lok_sabha_id: lokSabhaId || undefined,
-          district_id: districtId || undefined,
-          assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
-          designation_ids: designationIds.length ? designationIds.join(",") : undefined,
-          search: search || undefined,
           reassign: reassignOthers,
+          ...(hasSelection ? { contact_ids: [...selectedIds] } : {
+            status: filter,
+            // Send EVERY active list filter so distribution acts on exactly the
+            // same people the filtered list shows (was only sending district +
+            // designation, so zone/Lok Sabha/assembly selections were ignored).
+            zone_id: zoneId || undefined,
+            lok_sabha_id: lokSabhaId || undefined,
+            district_id: districtId || undefined,
+            assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
+            designation_ids: designationIds.length ? designationIds.join(",") : undefined,
+            search: search || undefined,
+          }),
         }),
       });
       const d = await r.json();
@@ -186,10 +235,11 @@ function Body({ session }) {
       // mode there's no cap at all, so matched should always equal assigned —
       // if it doesn't there, that's a real failure, not a capacity note.
       const capNote = bulkMode === "perCaller" && d.matched_total > d.assigned
-        ? ` (${d.matched_total} contacts matched your filters; ${d.matched_total - d.assigned} weren't included because "N per caller" × callers is smaller than the match — raise the per-caller count or add callers to cover them all.)`
+        ? ` (${d.matched_total} contacts matched${hasSelection ? " your selection" : " your filters"}; ${d.matched_total - d.assigned} weren't included because "N per caller" × callers is smaller than the match — raise the per-caller count or add callers to cover them all.)`
         : "";
       const failed = d.failed > 0 ? ` ⚠ ${d.failed} failed to save — check the server log.` : "";
-      setMessage(`✓ Distributed ${d.assigned} of ${d.matched_total} matching contacts — ${breakdown || "none matched"}.${capNote}${failed}`);
+      setMessage(`✓ Distributed ${d.assigned} of ${d.matched_total} ${hasSelection ? "selected" : "matching"} contacts — ${breakdown || "none matched"}.${capNote}${failed}`);
+      clearSelection();
       load();
       loadCounts();
     } catch {
@@ -475,7 +525,7 @@ function Body({ session }) {
             { label: "Assigned", value: counts.assigned },
             { label: "Pool", value: counts.pool },
             { label: "Done", value: counts.done },
-            { label: "Selected Contacts", value: total },
+            { label: "Selected Contacts", value: selectedIds.size > 0 ? selectedIds.size : total },
             { label: "Selected Callers", value: bulkCallers.length },
           ].map((s) => (
             <div key={s.label} className="bg-white rounded-xl border border-gray-200 px-3 py-2">
@@ -583,6 +633,22 @@ function Body({ session }) {
         </div>
       )}
 
+      {!loading && contacts.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap text-sm">
+          {selectedIds.size > 0 && (
+            <span className="font-semibold text-[#164FA3]">{selectedIds.size.toLocaleString()} selected</span>
+          )}
+          {total > contacts.length && (
+            <button onClick={selectAllMatching} disabled={selectingAll} className="text-[#164FA3] font-medium hover:underline disabled:opacity-50">
+              {selectingAll ? "Selecting…" : `Select all ${total.toLocaleString()} matching filters`}
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <button onClick={clearSelection} className="text-gray-500 font-medium hover:underline">Clear selection</button>
+          )}
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="p-8 text-gray-400">Loading…</div>
@@ -593,6 +659,9 @@ function Body({ session }) {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
+                <th className="px-4 py-3 w-8">
+                  <input type="checkbox" checked={pageFullySelected} onChange={toggleSelectPage} aria-label="Select all on this page" />
+                </th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
@@ -604,7 +673,10 @@ function Body({ session }) {
             </thead>
             <tbody>
               {contacts.map((c, i) => (
-                <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
+                <tr key={c.id} className={`border-t border-gray-100 hover:bg-gray-50 ${selectedIds.has(c.id) ? "bg-blue-50/50" : ""}`}>
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} aria-label={`Select ${c.person_name}`} />
+                  </td>
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Avatar name={c.person_name} src={c.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />

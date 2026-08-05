@@ -111,9 +111,10 @@ export async function GET(req) {
               -- Mirror Add Workers: show the worker's position (source of truth)
               -- when linked; fall back to the contact's own designation otherwise.
               COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
-              -- Contacts have no photo of their own — show the linked worker's
-              -- (same pattern already used by the caller workspace queue).
-              w.photo_url AS photo_url
+              -- Contacts have their own native photo_url now; COALESCE only
+              -- covers rows from before that column existed whose backfill
+              -- (scripts/add-contact-photo-url.mjs) somehow missed them.
+              COALESCE(c.photo_url, w.photo_url) AS photo_url
          FROM contacts c
          ${workerJoin}
          LEFT JOIN users u ON u.id = c.assigned_to_user_id

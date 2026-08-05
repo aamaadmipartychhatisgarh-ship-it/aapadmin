@@ -14,19 +14,27 @@ import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 // thousands of contacts never builds a single enormous IN() list.
 const UPDATE_CHUNK_SIZE = 1000;
 
-// Distribute contacts matching the given filters across MULTIPLE callers.
+// Distribute contacts across MULTIPLE callers — either every contact
+// matching the given filters, or an EXPLICIT set of contact ids (bulk
+// checkbox selection on the Contacts page).
 //
 // Body: {
 //   caller_ids: number[],            // callers to share the work
 //   mode: "even" | "perCaller",      // even split, or a fixed number each
 //   per_caller?: number,             // required when mode = "perCaller"
-//   status?, district_id?, search?   // same filters as the contacts list
+//   contact_ids?: number[],          // explicit selection — when given, this
+//                                     // IS the target set; status/geo/search
+//                                     // filters below are ignored (the user
+//                                     // already picked exactly who)
+//   status?, district_id?, search?   // same filters as the contacts list —
+//                                     // only used when contact_ids is absent
 // }
 //
-// Pulls from every contact matching the given status/filters (the status
-// filter, if any, controls whether Done contacts are included — see
-// src/lib/contactStatus.js), ordered so unassigned contacts go out first
-// when not reassigning. Round-robin so any remainder is spread.
+// Either way, the wrong-number exclusion, the `reassign` gate, and the
+// caller's geographic scope always apply — an explicit id list is never
+// trusted blindly, only ever narrowed further by those. Pulls in id order
+// (or oldest-held-first when not reassigning). Round-robin so any remainder
+// is spread.
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -61,43 +69,59 @@ export async function POST(req) {
     // When false, only unassigned pool contacts are handed out.
     const reassign = body.reassign !== false;
 
-    // Build the same WHERE the list uses (src/app/api/contacts/route.js), so
-    // Distribute acts on EXACTLY the set the admin is looking at when they
-    // click it — not a silently narrower one. Previously this unconditionally
-    // forced `is_completed = 0`, which dropped every "done" contact from the
-    // batch regardless of the status filter actually selected: filtering to
-    // "Done" and distributing matched zero rows, and filtering to "All" quietly
-    // dropped the done ones from the count ("Selected 200, only some assigned").
+    // Explicit checkbox selection takes over targeting entirely — status/geo/
+    // designation/search filters are meaningless once the user has already
+    // picked exact contacts, so they're skipped rather than ANDed in (which
+    // would silently drop selected rows that fall outside whatever filter
+    // happens to still be active in the UI).
+    const explicitIds = Array.isArray(body.contact_ids)
+      ? [...new Set(body.contact_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))]
+      : [];
+
     let where = " WHERE 1=1";
     const params = [];
+    let workerJoin = "";
     const status = body.status;
-    const statusCond = statusWhere(status);
-    if (statusCond) where += ` AND ${statusCond}`;
-    // The calling engine must NEVER assign a Wrong Number contact — applied
-    // unconditionally here, not gated behind the status filter, so switching
-    // to "All" or any other status can't accidentally sweep one up.
+    if (explicitIds.length > 0) {
+      const ph = explicitIds.map(() => "?").join(",");
+      where += ` AND c.id IN (${ph})`;
+      params.push(...explicitIds);
+    } else {
+      // Build the same WHERE the list uses (src/app/api/contacts/route.js), so
+      // Distribute acts on EXACTLY the set the admin is looking at when they
+      // click it — not a silently narrower one. Previously this unconditionally
+      // forced `is_completed = 0`, which dropped every "done" contact from the
+      // batch regardless of the status filter actually selected: filtering to
+      // "Done" and distributing matched zero rows, and filtering to "All" quietly
+      // dropped the done ones from the count ("Selected 200, only some assigned").
+      const statusCond = statusWhere(status);
+      if (statusCond) where += ` AND ${statusCond}`;
+      // Geo + designation via the SHARED person-aware filter, so Distribution acts
+      // on exactly the same people the Contacts list and Add Workers page show.
+      const idList = (v) => [...new Set(String(v ?? "").split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
+      const person = buildContactPersonFilter({
+        zone_id: body.zone_id,
+        lok_sabha_id: body.lok_sabha_id,
+        district_id: body.district_id,
+        assembly_ids: idList(body.assembly_ids ?? body.assembly_id),
+        designation_ids: idList(body.designation_ids ?? body.designation_id),
+      });
+      where += person.where;
+      params.push(...person.params);
+      if (body.search) {
+        where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
+        params.push(`%${body.search}%`, `%${body.search}%`);
+      }
+      workerJoin = person.needsWorkerJoin ? "LEFT JOIN workers w ON w.id = c.worker_id" : "";
+    }
+    // Always applied, explicit selection or not: the calling engine must
+    // NEVER assign a Wrong Number contact, `reassign=false` must never pull
+    // from another caller's queue, and geographic scope is never bypassable.
     where += await notWrongNumberClause("c");
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
-    // Geo + designation via the SHARED person-aware filter, so Distribution acts
-    // on exactly the same people the Contacts list and Add Workers page show.
-    const idList = (v) => [...new Set(String(v ?? "").split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
-    const person = buildContactPersonFilter({
-      zone_id: body.zone_id,
-      lok_sabha_id: body.lok_sabha_id,
-      district_id: body.district_id,
-      assembly_ids: idList(body.assembly_ids ?? body.assembly_id),
-      designation_ids: idList(body.designation_ids ?? body.designation_id),
-    });
-    where += person.where;
-    params.push(...person.params);
-    if (body.search) {
-      where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
-      params.push(`%${body.search}%`, `%${body.search}%`);
-    }
     const scope = scopeFilterSync(session.user, "c");
     where += " " + scope.where;
     params.push(...scope.params);
-    const workerJoin = person.needsWorkerJoin ? "LEFT JOIN workers w ON w.id = c.worker_id" : "";
 
     // How many to fetch. "even" mode takes every matching row (no cap); only
     // "perCaller" imposes a deliberate, admin-specified capacity.
@@ -204,6 +228,7 @@ export async function POST(req) {
         per_caller_counts: perCounts,
         mode, per_caller: mode === "perCaller" ? perCaller : undefined,
         reassign, status: status || "all",
+        explicit_selection: explicitIds.length > 0 ? explicitIds.length : undefined,
         mismatches: mismatches.length ? mismatches : undefined,
       },
     });

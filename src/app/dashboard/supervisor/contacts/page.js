@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Search, Loader2, CheckCircle2, Pencil, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin } from "lucide-react";
+import { Search, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
@@ -24,11 +24,11 @@ const PAGE_SIZE = 50;
 // URL edits / DevTools / raw API calls can't see or touch anything outside
 // the supervisor's territory.
 //
-// Admin-only conveniences (Add Contact, CSV/Excel import, per-row Delete,
-// bulk-delete Wrong Numbers) are intentionally omitted — a Supervisor's
-// granted capabilities are assign/reassign/remove-assignment, edit contact
-// details, create tasks, and view history (see the Permissions section of
-// the module spec).
+// Admin-only conveniences (Add Contact, CSV/Excel import, bulk-delete Wrong
+// Numbers) are intentionally omitted — a Supervisor's granted capabilities
+// are assign/reassign/remove-assignment, edit contact details, delete a
+// contact (scoped to their own territory), create tasks, and view history
+// (see the Permissions section of the module spec).
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -89,6 +89,11 @@ function Body({ session }) {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [counts, setCounts] = useState({ pending: 0, assigned: 0, pool: 0, done: 0 });
   const [countsLoading, setCountsLoading] = useState(true);
+  // Bulk checkbox selection — same model as the admin Contacts page: empty
+  // means "act on everything matching the current filters" (unchanged
+  // default), non-empty means "act on exactly these contacts".
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [selectingAll, setSelectingAll] = useState(false);
   const loadSeq = useRef(0);
   const countSeq = useRef(0);
 
@@ -109,7 +114,7 @@ function Body({ session }) {
   }, []);
 
   useEffect(() => { if (!scopeLoading) load(); }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page]);
-  useEffect(() => { setPage(1); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search]);
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search]);
 
   useEffect(() => {
     fetch("/api/supervisor/contacts/callers").then((r) => r.json()).then((d) => setUsers(d.users || []));
@@ -161,6 +166,40 @@ function Body({ session }) {
     setBulkCallers((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   }
 
+  // Bulk checkbox selection — individual toggle, toggle the whole loaded
+  // page, fetch+select every id matching the current filters (within
+  // territory, across every page), or clear.
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  const pageIds = contacts.map((c) => c.id);
+  const pageFullySelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  function toggleSelectPage() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (pageFullySelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+  async function selectAllMatching() {
+    setSelectingAll(true);
+    try {
+      const r = await fetch(`/api/supervisor/contacts/ids?${buildParams(1)}`);
+      const d = await r.json();
+      setSelectedIds(new Set(d.ids || []));
+    } catch {
+      setError("Couldn't select all — network error.");
+    } finally {
+      setSelectingAll(false);
+    }
+  }
+  function clearSelection() { setSelectedIds(new Set()); }
+
   async function bulkDistribute() {
     setMessage(""); setError("");
     if (bulkCallers.length === 0) { setError("Select at least one caller to distribute to."); return; }
@@ -168,10 +207,14 @@ function Body({ session }) {
     const desc = bulkMode === "perCaller"
       ? `${perCaller} contacts each to ${bulkCallers.length} caller(s): ${names}`
       : `evenly across ${bulkCallers.length} caller(s): ${names}`;
+    const hasSelection = selectedIds.size > 0;
     const desigNames = designations.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
     const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
-    const skipNote = filter === "pending" ? " (Already-called contacts are excluded — you're viewing Pending only.)" : "";
-    if (!confirm(`Distribute ${filter !== "all" ? filter + " " : ""}contacts in your territory${desigLabel} — ${desc}?${skipNote}`)) return;
+    const skipNote = !hasSelection && filter === "pending" ? " (Already-called contacts are excluded — you're viewing Pending only.)" : "";
+    const targetDesc = hasSelection
+      ? `${selectedIds.size} selected contact${selectedIds.size === 1 ? "" : "s"}`
+      : `${filter !== "all" ? filter + " " : ""}contacts in your territory${desigLabel}`;
+    if (!confirm(`Distribute ${targetDesc} — ${desc}?${skipNote}`)) return;
     setBulkBusy(true);
     try {
       const r = await fetch("/api/supervisor/contacts/bulk-distribute", {
@@ -181,24 +224,27 @@ function Body({ session }) {
           caller_ids: bulkCallers,
           mode: bulkMode,
           per_caller: bulkMode === "perCaller" ? Number(perCaller) : undefined,
-          status: filter,
-          zone_id: zoneId || undefined,
-          lok_sabha_id: lokSabhaId || undefined,
-          district_id: districtId || undefined,
-          assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
-          designation_ids: designationIds.length ? designationIds.join(",") : undefined,
-          search: search || undefined,
           reassign: reassignOthers,
+          ...(hasSelection ? { contact_ids: [...selectedIds] } : {
+            status: filter,
+            zone_id: zoneId || undefined,
+            lok_sabha_id: lokSabhaId || undefined,
+            district_id: districtId || undefined,
+            assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
+            designation_ids: designationIds.length ? designationIds.join(",") : undefined,
+            search: search || undefined,
+          }),
         }),
       });
       const d = await r.json();
       if (!r.ok) { setError(d.message || "Distribute failed"); return; }
       const breakdown = Object.entries(d.per_caller_counts || {}).map(([u, n]) => `${u}: ${n}`).join(", ");
       const capNote = bulkMode === "perCaller" && d.matched_total > d.assigned
-        ? ` (${d.matched_total} contacts matched your filters; ${d.matched_total - d.assigned} weren't included because "N per caller" × callers is smaller than the match.)`
+        ? ` (${d.matched_total} contacts matched${hasSelection ? " your selection" : " your filters"}; ${d.matched_total - d.assigned} weren't included because "N per caller" × callers is smaller than the match.)`
         : "";
       const failed = d.failed > 0 ? ` ⚠ ${d.failed} failed to save — check the server log.` : "";
-      setMessage(`✓ Distributed ${d.assigned} of ${d.matched_total} matching contacts — ${breakdown || "none matched"}.${capNote}${failed}`);
+      setMessage(`✓ Distributed ${d.assigned} of ${d.matched_total} ${hasSelection ? "selected" : "matching"} contacts — ${breakdown || "none matched"}.${capNote}${failed}`);
+      clearSelection();
       load();
       loadCounts();
     } catch {
@@ -323,6 +369,13 @@ function Body({ session }) {
     load();
   }
 
+  async function removeContact(c) {
+    if (!confirm(`Delete contact "${c.person_name}" (${c.phone_number})? Their call history stays, but the contact is removed from the calling list.`)) return;
+    const r = await fetch(`/api/supervisor/contacts/${c.id}`, { method: "DELETE" });
+    if (r.ok) { setMessage(`Deleted ${c.person_name}.`); load(); loadCounts(); }
+    else { const d = await r.json().catch(() => ({})); setError(d.message || "Delete failed"); }
+  }
+
   if (scopeLoading) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
@@ -422,7 +475,7 @@ function Body({ session }) {
             { label: "Assigned", value: counts.assigned },
             { label: "Pool", value: counts.pool },
             { label: "Done", value: counts.done },
-            { label: "Selected Contacts", value: total },
+            { label: "Selected Contacts", value: selectedIds.size > 0 ? selectedIds.size : total },
             { label: "Selected Callers", value: bulkCallers.length },
           ].map((s) => (
             <div key={s.label} className="bg-white rounded-xl border border-gray-200 px-3 py-2">
@@ -508,6 +561,22 @@ function Body({ session }) {
       </CollapsibleSection>
       )}
 
+      {!loading && contacts.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap text-sm">
+          {selectedIds.size > 0 && (
+            <span className="font-semibold text-[#164FA3]">{selectedIds.size.toLocaleString()} selected</span>
+          )}
+          {total > contacts.length && (
+            <button onClick={selectAllMatching} disabled={selectingAll} className="text-[#164FA3] font-medium hover:underline disabled:opacity-50">
+              {selectingAll ? "Selecting…" : `Select all ${total.toLocaleString()} matching filters`}
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <button onClick={clearSelection} className="text-gray-500 font-medium hover:underline">Clear selection</button>
+          )}
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="p-8 text-gray-400">Loading…</div>
@@ -518,6 +587,9 @@ function Body({ session }) {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
+                <th className="px-4 py-3 w-8">
+                  <input type="checkbox" checked={pageFullySelected} onChange={toggleSelectPage} aria-label="Select all on this page" />
+                </th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
@@ -529,7 +601,10 @@ function Body({ session }) {
             </thead>
             <tbody>
               {contacts.map((c, i) => (
-                <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
+                <tr key={c.id} className={`border-t border-gray-100 hover:bg-gray-50 ${selectedIds.has(c.id) ? "bg-blue-50/50" : ""}`}>
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} aria-label={`Select ${c.person_name}`} />
+                  </td>
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Avatar name={c.person_name} src={c.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
@@ -574,6 +649,9 @@ function Body({ session }) {
                     </button>
                     <button onClick={() => setEditingIndex(i)} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
                       <Pencil size={14} /> Edit
+                    </button>
+                    <button onClick={() => removeContact(c)} className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium">
+                      <Trash2 size={14} /> Delete
                     </button>
                   </td>
                 </tr>

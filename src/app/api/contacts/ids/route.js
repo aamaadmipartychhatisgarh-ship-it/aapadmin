@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
-import { isSupervisorRole } from "@/lib/permissions";
+import { authOptions, isSupervisor } from "@/lib/auth";
+import { scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
-import { supervisorScopeFilter } from "@/lib/supervisorScope";
 
-// Supervisor-scoped mirror of GET /api/contacts (src/app/api/contacts/route.js)
-// — same filters, same shape, same pagination — but gated to the strict
-// Supervisor role and ALWAYS scoped to the supervisor's own territory via
-// supervisorScopeFilter (never bypassable, unlike scopeFilterSync's
-// "supervisor sees everything" default used by the admin route).
+// GET /api/contacts/ids?<same filters as GET /api/contacts> — every matching
+// contact id, uncapped (no pagination limit). Powers the Contacts page's
+// "Select all N matching filters" bulk-selection action: fetching a full id
+// list this way (a few bytes per row) is far cheaper than the alternative of
+// raising the main list endpoint's page-size cap to return every full row.
+// Same WHERE-building as GET /api/contacts — kept in lockstep intentionally
+// so "N selected" always matches what the filtered list actually shows.
 function idList(raw) {
   if (!raw) return [];
   return [...new Set(String(raw).split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
@@ -21,7 +22,7 @@ function idList(raw) {
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isSupervisorRole(session)) {
+    if (!session || !isSupervisor(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
@@ -36,9 +37,6 @@ export async function GET(req) {
     const designation_ids = idList(searchParams.get("designation_ids") || searchParams.get("designation_id"));
     const assigned_to = searchParams.get("assigned_to");
     const search = searchParams.get("search");
-    const page = Math.max(1, parseInt(searchParams.get("page"), 10) || 1);
-    const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get("page_size"), 10) || 50));
-    const offset = (page - 1) * pageSize;
 
     let where = " WHERE 1=1";
     const params = [];
@@ -74,42 +72,15 @@ export async function GET(req) {
          ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1
       ) = c.phone_number`;
     }
-    // Strict, non-bypassable territory scope — the whole point of this route.
-    const scope = supervisorScopeFilter(session.user, "c");
+    const scope = scopeFilterSync(session.user, "c");
     where += " " + scope.where;
     params.push(...scope.params);
 
     const workerJoin = "LEFT JOIN workers w ON w.id = c.worker_id";
-
-    const countRows = await query(`SELECT COUNT(*) AS total FROM contacts c ${workerJoin} ${where}`, params);
-    const total = Number(countRows[0]?.total || 0);
-
-    const contacts = await query(
-      `SELECT c.*,
-              u.username AS assigned_to_username,
-              ld.name AS district_name,
-              lw.name AS ward_name,
-              COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
-              -- Contacts have their own native photo_url now; COALESCE only
-              -- covers rows whose backfill (scripts/add-contact-photo-url.mjs)
-              -- somehow missed them.
-              COALESCE(c.photo_url, w.photo_url) AS photo_url
-         FROM contacts c
-         ${workerJoin}
-         LEFT JOIN users u ON u.id = c.assigned_to_user_id
-         LEFT JOIN locations ld ON ld.id = c.district_id
-         LEFT JOIN locations lw ON lw.id = c.ward_id
-         LEFT JOIN designations dsg ON dsg.id = c.designation_id
-         ${where}
-        ORDER BY ${duplicates === "1"
-          ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, c.id ASC"
-          : "c.is_completed ASC, c.id DESC"}
-        LIMIT ${pageSize} OFFSET ${offset}`,
-      params
-    );
-    return NextResponse.json({ contacts, total, page, page_size: pageSize });
+    const rows = await query(`SELECT c.id FROM contacts c ${workerJoin} ${where}`, params);
+    return NextResponse.json({ ids: rows.map((r) => r.id) });
   } catch (err) {
-    console.error("supervisor contacts GET error:", err);
+    console.error("contacts ids GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

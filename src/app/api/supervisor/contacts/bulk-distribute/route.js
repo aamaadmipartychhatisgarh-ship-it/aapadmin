@@ -53,32 +53,47 @@ export async function POST(req) {
 
     const reassign = body.reassign !== false;
 
+    // Explicit checkbox selection takes over targeting entirely — see the
+    // admin route (src/app/api/contacts/bulk-distribute/route.js) for why
+    // status/geo/search filters are skipped rather than ANDed in when present.
+    const explicitIds = Array.isArray(body.contact_ids)
+      ? [...new Set(body.contact_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))]
+      : [];
+
     let where = " WHERE 1=1";
     const params = [];
+    let workerJoin = "";
     const status = body.status;
-    const statusCond = statusWhere(status);
-    if (statusCond) where += ` AND ${statusCond}`;
+    if (explicitIds.length > 0) {
+      const ph = explicitIds.map(() => "?").join(",");
+      where += ` AND c.id IN (${ph})`;
+      params.push(...explicitIds);
+    } else {
+      const statusCond = statusWhere(status);
+      if (statusCond) where += ` AND ${statusCond}`;
+      const idListFn = (v) => [...new Set(String(v ?? "").split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
+      const person = buildContactPersonFilter({
+        zone_id: body.zone_id,
+        lok_sabha_id: body.lok_sabha_id,
+        district_id: body.district_id,
+        assembly_ids: idListFn(body.assembly_ids ?? body.assembly_id),
+        designation_ids: idListFn(body.designation_ids ?? body.designation_id),
+      });
+      where += person.where;
+      params.push(...person.params);
+      if (body.search) {
+        where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
+        params.push(`%${body.search}%`, `%${body.search}%`);
+      }
+      workerJoin = "LEFT JOIN workers w ON w.id = c.worker_id";
+    }
     where += await notWrongNumberClause("c");
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
-    const idListFn = (v) => [...new Set(String(v ?? "").split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
-    const person = buildContactPersonFilter({
-      zone_id: body.zone_id,
-      lok_sabha_id: body.lok_sabha_id,
-      district_id: body.district_id,
-      assembly_ids: idListFn(body.assembly_ids ?? body.assembly_id),
-      designation_ids: idListFn(body.designation_ids ?? body.designation_id),
-    });
-    where += person.where;
-    params.push(...person.params);
-    if (body.search) {
-      where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
-      params.push(`%${body.search}%`, `%${body.search}%`);
-    }
     // Strict territory scope — the contact set this supervisor may ever touch.
+    // Always applied, explicit selection or not.
     const scope = supervisorScopeFilter(session.user, "c");
     where += " " + scope.where;
     params.push(...scope.params);
-    const workerJoin = "LEFT JOIN workers w ON w.id = c.worker_id";
 
     const capacity = mode === "perCaller" ? perCaller * callers.length : null;
     const limitSql = capacity ? " LIMIT " + capacity : "";
@@ -156,6 +171,7 @@ export async function POST(req) {
         matched_total: matchedTotal, assigned, db_updated: dbUpdatedTotal,
         per_caller_counts: perCounts, mode, per_caller: mode === "perCaller" ? perCaller : undefined,
         reassign, status: status || "all", supervisor: true,
+        explicit_selection: explicitIds.length > 0 ? explicitIds.length : undefined,
         mismatches: mismatches.length ? mismatches : undefined,
       },
     });

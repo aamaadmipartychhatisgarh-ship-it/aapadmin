@@ -117,3 +117,31 @@ export async function PUT(req, { params }) {
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
+
+// DELETE /api/supervisor/contacts/[id] — territory-scoped. The scope clause
+// is baked into the DELETE's own WHERE (same pattern as PUT above), so an
+// out-of-territory id is atomically unreachable rather than just hidden
+// from the list UI.
+export async function DELETE(req, { params }) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || !isSupervisorRole(session)) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    const { id } = await params;
+    const scope = supervisorScopeFilter(session.user, "c");
+    const [existing] = await query(`SELECT person_name, phone_number FROM contacts c WHERE c.id = ? ${scope.where}`, [id, ...scope.params]);
+    if (!existing) {
+      return NextResponse.json({ message: "Contact not found or outside your territory." }, { status: 404 });
+    }
+    const res = await query(`DELETE FROM contacts c WHERE c.id = ? ${scope.where}`, [id, ...scope.params]);
+    if (res.affectedRows === 0) {
+      return NextResponse.json({ message: "Contact not found or outside your territory." }, { status: 404 });
+    }
+    await logAudit(session, { action: "contact.delete", entityType: "contact", entityId: id, details: { ...existing, supervisor: true } });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("supervisor contacts DELETE error:", err);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}
