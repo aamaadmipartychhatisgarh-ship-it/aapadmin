@@ -48,7 +48,7 @@ function Body({ id, canEdit, canDelete, router }) {
   async function del() {
     if (!confirm("Delete this worker?")) return;
     await fetch(`/api/workers/${id}`, { method: "DELETE" });
-    router.push("/dashboard/admin/workers");
+    router.push("/dashboard/admin/administration");
   }
 
   if (loading || !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
@@ -56,7 +56,7 @@ function Body({ id, canEdit, canDelete, router }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl">
-      <Link href="/dashboard/admin/workers" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-[#164FA3]"><ArrowLeft size={16} /> Back to workers</Link>
+      <Link href="/dashboard/admin/administration" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-[#164FA3]"><ArrowLeft size={16} /> Back to workers</Link>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">

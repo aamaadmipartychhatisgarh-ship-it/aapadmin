@@ -22,6 +22,17 @@ const nextConfig = {
       ],
     };
   },
+  // Worker management was consolidated into the Administration hub's Workers
+  // tab — the standalone list page is gone. Old bookmarks/links to it get a
+  // real HTTP permanent redirect (not a client-side page that has to mount
+  // and re-navigate) straight to the hub. Only the exact list path is
+  // matched — /dashboard/admin/workers/[id] (a worker's own profile page)
+  // is a separate, still-live route and must NOT be redirected.
+  async redirects() {
+    return [
+      { source: "/dashboard/admin/workers", destination: "/dashboard/admin/administration?tab=workers", permanent: true },
+    ];
+  },
   async headers() {
     return [
       {

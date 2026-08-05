@@ -36,7 +36,8 @@ export const GROUPS = [
 ];
 
 // Find the group that owns a given pathname (exact match, or a dynamic child
-// route like /dashboard/admin/workers/123 under /dashboard/admin/workers).
+// route under one of a group's hrefs, e.g. /dashboard/admin/teams/123 under
+// /dashboard/admin/teams).
 export function groupForPath(pathname) {
   return (
     GROUPS.find((g) => g.hrefs.includes(pathname)) ||
