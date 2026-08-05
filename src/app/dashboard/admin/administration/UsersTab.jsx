@@ -10,10 +10,12 @@ import { isTopAdmin, ASSIGNABLE_ROLES, roleLabel, normalizeRole } from "@/lib/pe
 export default function UsersTab({ session }) {
   const [users, setUsers] = useState([]);
   const [zones, setZones] = useState([]);
+  const [districts, setDistricts] = useState([]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("caller");
   const [zoneId, setZoneId] = useState("");
+  const [districtId, setDistrictId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -34,6 +36,7 @@ export default function UsersTab({ session }) {
   useEffect(() => {
     fetchUsers();
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
+    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
   }, []);
 
   const fetchUsers = async () => {
@@ -78,7 +81,7 @@ export default function UsersTab({ session }) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ username, password, role, scope_zone_id: zoneId || null }),
+        body: JSON.stringify({ username, password, role, scope_zone_id: zoneId || null, home_district_id: districtId || null }),
       });
 
       const data = await res.json();
@@ -89,6 +92,7 @@ export default function UsersTab({ session }) {
         setPassword("");
         setRole("caller");
         setZoneId("");
+        setDistrictId("");
         fetchUsers();
       } else {
         setError(data.message || "Failed to create user");
@@ -152,6 +156,15 @@ export default function UsersTab({ session }) {
               <option value="">— No zone —</option>
               {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
             </select>
+            <select
+              value={districtId}
+              onChange={(e) => setDistrictId(e.target.value)}
+              className="w-full bg-gray-100 border border-gray-200 h-12 rounded-2xl px-4 text-sm font-medium text-gray-900 focus:ring-2 focus:ring-[#164FA3] outline-none appearance-none"
+            >
+              <option value="">— No district —</option>
+              {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-400 -mt-2">District sets a Supervisor's or geo-scoped admin's territory — required for Supervisor Contacts to show any data.</p>
             <button type="submit" disabled={loading} className="w-full h-12 bg-[#164FA3] hover:bg-blue-800 text-white font-semibold rounded-2xl transition-all shadow-md mt-2">
               {loading ? "Adding..." : "Add Account"}
             </button>
@@ -205,6 +218,7 @@ export default function UsersTab({ session }) {
                   <th className="pb-3 font-semibold">User</th>
                   <th className="pb-3 font-semibold">Role</th>
                   <th className="pb-3 font-semibold">Zone</th>
+                  <th className="pb-3 font-semibold">District</th>
                   <th className="pb-3 font-semibold">Joined</th>
                   {canManage && <th className="pb-3 font-semibold text-right">Actions</th>}
                 </tr>
@@ -243,6 +257,16 @@ export default function UsersTab({ session }) {
                         {zones.map((z) => <option key={z.id} value={z.id} className="text-gray-900">{z.name}</option>)}
                       </select>
                     </td>
+                    <td className="py-4">
+                      <select
+                        value={u.home_district_id || ""}
+                        onChange={(e) => updateUser(u.id, { home_district_id: e.target.value || null })}
+                        className="bg-white/10 text-white text-xs rounded px-2 py-1 border border-white/20"
+                      >
+                        <option className="text-gray-900" value="">—</option>
+                        {districts.map((d) => <option key={d.id} value={d.id} className="text-gray-900">{d.name}</option>)}
+                      </select>
+                    </td>
                     <td className="py-4 text-blue-100 font-medium">
                       {new Date(u.created_at).toLocaleDateString(undefined, {
                         year: 'numeric',
@@ -266,7 +290,7 @@ export default function UsersTab({ session }) {
                 ))}
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={canManage ? 5 : 4} className="py-8 text-center text-blue-200 font-medium">
+                    <td colSpan={canManage ? 6 : 5} className="py-8 text-center text-blue-200 font-medium">
                       No users found
                     </td>
                   </tr>
@@ -281,6 +305,7 @@ export default function UsersTab({ session }) {
         <EditUserModal
           user={editing}
           zones={zones}
+          districts={districts}
           onClose={() => setEditing(null)}
           onSaved={(msg) => { setEditing(null); setSuccess(msg); fetchUsers(); }}
         />
@@ -296,17 +321,18 @@ export default function UsersTab({ session }) {
   );
 }
 
-function EditUserModal({ user, zones, onClose, onSaved }) {
+function EditUserModal({ user, zones, districts, onClose, onSaved }) {
   const [username, setUsername] = useState(user.username || "");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState(normalizeRole(user.role));
   const [zoneId, setZoneId] = useState(user.scope_zone_id || "");
+  const [districtId, setDistrictId] = useState(user.home_district_id || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function save() {
     setSaving(true); setError("");
-    const patch = { username, role, scope_zone_id: zoneId || null };
+    const patch = { username, role, scope_zone_id: zoneId || null, home_district_id: districtId || null };
     if (password) patch.password = password; // only change password if a new one is typed
     const r = await fetch(`/api/users/${user.id}`, {
       method: "PUT",
@@ -343,6 +369,13 @@ function EditUserModal({ user, zones, onClose, onSaved }) {
           <select className={inp + " appearance-none"} value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
             <option value="">— No zone —</option>
             {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500">District <span className="text-gray-400">(a Supervisor's territory — Contacts shows no data without this)</span></label>
+          <select className={inp + " appearance-none"} value={districtId} onChange={(e) => setDistrictId(e.target.value)}>
+            <option value="">— No district —</option>
+            {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </div>
         <div className="flex justify-end gap-2 pt-2">
