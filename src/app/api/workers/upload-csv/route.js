@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { computeWorkerStatus } from "@/lib/workerStatus";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // CSV header: name,mobile,address,district_name,assembly_name,position,skills,status
 function splitRow(line) {
@@ -58,6 +59,7 @@ export async function POST(req) {
       );
       inserted++;
     }
+    if (inserted > 0) emitLiveEvent(LIVE_EVENTS.WORKER_ADDED, { count: inserted });
     return NextResponse.json({ inserted, total_rows: lines.length - 1 });
   } catch (err) {
     console.error("workers upload-csv error:", err);

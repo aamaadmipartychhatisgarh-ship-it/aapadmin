@@ -8,6 +8,7 @@ import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { logAudit } from "@/lib/audit";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // UPDATE ... WHERE id IN (...) is chunked at this size so one caller taking
 // thousands of contacts never builds a single enormous IN() list.
@@ -206,6 +207,7 @@ export async function POST(req) {
         mismatches: mismatches.length ? mismatches : undefined,
       },
     });
+    if (assigned > 0) emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: assigned });
     return NextResponse.json({
       assigned,
       matched_total: matchedTotal,

@@ -5,6 +5,7 @@ import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { recomputeTaskStatus } from "@/lib/tasks";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // PATCH /api/tasks/subtasks/[id]  { completed: boolean }
 // Toggle one checklist item, record who/when, then auto-recompute the master
@@ -50,6 +51,7 @@ export async function PATCH(req, { params }) {
 
     // Auto-status: all items done → task completed, some → in_progress, none → pending.
     const progress = await recomputeTaskStatus(task.id);
+    if (progress?.status === "completed") emitLiveEvent(LIVE_EVENTS.TASK_COMPLETED, { task_id: task.id });
     return NextResponse.json({ ok: true, ...(progress || {}) });
   } catch (err) {
     console.error("subtask toggle error:", err);

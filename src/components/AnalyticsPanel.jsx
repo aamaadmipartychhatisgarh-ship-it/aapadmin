@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   Treemap, FunnelChart, Funnel, LabelList,
   CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { Loader2, Filter, BarChart3, PieChart as PieIcon, TrendingUp, Layers, Activity, Radar as RadarIcon, GitBranch, Grid3x3 } from "lucide-react";
+import { Loader2, Filter, BarChart3, PieChart as PieIcon, TrendingUp, Layers, Activity, Radar as RadarIcon, GitBranch, Grid3x3, Radio } from "lucide-react";
+import { useLiveAnalytics } from "@/hooks/useLiveAnalytics";
 
 const STATUS_COLORS = {
   "Phone Picked":   "#10B981",
@@ -35,22 +36,36 @@ export default function AnalyticsPanel() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [districtId, setDistrictId] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(null);
+  // Silent background refetches (live-event/poll-triggered) skip the
+  // full-panel loading spinner — only the very first load and explicit
+  // filter changes should blank the charts out.
+  const firstLoad = useRef(true);
 
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
   }, []);
 
-  useEffect(() => {
-    setLoading(true);
+  const load = useCallback(() => {
+    if (firstLoad.current) setLoading(true);
     const params = new URLSearchParams();
     if (dateFrom)   params.set("date_from", dateFrom);
     if (dateTo)     params.set("date_to", dateTo);
     if (districtId) params.set("district_id", districtId);
     fetch(`/api/analytics?${params}`)
       .then((r) => r.json())
-      .then((d) => setData(d))
-      .finally(() => setLoading(false));
+      .then((d) => { setData(d); setLastUpdated(new Date()); })
+      .finally(() => { setLoading(false); firstLoad.current = false; });
   }, [dateFrom, dateTo, districtId]);
+
+  // Re-run whenever a filter changes (also covers the initial load).
+  useEffect(() => { firstLoad.current = true; load(); }, [load]);
+
+  // Live refresh: SSE push (instant) + 60s safety-net poll + focus/visibility
+  // refetch — see src/hooks/useLiveAnalytics.js for why all three are needed
+  // on Hostinger's hosting. Reacts to: call logged, wrong number added, task
+  // completed, worker added, contact assigned.
+  useLiveAnalytics(load);
 
   const lineData = useMemo(() =>
     (data?.line || []).map((r) => ({ day: fmtDay(r.day), calls: Number(r.calls) })),
@@ -167,6 +182,11 @@ export default function AnalyticsPanel() {
             Clear
           </button>
         )}
+        <div className="ml-auto flex items-center gap-1.5 text-xs text-gray-400 self-center" title="Updates automatically — no refresh needed">
+          <Radio size={13} className="text-emerald-500 animate-pulse" />
+          <span className="font-medium text-emerald-600">Live</span>
+          {lastUpdated && <span>· updated {lastUpdated.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>}
+        </div>
       </div>
 
       {loading && !data ? (

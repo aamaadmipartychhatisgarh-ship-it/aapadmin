@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { getPool } from "@/lib/db";
 import { buildRuleMatch, zoneMatch } from "@/lib/assignmentRules";
 import { notWrongNumberClause } from "@/lib/contactExtras";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // On-demand daily top-up for the signed-in caller. For each active rule, fill
 // the caller's queue up to the daily quota: first from the unassigned pool,
@@ -122,6 +123,9 @@ export async function POST() {
       }
 
       conn.release();
+      if (assignedTotal + takenTotal > 0) {
+        emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: assignedTotal + takenTotal });
+      }
       return NextResponse.json({ assigned: assignedTotal, taken_from_others: takenTotal, rules: rules.length });
     } catch (e) {
       conn.release();

@@ -5,6 +5,7 @@ import { canManageWorkers, scopeFilterSync } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
 import { syncWorkerToContact } from "@/lib/workerSync";
 import { computeWorkerStatus } from "@/lib/workerStatus";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // Always compute fresh — the Workers directory must reflect the latest contact
 // edits synced from My Workplace, never a cached response.
@@ -209,6 +210,7 @@ export async function POST(req) {
       conn.release();
     }
 
+    emitLiveEvent(LIVE_EVENTS.WORKER_ADDED, { worker_id: workerId, count: 1 });
     return NextResponse.json({ id: workerId }, { status: 201 }); // eslint-disable-line
   } catch (err) {
     console.error("workers POST error:", err);

@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
 import { syncContactToWorker } from "@/lib/workerSync";
 import { logAudit } from "@/lib/audit";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // The contacts table has been extended over several migrations, and a given
 // deployment may not have every column yet (e.g. assembly_id/booth_id). Naming
@@ -123,6 +124,9 @@ export async function PUT(req, { params }) {
       conn.release();
     }
 
+    if (admin && "assigned_to_user_id" in data && data.assigned_to_user_id) {
+      emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
+    }
     // Return the latest saved record so the client never shows stale data.
     return NextResponse.json({ ok: true, contact: updated });
   } catch (err) {

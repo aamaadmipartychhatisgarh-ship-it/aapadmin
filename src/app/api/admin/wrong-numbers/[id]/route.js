@@ -6,6 +6,7 @@ import { query, getPool } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns } from "@/lib/contactExtras";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
 import { logAudit } from "@/lib/audit";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // POST /api/admin/wrong-numbers/[id]  { action: "restore" | "reassign" | "merge", user_id?, target_contact_id? }
 // Supervisor / Team Leader / Super Admin.
@@ -46,6 +47,7 @@ export async function POST(req, { params }) {
         [user_id, id]
       );
       logAudit(session, { action: "contact.wrong_number_reassign", entityType: "contact", entityId: id, details: { user_id } });
+      emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
       return NextResponse.json({ message: "Contact reassigned." });
     }
 

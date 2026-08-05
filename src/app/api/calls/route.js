@@ -4,6 +4,7 @@ import { authOptions, isSupervisor } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn } from "@/lib/contactExtras";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 export async function GET(req) {
   try {
@@ -181,10 +182,11 @@ export async function POST(req) {
     // If the call was tied to a contact: clear the lock, update completion / VIP /
     // follow-up state, and hand the contact back to the caller who scheduled the
     // follow-up so it lands in their queue on the right date.
+    let isWrongNumber = false;
     if (contact_id) {
       const finalStatuses = ["Phone Picked", "Wrong Number", "Rudely Behaved"];
       const isFinal = !!statusName && finalStatuses.includes(statusName);
-      const isWrongNumber = statusName === "Wrong Number";
+      isWrongNumber = statusName === "Wrong Number";
       // If a follow-up was scheduled, keep the contact open and pin it to this caller.
       const wantsFollowUp = !!is_follow_up_required;
       // Re-logging a call always consumes the previous reminder: set the new
@@ -240,6 +242,9 @@ export async function POST(req) {
         }
       }
     }
+
+    emitLiveEvent(LIVE_EVENTS.CALL_LOGGED, { call_id: res.insertId, contact_id: contact_id || null, status: statusName, user_id: session.user.id });
+    if (isWrongNumber) emitLiveEvent(LIVE_EVENTS.WRONG_NUMBER_ADDED, { contact_id, call_id: res.insertId });
 
     return Response.json({ message: "Call logged successfully", id: res.insertId }, { status: 201 });
   } catch (error) {

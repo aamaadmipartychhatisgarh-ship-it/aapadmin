@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/permissions";
 import { getPool } from "@/lib/db";
 import * as XLSX from "xlsx";
 import { parseAndValidateWorkbook, norm } from "@/lib/workerImport";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // Unified member import from Excel/CSV. Each member is added to BOTH:
 //   - workers  (the org member record — always, phone optional)
@@ -163,6 +164,7 @@ export async function POST(req) {
       }
 
       await conn.commit();
+      if (workersInserted > 0) emitLiveEvent(LIVE_EVENTS.WORKER_ADDED, { count: workersInserted });
 
       return NextResponse.json({
         total_rows: totalRows,

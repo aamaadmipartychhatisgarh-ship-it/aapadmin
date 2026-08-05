@@ -6,6 +6,7 @@ import { query } from "@/lib/db";
 import { notifyTaskAssigned } from "@/lib/notify";
 import { recomputeTaskStatus, hasSubtasksTable, hasTaskAssignedAt, hasTaskDurationColumns } from "@/lib/tasks";
 import { addDays } from "@/lib/taskDuration";
+import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 export async function PUT(req, { params }) {
   try {
@@ -55,8 +56,10 @@ export async function PUT(req, { params }) {
       sets.push("assigned_at = NOW()");
     }
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
+    const isCompleting = "status" in d && d.status === "completed";
     vals.push(id);
     await query(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`, vals);
+    if (isCompleting) emitLiveEvent(LIVE_EVENTS.TASK_COMPLETED, { task_id: id });
 
     // Reconcile the checklist (oversight edits only): keep items by id (update
     // title/order, preserving completion), insert new ones, delete removed ones,
@@ -73,7 +76,8 @@ export async function PUT(req, { params }) {
         if (s.id) await query("UPDATE task_subtasks SET title = ?, sort_order = ? WHERE id = ? AND task_id = ?", [s.title, s.sort, s.id, id]);
         else await query("INSERT INTO task_subtasks (task_id, title, sort_order) VALUES (?, ?, ?)", [id, s.title, s.sort]);
       }
-      await recomputeTaskStatus(id);
+      const recomputed = await recomputeTaskStatus(id);
+      if (recomputed?.status === "completed") emitLiveEvent(LIVE_EVENTS.TASK_COMPLETED, { task_id: id });
     }
 
     // If an oversight edit (re)assigned the task, alert the new assignee(s).
