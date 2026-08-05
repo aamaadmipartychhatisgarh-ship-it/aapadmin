@@ -6,8 +6,11 @@ import { query } from "@/lib/db";
 
 // Serves every /uploads/... URL, from three possible backends:
 //  1. worker_photos (DB-stored — durable across redeploys, see
-//     scripts/add-worker-photos-schema.mjs and /api/workers/photo) — checked
-//     first, by the uuid portion of the filename.
+//     scripts/add-worker-photos-schema.mjs) — legacy data only now (Worker
+//     Management was removed, nothing writes new rows here), kept so photos
+//     uploaded before the removal — including ones backfilled onto
+//     contacts.photo_url — keep resolving. Checked first, by the uuid
+//     portion of the filename.
 //  2. user_photos (same pattern, for caller/staff profile photos — see
 //     scripts/add-user-photos-schema.mjs and /api/users/photo).
 //  3. Local disk under /public/uploads (press notes, debate briefs, social

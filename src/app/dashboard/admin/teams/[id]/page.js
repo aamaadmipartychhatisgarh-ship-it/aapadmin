@@ -98,11 +98,7 @@ function Body({ id, canEdit, router }) {
               {members.map((m) => (
                 <tr key={m.membership_id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">
-                    {m.member_type === "worker" ? (
-                      <Link href={`/dashboard/admin/workers/${m.id}`} className="hover:text-[#164FA3]">{m.name}</Link>
-                    ) : (
-                      <span>{m.name}</span>
-                    )}
+                    <span>{m.name}</span>
                     <span className={`ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${m.member_type === "user" ? "bg-blue-50 text-[#164FA3]" : "bg-gray-100 text-gray-500"}`}>
                       {m.member_type === "user" ? "User" : "Worker"}
                     </span>
@@ -129,7 +125,6 @@ function Body({ id, canEdit, router }) {
         <AddMemberModal
           teamId={id}
           existingUsers={members.filter((m) => m.member_type === "user").map((m) => m.user_id)}
-          existingWorkers={members.filter((m) => m.member_type === "worker").map((m) => m.worker_id)}
           onClose={() => setShowAdd(false)}
           onSaved={() => { setShowAdd(false); load(); }}
         />
@@ -147,29 +142,13 @@ function Stat({ icon: Icon, label, value }) {
   );
 }
 
-function AddMemberModal({ teamId, existingUsers, existingWorkers, onClose, onSaved }) {
-  const [tab, setTab] = useState("users"); // users | workers
+function AddMemberModal({ teamId, existingUsers, onClose, onSaved }) {
   const [search, setSearch] = useState("");
-  const [workers, setWorkers] = useState([]);
   const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers(d.users || [])).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (tab !== "workers") return;
-    const t = setTimeout(async () => {
-      setLoading(true);
-      const p = new URLSearchParams({ limit: "20" });
-      if (search) p.set("search", search);
-      const r = await fetch(`/api/workers?${p}`);
-      if (r.ok) setWorkers((await r.json()).workers || []);
-      setLoading(false);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search, tab]);
 
   async function add(payload) {
     await fetch(`/api/teams/${teamId}/members`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -186,14 +165,9 @@ function AddMemberModal({ teamId, existingUsers, existingWorkers, onClose, onSav
           <h2 className="text-xl font-bold text-gray-900">Add Member</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          <button onClick={() => setTab("users")} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold ${tab === "users" ? "bg-[#164FA3] text-white" : "text-gray-600"}`}>Users (accounts)</button>
-          <button onClick={() => setTab("workers")} className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold ${tab === "workers" ? "bg-[#164FA3] text-white" : "text-gray-600"}`}>Workers</button>
-        </div>
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === "users" ? "Search users…" : "Search workers…"} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users…" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
         <div className="max-h-80 overflow-auto divide-y divide-gray-100">
-          {tab === "users" ? (
-            visibleUsers.length === 0 ? <div className="py-6 text-center text-gray-400 text-sm">No users match.</div> :
+          {visibleUsers.length === 0 ? <div className="py-6 text-center text-gray-400 text-sm">No users match.</div> :
             visibleUsers.map((u) => {
               const already = existingUsers.includes(u.id);
               return (
@@ -203,21 +177,6 @@ function AddMemberModal({ teamId, existingUsers, existingWorkers, onClose, onSav
                     <div className="text-xs text-gray-500 truncate">{u.role} · {u.home_district_name || "no district"}</div>
                   </div>
                   <button disabled={already} onClick={() => add({ user_id: u.id })} className={`shrink-0 text-xs px-3 py-1 rounded-lg font-semibold ${already ? "bg-gray-100 text-gray-400" : "bg-[#164FA3] text-white hover:bg-blue-800"}`}>
-                    {already ? "Added" : "Add"}
-                  </button>
-                </div>
-              );
-            })
-          ) : loading ? <div className="py-6 text-center text-gray-400"><Loader2 className="inline animate-spin" /></div> :
-            workers.map((w) => {
-              const already = existingWorkers.includes(w.id);
-              return (
-                <div key={w.id} className="flex items-center justify-between gap-3 py-2.5">
-                  <div className="min-w-0">
-                    <div className="font-medium text-gray-900 text-sm truncate">{w.name}</div>
-                    <div className="text-xs text-gray-500 truncate">{w.position || "—"} · {w.district_name || "—"}</div>
-                  </div>
-                  <button disabled={already} onClick={() => add({ worker_id: w.id })} className={`shrink-0 text-xs px-3 py-1 rounded-lg font-semibold ${already ? "bg-gray-100 text-gray-400" : "bg-[#164FA3] text-white hover:bg-blue-800"}`}>
                     {already ? "Added" : "Add"}
                   </button>
                 </div>

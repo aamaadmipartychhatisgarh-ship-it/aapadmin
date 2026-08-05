@@ -170,7 +170,7 @@ export default function DashboardLayout({ children }) {
       { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
       { name: "Caller Performance", href: "/dashboard/supervisor/callers", icon: TrendingUp },
       { name: "Live Status", href: "/dashboard/supervisor/live", icon: Activity },
-      { name: "Workers", href: "/dashboard/admin/administration", icon: UserCog },
+      { name: "Teams", href: "/dashboard/admin/administration?tab=teams", icon: UserCog },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
@@ -212,7 +212,6 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { name: "Log a Call", href: "/dashboard/calls/new", icon: PhoneCall },
       { name: "My Calls", href: "/dashboard/calls", icon: Database },
-      { name: "Add Workers", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Complaints", href: "/dashboard/complaints", icon: MessageSquare },
       { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
     ];

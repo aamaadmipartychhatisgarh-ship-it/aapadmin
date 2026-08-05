@@ -22,13 +22,6 @@ export async function GET() {
 
     const alerts = [];
 
-    // Inactive workers
-    const [[inactive]] = await query(
-      `SELECT COUNT(*) AS n FROM workers w WHERE status='inactive' ${wScope.where}`,
-      wScope.params
-    ).then((r) => [r]);
-    if (inactive.n > 0) alerts.push({ type: "inactive_worker", severity: "warning", title: `${inactive.n} inactive workers`, body: "Workers marked inactive need follow-up.", link: "/dashboard/admin/administration" });
-
     // Weak districts (low avg activity) — scope the worker join the same way.
     // For simplicity reuse the wScope as the district filter on workers.
     const weak = await query(

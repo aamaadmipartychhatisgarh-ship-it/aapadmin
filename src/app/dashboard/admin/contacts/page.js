@@ -15,9 +15,9 @@ import Avatar from "@/components/Avatar";
 
 const PAGE_SIZE = 50; // contacts per page — keeps each query light on big tables
 
-// Contacts is the central place for both contact records AND contact
-// assignment/distribution — Administration is worker management only, no
-// duplicate assignment panel there.
+// Contacts is the central place for contact records AND contact
+// assignment/distribution — fully standalone (Worker Management was
+// removed; contacts no longer depend on a linked worker for anything).
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -67,7 +67,7 @@ function Body({ session }) {
   const [editingIndex, setEditingIndex] = useState(null); // index into `contacts`, or null
   const [editNavBusy, setEditNavBusy] = useState(false); // fetching an adjacent page mid-edit
   const [taskFor, setTaskFor] = useState(null); // contact to create a task for
-  const [viewingWorkerId, setViewingWorkerId] = useState(null);
+  const [viewingContact, setViewingContact] = useState(null); // contact row to show in the detail modal, or null
   const [importing, setImporting] = useState(false);
   const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
   const [teams, setTeams] = useState([]);
@@ -334,20 +334,19 @@ function Body({ session }) {
     load();
   }
 
-  // Import members from an Excel/CSV file (e.g. MEMBER LIST.xlsx).
-  // Adds each member to Workers AND (if they have a phone) to Contacts.
+  // Import contacts from an Excel/CSV file (e.g. MEMBER LIST.xlsx).
   async function importExcel(file) {
     setMessage(""); setError("");
     setImporting(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const r = await fetch("/api/workers/import-excel", { method: "POST", body: fd });
+      const r = await fetch("/api/contacts/import-excel", { method: "POST", body: fd });
       const d = await r.json();
       if (!r.ok) { setError(d.message || "Import failed"); return; }
       let msg = `Contacts: ${d.contacts_inserted} new, ${d.contacts_updated} updated`;
-      if (d.contacts_skipped_no_phone) msg += ` (${d.contacts_skipped_no_phone} members had no phone)`;
-      msg += `. Members: ${d.workers_inserted} new, ${d.workers_updated} updated.`;
+      if (d.contacts_skipped_no_phone) msg += ` (${d.contacts_skipped_no_phone} rows had no phone)`;
+      msg += ".";
       if (d.unmatched_assemblies?.length) msg += ` Unmatched assemblies: ${d.unmatched_assemblies.slice(0, 5).join(", ")}${d.unmatched_assemblies.length > 5 ? "…" : ""}.`;
       setMessage(msg);
       load();
@@ -609,11 +608,9 @@ function Body({ session }) {
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Avatar name={c.person_name} src={c.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
-                      {c.worker_id ? (
-                        <button onClick={() => setViewingWorkerId(c.worker_id)} className="hover:underline hover:text-[#164FA3] text-left" title="View details">
-                          {c.person_name}
-                        </button>
-                      ) : c.person_name}
+                      <button onClick={() => setViewingContact(c)} className="hover:underline hover:text-[#164FA3] text-left" title="View details">
+                        {c.person_name}
+                      </button>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">
@@ -622,7 +619,6 @@ function Body({ session }) {
                       <CallActionIcons
                         phone={c.phone_number} personName={c.person_name} contactId={c.id}
                         canLog={isCaller(session)} onLogged={load}
-                        profileHref={c.worker_id ? `/dashboard/admin/workers/${c.worker_id}` : undefined}
                       />
                     </div>
                   </td>
@@ -687,7 +683,7 @@ function Body({ session }) {
         />
       )}
       {taskFor && <ContactTaskModal contact={taskFor} users={users} onClose={() => setTaskFor(null)} onSaved={() => { setTaskFor(null); setMessage(`Task assigned for ${taskFor.person_name}.`); }} />}
-      {viewingWorkerId && <PersonDetailModal type="worker" id={viewingWorkerId} onClose={() => setViewingWorkerId(null)} />}
+      {viewingContact && <PersonDetailModal type="contact" data={viewingContact} onClose={() => setViewingContact(null)} />}
     </div>
   );
 }

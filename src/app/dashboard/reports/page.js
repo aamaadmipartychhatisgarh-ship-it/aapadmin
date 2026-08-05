@@ -28,7 +28,7 @@ const emptyGeo = () => ({ zone_id: [], lok_sabha_id: [], district_id: [], assemb
 
 // Fetch a level's location options, narrowed to children of `parentIds` when
 // any are selected — otherwise the full list. Multi-select-aware version of
-// the single-parent cascades used elsewhere (WorkersTab, Contacts).
+// the single-parent cascades used elsewhere (Contacts).
 async function fetchLocations(type, parentIds) {
   if (!parentIds || parentIds.length === 0) {
     const d = await fetch(`/api/locations?type=${type}`).then((r) => r.json()).catch(() => ({}));

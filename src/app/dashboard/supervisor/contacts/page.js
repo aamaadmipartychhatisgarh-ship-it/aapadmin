@@ -79,7 +79,7 @@ function Body({ session }) {
   const [editingIndex, setEditingIndex] = useState(null);
   const [editNavBusy, setEditNavBusy] = useState(false);
   const [taskFor, setTaskFor] = useState(null);
-  const [viewingWorkerId, setViewingWorkerId] = useState(null);
+  const [viewingContact, setViewingContact] = useState(null); // contact row to show in the detail modal, or null
   const [bulkCallers, setBulkCallers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [bulkTeam, setBulkTeam] = useState("");
@@ -533,11 +533,9 @@ function Body({ session }) {
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Avatar name={c.person_name} src={c.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
-                      {c.worker_id ? (
-                        <button onClick={() => setViewingWorkerId(c.worker_id)} className="hover:underline hover:text-[#164FA3] text-left" title="View details">
-                          {c.person_name}
-                        </button>
-                      ) : c.person_name}
+                      <button onClick={() => setViewingContact(c)} className="hover:underline hover:text-[#164FA3] text-left" title="View details">
+                        {c.person_name}
+                      </button>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">
@@ -546,7 +544,6 @@ function Body({ session }) {
                       <CallActionIcons
                         phone={c.phone_number} personName={c.person_name} contactId={c.id}
                         canLog={false} onLogged={load}
-                        profileHref={c.worker_id ? `/dashboard/admin/workers/${c.worker_id}` : undefined}
                       />
                     </div>
                   </td>
@@ -607,7 +604,7 @@ function Body({ session }) {
         />
       )}
       {taskFor && <ContactTaskModal contact={taskFor} users={users} onClose={() => setTaskFor(null)} onSaved={() => { setTaskFor(null); setMessage(`Task assigned for ${taskFor.person_name}.`); }} />}
-      {viewingWorkerId && <PersonDetailModal type="worker" id={viewingWorkerId} onClose={() => setViewingWorkerId(null)} />}
+      {viewingContact && <PersonDetailModal type="contact" data={viewingContact} onClose={() => setViewingContact(null)} />}
     </div>
   );
 }

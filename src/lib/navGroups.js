@@ -4,10 +4,10 @@
 //
 // Groups are keyed by href so they're robust to label changes.
 export const GROUPS = [
-  // Administration: Workers + Contact Distribution + Worker Activity + Teams
-  // + Users, all tabs on one page now (src/app/dashboard/admin/administration).
-  // Future modules (Roles, Permissions, Departments, Designations, …) belong
-  // here too.
+  // Administration: Teams + Users, tabs on one page
+  // (src/app/dashboard/admin/administration). Worker Management (a former
+  // third tab here) was removed entirely. Future modules (Roles, Permissions,
+  // Departments, Designations, …) belong here too.
   { key: "people", label: "Administration", hrefs: ["/dashboard/admin/administration"] },
   // People: the day-to-day calling/contact operations. Administration is
   // cross-listed here too (not just under its own group above) so this

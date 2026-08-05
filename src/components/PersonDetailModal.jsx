@@ -1,53 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { X, Phone, MapPin, Activity, Award, Users as UsersIcon, Loader2, User, ExternalLink } from "lucide-react";
+import { X, Phone, MapPin, Activity, Users as UsersIcon, User } from "lucide-react";
 import { initialsOf } from "@/components/Avatar";
 
 // Popup shown when a user clicks a person's name or photo in a list/table —
-// two modes:
-//   type="worker" id={workerId}   fetches the full profile (/api/workers/:id):
-//                                  photo, position, mobile, location, activity,
-//                                  teams, badges — same data the full worker
-//                                  page shows, just without navigating away.
-//   type="user" data={rowObject}  renders the row data the list already has
-//                                  loaded (username, role, district, status) —
-//                                  no extra fetch, since there's no separate
-//                                  user-detail endpoint today.
+// two modes, both rendering from data the list already has loaded (no extra
+// fetch — there's no separate detail endpoint for either):
+//   type="contact" data={rowObject}  a contacts-list row (name, phone, photo,
+//                                     designation, district/ward, status).
+//   type="user" data={rowObject}     a users-list row (username, role,
+//                                     district, status).
 //
 // Layout: a full-width photo "hero" on top (name/subtitle overlaid at the
 // bottom of the image, on a dark gradient scrim so text stays legible over
 // any photo), details grid below — matches how a phone contact card reads.
-export default function PersonDetailModal({ type, id, data, onClose }) {
-  const [worker, setWorker] = useState(null);
-  const [loading, setLoading] = useState(type === "worker");
-
-  useEffect(() => {
-    if (type !== "worker" || !id) return;
-    let alive = true;
-    setLoading(true);
-    fetch(`/api/workers/${id}`)
-      .then((r) => r.json())
-      .then((d) => { if (alive) setWorker(d); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [type, id]);
-
+export default function PersonDetailModal({ type, data, onClose }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        {type === "worker" ? (
-          loading ? (
-            <div className="p-10 flex items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
-          ) : worker ? (
-            <WorkerBody w={worker.worker} teams={worker.teams} badges={worker.badges} onClose={onClose} />
-          ) : (
-            <div className="p-10 text-center text-gray-400 text-sm">Couldn't load this worker.</div>
-          )
-        ) : (
-          <UserBody u={data} onClose={onClose} />
-        )}
+        {type === "contact" ? <ContactBody c={data} onClose={onClose} /> : <UserBody u={data} onClose={onClose} />}
       </div>
     </div>
   );
@@ -90,52 +62,28 @@ function Hero({ name, photo, subtitle, onClose }) {
   );
 }
 
-function WorkerBody({ w, teams, badges, onClose }) {
+function ContactBody({ c, onClose }) {
+  const subtitle = c?.designation_name || null;
+  const location = [c?.district_name, c?.ward_name].filter(Boolean).join(" / ");
   return (
     <div>
-      <Hero name={w.name} photo={w.photo_url} subtitle={w.position || "—"} onClose={onClose} />
+      <Hero name={c?.person_name} photo={c?.photo_url} subtitle={subtitle} onClose={onClose} />
 
-      <div className="p-5 space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <MiniDetail icon={Phone} label="Mobile">{w.mobile || "—"}</MiniDetail>
+      <div className="p-5 space-y-3">
+        {c?.phone_number && <MiniDetail icon={Phone} label="Phone">{c.phone_number}</MiniDetail>}
+        {location && <MiniDetail icon={MapPin} label="Location">{location}</MiniDetail>}
+        {c?.address && <MiniDetail icon={MapPin} label="Address">{c.address}</MiniDetail>}
+        {c?.assigned_to_username && <MiniDetail icon={UsersIcon} label="Assigned to">{c.assigned_to_username}</MiniDetail>}
+        {"is_completed" in (c || {}) && (
           <MiniDetail icon={Activity} label="Status">
-            <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${w.status === "active" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-              {w.status === "active" ? "Active" : "Pending"}
+            <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${c.is_completed ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+              {c.is_completed ? "Done" : "Pending"}
             </span>
           </MiniDetail>
-        </div>
-        <MiniDetail icon={MapPin} label="Location">
-          {[w.zone_name, w.lok_sabha_name, w.district_name, w.assembly_name, w.ward_name].filter(Boolean).join(" / ") || "—"}
-        </MiniDetail>
-        <MiniDetail icon={Activity} label="Activity Score">
-          <div className="flex items-center gap-2">
-            <div className="w-24 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3]" style={{ width: `${w.activity_score || 0}%` }} /></div>
-            <span className="font-bold text-gray-700 text-sm">{w.activity_score || 0}</span>
-          </div>
-        </MiniDetail>
-
-        {teams?.length > 0 && (
-          <div>
-            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1.5"><UsersIcon size={13} /> Teams</div>
-            <div className="flex flex-wrap gap-1.5">
-              {teams.map((t) => <span key={t.id} className="px-2.5 py-1 rounded-full bg-gray-100 text-xs font-medium text-gray-700">{t.name}</span>)}
-            </div>
-          </div>
         )}
-        {badges?.length > 0 && (
-          <div>
-            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1.5"><Award size={13} className="text-[#FCB712]" /> Badges</div>
-            <div className="flex flex-wrap gap-1.5">
-              {badges.map((b, i) => <span key={i} className="px-2.5 py-1 rounded-full text-xs font-semibold text-white" style={{ background: b.color || "#164FA3" }}>{b.name}</span>)}
-            </div>
-          </div>
+        {!c?.phone_number && !location && !c?.address && (
+          <p className="text-sm text-gray-400">No further details available.</p>
         )}
-      </div>
-
-      <div className="px-5 pb-5">
-        <Link href={`/dashboard/admin/workers/${w.id}`} className="inline-flex items-center gap-1.5 text-sm font-medium text-[#164FA3] hover:underline">
-          Open full profile <ExternalLink size={13} />
-        </Link>
       </div>
     </div>
   );

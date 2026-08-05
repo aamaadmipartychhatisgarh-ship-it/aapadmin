@@ -8,9 +8,9 @@ import { sniffImage, IMAGE_TYPES } from "@/lib/imageSniff";
 // POST /api/users/photo (multipart/form-data: field "file")
 // Returns: { url: "/uploads/<uuid>.<ext>" } — every signed-in user can call
 // this for their OWN profile photo (see PUT /api/users/me/photo, which is
-// what actually attaches the returned url to the caller's account). Mirrors
-// /api/workers/photo exactly — DB-stored (user_photos), survives redeploys,
-// served back out through /api/media/[file].
+// what actually attaches the returned url to the caller's account).
+// DB-stored (user_photos), survives redeploys, served back out through
+// /api/media/[file].
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);

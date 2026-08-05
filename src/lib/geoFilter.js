@@ -37,8 +37,8 @@ export function zoneScope(alias, zoneId) {
 // multi-select. Within a level the ids are OR'd (WHERE ... IN (…)); across
 // levels the clauses are AND'd by the caller, preserving the Zone → Lok Sabha →
 // District → Assembly → Ward (Block) → Booth hierarchy. "Ward" is what the
-// rest of the app labels "Block" (see WorkerModal.jsx) — same location type
-// and column, just a different display label depending on screen.
+// rest of the app labels "Block" — same location type and column, just a
+// different display label depending on screen.
 export function geoFilter(alias, { zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id } = {}) {
   const a = alias ? `${alias}.` : "";
   const clauses = [];

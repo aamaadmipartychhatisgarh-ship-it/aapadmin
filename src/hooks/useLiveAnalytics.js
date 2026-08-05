@@ -12,7 +12,7 @@ const SAFETY_POLL_MS = 60000;
 //     layer silently buffering or dropping the long-lived SSE connection,
 //     which is unconfirmed on this host (see api/analytics/stream/route.js)
 //   - immediately on tab focus/visibility, matching this app's existing
-//     refetch pattern (WorkersTab.jsx, dashboard/map/page.js)
+//     refetch pattern (see dashboard/map/page.js)
 // Returns nothing — it's a side-effect-only subscription.
 export function useLiveAnalytics(onRefresh) {
   const cbRef = useRef(onRefresh);

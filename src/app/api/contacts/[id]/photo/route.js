@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
-import { query, getPool } from "@/lib/db";
-import { syncContactToWorker } from "@/lib/workerSync";
+import { query } from "@/lib/db";
+import { hasContactPhotoColumn } from "@/lib/contactExtras";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 
 // POST /api/contacts/[id]/photo  { photo_url }
-// Saves a profile photo for the person by storing the URL on their linked worker
-// record (a person's photo lives on workers.photo_url, which every module reads).
+// Saves a profile photo directly on the contact (contacts.photo_url) — no
+// longer routes through a linked worker record (Worker Management was
+// removed; contacts are fully standalone now).
 // Allowed for the caller currently holding the contact, or any oversight user.
 export async function POST(req, { params }) {
   try {
@@ -22,29 +23,15 @@ export async function POST(req, { params }) {
         return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
       }
     }
+    if (!(await hasContactPhotoColumn())) {
+      return NextResponse.json({ message: "Contact photos are not enabled on this deployment yet." }, { status: 400 });
+    }
     const { photo_url } = await req.json();
 
-    const pool = getPool();
-    const conn = await pool.getConnection();
-    let oldPhoto = null;
-    try {
-      await conn.beginTransaction();
-      // Ensure a linked worker exists (creates + links one if not), then set its photo.
-      const workerId = await syncContactToWorker(conn, id);
-      if (workerId) {
-        const [[prev]] = await conn.query("SELECT photo_url FROM workers WHERE id = ?", [workerId]);
-        oldPhoto = prev?.photo_url || null;
-        await conn.query("UPDATE workers SET photo_url = ? WHERE id = ?", [photo_url || null, workerId]);
-      }
-      await conn.commit();
-    } catch (e) {
-      await conn.rollback();
-      throw e;
-    } finally {
-      conn.release();
-    }
+    const [prev] = await query("SELECT photo_url FROM contacts WHERE id = ?", [id]);
+    const oldPhoto = prev?.photo_url || null;
+    await query("UPDATE contacts SET photo_url = ? WHERE id = ?", [photo_url || null, id]);
 
-    // Remove the previous file once the new photo is committed (or on removal).
     if (oldPhoto && oldPhoto !== (photo_url || null)) await deleteLocalUpload(oldPhoto);
 
     return NextResponse.json({ ok: true, photo_url: photo_url || null });

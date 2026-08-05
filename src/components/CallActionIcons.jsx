@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Phone, MessageCircle, MessageSquare, Copy, UserRound, ClipboardCheck, Loader2, Check, History, PhoneCall, PhoneMissed, Clock, Flag } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Copy, UserRound, ClipboardCheck, Loader2, Check, History, Flag } from "lucide-react";
 import FloatingPopover from "@/components/FloatingPopover";
 
 // Indian 10-digit mobile → wa.me international format (91XXXXXXXXXX, no '+').
@@ -47,15 +47,13 @@ export const WRONG_NUMBER_REASONS = [
 // box, not the viewport.
 //   canLog       show an inline "log call result" popover (caller-only — the
 //                /api/calls endpoint 403s for admin/supervisor by design).
-//   workerId     show a "Call History" icon with a stats popover (Picked / Not
-//                Picked / etc. breakdown + total talk time), for the Workers list.
-//   contactId    (without workerId) shows "Call History" as a plain call-log
-//                list instead — for contact rows with no linked worker.
+//   contactId    if given, shows a "Call History" icon with that contact's
+//                plain call-log list.
 //   profileHref  if given, shows an "Open Profile" icon linking there.
 //   dark         true on a colored/dark card background (e.g. the workspace's
 //                active-call header) — swaps the per-action colors for a
 //                uniform white/translucent style that reads on dark backgrounds.
-export default function CallActionIcons({ phone, personName, contactId, workerId, canLog = false, onLogged, size = 15, profileHref, dark = false }) {
+export default function CallActionIcons({ phone, personName, contactId, canLog = false, onLogged, size = 15, profileHref, dark = false }) {
   const [logOpen, setLogOpen] = useState(false);
   const [waOpen, setWaOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -97,7 +95,7 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
         {copied ? <Check size={size} /> : <Copy size={size} />}
       </button>
 
-      {(workerId || contactId) && (
+      {contactId && (
         <>
           <button
             ref={historyRef}
@@ -108,8 +106,8 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
           >
             <History size={size} />
           </button>
-          <FloatingPopover anchorRef={historyRef} open={historyOpen} onClose={() => setHistoryOpen(false)} width={workerId ? 256 : 280} estimatedHeight={260}>
-            {workerId ? <CallHistoryPopover workerId={workerId} /> : <ContactHistoryPopover contactId={contactId} />}
+          <FloatingPopover anchorRef={historyRef} open={historyOpen} onClose={() => setHistoryOpen(false)} width={280} estimatedHeight={260}>
+            <ContactHistoryPopover contactId={contactId} />
           </FloatingPopover>
         </>
       )}
@@ -190,72 +188,7 @@ function WhatsAppTemplatePopover({ wa, personName, onClose }) {
   );
 }
 
-const STATUS_META = {
-  "Phone Picked": { icon: PhoneCall, color: "text-emerald-600" },
-  "Not Picked": { icon: PhoneMissed, color: "text-amber-600" },
-  "Wrong Number": { icon: Phone, color: "text-gray-500" },
-  "Rudely Behaved": { icon: Phone, color: "text-red-600" },
-  "Busy": { icon: Clock, color: "text-violet-600" },
-  "Switched Off": { icon: Phone, color: "text-sky-600" },
-};
-
-function CallHistoryPopover({ workerId }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch(`/api/workers/${workerId}/call-history`).then((r) => r.json()).then(setData).finally(() => setLoading(false));
-  }, [workerId]);
-
-  const fmtMinutes = (secs) => {
-    const m = Math.floor(secs / 60), s = secs % 60;
-    return m > 0 ? `${m}m ${s}s` : `${s}s`;
-  };
-
-  return (
-    <div className="p-3">
-      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5"><History size={13} /> Call History</div>
-      {loading ? (
-        <div className="py-4 flex items-center justify-center text-gray-400"><Loader2 size={16} className="animate-spin" /></div>
-      ) : !data || data.total === 0 ? (
-        <p className="text-sm text-gray-400 py-2">No calls logged yet.</p>
-      ) : (
-        <div className="space-y-2">
-          <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-bold text-gray-900">{data.total}</span>
-            <span className="text-xs text-gray-400">total calls</span>
-          </div>
-          <div className="space-y-1">
-            {Object.entries(data.by_status).map(([name, n]) => {
-              const meta = STATUS_META[name] || { icon: Phone, color: "text-gray-500" };
-              const Icon = meta.icon;
-              return (
-                <div key={name} className="flex items-center justify-between text-sm">
-                  <span className={`flex items-center gap-1.5 ${meta.color}`}><Icon size={13} /> {name}</span>
-                  <span className="font-semibold text-gray-700">{n}</span>
-                </div>
-              );
-            })}
-          </div>
-          {data.talk_seconds > 0 && (
-            <div className="flex items-center justify-between text-sm pt-1.5 border-t border-gray-100">
-              <span className="text-gray-500">Total talk time</span>
-              <span className="font-semibold text-gray-700">{fmtMinutes(data.talk_seconds)}</span>
-            </div>
-          )}
-          {data.last_call_at && (
-            <div className="text-[11px] text-gray-400 pt-1">
-              Last: {new Date(data.last_call_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} — {data.last_call_status}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Raw call-log list for a contact with no linked worker (workerId's aggregate
-// stats popover needs a worker row; this covers the plain-contact case).
+// Raw call-log list for a contact.
 function ContactHistoryPopover({ contactId }) {
   const [history, setHistory] = useState(null);
 

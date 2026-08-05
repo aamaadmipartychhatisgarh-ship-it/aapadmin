@@ -623,7 +623,6 @@ function WorkspaceBody() {
                         phone={active.phone_number}
                         personName={active.person_name}
                         contactId={active.id}
-                        profileHref={active.worker_id ? `/dashboard/admin/workers/${active.worker_id}` : undefined}
                         dark
                       />
                     </div>

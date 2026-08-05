@@ -3,7 +3,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
-import { syncContactToWorker } from "@/lib/workerSync";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
@@ -93,7 +92,6 @@ export async function PUT(req, { params }) {
       );
       affected = result.affectedRows;
       if (affected > 0) {
-        await syncContactToWorker(conn, id);
         const [rows] = await conn.query("SELECT * FROM contacts WHERE id = ?", [id]);
         updated = rows[0];
       }

@@ -1,10 +1,14 @@
 import { query } from "@/lib/db";
 import { WORKER_TYPES } from "@/lib/workerTypes";
 
-// Shared parse + validate logic for the Worker Excel/CSV importer — used by
-// BOTH the dry-run preview and the real commit (src/app/api/workers/
-// import-excel/route.js) so the numbers shown in the preview modal are
+// Shared parse + validate logic for the Contacts Excel/CSV importer
+// (src/app/api/contacts/import-excel/route.js) — used by BOTH the dry-run
+// preview and the real commit, so the numbers shown in the preview are
 // exactly what gets written, never a second, slightly different pass.
+// Despite the filename (this originally also matched against a `workers`
+// table, before Worker Management was removed), the geo/name/mobile
+// resolution logic here is domain-neutral, not worker-specific — kept as-is
+// and reused for contacts rather than duplicated.
 //
 // Handles the MEMBER LIST format:
 //   S.NO | DATE | NAME | CONTACT NO | JILA | VIDHANSABHA | BLOCK | WARD

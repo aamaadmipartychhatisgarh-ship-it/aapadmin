@@ -17,6 +17,21 @@ export async function hasWrongNumberColumn() {
   return _wrongCol;
 }
 
+// Optional contacts.photo_url column (scripts/add-contact-photo-url.mjs) —
+// gives contacts their own native photo, decoupled from the (removed)
+// Worker Management module.
+let _photoUrl;
+export async function hasContactPhotoColumn() {
+  if (_photoUrl !== undefined) return _photoUrl;
+  try {
+    const rows = await query("SHOW COLUMNS FROM contacts LIKE 'photo_url'");
+    _photoUrl = rows.length > 0;
+  } catch {
+    _photoUrl = false;
+  }
+  return _photoUrl;
+}
+
 // Optional contacts.follow_up_time column (scripts/add-followup-time.mjs).
 let _fupTime;
 export async function hasFollowUpTimeColumn() {

@@ -22,15 +22,17 @@ const nextConfig = {
       ],
     };
   },
-  // Worker management was consolidated into the Administration hub's Workers
-  // tab — the standalone list page is gone. Old bookmarks/links to it get a
+  // Worker Management (list page, profile page, everything under
+  // /dashboard/admin/workers) was removed entirely — Administration now
+  // has only Teams/Users tabs. Old bookmarks/links to any worker URL get a
   // real HTTP permanent redirect (not a client-side page that has to mount
-  // and re-navigate) straight to the hub. Only the exact list path is
-  // matched — /dashboard/admin/workers/[id] (a worker's own profile page)
-  // is a separate, still-live route and must NOT be redirected.
+  // and re-navigate) to the Administration hub's default (Teams) tab.
+  // Matches both the exact list path and any sub-path (old profile URLs
+  // like /dashboard/admin/workers/123).
   async redirects() {
     return [
-      { source: "/dashboard/admin/workers", destination: "/dashboard/admin/administration?tab=workers", permanent: true },
+      { source: "/dashboard/admin/workers", destination: "/dashboard/admin/administration?tab=teams", permanent: true },
+      { source: "/dashboard/admin/workers/:path*", destination: "/dashboard/admin/administration?tab=teams", permanent: true },
     ];
   },
   async headers() {

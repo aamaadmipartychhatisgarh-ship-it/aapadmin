@@ -3,7 +3,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
-import { syncContactToWorker } from "@/lib/workerSync";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
@@ -101,11 +100,7 @@ export async function PUT(req, { params }) {
     }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
 
-    // Apply the contact edit and mirror it onto the linked worker (matched by the
-    // stable worker_id, falling back to phone) atomically — both commit or neither
-    // does. syncContactToWorker updates every mapped field incl. the designation,
-    // and creates + links a worker if the person has none yet, so a My Workplace
-    // edit is always reflected in the Workers module. Returns the fresh contact.
+    // Apply the contact edit. Returns the fresh contact.
     const pool = getPool();
     const conn = await pool.getConnection();
     let updated;
@@ -113,7 +108,6 @@ export async function PUT(req, { params }) {
       await conn.beginTransaction();
       vals.push(id);
       await conn.query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
-      await syncContactToWorker(conn, id);
       const [rows] = await conn.query("SELECT * FROM contacts WHERE id = ?", [id]);
       updated = rows[0];
       await conn.commit();

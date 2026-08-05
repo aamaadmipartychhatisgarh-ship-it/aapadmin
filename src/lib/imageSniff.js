@@ -1,8 +1,8 @@
 // Shared image validation for every upload endpoint that accepts photos.
 // Validates the REAL content type from the file's magic bytes (not just the
 // client-declared MIME type), so an executable renamed to .jpg can't slip
-// through. Extracted so /api/uploads and /api/workers/photo share one check
-// instead of two copies drifting apart.
+// through. Extracted so every upload endpoint (/api/uploads, /api/users/photo,
+// …) shares one check instead of copies drifting apart.
 export const IMAGE_TYPES = {
   "image/jpeg": "jpg",
   "image/png": "png",
