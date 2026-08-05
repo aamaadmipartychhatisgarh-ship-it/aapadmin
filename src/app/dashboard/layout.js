@@ -166,6 +166,7 @@ export default function DashboardLayout({ children }) {
   } else if (isSupervisor) {
     navItems = [
       { name: "Overview", href: "/dashboard/supervisor", icon: LayoutDashboard },
+      { name: "Contacts", href: "/dashboard/supervisor/contacts", icon: UserCheck },
       { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
       { name: "Caller Performance", href: "/dashboard/supervisor/callers", icon: TrendingUp },
       { name: "Live Status", href: "/dashboard/supervisor/live", icon: Activity },
