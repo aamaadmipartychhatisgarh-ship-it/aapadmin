@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight, isAdmin } from "@/lib/permissions";
-import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X } from "lucide-react";
+import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X, GitMerge, Send } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import Avatar from "@/components/Avatar";
+import { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
+
+const REASON_LABEL = Object.fromEntries(WRONG_NUMBER_REASONS.map((r) => [r.value, r.label]));
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -35,6 +38,7 @@ function Body({ canDelete }) {
   const [assemblyId, setAssemblyId] = useState("");
   const [caller, setCaller] = useState("");
   const [statusF, setStatusF] = useState("");
+  const [reasonF, setReasonF] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [zones, setZones] = useState([]);
@@ -45,6 +49,8 @@ function Body({ canDelete }) {
   const [reassign, setReassign] = useState(null);
   const [editRow, setEditRow] = useState(null);
   const [historyRow, setHistoryRow] = useState(null);
+  const [mergeRow, setMergeRow] = useState(null);
+  const [verifyBusyId, setVerifyBusyId] = useState(null);
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
@@ -64,6 +70,7 @@ function Body({ canDelete }) {
     if (assemblyId) p.set("assembly_id", assemblyId);
     if (caller) p.set("caller", caller);
     if (statusF) p.set("status", statusF);
+    if (reasonF) p.set("reason", reasonF);
     if (from) p.set("date_from", from);
     if (to) p.set("date_to", to);
     return p;
@@ -79,7 +86,7 @@ function Body({ canDelete }) {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, from, to]);
+  }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, reasonF, from, to]);
 
   async function restore(id) {
     if (!confirm("Restore this contact to the active calling queue?")) return;
@@ -91,6 +98,19 @@ function Body({ canDelete }) {
     const r = await fetch(`/api/admin/wrong-numbers/${id}`, { method: "DELETE" });
     if (r.ok) { setMsg("Record deleted."); load(); }
     else { const d = await r.json().catch(() => ({})); setMsg(d.message || "Delete failed."); }
+  }
+  // Send for Verification — routes this record into the designation-based
+  // correction workflow (Report → Supervisor verifies → Designation fixes it),
+  // reusing the same endpoint the caller-facing "Report number issue" uses.
+  async function sendForVerification(c) {
+    setVerifyBusyId(c.id);
+    const r = await fetch(`/api/contacts/${c.id}/report-issue`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "wrong_number", note: "Sent for verification from the Wrong Numbers module." }),
+    });
+    setVerifyBusyId(null);
+    if (r.ok) setMsg(`Sent for verification. Open Number Corrections to route it to a designation.`);
+    else { const d = await r.json().catch(() => ({})); setMsg(d.message || "Failed to send for verification."); }
   }
 
   const sel = "h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white";
@@ -119,6 +139,7 @@ function Body({ canDelete }) {
         <select value={assemblyId} onChange={(e) => setAssemblyId(e.target.value)} className={sel}><option value="">All assemblies</option>{assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select value={caller} onChange={(e) => setCaller(e.target.value)} className={sel}><option value="">All callers</option>{callers.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}</select>
         <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className={sel}><option value="">Any status</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select>
+        <select value={reasonF} onChange={(e) => setReasonF(e.target.value)} className={sel}><option value="">Any reason</option>{WRONG_NUMBER_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</select>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} title="Marked from" className={sel} />
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="Marked to" className={sel} />
       </div>
@@ -134,7 +155,7 @@ function Body({ canDelete }) {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 text-left">
                 <tr>
-                  {["Name", "Mobile", "Zone", "Lok Sabha", "District", "Assembly", "Block/Ward", "Address", "Caller", "Marked Wrong", "Last Call", "Attempts", "Status", "Remarks", "Actions"].map((h) => (
+                  {["Name", "Mobile", "Designation", "Zone", "Lok Sabha", "District", "Assembly", "Block/Ward", "Address", "Caller", "Marked By", "Marked Wrong", "Reason", "Notes", "Wrong # Attempts", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-3 py-3 font-semibold text-gray-600">{h}</th>
                   ))}
                 </tr>
@@ -149,6 +170,7 @@ function Body({ canDelete }) {
                       </div>
                     </td>
                     <td className="px-3 py-3 font-mono text-xs text-gray-700">{c.phone_number}</td>
+                    <td className="px-3 py-3 text-xs text-gray-600">{c.designation_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.zone_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.lok_sabha_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.district_name || "—"}</td>
@@ -156,18 +178,23 @@ function Body({ canDelete }) {
                     <td className="px-3 py-3 text-xs text-gray-600">{c.ward_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[160px] truncate" title={c.address || ""}>{c.address || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-700">{c.caller_name || <span className="text-gray-300">Unassigned</span>}</td>
+                    <td className="px-3 py-3 text-xs text-gray-700">{c.marked_by_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{fmt(c.marked_wrong_date)}</td>
-                    <td className="px-3 py-3 text-xs text-gray-600">{fmt(c.last_call_date)}</td>
-                    <td className="px-3 py-3 text-center font-bold text-gray-700">{c.attempts}</td>
+                    <td className="px-3 py-3 text-xs text-gray-600">{c.wrong_number_reason ? (REASON_LABEL[c.wrong_number_reason] || c.wrong_number_reason) : "—"}</td>
+                    <td className="px-3 py-3 text-xs text-gray-600 max-w-[160px] truncate" title={c.wrong_number_notes || c.last_remarks || ""}>{c.wrong_number_notes || c.last_remarks || "—"}</td>
+                    <td className="px-3 py-3 text-center font-bold text-gray-700">{c.wrong_attempts}</td>
                     <td className="px-3 py-3"><span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Wrong Number</span></td>
-                    <td className="px-3 py-3 text-xs text-gray-600 max-w-[160px] truncate" title={c.last_remarks || ""}>{c.last_remarks || "—"}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-1">
                         <IconBtn title="Restore to queue" onClick={() => restore(c.id)} className="text-emerald-600 hover:bg-emerald-50"><RotateCcw size={15} /></IconBtn>
-                        <IconBtn title="Edit contact" onClick={() => setEditRow(c)} className="text-[#164FA3] hover:bg-blue-50"><Pencil size={15} /></IconBtn>
-                        <IconBtn title="Reassign" onClick={() => setReassign(c)} className="text-amber-600 hover:bg-amber-50"><UserCog size={15} /></IconBtn>
+                        <IconBtn title="Edit contact / mobile number" onClick={() => setEditRow(c)} className="text-[#164FA3] hover:bg-blue-50"><Pencil size={15} /></IconBtn>
+                        <IconBtn title="Reassign caller" onClick={() => setReassign(c)} className="text-amber-600 hover:bg-amber-50"><UserCog size={15} /></IconBtn>
+                        <IconBtn title="Merge into another contact" onClick={() => setMergeRow(c)} className="text-violet-600 hover:bg-violet-50"><GitMerge size={15} /></IconBtn>
+                        <IconBtn title="Send for verification" onClick={() => sendForVerification(c)} className="text-sky-600 hover:bg-sky-50" disabled={verifyBusyId === c.id}>
+                          {verifyBusyId === c.id ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+                        </IconBtn>
                         <IconBtn title="Call history" onClick={() => setHistoryRow(c)} className="text-gray-600 hover:bg-gray-100"><History size={15} /></IconBtn>
-                        {canDelete && <IconBtn title="Delete" onClick={() => del(c.id)} className="text-red-600 hover:bg-red-50"><Trash2 size={15} /></IconBtn>}
+                        {canDelete && <IconBtn title="Delete permanently" onClick={() => del(c.id)} className="text-red-600 hover:bg-red-50"><Trash2 size={15} /></IconBtn>}
                       </div>
                     </td>
                   </tr>
@@ -181,12 +208,19 @@ function Body({ canDelete }) {
       {reassign && <ReassignModal row={reassign} callers={callers} onClose={() => setReassign(null)} onSaved={() => { setReassign(null); setMsg("Contact reassigned."); load(); }} />}
       {editRow && <EditModal row={editRow} onClose={() => setEditRow(null)} onSaved={() => { setEditRow(null); setMsg("Contact updated."); load(); }} />}
       {historyRow && <HistoryModal row={historyRow} onClose={() => setHistoryRow(null)} />}
+      {mergeRow && (
+        <MergeModal
+          row={mergeRow}
+          onClose={() => setMergeRow(null)}
+          onSaved={(d) => { setMergeRow(null); setMsg(d.message || "Merged."); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function IconBtn({ title, onClick, className, children }) {
-  return <button title={title} onClick={onClick} className={`p-1.5 rounded-lg ${className}`}>{children}</button>;
+function IconBtn({ title, onClick, className, disabled, children }) {
+  return <button title={title} onClick={onClick} disabled={disabled} className={`p-1.5 rounded-lg disabled:opacity-40 ${className}`}>{children}</button>;
 }
 
 const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
@@ -243,6 +277,82 @@ function EditModal({ row, onClose, onSaved }) {
       <div className="flex justify-end gap-2 pt-2">
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
         <button onClick={save} disabled={saving || !form.person_name || !form.phone_number} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Save"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+// Merge this (wrong-number) contact into an existing correct one — search by
+// name/phone, pick the target, confirm. Call/task history moves to the
+// target; this duplicate row is removed once nothing points at it anymore.
+function MergeModal({ row, onClose, onSaved }) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [target, setTarget] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!q.trim()) { setResults([]); return; }
+    setSearching(true);
+    const t = setTimeout(() => {
+      fetch(`/api/contacts?search=${encodeURIComponent(q)}&status=all&page_size=8`)
+        .then((r) => r.json())
+        .then((d) => setResults((d.contacts || []).filter((c) => c.id !== row.id)))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, row.id]);
+
+  async function save() {
+    if (!target) return;
+    setSaving(true); setError("");
+    const r = await fetch(`/api/admin/wrong-numbers/${row.id}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "merge", target_contact_id: target.id }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) onSaved(d);
+    else { setError(d.message || "Merge failed."); setSaving(false); }
+  }
+
+  return (
+    <Modal title={`Merge "${row.person_name}" into…`} onClose={onClose}>
+      <p className="text-sm text-gray-500">
+        Search for the correct contact record. All call/task history from <strong>{row.person_name}</strong> ({row.phone_number}) moves to the
+        contact you pick, then this duplicate is removed.
+      </p>
+      {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
+      {!target ? (
+        <>
+          <input className={inp} placeholder="Search name or mobile…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+          {searching && <div className="text-xs text-gray-400 py-2"><Loader2 size={13} className="inline animate-spin" /> Searching…</div>}
+          {!searching && q.trim() && results.length === 0 && <div className="text-xs text-gray-400 py-2">No matching contacts.</div>}
+          <div className="max-h-56 overflow-y-auto divide-y divide-gray-100">
+            {results.map((c) => (
+              <button key={c.id} onClick={() => setTarget(c)} className="w-full text-left px-2 py-2 hover:bg-gray-50 text-sm flex items-center justify-between">
+                <span className="font-medium text-gray-900">{c.person_name}</span>
+                <span className="text-xs text-gray-500 font-mono">{c.phone_number}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="bg-violet-50 border border-violet-100 rounded-lg p-3 flex items-center justify-between">
+          <div>
+            <div className="font-semibold text-gray-900">{target.person_name}</div>
+            <div className="text-xs text-gray-500 font-mono">{target.phone_number}</div>
+          </div>
+          <button onClick={() => setTarget(null)} className="text-xs text-gray-500 hover:text-gray-700">Change</button>
+        </div>
+      )}
+      <div className="flex justify-end gap-2 pt-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+        <button onClick={save} disabled={saving || !target} className="px-4 py-2 text-sm bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-lg font-semibold flex items-center gap-1.5">
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <GitMerge size={14} />}
+          {saving ? "Merging…" : "Merge"}
+        </button>
       </div>
     </Modal>
   );

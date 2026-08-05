@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildRuleMatch, parseIds } from "@/lib/assignmentRules";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // GET: list all rules with caller name + a live "matching pending pool" count.
 export async function GET() {
@@ -19,11 +20,12 @@ export async function GET() {
         ORDER BY u.username ASC, r.id ASC`
     );
     // Annotate each with how many unassigned, pending contacts currently match.
+    const notWrong = await notWrongNumberClause("c");
     for (const r of rules) {
       const m = buildRuleMatch(r);
       const rows = await query(
         `SELECT COUNT(*) AS n FROM contacts c
-          WHERE c.is_completed = 0 AND c.assigned_to_user_id IS NULL ${m.where}`,
+          WHERE c.is_completed = 0 AND c.assigned_to_user_id IS NULL ${notWrong} ${m.where}`,
         m.params
       );
       r.pool_matches = Number(rows[0]?.n || 0);

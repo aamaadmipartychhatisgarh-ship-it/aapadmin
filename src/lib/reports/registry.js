@@ -125,6 +125,13 @@ export const MODULES = [
     dateField: "c.created_at",
     scopeCols: ["zone_id", "district_id", "assembly_id"],
     geo: true,
+    // Wrong Number contacts are hidden from this (and every other) report by
+    // default — same rule as every other list/queue/assignment in the app.
+    // Explicitly setting the "Wrong number" filter to Yes overrides it, so
+    // the Wrong Number report (below) and an admin who wants to see them
+    // here both still can.
+    baseWhere: "(c.is_wrong_number = 0 OR c.is_wrong_number IS NULL)",
+    baseWhereOverrideFilter: "is_wrong_number",
     joins: `
       LEFT JOIN users u ON u.id = c.assigned_to_user_id
       LEFT JOIN designations dg ON dg.id = c.designation_id
@@ -161,6 +168,70 @@ export const MODULES = [
       ...timeGroupBys("c.created_at"),
     ],
     defaultColumns: ["person_name", "phone_number", "assigned_to", "district", "is_completed", "created_at"],
+  },
+
+  // -------------------------------------------------------- WRONG NUMBERS ---
+  // The dedicated report for the Wrong Number module — the inverse of the
+  // Contacts module's default (baseWhere here always shows ONLY wrong
+  // numbers, whereas the Contacts module always HIDES them). dateField is a
+  // correlated subquery (the latest call logged "Wrong Number" for this
+  // contact) rather than the new wrong_number_at column, so date-range
+  // filtering works for contacts marked wrong before that column existed too.
+  {
+    key: "wrong_numbers",
+    label: "Wrong Numbers",
+    icon: "PhoneOff",
+    table: "contacts",
+    alias: "c",
+    dateField: "(SELECT MAX(cx.called_at) FROM calls cx JOIN call_statuses csx ON csx.id = cx.status_id WHERE cx.contact_id = c.id AND csx.name = 'Wrong Number')",
+    scopeCols: ["zone_id", "district_id", "assembly_id"],
+    geo: true,
+    baseWhere: "c.is_wrong_number = 1",
+    joins: `
+      LEFT JOIN users u ON u.id = c.assigned_to_user_id
+      LEFT JOIN users mb ON mb.id = c.wrong_number_by
+      LEFT JOIN designations dg ON dg.id = c.designation_id
+      LEFT JOIN locations dist ON dist.id = c.district_id
+      LEFT JOIN locations asm ON asm.id = c.assembly_id
+      LEFT JOIN locations wd ON wd.id = c.ward_id`,
+    columns: [
+      { key: "id", label: "ID", sql: "c.id", type: "number" },
+      { key: "person_name", label: "Person", sql: "c.person_name", type: "string" },
+      { key: "phone_number", label: "Phone", sql: "c.phone_number", type: "string" },
+      { key: "designation", label: "Designation", sql: "dg.name", type: "string" },
+      { key: "district", label: "District", sql: "dist.name", type: "string" },
+      { key: "assembly", label: "Assembly", sql: "asm.name", type: "string" },
+      { key: "block", label: "Block", sql: "wd.name", type: "string" },
+      { key: "assigned_to", label: "Assigned caller", sql: "u.username", type: "string" },
+      { key: "marked_by", label: "Marked by", sql: "mb.username", type: "string" },
+      { key: "reason", label: "Reason", sql: "c.wrong_number_reason", type: "string" },
+      { key: "notes", label: "Notes", sql: "c.wrong_number_notes", type: "string" },
+      { key: "marked_at", label: "Marked at", sql: "c.wrong_number_at", type: "datetime" },
+      { key: "restored_at", label: "Restored at", sql: "c.restored_at", type: "datetime" },
+    ],
+    filters: [
+      { key: "designation_id", label: "Designation", type: "enum", column: "c.designation_id", optionsFrom: "designations" },
+      { key: "assigned_to_user_id", label: "Caller", type: "user", column: "c.assigned_to_user_id" },
+      { key: "wrong_number_by", label: "Marked by", type: "user", column: "c.wrong_number_by" },
+      {
+        key: "wrong_number_reason", label: "Reason", type: "enum", column: "c.wrong_number_reason",
+        options: ["not_in_service", "invalid_number", "belongs_to_someone_else", "number_changed", "other"].map((v) => ({ value: v, label: v.replace(/_/g, " ") })),
+      },
+      {
+        key: "team_id", label: "Team", type: "m2m", optionsFrom: "teams",
+        existsSql: "EXISTS (SELECT 1 FROM team_members tmm WHERE tmm.user_id = c.assigned_to_user_id AND tmm.team_id IN (%IN%))",
+      },
+    ],
+    searchCols: ["c.person_name", "c.phone_number"],
+    groupBy: [
+      { key: "district", label: "District", sql: "dist.name" },
+      { key: "assembly", label: "Assembly", sql: "asm.name" },
+      { key: "designation", label: "Designation", sql: "dg.name" },
+      { key: "reason", label: "Reason", sql: "c.wrong_number_reason" },
+      { key: "marked_by", label: "Marked by", sql: "mb.username" },
+      ...timeGroupBys("(SELECT MAX(cx.called_at) FROM calls cx JOIN call_statuses csx ON csx.id = cx.status_id WHERE cx.contact_id = c.id AND csx.name = 'Wrong Number')"),
+    ],
+    defaultColumns: ["person_name", "phone_number", "designation", "district", "assigned_to", "marked_by", "reason", "marked_at"],
   },
 
   // -------------------------------------------------------------- WORKERS ---

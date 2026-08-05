@@ -6,6 +6,7 @@ import { query, getPool } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 import { logAudit } from "@/lib/audit";
 
 // UPDATE ... WHERE id IN (...) is chunked at this size so one caller taking
@@ -71,6 +72,10 @@ export async function POST(req) {
     const status = body.status;
     const statusCond = statusWhere(status);
     if (statusCond) where += ` AND ${statusCond}`;
+    // The calling engine must NEVER assign a Wrong Number contact — applied
+    // unconditionally here, not gated behind the status filter, so switching
+    // to "All" or any other status can't accidentally sweep one up.
+    where += await notWrongNumberClause("c");
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
     // Geo + designation via the SHARED person-aware filter, so Distribution acts
     // on exactly the same people the Contacts list and Add Workers page show.

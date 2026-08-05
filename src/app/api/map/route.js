@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // District-level map data: strength score + drill-down details per district,
 // grouped by zone. Scoped per role: zone-admins see their zone, etc.
@@ -26,6 +27,7 @@ export async function GET() {
       dParams.push(u.scope_assembly_id);
     }
 
+    const notWrong = await notWrongNumberClause("ct");
     const rows = await query(
       `SELECT ld.id, ld.name,
               lz.name AS zone_name,
@@ -36,10 +38,10 @@ export async function GET() {
               (SELECT COALESCE(ROUND(AVG(w.activity_score)),0) FROM workers w WHERE w.district_id = ld.id) AS avg_activity,
               (SELECT COUNT(*) FROM teams t WHERE t.location_id = ld.id) AS team_count,
               (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
-              (SELECT COUNT(*) FROM contacts ct WHERE ct.district_id = ld.id) AS contact_count,
+              (SELECT COUNT(*) FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS contact_count,
               (SELECT COUNT(*) FROM users u WHERE u.role='caller' AND u.home_district_id = ld.id) AS caller_count,
               (SELECT ROUND(COALESCE(SUM(ct.is_completed) / NULLIF(COUNT(*), 0) * 100, 0))
-                 FROM contacts ct WHERE ct.district_id = ld.id) AS call_completion_pct,
+                 FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS call_completion_pct,
               (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS new_workers_30d,
               (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.created_at >= DATE_SUB(NOW(), INTERVAL 60 DAY) AND w.created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)) AS new_workers_prev_30d
          FROM locations ld

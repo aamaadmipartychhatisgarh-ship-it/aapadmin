@@ -29,6 +29,16 @@ function fillTemplate(text, name) {
   return text.replace(/\{name\}/g, name || "");
 }
 
+// Mirrors the wrong_number_reason ENUM (scripts/add-wrong-number-detail.mjs)
+// and the Reports Engine's Wrong Number module filter options — keep in sync.
+export const WRONG_NUMBER_REASONS = [
+  { value: "not_in_service", label: "Not in service" },
+  { value: "invalid_number", label: "Invalid number" },
+  { value: "belongs_to_someone_else", label: "Belongs to someone else" },
+  { value: "number_changed", label: "Number changed" },
+  { value: "other", label: "Other" },
+];
+
 // Call + WhatsApp icon buttons for a list row. Every popover is rendered via
 // FloatingPopover (portal + viewport-clamped fixed position) instead of
 // `absolute right-0` — inside a horizontally-scrolled table (common on
@@ -297,6 +307,7 @@ function QuickLogPopover({ phone, personName, contactId, onClose, onLogged }) {
   const [statuses, setStatuses] = useState([]);
   const [statusId, setStatusId] = useState("");
   const [remarks, setRemarks] = useState("");
+  const [wrongReason, setWrongReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState("");
@@ -304,6 +315,8 @@ function QuickLogPopover({ phone, personName, contactId, onClose, onLogged }) {
   useEffect(() => {
     fetch("/api/statuses").then((r) => r.json()).then((d) => setStatuses(d.statuses || [])).catch(() => {});
   }, []);
+
+  const isWrongNumber = statuses.find((s) => String(s.id) === String(statusId))?.name === "Wrong Number";
 
   async function save() {
     if (!statusId) return;
@@ -317,6 +330,7 @@ function QuickLogPopover({ phone, personName, contactId, onClose, onLogged }) {
           phone_number: phone,
           status_id: statusId,
           remarks: remarks || null,
+          wrong_number_reason: isWrongNumber ? (wrongReason || undefined) : undefined,
           contact_id: contactId || undefined,
         }),
       });
@@ -346,6 +360,16 @@ function QuickLogPopover({ phone, personName, contactId, onClose, onLogged }) {
             <option value="">Select status…</option>
             {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
+          {isWrongNumber && (
+            <select
+              value={wrongReason}
+              onChange={(e) => setWrongReason(e.target.value)}
+              className="w-full h-8 px-2 rounded-lg border border-amber-200 bg-amber-50 text-sm outline-none focus:ring-1 focus:ring-amber-500"
+            >
+              <option value="">Reason (optional)…</option>
+              {WRONG_NUMBER_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </select>
+          )}
           <textarea
             value={remarks}
             onChange={(e) => setRemarks(e.target.value)}

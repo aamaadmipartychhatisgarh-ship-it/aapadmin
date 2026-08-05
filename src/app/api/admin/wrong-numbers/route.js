@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { hasWrongNumberColumn } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasWrongNumberDetailColumns } from "@/lib/contactExtras";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +31,8 @@ export async function GET(req) {
     const dateFrom = searchParams.get("date_from");
     const dateTo = searchParams.get("date_to");
     const statusF = searchParams.get("status"); // assigned | unassigned
+    const reason = searchParams.get("reason");
+    const designationId = searchParams.get("designation_id");
 
     const where = ["c.is_wrong_number = 1"];
     const params = [];
@@ -42,6 +44,8 @@ export async function GET(req) {
     if (caller) { where.push("c.assigned_to_user_id = ?"); params.push(caller); }
     if (statusF === "assigned") where.push("c.assigned_to_user_id IS NOT NULL");
     if (statusF === "unassigned") where.push("c.assigned_to_user_id IS NULL");
+    if (reason) { where.push("c.wrong_number_reason = ?"); params.push(reason); }
+    if (designationId) { where.push("c.designation_id = ?"); params.push(designationId); }
 
     // Geographic scope from role (super_admin / state / supervisor see all).
     const scope = scopeFilterSync(session.user, "c");
@@ -56,14 +60,28 @@ export async function GET(req) {
     if (dateTo) { outer.push("DATE(t.marked_wrong_date) <= ?"); outerParams.push(dateTo); }
     const outerWhere = outer.length ? `WHERE ${outer.join(" AND ")}` : "";
 
+    const hasDetail = await hasWrongNumberDetailColumns();
+    const detailCols = hasDetail
+      ? `c.wrong_number_reason, c.wrong_number_notes, c.wrong_number_at,
+         mb.username AS marked_by_name, c.restored_at, rb.username AS restored_by_name,`
+      : "";
+    const detailJoins = hasDetail
+      ? `LEFT JOIN users mb ON mb.id = c.wrong_number_by
+         LEFT JOIN users rb ON rb.id = c.restored_by`
+      : "";
+
     const rows = await query(
       `SELECT * FROM (
         SELECT c.id, c.person_name, c.phone_number, c.address, c.assigned_to_user_id,
               u.username AS caller_name,
+              COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               lz.name AS zone_name, lls.name AS lok_sabha_name, ld.name AS district_name,
               la.name AS assembly_name, lw.name AS ward_name,
               w.photo_url AS photo_url,
+              ${detailCols}
               (SELECT COUNT(*) FROM calls x WHERE x.contact_id = c.id) AS attempts,
+              (SELECT COUNT(*) FROM calls x JOIN call_statuses cs2 ON cs2.id = x.status_id
+                 WHERE x.contact_id = c.id AND cs2.name = 'Wrong Number') AS wrong_attempts,
               (SELECT MAX(x.called_at) FROM calls x WHERE x.contact_id = c.id) AS last_call_date,
               (SELECT MAX(x.called_at) FROM calls x JOIN call_statuses cs ON cs.id = x.status_id
                  WHERE x.contact_id = c.id AND cs.name = 'Wrong Number') AS marked_wrong_date,
@@ -71,11 +89,13 @@ export async function GET(req) {
          FROM contacts c
          LEFT JOIN users u ON u.id = c.assigned_to_user_id
          LEFT JOIN workers w ON w.id = c.worker_id
+         LEFT JOIN designations dsg ON dsg.id = c.designation_id
          LEFT JOIN locations lz ON lz.id = c.zone_id
          LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
+         ${detailJoins}
         WHERE ${where.join(" AND ")}
       ) t
       ${outerWhere}

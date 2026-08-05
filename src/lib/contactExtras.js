@@ -29,3 +29,30 @@ export async function hasFollowUpTimeColumn() {
   }
   return _fupTime;
 }
+
+// Optional wrong_number_reason/notes/at/by/call_id + restored_at/by columns
+// (scripts/add-wrong-number-detail.mjs) — added together, so one flag covers all.
+let _wrongDetail;
+export async function hasWrongNumberDetailColumns() {
+  if (_wrongDetail !== undefined) return _wrongDetail;
+  try {
+    const rows = await query("SHOW COLUMNS FROM contacts LIKE 'wrong_number_reason'");
+    _wrongDetail = rows.length > 0;
+  } catch {
+    _wrongDetail = false;
+  }
+  return _wrongDetail;
+}
+
+// THE data-isolation fix: a Wrong Number contact must disappear from every
+// active calling/list/assignment/dashboard query and surface only in the
+// dedicated Wrong Numbers module. Every query that lists or selects
+// candidate contacts (except the Wrong Numbers module itself, and reports
+// where the admin explicitly opened the Wrong Number filter) must AND this
+// in. Centralized here so every call site uses the exact same predicate —
+// same defensive `hasWrongNumberColumn()` gate + `OR IS NULL` form already
+// proven in workspace/queue and workspace/claim.
+export async function notWrongNumberClause(alias = "c") {
+  if (!(await hasWrongNumberColumn())) return "";
+  return ` AND (${alias}.is_wrong_number = 0 OR ${alias}.is_wrong_number IS NULL)`;
+}

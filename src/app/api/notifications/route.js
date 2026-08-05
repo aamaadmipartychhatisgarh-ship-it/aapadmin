@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // Returns live, rule-derived alerts (computed on the fly) for oversight roles.
 // This keeps the notification center always current without a cron.
@@ -49,8 +50,9 @@ export async function GET() {
     if (tasks.n > 0) alerts.push({ type: "pending_task", severity: "critical", title: `${tasks.n} overdue tasks`, body: "Tasks past their deadline.", link: "/dashboard/tasks" });
 
     // Overdue follow-ups (on contacts)
+    const notWrong = await notWrongNumberClause("ct");
     const [[fu]] = await query(
-      `SELECT COUNT(*) AS n FROM contacts ct WHERE is_completed=0 AND follow_up_date IS NOT NULL AND follow_up_date < CURDATE() ${cScope.where}`,
+      `SELECT COUNT(*) AS n FROM contacts ct WHERE is_completed=0 AND follow_up_date IS NOT NULL AND follow_up_date < CURDATE()${notWrong} ${cScope.where}`,
       cScope.params
     ).then((r) => [r]);
     if (fu.n > 0) alerts.push({ type: "follow_up", severity: "warning", title: `${fu.n} overdue follow-ups`, body: "Scheduled callbacks are past due.", link: "/dashboard/supervisor/follow-ups" });

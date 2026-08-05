@@ -148,7 +148,7 @@ export async function GET(req) {
          LEFT JOIN locations ld ON ld.id = c.district_id
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND ${laterSql}
+          AND ${laterSql}${notWrong}
         ORDER BY c.follow_up_date ASC${hasFupTime ? ", c.follow_up_time ASC" : ""}
         LIMIT 50`,
       [userId]
@@ -164,7 +164,7 @@ export async function GET(req) {
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
          LEFT JOIN workers w ON w.id = c.worker_id
-        WHERE c.locked_by_user_id = ?
+        WHERE c.locked_by_user_id = ?${notWrong}
         LIMIT 1`,
       [userId]
     );

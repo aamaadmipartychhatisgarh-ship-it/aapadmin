@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound, Flag, Check } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
+import { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { MultiSelect } from "@/components/MultiSelect";
@@ -883,15 +884,16 @@ function WorkspaceBody() {
                     status the field is hidden and Status takes the full width. */}
                 {(() => {
                   const isPicked = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked";
+                  const isWrongNum = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Wrong Number";
                   return (
                     <>
-                      <Field label="Status *" className={isPicked ? "" : "md:col-span-2"}>
+                      <Field label="Status *" className={isPicked || isWrongNum ? "" : "md:col-span-2"}>
                         <select
                           value={form.status_id}
                           onChange={(e) => {
                             const picked = statuses.find((s) => String(s.id) === String(e.target.value))?.name === "Phone Picked";
                             // Reset sentiment whenever the status is not Phone Picked.
-                            setForm({ ...form, status_id: e.target.value, sentiment: picked ? form.sentiment : "" });
+                            setForm({ ...form, status_id: e.target.value, sentiment: picked ? form.sentiment : "", wrong_number_reason: "" });
                           }}
                           className={inputCls}
                         >
@@ -909,6 +911,14 @@ function WorkspaceBody() {
                             <option value="negative">Negative</option>
                             <option value="opponent">Opponent</option>
                             <option value="not_supporter">Not a Supporter</option>
+                          </select>
+                        </Field>
+                      )}
+                      {isWrongNum && (
+                        <Field label="Reason">
+                          <select value={form.wrong_number_reason} onChange={(e) => setForm({ ...form, wrong_number_reason: e.target.value })} className={inputCls}>
+                            <option value="">Select reason (optional)…</option>
+                            {WRONG_NUMBER_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                           </select>
                         </Field>
                       )}
@@ -1257,6 +1267,7 @@ function initialForm() {
     phone_number: "",
     status_id: "",
     sentiment: "",
+    wrong_number_reason: "",
     remarks: "",
     is_follow_up_required: false,
     follow_up_date: "",

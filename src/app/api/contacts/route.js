@@ -6,6 +6,7 @@ import { query } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // Parse a "1,2,3" style query value into a de-duped list of positive integers.
 function idList(raw) {
@@ -43,6 +44,11 @@ export async function GET(req) {
     const params = [];
     const statusCond = statusWhere(status);
     if (statusCond) where += ` AND ${statusCond}`;
+    // Wrong Number contacts live only in the dedicated Wrong Numbers module —
+    // excluded from every other view of Contacts by default. The `wrong=1`
+    // branch below is the one deliberate exception (it's what THAT module
+    // itself queries), so skip the exclusion there.
+    if (wrong !== "1") where += await notWrongNumberClause("c");
     // Zone / Lok Sabha / District / Assembly / Designation — filter by the PERSON
     // (their linked worker) via the shared helper, so the same selection returns
     // the same people as the Add Workers page and the Distribution panel.

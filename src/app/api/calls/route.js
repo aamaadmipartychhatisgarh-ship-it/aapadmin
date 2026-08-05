@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn } from "@/lib/contactExtras";
 
 export async function GET(req) {
   try {
@@ -226,6 +226,18 @@ export async function POST(req) {
           `UPDATE contacts SET is_wrong_number = ? WHERE id = ?`,
           [isWrongNumber ? 1 : 0, contact_id]
         );
+        // Record who/when/why — only ON marking (not on clearing), so the
+        // detail columns keep the last time this contact WAS flagged as
+        // permanent history, even after a later call outcome un-flags it.
+        if (isWrongNumber && (await hasWrongNumberDetailColumns())) {
+          await query(
+            `UPDATE contacts
+                SET wrong_number_reason = ?, wrong_number_notes = ?, wrong_number_at = NOW(),
+                    wrong_number_by = ?, wrong_number_call_id = ?
+              WHERE id = ?`,
+            [data.wrong_number_reason || null, remarks || null, session.user.id, res.insertId, contact_id]
+          );
+        }
       }
     }
 

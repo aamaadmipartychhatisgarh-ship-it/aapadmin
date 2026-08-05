@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildRuleMatch, zoneMatch } from "@/lib/assignmentRules";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // Contacts covered by a rule, exactly as the top-up sees them (rule filter AND
 // the caller's home zone): those assigned to the caller now, those waiting in
@@ -28,16 +29,17 @@ export async function GET(req, { params }) {
                   ld.name AS district_name, dsg.name AS designation_name`;
     const joins = `LEFT JOIN locations ld ON ld.id = c.district_id
                    LEFT JOIN designations dsg ON dsg.id = c.designation_id`;
+    const notWrong = await notWrongNumberClause("c");
 
     const assigned = await query(
       `SELECT ${cols} FROM contacts c ${joins}
-        WHERE c.assigned_to_user_id = ? AND c.is_completed = 0 ${m.where}
+        WHERE c.assigned_to_user_id = ? AND c.is_completed = 0 ${notWrong} ${m.where}
         ORDER BY c.id ASC LIMIT 300`,
       [rule.caller_user_id, ...m.params]
     );
     const pool = await query(
       `SELECT ${cols} FROM contacts c ${joins}
-        WHERE c.assigned_to_user_id IS NULL AND c.is_completed = 0 ${m.where}
+        WHERE c.assigned_to_user_id IS NULL AND c.is_completed = 0 ${notWrong} ${m.where}
         ORDER BY c.id ASC LIMIT 300`,
       m.params
     );
@@ -45,7 +47,7 @@ export async function GET(req, { params }) {
       `SELECT ${cols}, ou.username AS owner_name FROM contacts c ${joins}
          LEFT JOIN users ou ON ou.id = c.assigned_to_user_id
         WHERE c.assigned_to_user_id IS NOT NULL AND c.assigned_to_user_id <> ?
-          AND c.is_completed = 0 ${m.where}
+          AND c.is_completed = 0 ${notWrong} ${m.where}
         ORDER BY c.id ASC LIMIT 300`,
       [rule.caller_user_id, ...m.params]
     );

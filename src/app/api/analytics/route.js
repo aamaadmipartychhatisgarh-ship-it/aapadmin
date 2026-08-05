@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // Powers /dashboard/analytics. Returns datasets for all charts in one round-trip.
 export async function GET(req) {
@@ -139,6 +140,7 @@ export async function GET(req) {
     const funnelParams = [];
     let fundWhere = "WHERE 1=1";
     if (districtId) { fundWhere += " AND ct.district_id = ?"; funnelParams.push(districtId); }
+    fundWhere += await notWrongNumberClause("ct");
     const [[funnel]] = await query(
       `SELECT
          (SELECT COUNT(*) FROM contacts ct ${fundWhere}) AS loaded,

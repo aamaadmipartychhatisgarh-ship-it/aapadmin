@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 export async function GET(req) {
   try {
@@ -31,7 +32,7 @@ export async function GET(req) {
       ? await query(
           `SELECT d.id, d.name, COUNT(c.id) AS contact_count
              FROM designations d
-             LEFT JOIN contacts c ON c.designation_id = d.id
+             LEFT JOIN contacts c ON c.designation_id = d.id${await notWrongNumberClause("c")}
             GROUP BY d.id, d.name
             ORDER BY ${orderBy}`
         )

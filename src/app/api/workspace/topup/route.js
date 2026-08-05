@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { getPool } from "@/lib/db";
 import { buildRuleMatch, zoneMatch } from "@/lib/assignmentRules";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // On-demand daily top-up for the signed-in caller. For each active rule, fill
 // the caller's queue up to the daily quota: first from the unassigned pool,
@@ -34,6 +35,9 @@ export async function POST() {
       // from that zone (the rule's own geo/designation narrows further).
       const [[me]] = await conn.execute(`SELECT scope_zone_id FROM users WHERE id = ?`, [userId]);
       const zone = zoneMatch(me?.scope_zone_id);
+      // The daily top-up must never hand a caller a Wrong Number contact —
+      // neither from the pool nor pulled from another caller.
+      const notWrong = await notWrongNumberClause("c");
 
       let assignedTotal = 0;
       let takenTotal = 0;
@@ -50,7 +54,7 @@ export async function POST() {
             `SELECT COUNT(*) AS n FROM contacts c
               WHERE c.assigned_to_user_id = ? AND c.is_completed = 0
                 AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
-                ${m.where}`,
+                ${notWrong} ${m.where}`,
             [userId, ...m.params]
           );
           let need = Math.max(0, (Number(rule.daily_quota) || 0) - Number(held.n || 0));
@@ -63,7 +67,7 @@ export async function POST() {
                   AND c.assigned_to_user_id IS NULL
                   AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
                   AND (c.locked_by_user_id IS NULL OR c.locked_at < NOW() - INTERVAL 10 MINUTE)
-                  ${m.where}
+                  ${notWrong} ${m.where}
                 ORDER BY c.is_vip DESC, c.id ASC
                 LIMIT ${need} FOR UPDATE`,
               m.params
@@ -93,7 +97,7 @@ export async function POST() {
                   AND c.assigned_to_user_id <> ?
                   AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
                   AND (c.assigned_at IS NULL OR c.assigned_at < NOW() - INTERVAL ${staleDays} DAY)
-                  ${m.where}
+                  ${notWrong} ${m.where}
                 ORDER BY c.assigned_at ASC, c.id ASC
                 LIMIT ${need} FOR UPDATE`,
               [userId, ...m.params]

@@ -70,15 +70,28 @@ function clampInt(v, min, max, dflt) {
   return Math.max(min, Math.min(max, n));
 }
 
-// Build the shared WHERE (role scope + time + filters + geo + search).
+// Build the shared WHERE (role scope + base predicate + time + filters + geo + search).
 function buildWhere(module, session, body) {
   let where = "WHERE 1=1";
   const params = [];
+  const fvals = body.filters || {};
 
   // 1. Role/geography scope (server-enforced; client cannot widen it).
   if (module.scopeCols && session?.user) {
     const s = scopeFilterSync(session.user, module.alias, { cols: module.scopeCols });
     if (s.where) { where += " " + s.where; params.push(...s.params); }
+  }
+
+  // 1b. Module base predicate — a permanent default scope, distinct from a
+  // user-toggleable filter (e.g. the Contacts module hides Wrong Number rows
+  // from every report by default, matching the rest of the app). Skipped
+  // only when the admin explicitly opens the named override filter — so
+  // "hidden unless explicitly opened" holds for reports too.
+  if (module.baseWhere) {
+    const overrideVal = module.baseWhereOverrideFilter ? fvals[module.baseWhereOverrideFilter] : undefined;
+    const overridden = overrideVal !== undefined && overrideVal !== null && overrideVal !== "" &&
+      (Array.isArray(overrideVal) ? overrideVal.includes("1") || overrideVal.includes(1) : String(overrideVal) === "1");
+    if (!overridden) where += ` AND ${module.baseWhere}`;
   }
 
   // 2. Time range on the module's date field (IST calendar days).
@@ -89,7 +102,6 @@ function buildWhere(module, session, body) {
   }
 
   // 3. Declared filters.
-  const fvals = body.filters || {};
   for (const f of module.filters || []) {
     const raw = fvals[f.key];
     if (raw === undefined || raw === null || raw === "") continue;
