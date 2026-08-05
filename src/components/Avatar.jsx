@@ -36,7 +36,7 @@ export default function Avatar({ name, src, size = 64, square = false, className
     >
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={name || "avatar"} onError={() => setErrored(true)} className="w-full h-full object-cover" />
+        <img src={src} alt={name || "avatar"} loading="lazy" decoding="async" onError={() => setErrored(true)} className="w-full h-full object-cover" />
       ) : ini ? (
         <span className={`font-bold leading-none ${textClassName}`} style={{ fontSize: Math.round(size * 0.38) }}>{ini}</span>
       ) : (

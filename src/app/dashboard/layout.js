@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -74,6 +74,7 @@ export default function DashboardLayout({ children }) {
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+      { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
@@ -96,6 +97,7 @@ export default function DashboardLayout({ children }) {
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+      { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
@@ -116,6 +118,7 @@ export default function DashboardLayout({ children }) {
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+      { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
@@ -132,6 +135,7 @@ export default function DashboardLayout({ children }) {
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+      { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
@@ -146,6 +150,7 @@ export default function DashboardLayout({ children }) {
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+      { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
     ],
@@ -162,6 +167,7 @@ export default function DashboardLayout({ children }) {
       { name: "Live Status", href: "/dashboard/supervisor/live", icon: Activity },
       { name: "Workers", href: "/dashboard/admin/workers", icon: UserCog },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+      { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
       { name: "Map", href: "/dashboard/map", icon: Map },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },

@@ -62,6 +62,7 @@ export async function GET(req) {
               u.username AS caller_name,
               lz.name AS zone_name, lls.name AS lok_sabha_name, ld.name AS district_name,
               la.name AS assembly_name, lw.name AS ward_name,
+              w.photo_url AS photo_url,
               (SELECT COUNT(*) FROM calls x WHERE x.contact_id = c.id) AS attempts,
               (SELECT MAX(x.called_at) FROM calls x WHERE x.contact_id = c.id) AS last_call_date,
               (SELECT MAX(x.called_at) FROM calls x JOIN call_statuses cs ON cs.id = x.status_id
@@ -69,6 +70,7 @@ export async function GET(req) {
               (SELECT x.remarks FROM calls x WHERE x.contact_id = c.id ORDER BY x.called_at DESC, x.id DESC LIMIT 1) AS last_remarks
          FROM contacts c
          LEFT JOIN users u ON u.id = c.assigned_to_user_id
+         LEFT JOIN workers w ON w.id = c.worker_id
          LEFT JOIN locations lz ON lz.id = c.zone_id
          LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
          LEFT JOIN locations ld ON ld.id = c.district_id

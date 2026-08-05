@@ -11,6 +11,7 @@ import FilterMultiSelect from "@/components/FilterMultiSelect";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import { isAdmin, isCaller, normalizeRole, ROLES } from "@/lib/permissions";
 import CallActionIcons from "@/components/CallActionIcons";
+import Avatar from "@/components/Avatar";
 
 const PAGE_SIZE = 50; // contacts per page — keeps each query light on big tables
 
@@ -63,7 +64,8 @@ function Body({ session }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [showAdd, setShowAdd] = useState(false);
-  const [editing, setEditing] = useState(null);
+  const [editingIndex, setEditingIndex] = useState(null); // index into `contacts`, or null
+  const [editNavBusy, setEditNavBusy] = useState(false); // fetching an adjacent page mid-edit
   const [taskFor, setTaskFor] = useState(null); // contact to create a task for
   const [viewingWorkerId, setViewingWorkerId] = useState(null);
   const [importing, setImporting] = useState(false);
@@ -249,12 +251,10 @@ function Body({ session }) {
     setAssemblyIds([]);
   }, [districtId, lokSabhaId]);
 
-  async function load() {
-    // Several effects (filter change, URL deep-link, search debounce) can fire
-    // loads near-simultaneously. Tag each request and only let the latest one
-    // apply, so a slower earlier response can't clobber the current filter.
-    const seq = ++loadSeq.current;
-    setLoading(true);
+  // Shared by the main table load AND the Edit modal's "jump to the next/prev
+  // page's first/last contact" boundary crossing — both must query the exact
+  // same filtered set so the sequence a caller pages through stays consistent.
+  function buildParams(pageNum) {
     const params = new URLSearchParams();
     if (filter === "duplicates") params.set("duplicates", "1");
     else if (filter === "wrong") params.set("wrong", "1");
@@ -266,13 +266,54 @@ function Body({ session }) {
     if (assemblyIds.length) params.set("assembly_ids", assemblyIds.join(","));
     if (designationIds.length) params.set("designation_ids", designationIds.join(","));
     if (assignedTo) params.set("assigned_to", assignedTo);
-    params.set("page", String(page));
+    params.set("page", String(pageNum));
     params.set("page_size", String(PAGE_SIZE));
-    const r = await fetch(`/api/contacts?${params}`, { cache: "no-store" });
+    return params;
+  }
+
+  async function fetchContactsPage(pageNum) {
+    const r = await fetch(`/api/contacts?${buildParams(pageNum)}`, { cache: "no-store" });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return { contacts: d.contacts || [], total: d.total ?? (d.contacts || []).length };
+  }
+
+  async function load() {
+    // Several effects (filter change, URL deep-link, search debounce) can fire
+    // loads near-simultaneously. Tag each request and only let the latest one
+    // apply, so a slower earlier response can't clobber the current filter.
+    const seq = ++loadSeq.current;
+    setLoading(true);
+    const d = await fetchContactsPage(page);
     if (seq !== loadSeq.current) return; // a newer load started — drop this stale result
-    if (r.ok) { const d = await r.json(); setContacts(d.contacts || []); setTotal(d.total ?? (d.contacts || []).length); }
+    if (d) { setContacts(d.contacts); setTotal(d.total); }
     setLoading(false);
   }
+
+  // Edit-and-advance navigation: move to the next/previous contact in the
+  // SAME filtered order the table shows, crossing a page boundary (fetching
+  // that page) when the current one runs out — the admin never has to close
+  // the modal, refind their place, and reopen the next row by hand.
+  async function editStep(delta) {
+    if (editingIndex == null) return;
+    const nextInPage = editingIndex + delta;
+    if (nextInPage >= 0 && nextInPage < contacts.length) { setEditingIndex(nextInPage); return; }
+    const targetPage = page + delta;
+    if (targetPage < 1 || (delta > 0 && (targetPage - 1) * PAGE_SIZE >= total)) return; // nothing further
+    setEditNavBusy(true);
+    const d = await fetchContactsPage(targetPage);
+    setEditNavBusy(false);
+    if (!d || d.contacts.length === 0) return;
+    setContacts(d.contacts);
+    setTotal(d.total);
+    setPage(targetPage);
+    setEditingIndex(delta > 0 ? 0 : d.contacts.length - 1);
+  }
+
+  const editingContact = editingIndex != null ? contacts[editingIndex] : null;
+  const editingPosition = editingIndex != null ? (page - 1) * PAGE_SIZE + editingIndex + 1 : null;
+  const editingHasPrev = editingIndex != null && ((editingIndex > 0) || page > 1);
+  const editingHasNext = editingIndex != null && ((editingIndex < contacts.length - 1) || page * PAGE_SIZE < total);
 
   useEffect(() => {
     const t = setTimeout(load, 300);
@@ -563,14 +604,17 @@ function Body({ session }) {
               </tr>
             </thead>
             <tbody>
-              {contacts.map((c) => (
+              {contacts.map((c, i) => (
                 <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">
-                    {c.worker_id ? (
-                      <button onClick={() => setViewingWorkerId(c.worker_id)} className="hover:underline hover:text-[#164FA3] text-left" title="View details">
-                        {c.person_name}
-                      </button>
-                    ) : c.person_name}
+                    <div className="flex items-center gap-2.5">
+                      <Avatar name={c.person_name} src={c.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
+                      {c.worker_id ? (
+                        <button onClick={() => setViewingWorkerId(c.worker_id)} className="hover:underline hover:text-[#164FA3] text-left" title="View details">
+                          {c.person_name}
+                        </button>
+                      ) : c.person_name}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">
                     <div className="flex items-center gap-2">
@@ -603,7 +647,7 @@ function Body({ session }) {
                     <button onClick={() => setTaskFor(c)} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded-lg font-medium">
                       <ClipboardList size={14} /> Task
                     </button>
-                    <button onClick={() => setEditing(c)} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
+                    <button onClick={() => setEditingIndex(i)} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
                       <Pencil size={14} /> Edit
                     </button>
                     <button onClick={() => removeContact(c)} className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium">
@@ -621,7 +665,23 @@ function Body({ session }) {
       <Pagination total={total} page={page} pageSize={PAGE_SIZE} onPage={setPage} loading={loading} />
 
       {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
-      {editing && <EditContactModal contact={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {editingContact && (
+        <EditContactModal
+          contact={editingContact}
+          position={editingPosition}
+          total={total}
+          hasPrev={editingHasPrev}
+          hasNext={editingHasNext}
+          navBusy={editNavBusy}
+          onPrev={() => editStep(-1)}
+          onNext={() => editStep(1)}
+          onClose={() => setEditingIndex(null)}
+          onSaved={(updated) => {
+            setContacts((prev) => prev.map((c, i) => (i === editingIndex ? { ...c, ...updated } : c)));
+            if (editingHasNext) editStep(1); else setEditingIndex(null);
+          }}
+        />
+      )}
       {taskFor && <ContactTaskModal contact={taskFor} users={users} onClose={() => setTaskFor(null)} onSaved={() => { setTaskFor(null); setMessage(`Task assigned for ${taskFor.person_name}.`); }} />}
       {viewingWorkerId && <PersonDetailModal type="worker" id={viewingWorkerId} onClose={() => setViewingWorkerId(null)} />}
     </div>
@@ -721,8 +781,11 @@ function ContactTaskModal({ contact, users, onClose, onSaved }) {
   );
 }
 
-function EditContactModal({ contact, onClose, onSaved }) {
-  const [form, setForm] = useState({
+// Formats a contact into the modal's editable field shape — reused whenever
+// the modal is handed a new `contact` prop (initial open, and every
+// Prev/Next/save-and-advance step, since the modal stays mounted).
+function contactToForm(contact) {
+  return {
     person_name: contact.person_name || "",
     phone_number: contact.phone_number || "",
     address: contact.address || "",
@@ -732,7 +795,17 @@ function EditContactModal({ contact, onClose, onSaved }) {
     assembly_id: contact.assembly_id || "",
     ward_id: contact.ward_id || "",
     booth_id: contact.booth_id || "",
-  });
+  };
+}
+
+// Edit-and-advance: save commits then automatically opens the next contact in
+// the SAME filtered/sorted order the table shows — no return to page 1, no
+// reload. Prev/Next buttons, arrow-key navigation (ignored while typing so it
+// doesn't fight normal text-field cursor movement), a live "N of Total"
+// counter, and an unsaved-changes guard on every way out (Cancel, backdrop,
+// Escape, Prev/Next, and browser close/refresh) round out the workflow.
+function EditContactModal({ contact, position, total, hasPrev, hasNext, navBusy, onPrev, onNext, onClose, onSaved }) {
+  const [form, setForm] = useState(() => contactToForm(contact));
   const [zones, setZones] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
@@ -741,6 +814,47 @@ function EditContactModal({ contact, onClose, onSaved }) {
   const [booths, setBooths] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // The modal stays mounted across Prev/Next/save-and-advance — reset the
+  // form (and the dirty baseline) whenever a DIFFERENT contact is handed in,
+  // but not on every re-render of the same one.
+  useEffect(() => {
+    setForm(contactToForm(contact));
+    setError("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contact.id]);
+
+  const dirty = JSON.stringify(form) !== JSON.stringify(contactToForm(contact));
+
+  // Native "close the tab" warning — the in-modal Cancel/Escape/Prev/Next
+  // guards below handle every in-app way out; this covers a hard refresh/close.
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
+
+  function guardedExit(action) {
+    if (dirty && !confirm("You have unsaved changes. Discard them?")) return;
+    action();
+  }
+
+  // Arrow-key Prev/Next — only when focus isn't in a text field/select, so
+  // typing (which also uses arrow keys, for the cursor) is never hijacked.
+  useEffect(() => {
+    function onKeyDown(e) {
+      const tag = document.activeElement?.tagName;
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (e.key === "Escape") { e.preventDefault(); guardedExit(onClose); return; }
+      if (typing) return;
+      if (e.key === "ArrowRight" && hasNext) { e.preventDefault(); guardedExit(onNext); }
+      else if (e.key === "ArrowLeft" && hasPrev) { e.preventDefault(); guardedExit(onPrev); }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, hasPrev, hasNext]);
 
   useEffect(() => {
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
@@ -764,31 +878,49 @@ function EditContactModal({ contact, onClose, onSaved }) {
 
   async function save() {
     setSaving(true); setError("");
+    const body = {
+      person_name: form.person_name,
+      phone_number: form.phone_number,
+      address: form.address,
+      designation_id: form.designation_id || null,
+      zone_id: form.zone_id || null,
+      district_id: form.district_id || null,
+      assembly_id: form.assembly_id || null,
+      ward_id: form.ward_id || null,
+      booth_id: form.booth_id || null,
+    };
     const r = await fetch(`/api/contacts/${contact.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        person_name: form.person_name,
-        phone_number: form.phone_number,
-        address: form.address,
-        designation_id: form.designation_id || null,
-        zone_id: form.zone_id || null,
-        district_id: form.district_id || null,
-        assembly_id: form.assembly_id || null,
-        ward_id: form.ward_id || null,
-        booth_id: form.booth_id || null,
-      }),
+      body: JSON.stringify(body),
     });
     const data = await r.json();
-    if (!r.ok) { setError(data.message || "Save failed"); setSaving(false); return; }
-    onSaved();
+    setSaving(false);
+    if (!r.ok) { setError(data.message || "Save failed"); return; }
+    onSaved({ ...contact, ...body });
   }
 
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white";
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) guardedExit(onClose); }}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-        <h2 className="text-xl font-bold text-gray-900">Edit Contact</h2>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <Avatar name={contact.person_name} src={contact.photo_url} size={40} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-sm" />
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-gray-900 truncate">Edit Contact</h2>
+              {position != null && <p className="text-xs text-gray-500">Contact {position.toLocaleString()} of {total.toLocaleString()}{dirty ? " · unsaved changes" : ""}</p>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={() => guardedExit(onPrev)} disabled={!hasPrev || navBusy} title="Previous (←)" className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30">
+              <ChevronLeftIcon />
+            </button>
+            <button onClick={() => guardedExit(onNext)} disabled={!hasNext || navBusy} title="Next (→)" className="p-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30">
+              <ChevronRightIcon />
+            </button>
+          </div>
+        </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className={inp} placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className={inp} placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
@@ -819,16 +951,22 @@ function EditContactModal({ contact, onClose, onSaved }) {
             {booths.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={save} disabled={saving || !form.person_name || !form.phone_number} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">
-            {saving ? "Saving…" : "Save"}
-          </button>
+        <div className="flex items-center justify-between gap-2 pt-2">
+          <span className="text-[11px] text-gray-400">Esc to close · ← → to move between contacts</span>
+          <div className="flex gap-2">
+            <button onClick={() => guardedExit(onClose)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+            <button onClick={save} disabled={saving || !form.person_name || !form.phone_number} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">
+              {saving ? "Saving…" : hasNext ? "Save & Next" : "Save"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
+function ChevronLeftIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>; }
+function ChevronRightIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>; }
 
 function AddContactModal({ onClose, onSaved }) {
   const [form, setForm] = useState({ person_name: "", phone_number: "", address: "", designation_id: "", district_id: "" });

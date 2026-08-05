@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound } from "lucide-react";
+import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound, Flag, Check } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -81,6 +81,34 @@ function WorkspaceBody() {
   // Quick complaint logging while on a call
   const [showComplaint, setShowComplaint] = useState(false);
 
+  // Report wrong number / switched off — step 1 of the number-correction
+  // workflow ("Caller marks number"). Separate from Log Outcome: that
+  // records what happened on THIS call, this asks someone to fix the data.
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("wrong_number");
+  const [reportNote, setReportNote] = useState("");
+  const [reportSaving, setReportSaving] = useState(false);
+  const [reportDone, setReportDone] = useState(false);
+  const [reportErr, setReportErr] = useState("");
+
+  async function submitReport() {
+    setReportSaving(true); setReportErr("");
+    try {
+      const r = await fetch(`/api/contacts/${active.id}/report-issue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reportReason, note: reportNote || undefined }),
+      });
+      if (!r.ok) throw new Error((await r.json()).message || "Failed to report");
+      setReportDone(true);
+      setTimeout(() => { setReportOpen(false); setReportDone(false); setReportNote(""); }, 1200);
+    } catch (e) {
+      setReportErr(e.message);
+    } finally {
+      setReportSaving(false);
+    }
+  }
+
   // Tasks pinned to the active contact
   const [contactTasks, setContactTasks] = useState([]);
 
@@ -156,6 +184,7 @@ function WorkspaceBody() {
 
   // Whenever a contact becomes active, fetch its prior call history
   useEffect(() => {
+    setReportOpen(false); setReportReason("wrong_number"); setReportNote(""); setReportErr("");
     if (!active) { setHistory([]); setHistoryOpen(false); return; }
     setHistoryLoading(true);
     fetch(`/api/contacts/${active.id}/history`)
@@ -815,7 +844,39 @@ function WorkspaceBody() {
 
             {/* Outcome form */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Square size={16} /> Log Outcome</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-gray-900 flex items-center gap-2"><Square size={16} /> Log Outcome</h3>
+                <button onClick={() => setReportOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg">
+                  <Flag size={13} /> Report number issue
+                </button>
+              </div>
+
+              {reportOpen && (
+                <div className="mb-4 p-4 bg-amber-50 border border-amber-100 rounded-xl space-y-2.5">
+                  {reportDone ? (
+                    <div className="flex items-center gap-2 text-emerald-700 text-sm font-semibold py-1"><Check size={16} /> Reported — a supervisor will review it.</div>
+                  ) : (
+                    <>
+                      <div className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Send this number for correction</div>
+                      <div className="flex gap-2">
+                        {[["wrong_number", "Wrong Number"], ["switched_off", "Switched Off"]].map(([v, label]) => (
+                          <button key={v} type="button" onClick={() => setReportReason(v)}
+                            className={`flex-1 h-9 rounded-lg text-xs font-semibold border ${reportReason === v ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200"}`}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea value={reportNote} onChange={(e) => setReportNote(e.target.value)} placeholder="Note (optional)" rows={2} className={`${inputCls} resize-none`} />
+                      {reportErr && <div className="text-xs text-red-600">{reportErr}</div>}
+                      <button onClick={submitReport} disabled={reportSaving} className="w-full h-9 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5">
+                        {reportSaving ? <Loader2 size={14} className="animate-spin" /> : <Flag size={14} />}
+                        {reportSaving ? "Sending…" : "Send for review"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Sentiment only makes sense for a connected call, so it shows
                     only when the status is "Phone Picked". For every other

@@ -8,6 +8,7 @@ import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserC
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
+import Avatar from "@/components/Avatar";
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -141,7 +142,12 @@ function Body({ canDelete }) {
               <tbody>
                 {rows.map((c) => (
                   <tr key={c.id} className="border-t border-gray-100 hover:bg-red-50/20 align-top">
-                    <td className="px-3 py-3 font-medium text-gray-900">{c.person_name}</td>
+                    <td className="px-3 py-3 font-medium text-gray-900">
+                      <div className="flex items-center gap-2">
+                        <Avatar name={c.person_name} src={c.photo_url} size={28} className="bg-red-50 border border-red-100" textClassName="text-red-600 text-[10px]" />
+                        {c.person_name}
+                      </div>
+                    </td>
                     <td className="px-3 py-3 font-mono text-xs text-gray-700">{c.phone_number}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.zone_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.lok_sabha_name || "—"}</td>

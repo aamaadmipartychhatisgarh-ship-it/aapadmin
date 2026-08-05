@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Phone, MessageCircle, ClipboardCheck, Loader2, Check, History, PhoneCall, PhoneMissed, Clock } from "lucide-react";
+import { Phone, MessageCircle, ClipboardCheck, Loader2, Check, History, PhoneCall, PhoneMissed, Clock, Flag } from "lucide-react";
 import FloatingPopover from "@/components/FloatingPopover";
 
 // Indian 10-digit mobile → wa.me international format (91XXXXXXXXXX, no '+').
@@ -43,9 +43,11 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
   const [logOpen, setLogOpen] = useState(false);
   const [waOpen, setWaOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const logRef = useRef(null);
   const waRef = useRef(null);
   const historyRef = useRef(null);
+  const reportRef = useRef(null);
 
   if (!phone) return null;
   const wa = toWhatsAppDigits(phone);
@@ -109,6 +111,23 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
               onClose={() => setLogOpen(false)}
               onLogged={onLogged}
             />
+          </FloatingPopover>
+        </>
+      )}
+
+      {canLog && contactId && (
+        <>
+          <button
+            ref={reportRef}
+            type="button"
+            onClick={() => setReportOpen((o) => !o)}
+            title="Report wrong number / switched off"
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-amber-600 hover:bg-amber-50"
+          >
+            <Flag size={size} />
+          </button>
+          <FloatingPopover anchorRef={reportRef} open={reportOpen} onClose={() => setReportOpen(false)} width={260} estimatedHeight={230}>
+            <ReportIssuePopover contactId={contactId} onClose={() => setReportOpen(false)} />
           </FloatingPopover>
         </>
       )}
@@ -202,6 +221,73 @@ function CallHistoryPopover({ workerId }) {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Step 1 of the number-correction workflow ("Caller marks number") — sends a
+// pending request a supervisor later verifies and routes to a Designation.
+// Separate from QuickLogPopover: logging "Wrong Number"/"Switched Off" as a
+// call OUTCOME just records what happened on this call; this explicitly asks
+// someone to go fix the data.
+function ReportIssuePopover({ contactId, onClose }) {
+  const [reason, setReason] = useState("wrong_number");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function submit() {
+    setSaving(true); setErr("");
+    try {
+      const r = await fetch(`/api/contacts/${contactId}/report-issue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason, note: note || undefined }),
+      });
+      if (!r.ok) throw new Error((await r.json()).message || "Failed to report");
+      setDone(true);
+      setTimeout(onClose, 900);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="p-3 space-y-2">
+      {done ? (
+        <div className="flex items-center gap-2 text-emerald-600 text-sm font-medium py-2 justify-center"><Check size={16} /> Reported — a supervisor will review it</div>
+      ) : (
+        <>
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Report number issue</div>
+          <div className="flex gap-1.5">
+            {[["wrong_number", "Wrong Number"], ["switched_off", "Switched Off"]].map(([v, label]) => (
+              <button key={v} type="button" onClick={() => setReason(v)}
+                className={`flex-1 h-8 rounded-lg text-xs font-semibold border ${reason === v ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note (optional)"
+            rows={2}
+            className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm outline-none focus:ring-1 focus:ring-[#164FA3] resize-none"
+          />
+          {err && <div className="text-xs text-red-600">{err}</div>}
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="w-full h-8 rounded-lg bg-amber-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Flag size={14} />}
+            {saving ? "Sending…" : "Send for review"}
+          </button>
+        </>
       )}
     </div>
   );
