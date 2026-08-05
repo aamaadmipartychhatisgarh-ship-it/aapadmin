@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound, Flag, Check } from "lucide-react";
 import { isAdmin, isOversight, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import Avatar from "@/components/Avatar";
-import { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
+import CallActionIcons, { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { MultiSelect } from "@/components/MultiSelect";
@@ -618,6 +618,15 @@ function WorkspaceBody() {
                       </div>
                     )}
                     <a href={`tel:${active.phone_number}`} className="text-xl font-mono mt-1 inline-block hover:underline">{active.phone_number}</a>
+                    <div className="mt-2">
+                      <CallActionIcons
+                        phone={active.phone_number}
+                        personName={active.person_name}
+                        contactId={active.id}
+                        profileHref={active.worker_id ? `/dashboard/admin/workers/${active.worker_id}` : undefined}
+                        dark
+                      />
+                    </div>
                     {(active.district_name || active.ward_name) && (
                       <div className="flex items-center gap-1 mt-3 text-blue-200 text-sm min-w-0">
                         <MapPin size={14} className="shrink-0" />

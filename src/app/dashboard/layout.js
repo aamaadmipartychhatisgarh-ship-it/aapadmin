@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import Heartbeat from "@/components/Heartbeat";
+import Avatar from "@/components/Avatar";
 import InstallApp from "@/components/InstallApp";
 import ThemeToggle from "@/components/ThemeToggle";
 import TaskNotifier from "@/components/TaskNotifier";
@@ -23,8 +24,11 @@ async function handleSignOut() {
 }
 
 // Super admin only: quick "view as" links to jump straight into each role's
-// dashboard/workspace without needing a separate login for that role.
+// dashboard/workspace without needing a separate login for that role. "My
+// Profile" rides along here too since the super_admin avatar button already
+// opens this popover (other roles link straight to it from the plain avatar).
 const DASHBOARD_SWITCHER = [
+  { name: "My Profile", href: "/dashboard/profile", icon: User },
   { name: "State Overview (Admin)", href: "/dashboard/admin", icon: LayoutDashboard },
   { name: "Calling Workspace", href: "/dashboard/workspace", icon: Headphones },
   { name: "Media Center", href: "/dashboard/media", icon: Newspaper },
@@ -213,6 +217,11 @@ export default function DashboardLayout({ children }) {
     ];
   }
 
+  // Every role gets a profile link — appended once here instead of in each
+  // branch above. It's not part of any navGroups.js GROUPS entry, so
+  // primaryItems() (which shortens the admin sidebar) keeps it as-is.
+  navItems = [...navItems, { name: "My Profile", href: "/dashboard/profile", icon: User }];
+
   // Filter nav items for the header search bar. Search still covers every
   // page (not just the shortened sidebar list) so nothing becomes unreachable.
   const q = searchQuery.trim().toLowerCase();
@@ -362,9 +371,7 @@ export default function DashboardLayout({ children }) {
                   title="Switch dashboard"
                   className="flex items-center gap-3 lg:pl-4 rounded-lg hover:bg-gray-50 py-1 pr-1"
                 >
-                  <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
-                    <User size={20} />
-                  </div>
+                  <Avatar name={session.user.name} src={session.user.photo_url} size={40} className="bg-blue-50 border border-blue-100" textClassName="text-[#0B3A82]" />
                   <div className="hidden sm:flex text-left flex-col justify-center mr-2 min-w-0 max-w-[140px]">
                     <div className="text-sm font-bold text-gray-900 leading-tight truncate">
                       {session.user.name}
@@ -401,10 +408,8 @@ export default function DashboardLayout({ children }) {
                 </FloatingPopover>
               </>
             ) : (
-              <div className="flex items-center gap-3 lg:pl-4">
-                <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#0B3A82] shrink-0">
-                  <User size={20} />
-                </div>
+              <Link href="/dashboard/profile" title="My Profile" className="flex items-center gap-3 lg:pl-4 rounded-lg hover:bg-gray-50 py-1">
+                <Avatar name={session.user.name} src={session.user.photo_url} size={40} className="bg-blue-50 border border-blue-100" textClassName="text-[#0B3A82]" />
                 <div className="hidden sm:flex text-left flex-col justify-center mr-2 min-w-0 max-w-[140px]">
                   <div className="text-sm font-bold text-gray-900 leading-tight truncate">
                     {session.user.name}
@@ -413,7 +418,7 @@ export default function DashboardLayout({ children }) {
                     {roleLabel(role)}
                   </div>
                 </div>
-              </div>
+              </Link>
             )}
           </div>
         </header>

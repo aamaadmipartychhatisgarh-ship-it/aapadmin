@@ -28,6 +28,7 @@ export const authOptions = {
             id: user.id.toString(),
             name: user.username,
             role: user.role,
+            photo_url: user.photo_url ?? null,
             home_district_id: user.home_district_id ?? null,
             scope_zone_id: user.scope_zone_id ?? null,
             scope_lok_sabha_id: user.scope_lok_sabha_id ?? null,
@@ -41,14 +42,21 @@ export const authOptions = {
     })
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session }) {
       if (user) {
         token.role = user.role;
         token.id = user.id;
+        token.photo_url = user.photo_url ?? null;
         token.home_district_id = user.home_district_id ?? null;
         token.scope_zone_id = user.scope_zone_id ?? null;
         token.scope_lok_sabha_id = user.scope_lok_sabha_id ?? null;
         token.scope_assembly_id = user.scope_assembly_id ?? null;
+      }
+      // Lets the client refresh just the photo (e.g. after the profile page
+      // saves a new one) without forcing a full re-login — see
+      // `update({ photo_url })` in src/app/dashboard/profile/page.js.
+      if (trigger === "update" && session && "photo_url" in session) {
+        token.photo_url = session.photo_url;
       }
       return token;
     },
@@ -57,6 +65,7 @@ export const authOptions = {
         session.user.role = token.role;
         session.user.id = token.id;
         session.user.name = token.name;
+        session.user.photo_url = token.photo_url ?? null;
         session.user.home_district_id = token.home_district_id ?? null;
         session.user.scope_zone_id = token.scope_zone_id ?? null;
         session.user.scope_lok_sabha_id = token.scope_lok_sabha_id ?? null;

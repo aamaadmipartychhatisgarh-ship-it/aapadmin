@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { logAudit } from "@/lib/audit";
 
 export async function PUT(req, { params }) {
   try {
@@ -32,10 +33,12 @@ export async function DELETE(req, { params }) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
+    const [existing] = await query("SELECT name FROM designations WHERE id = ?", [id]);
     // calls.designation_id has ON DELETE SET NULL; clear contacts references too.
     await query("UPDATE contacts SET designation_id = NULL WHERE designation_id = ?", [id]);
     const res = await query("DELETE FROM designations WHERE id = ?", [id]);
     if (res.affectedRows === 0) return Response.json({ message: "Not found" }, { status: 404 });
+    logAudit(session, { action: "designation.delete", entityType: "designation", entityId: id, details: existing || null });
     return Response.json({ ok: true });
   } catch (error) {
     if (error.code === "ER_ROW_IS_REFERENCED_2") {

@@ -619,7 +619,11 @@ function Body({ session }) {
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">
                     <div className="flex items-center gap-2">
                       <span>{c.phone_number}</span>
-                      <CallActionIcons phone={c.phone_number} personName={c.person_name} contactId={c.id} canLog={isCaller(session)} onLogged={load} />
+                      <CallActionIcons
+                        phone={c.phone_number} personName={c.person_name} contactId={c.id}
+                        canLog={isCaller(session)} onLogged={load}
+                        profileHref={c.worker_id ? `/dashboard/admin/workers/${c.worker_id}` : undefined}
+                      />
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{c.designation_name || "—"}</td>

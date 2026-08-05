@@ -4,7 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { notifyTaskAssigned } from "@/lib/notify";
-import { recomputeTaskStatus, hasSubtasksTable, hasTaskAssignedAt } from "@/lib/tasks";
+import { recomputeTaskStatus, hasSubtasksTable, hasTaskAssignedAt, hasTaskDurationColumns } from "@/lib/tasks";
+import { addDays } from "@/lib/taskDuration";
 
 export async function PUT(req, { params }) {
   try {
@@ -34,9 +35,17 @@ export async function PUT(req, { params }) {
       }
     }
 
+    const hasDuration = await hasTaskDurationColumns();
     const fields = isOversight(session)
-      ? ["title", "description", "priority", "status", "deadline", "assigned_to_user_id", "assigned_to_team_id", "district_id"]
+      ? ["title", "description", "priority", "status", "deadline", "assigned_to_user_id", "assigned_to_team_id", "district_id",
+         ...(hasDuration ? ["start_date", "duration_preset", "duration_days"] : [])]
       : ["status"];
+    // The duration picker drives the deadline: if both start_date and
+    // duration_days are being set, recompute deadline from them instead of
+    // trusting a stale/absent value from the client.
+    if (hasDuration && isOversight(session) && "start_date" in d && "duration_days" in d && d.start_date && d.duration_days) {
+      d.deadline = addDays(d.start_date, d.duration_days);
+    }
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     if ("status" in d && d.status === "completed") sets.push("completed_at = NOW()");

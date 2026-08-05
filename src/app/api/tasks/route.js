@@ -6,7 +6,8 @@ import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
 import { notifyTaskAssigned } from "@/lib/notify";
-import { subtasksByTask, hasSubtasksTable, hasTaskAssignedAt } from "@/lib/tasks";
+import { subtasksByTask, hasSubtasksTable, hasTaskAssignedAt, hasTaskDurationColumns } from "@/lib/tasks";
+import { addDays } from "@/lib/taskDuration";
 
 // GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
 export async function GET(req) {
@@ -112,12 +113,19 @@ export async function POST(req) {
     await ensureTaskContactColumn();
     // Stamp assigned_at at creation (this is the initial assignment time).
     const stampAssigned = await hasTaskAssignedAt();
+    const hasDuration = await hasTaskDurationColumns();
+    // The deadline is derived from start_date + duration_days when both are
+    // given (the normal path, via the duration picker); an explicit d.deadline
+    // is only a fallback for callers that don't use the duration picker.
+    const deadline = (hasDuration && d.start_date && d.duration_days)
+      ? addDays(d.start_date, d.duration_days) : (d.deadline || null);
     const res = await query(
-      `INSERT INTO tasks (title, description, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id${stampAssigned ? ", assigned_at" : ""})
-       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?${stampAssigned ? ", NOW()" : ""})`,
-      [d.title, d.description || null, d.priority || "medium", d.deadline || null,
+      `INSERT INTO tasks (title, description, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
+      [d.title, d.description || null, d.priority || "medium", deadline,
        d.assigned_to_user_id || null, d.assigned_to_team_id || null, d.district_id || null,
-       d.contact_id || null, session.user.id]
+       d.contact_id || null, session.user.id,
+       ...(hasDuration ? [d.start_date || null, d.duration_preset || null, d.duration_days || null] : [])]
     );
     // Persist the checklist (unlimited items). Accepts an array of strings or
     // {title} objects; blank items are ignored.

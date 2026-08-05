@@ -26,6 +26,19 @@ export async function hasTaskAssignedAt() {
   return hasAssignedAtPromise;
 }
 
+// Whether tasks.start_date/duration_preset/duration_days exist yet (added by
+// add-task-duration). Cached.
+let hasDurationPromise;
+export async function hasTaskDurationColumns() {
+  if (!hasDurationPromise) {
+    hasDurationPromise = query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'start_date'`
+    ).then((r) => Number(r[0]?.n || 0) > 0).catch(() => { hasDurationPromise = undefined; return false; });
+  }
+  return hasDurationPromise;
+}
+
 // Fetch checklist items for a set of task ids in ONE query (no N+1), grouped by
 // task_id and ordered by sort_order.
 export async function subtasksByTask(taskIds) {

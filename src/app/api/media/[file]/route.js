@@ -4,12 +4,14 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { query } from "@/lib/db";
 
-// Serves every /uploads/... URL, from two possible backends:
+// Serves every /uploads/... URL, from three possible backends:
 //  1. worker_photos (DB-stored — durable across redeploys, see
 //     scripts/add-worker-photos-schema.mjs and /api/workers/photo) — checked
 //     first, by the uuid portion of the filename.
-//  2. Local disk under /public/uploads (press notes, debate briefs, social
-//     post media, and any legacy worker photo uploaded before the DB-storage
+//  2. user_photos (same pattern, for caller/staff profile photos — see
+//     scripts/add-user-photos-schema.mjs and /api/users/photo).
+//  3. Local disk under /public/uploads (press notes, debate briefs, social
+//     post media, and any legacy photo uploaded before the DB-storage
 //     migration) — the original fallback. Next.js only reliably static-serves
 //     files that existed at BUILD time; files written after deploy 404 through
 //     the CDN/static handler, so this route reads them straight off disk in
@@ -43,6 +45,10 @@ export async function GET(_req, { params }) {
     const [row] = await query("SELECT data, mime_type FROM worker_photos WHERE id = ? LIMIT 1", [id]);
     if (row) {
       return new Response(new Uint8Array(row.data), { status: 200, headers: { ...headers, "Content-Type": row.mime_type } });
+    }
+    const [userRow] = await query("SELECT data, mime_type FROM user_photos WHERE id = ? LIMIT 1", [id]);
+    if (userRow) {
+      return new Response(new Uint8Array(userRow.data), { status: 200, headers: { ...headers, "Content-Type": userRow.mime_type } });
     }
 
     const buf = await readFile(path.join(process.cwd(), "public", "uploads", name));

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Phone, MessageCircle, ClipboardCheck, Loader2, Check, History, PhoneCall, PhoneMissed, Clock, Flag } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Copy, UserRound, ClipboardCheck, Loader2, Check, History, PhoneCall, PhoneMissed, Clock, Flag } from "lucide-react";
 import FloatingPopover from "@/components/FloatingPopover";
 
 // Indian 10-digit mobile → wa.me international format (91XXXXXXXXXX, no '+').
@@ -45,15 +45,22 @@ export const WRONG_NUMBER_REASONS = [
 // mobile) a plain `absolute` popover clips against the scroll container or
 // lands off-screen, since its "right: 0" is relative to the trigger's own
 // box, not the viewport.
-//   canLog    show an inline "log call result" popover (caller-only — the
-//             /api/calls endpoint 403s for admin/supervisor by design).
-//   workerId  show a "Call History" icon with a stats popover (Picked / Not
-//             Picked / etc. breakdown + total talk time), for the Workers list.
-export default function CallActionIcons({ phone, personName, contactId, workerId, canLog = false, onLogged, size = 15 }) {
+//   canLog       show an inline "log call result" popover (caller-only — the
+//                /api/calls endpoint 403s for admin/supervisor by design).
+//   workerId     show a "Call History" icon with a stats popover (Picked / Not
+//                Picked / etc. breakdown + total talk time), for the Workers list.
+//   contactId    (without workerId) shows "Call History" as a plain call-log
+//                list instead — for contact rows with no linked worker.
+//   profileHref  if given, shows an "Open Profile" icon linking there.
+//   dark         true on a colored/dark card background (e.g. the workspace's
+//                active-call header) — swaps the per-action colors for a
+//                uniform white/translucent style that reads on dark backgrounds.
+export default function CallActionIcons({ phone, personName, contactId, workerId, canLog = false, onLogged, size = 15, profileHref, dark = false }) {
   const [logOpen, setLogOpen] = useState(false);
   const [waOpen, setWaOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const logRef = useRef(null);
   const waRef = useRef(null);
   const historyRef = useRef(null);
@@ -61,45 +68,56 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
 
   if (!phone) return null;
   const wa = toWhatsAppDigits(phone);
+  const cls = (light) => `w-7 h-7 rounded-lg flex items-center justify-center ${dark ? "text-white bg-white/10 hover:bg-white/20" : light}`;
+  const copyNumber = () => {
+    navigator.clipboard?.writeText(phone).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    });
+  };
 
   return (
     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      <a
-        href={`tel:${phone}`}
-        title={`Call ${personName || phone}`}
-        className="w-7 h-7 rounded-lg flex items-center justify-center text-emerald-600 hover:bg-emerald-50"
-      >
+      <a href={`tel:${phone}`} title={`Call ${personName || phone}`} className={cls("text-emerald-600 hover:bg-emerald-50")}>
         <Phone size={size} />
       </a>
 
-      <button
-        ref={waRef}
-        type="button"
-        onClick={() => setWaOpen((o) => !o)}
-        title={`WhatsApp ${personName || phone}`}
-        className="w-7 h-7 rounded-lg flex items-center justify-center text-emerald-600 hover:bg-emerald-50"
-      >
+      <button ref={waRef} type="button" onClick={() => setWaOpen((o) => !o)} title={`WhatsApp ${personName || phone}`} className={cls("text-emerald-600 hover:bg-emerald-50")}>
         <MessageCircle size={size} />
       </button>
       <FloatingPopover anchorRef={waRef} open={waOpen} onClose={() => setWaOpen(false)} width={240} estimatedHeight={280}>
         <WhatsAppTemplatePopover wa={wa} personName={personName} onClose={() => setWaOpen(false)} />
       </FloatingPopover>
 
-      {workerId && (
+      <a href={`sms:${phone}`} title={`SMS ${personName || phone}`} className={cls("text-sky-600 hover:bg-sky-50")}>
+        <MessageSquare size={size} />
+      </a>
+
+      <button type="button" onClick={copyNumber} title="Copy number" className={cls("text-gray-500 hover:bg-gray-100")}>
+        {copied ? <Check size={size} /> : <Copy size={size} />}
+      </button>
+
+      {(workerId || contactId) && (
         <>
           <button
             ref={historyRef}
             type="button"
             onClick={() => setHistoryOpen((o) => !o)}
             title="Call history"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-violet-600 hover:bg-violet-50"
+            className={cls("text-violet-600 hover:bg-violet-50")}
           >
             <History size={size} />
           </button>
-          <FloatingPopover anchorRef={historyRef} open={historyOpen} onClose={() => setHistoryOpen(false)} width={256} estimatedHeight={260}>
-            <CallHistoryPopover workerId={workerId} />
+          <FloatingPopover anchorRef={historyRef} open={historyOpen} onClose={() => setHistoryOpen(false)} width={workerId ? 256 : 280} estimatedHeight={260}>
+            {workerId ? <CallHistoryPopover workerId={workerId} /> : <ContactHistoryPopover contactId={contactId} />}
           </FloatingPopover>
         </>
+      )}
+
+      {profileHref && (
+        <a href={profileHref} title="Open profile" className={cls("text-indigo-600 hover:bg-indigo-50")}>
+          <UserRound size={size} />
+        </a>
       )}
 
       {canLog && (
@@ -109,7 +127,7 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
             type="button"
             onClick={() => setLogOpen((o) => !o)}
             title="Log call result"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-[#164FA3] hover:bg-blue-50"
+            className={cls("text-[#164FA3] hover:bg-blue-50")}
           >
             <ClipboardCheck size={size} />
           </button>
@@ -132,7 +150,7 @@ export default function CallActionIcons({ phone, personName, contactId, workerId
             type="button"
             onClick={() => setReportOpen((o) => !o)}
             title="Report wrong number / switched off"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-amber-600 hover:bg-amber-50"
+            className={cls("text-amber-600 hover:bg-amber-50")}
           >
             <Flag size={size} />
           </button>
@@ -231,6 +249,40 @@ function CallHistoryPopover({ workerId }) {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// Raw call-log list for a contact with no linked worker (workerId's aggregate
+// stats popover needs a worker row; this covers the plain-contact case).
+function ContactHistoryPopover({ contactId }) {
+  const [history, setHistory] = useState(null);
+
+  useEffect(() => {
+    fetch(`/api/contacts/${contactId}/history`).then((r) => r.json()).then((d) => setHistory(d.history || [])).catch(() => setHistory([]));
+  }, [contactId]);
+
+  return (
+    <div className="p-3">
+      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5"><History size={13} /> Call History</div>
+      {history === null ? (
+        <div className="py-4 flex items-center justify-center text-gray-400"><Loader2 size={16} className="animate-spin" /></div>
+      ) : history.length === 0 ? (
+        <p className="text-sm text-gray-400 py-2">No calls logged yet.</p>
+      ) : (
+        <ul className="divide-y divide-gray-100 max-h-64 overflow-y-auto">
+          {history.map((h) => (
+            <li key={h.id} className="py-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-gray-900 text-xs">{new Date(h.called_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                <span className="text-xs text-gray-500 shrink-0">{h.status_name}</span>
+              </div>
+              {h.agent_name && <div className="text-[11px] text-gray-400">{h.agent_name}</div>}
+              {h.remarks && <div className="text-gray-600 italic text-xs mt-0.5">"{h.remarks}"</div>}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

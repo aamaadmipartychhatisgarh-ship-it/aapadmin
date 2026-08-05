@@ -10,6 +10,30 @@ import { formatDate } from "@/lib/dateFormat";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import ActionBar from "@/components/ActionBar";
+import { DURATION_PRESETS, DURATION_DAYS, addDays, daysBetween } from "@/lib/taskDuration";
+
+const SHOW_COMPLETED_KEY = "tasks_show_completed";
+
+function durationLabel(t) {
+  if (!t.duration_preset && !t.duration_days) return "—";
+  const preset = DURATION_PRESETS.find((p) => p.key === t.duration_preset);
+  if (preset && preset.key !== "custom") return preset.label;
+  return t.duration_days ? `${t.duration_days} day${t.duration_days === 1 ? "" : "s"}` : "—";
+}
+function completionPct(t) {
+  if ((t.subtask_total || 0) > 0) return Math.round((t.subtask_done / t.subtask_total) * 100);
+  if (t.status === "completed") return 100;
+  if (t.status === "cancelled") return null;
+  return 0;
+}
+function RemainingCell({ t, today }) {
+  if (t.status === "completed" || t.status === "cancelled" || !t.deadline) return <span className="text-gray-300">—</span>;
+  const rem = daysBetween(today, t.deadline);
+  if (rem === null) return <span className="text-gray-300">—</span>;
+  if (rem < 0) return <span className="text-red-600 font-bold">{Math.abs(rem)}d overdue</span>;
+  if (rem === 0) return <span className="text-amber-600 font-semibold">Due today</span>;
+  return <span className="text-gray-600">{rem}d left</span>;
+}
 
 const PRIORITY = {
   urgent: "bg-red-100 text-red-700", high: "bg-orange-100 text-orange-700",
@@ -62,6 +86,16 @@ function Body({ canManage }) {
   const [districtId, setDistrictId] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
   const [sort, setSort] = useState("newest");
+  const [showCompleted, setShowCompleted] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setShowCompleted(window.localStorage.getItem(SHOW_COMPLETED_KEY) === "1");
+  }, []);
+  const toggleShowCompleted = () => setShowCompleted((v) => {
+    const next = !v;
+    if (typeof window !== "undefined") window.localStorage.setItem(SHOW_COMPLETED_KEY, next ? "1" : "0");
+    return next;
+  });
   const [districts, setDistricts] = useState([]);
   const [users, setUsers] = useState([]);
   const [expanded, setExpanded] = useState(() => new Set());
@@ -106,6 +140,9 @@ function Body({ canManage }) {
     : [{ k: "mine", l: "My Tasks" }];
   const c = data.counts || {};
   const today = new Date().toISOString().slice(0, 10);
+  // Completed tasks are hidden by default (remembered per-browser); an
+  // explicit "Completed" status filter always wins over the hide toggle.
+  const visibleTasks = data.tasks.filter((t) => showCompleted || statusFilter === "completed" || t.status !== "completed");
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -125,10 +162,14 @@ function Body({ canManage }) {
         <SumCard label="Overdue" value={c.overdue || 0} danger={Number(c.overdue) > 0} />
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         {views.map((v) => (
           <button key={v.k} onClick={() => setView(v.k)} className={`px-4 py-2 rounded-xl text-sm font-medium ${view === v.k ? "bg-[#164FA3] text-white" : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"}`}>{v.l}</button>
         ))}
+        <label className="ml-auto flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+          <input type="checkbox" checked={showCompleted} onChange={toggleShowCompleted} className="rounded border-gray-300 text-[#164FA3] focus:ring-[#164FA3]" />
+          Show Completed
+        </label>
       </div>
 
       <CollapsibleSection title="Search & Filters">
@@ -168,8 +209,11 @@ function Body({ canManage }) {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="p-12 text-center text-gray-400"><Loader2 className="inline animate-spin" /></div>
-        ) : data.tasks.length === 0 ? (
-          <div className="p-12 text-center text-gray-400"><ClipboardList size={36} className="mx-auto text-gray-300 mb-3" />No tasks.</div>
+        ) : visibleTasks.length === 0 ? (
+          <div className="p-12 text-center text-gray-400">
+            <ClipboardList size={36} className="mx-auto text-gray-300 mb-3" />
+            {data.tasks.length === 0 ? "No tasks." : "No tasks to show — completed tasks are hidden."}
+          </div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -179,20 +223,25 @@ function Body({ canManage }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">Task</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Priority</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assignee</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Created By</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Duration</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned On</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Deadline</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Due Date</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Remaining</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Completion</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Action</th>
               </tr>
             </thead>
             <tbody>
-              {data.tasks.map((t, idx) => {
+              {visibleTasks.map((t, idx) => {
                 const overdue = t.deadline && t.deadline.slice(0, 10) < today && t.status !== "completed";
                 const next = STATUS_FLOW[STATUS_FLOW.indexOf(t.status) + 1];
                 const hasSubs = (t.subtask_total || 0) > 0;
                 const isOpen = expanded.has(t.id);
                 const pct = hasSubs ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0;
                 const assignedOn = fmtAssignedOn(t.assigned_at || t.created_at);
+                const completion = completionPct(t);
                 return (
                   <Fragment key={t.id}>
                   <tr className="border-t border-gray-100 hover:bg-gray-50">
@@ -219,6 +268,8 @@ function Body({ canManage }) {
                     </td>
                     <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${PRIORITY[t.priority]}`}>{t.priority}</span></td>
                     <td className="px-4 py-3 text-gray-600">{t.assignee_name || t.team_name || "Unassigned"}</td>
+                    <td className="px-4 py-3 text-gray-600">{t.created_by_name || "—"}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{durationLabel(t)}</td>
                     <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
                       {typeof assignedOn === "object" ? (
                         <><div className="font-medium text-gray-800">{assignedOn.date}</div><div className="text-gray-400">{assignedOn.time}</div></>
@@ -226,6 +277,15 @@ function Body({ canManage }) {
                     </td>
                     <td className={`px-4 py-3 text-xs ${overdue ? "text-red-600 font-bold" : "text-gray-600"}`}>
                       {t.deadline ? formatDate(t.deadline) : "—"}{overdue ? " (overdue)" : ""}
+                    </td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap"><RemainingCell t={t} today={today} /></td>
+                    <td className="px-4 py-3">
+                      {completion === null ? <span className="text-gray-300 text-xs">—</span> : (
+                        <div className="flex items-center gap-2 min-w-[70px]">
+                          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3] rounded-full" style={{ width: `${completion}%` }} /></div>
+                          <span className="text-[11px] font-semibold text-gray-500 shrink-0">{completion}%</span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[t.status]}`}>{t.status.replace("_", " ")}</span></td>
                     <td className="px-4 py-3">
@@ -248,7 +308,7 @@ function Body({ canManage }) {
                   </tr>
                   {hasSubs && isOpen && (
                     <tr className="bg-gray-50/60">
-                      <td colSpan={8} className="px-12 py-3">
+                      <td colSpan={12} className="px-12 py-3">
                         <SubtaskChecklist subtasks={t.subtasks} onProgress={(done, total, status) => onSubProgress(t.id, done, total, status)} />
                       </td>
                     </tr>
@@ -278,13 +338,35 @@ function SumCard({ label, value, accent, danger }) {
 }
 
 function AddTaskModal({ onClose, onSaved, editing }) {
-  const [form, setForm] = useState(editing ? {
-    title: editing.title || "", description: editing.description || "",
-    priority: editing.priority || "medium",
-    deadline: editing.deadline ? editing.deadline.slice(0, 10) : "",
-    assigned_to_user_id: editing.assigned_to_user_id || "",
-    assigned_to_team_id: editing.assigned_to_team_id || "",
-  } : { title: "", description: "", priority: "medium", deadline: "", assigned_to_user_id: "", assigned_to_team_id: "" });
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState(() => {
+    if (editing) {
+      const start_date = editing.start_date ? editing.start_date.slice(0, 10) : todayStr;
+      const duration_preset = editing.duration_preset || "custom";
+      let duration_days;
+      if (editing.duration_days != null) duration_days = editing.duration_days;
+      else if (DURATION_DAYS[duration_preset] != null) duration_days = DURATION_DAYS[duration_preset];
+      else if (editing.deadline) duration_days = daysBetween(start_date, editing.deadline);
+      else duration_days = "";
+      return {
+        title: editing.title || "", description: editing.description || "",
+        priority: editing.priority || "medium",
+        start_date, duration_preset, duration_days,
+        assigned_to_user_id: editing.assigned_to_user_id || "",
+        assigned_to_team_id: editing.assigned_to_team_id || "",
+      };
+    }
+    return {
+      title: "", description: "", priority: "medium",
+      start_date: todayStr, duration_preset: "one_week", duration_days: DURATION_DAYS.one_week,
+      assigned_to_user_id: "", assigned_to_team_id: "",
+    };
+  });
+  const durationDaysNum = form.duration_preset === "custom"
+    ? (form.duration_days === "" ? null : Number(form.duration_days))
+    : DURATION_DAYS[form.duration_preset];
+  const endDate = form.start_date && durationDaysNum != null && !isNaN(durationDaysNum)
+    ? addDays(form.start_date, durationDaysNum) : null;
   // Checklist builder — unlimited items. Keep ids on edit so completion state is
   // preserved; new items have id null.
   const [subtasks, setSubtasks] = useState(
@@ -346,7 +428,24 @@ function AddTaskModal({ onClose, onSaved, editing }) {
           <select className={inp} value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
             <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>
           </select>
-          <input type="date" className={inp} value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} />
+          <input type="date" className={inp} value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} title="Start date" />
+          <select
+            className={inp} value={form.duration_preset}
+            onChange={(e) => {
+              const preset = e.target.value;
+              setForm((f) => ({ ...f, duration_preset: preset, duration_days: DURATION_DAYS[preset] ?? f.duration_days }));
+            }}
+          >
+            {DURATION_PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </select>
+          {form.duration_preset === "custom" ? (
+            <input type="number" min={1} className={inp} placeholder="Number of days" value={form.duration_days} onChange={(e) => setForm({ ...form, duration_days: e.target.value })} />
+          ) : (
+            <div className={`${inp} bg-gray-50 text-gray-500 flex items-center`}>{endDate ? `Ends ${formatDate(endDate)}` : "—"}</div>
+          )}
+          {form.duration_preset === "custom" && (
+            <div className="col-span-2 text-xs text-gray-500 -mt-2">{endDate ? `Ends ${formatDate(endDate)}` : "Enter number of days to see the end date"}</div>
+          )}
           <select className={inp} value={form.assigned_to_user_id} onChange={(e) => setForm({ ...form, assigned_to_user_id: e.target.value })}>
             <option value="">Assign to user…</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
@@ -358,7 +457,7 @@ function AddTaskModal({ onClose, onSaved, editing }) {
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={save} disabled={saving || !form.title} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : (editing ? "Save" : "Create")}</button>
+          <button onClick={save} disabled={saving || !form.title || (form.duration_preset === "custom" && !form.duration_days)} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : (editing ? "Save" : "Create")}</button>
         </div>
       </div>
     </div>

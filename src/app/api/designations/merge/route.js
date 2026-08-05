@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { getPool } from "@/lib/db";
+import { logAudit } from "@/lib/audit";
 
 // Merge one designation into another: everything pointing at `from_id` is
 // repointed to `into_id`, then `from_id` is deleted. Use this to collapse
@@ -55,6 +56,12 @@ export async function POST(req) {
       await conn.execute("DELETE FROM designations WHERE id = ?", [fromId]);
 
       await conn.commit();
+      logAudit(session, {
+        action: "designation.merge",
+        entityType: "designation",
+        entityId: intoId,
+        details: { merged_from_id: fromId, merged_from_name: from.name, merged_into_name: into.name, moved_contacts: c.affectedRows || 0, moved_calls: cl.affectedRows || 0 },
+      });
       return NextResponse.json({
         ok: true,
         merged_from: from.name,

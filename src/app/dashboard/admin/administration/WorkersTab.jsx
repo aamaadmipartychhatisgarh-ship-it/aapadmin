@@ -367,7 +367,7 @@ export default function WorkersTab({ session }) {
                     <td className="px-4 py-3 text-gray-600 font-mono text-xs">
                       <div className="flex items-center gap-2">
                         <span>{w.mobile || "—"}</span>
-                        <CallActionIcons phone={w.mobile} personName={w.name} workerId={w.id} />
+                        <CallActionIcons phone={w.mobile} personName={w.name} workerId={w.id} profileHref={`/dashboard/admin/workers/${w.id}`} />
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{w.position || "—"}</td>
