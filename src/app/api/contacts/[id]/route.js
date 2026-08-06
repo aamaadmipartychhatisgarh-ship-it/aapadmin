@@ -48,6 +48,17 @@ export async function PUT(req, { params }) {
     }
     const data = await req.json();
 
+    // The profile modal always sends the contact's CURRENT assigned_to_user_id
+    // even when only another field changed (e.g. designation). Drop it when it's
+    // unchanged so an unrelated edit doesn't needlessly restamp assigned_at /
+    // assigned_by — keeping behavior identical to the supervisor route.
+    if (admin && "assigned_to_user_id" in data) {
+      const [cur] = await query("SELECT assigned_to_user_id FROM contacts WHERE id = ?", [id]);
+      const current = cur?.assigned_to_user_id ?? null;
+      const incoming = data.assigned_to_user_id || null;
+      if (String(current ?? "") === String(incoming ?? "")) delete data.assigned_to_user_id;
+    }
+
     // Block/Ward is entered as free text in My Workplace. Resolve the typed name
     // to a `ward` location row (reuse an existing one under the same assembly,
     // case-insensitively, or create it) and store its id in ward_id — so the

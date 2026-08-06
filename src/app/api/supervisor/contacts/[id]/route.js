@@ -47,6 +47,20 @@ export async function PUT(req, { params }) {
     const { id } = await params;
     const data = await req.json();
 
+    // The profile modal always sends the contact's CURRENT assigned_to_user_id,
+    // even when the edit only touches another field (e.g. designation). Treat
+    // the assignment as changed only when it actually differs — otherwise
+    // re-validating an unchanged caller would 403 whenever the contact's existing
+    // caller sits outside the supervisor's territory, silently blocking the whole
+    // update (designation, name, everything) from saving.
+    if ("assigned_to_user_id" in data) {
+      const s0 = supervisorScopeFilter(session.user, "c");
+      const [cur] = await query(`SELECT assigned_to_user_id FROM contacts c WHERE c.id = ? ${s0.where}`, [id, ...s0.params]);
+      const current = cur?.assigned_to_user_id ?? null;
+      const incoming = data.assigned_to_user_id || null;
+      if (String(current ?? "") === String(incoming ?? "")) delete data.assigned_to_user_id;
+    }
+
     if ("assigned_to_user_id" in data && data.assigned_to_user_id) {
       const callerScope = supervisorCallerScopeFilter(session.user, "u");
       const rows = await query(

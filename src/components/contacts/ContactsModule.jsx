@@ -966,6 +966,8 @@ export default function ContactsModule({ session, mode }) {
             setViewingContact(updated);
             setContacts((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
             loadCounts();
+            setError("");
+            setMessage("Contact updated successfully.");
           }}
         />
       )}
