@@ -90,6 +90,11 @@ export async function GET(req) {
               u.username AS assigned_to_username,
               ld.name AS district_name,
               lw.name AS ward_name,
+              -- Same geography derivation as the admin route (district → lok_sabha
+              -- → zone), with the contact's own zone/lok_sabha winning when set.
+              COALESCE(cz.name, lz.name) AS zone_name,
+              COALESCE(cls.name, lls.name) AS lok_sabha_name,
+              la.name AS assembly_name,
               COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               -- Contacts have their own native photo_url now; COALESCE only
               -- covers rows whose backfill (scripts/add-contact-photo-url.mjs)
@@ -99,6 +104,11 @@ export async function GET(req) {
          ${workerJoin}
          LEFT JOIN users u ON u.id = c.assigned_to_user_id
          LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations lls ON lls.id = ld.parent_id
+         LEFT JOIN locations lz ON lz.id = lls.parent_id
+         LEFT JOIN locations cz ON cz.id = c.zone_id
+         LEFT JOIN locations cls ON cls.id = c.lok_sabha_id
+         LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
          LEFT JOIN designations dsg ON dsg.id = c.designation_id
          ${where}

@@ -794,7 +794,11 @@ export default function ContactsModule({ session, mode }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Zone</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Address</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
                 <th className="px-4 py-3 font-semibold text-gray-600 text-right">Edit</th>
@@ -824,7 +828,11 @@ export default function ContactsModule({ session, mode }) {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{c.designation_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{c.zone_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{c.lok_sabha_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{c.assembly_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.district_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 max-w-[220px]"><div className="truncate" title={c.address || ""}>{c.address || "—"}</div></td>
                   <td className="px-4 py-3">
                     {c.is_completed ? (
                       <span className="text-emerald-700 font-medium text-xs">Done</span>

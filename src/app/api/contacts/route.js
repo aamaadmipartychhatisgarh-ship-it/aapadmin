@@ -108,6 +108,13 @@ export async function GET(req) {
               u.username AS assigned_to_username,
               ld.name AS district_name,
               lw.name AS ward_name,
+              -- Zone / Lok Sabha are shown from the contact's OWN column when set,
+              -- otherwise derived from the district's hierarchy (district →
+              -- lok_sabha → zone) since contacts are keyed by district_id.
+              -- Assembly is the contact's own (shown as "—" when unset).
+              COALESCE(cz.name, lz.name) AS zone_name,
+              COALESCE(cls.name, lls.name) AS lok_sabha_name,
+              la.name AS assembly_name,
               -- Mirror Add Workers: show the worker's position (source of truth)
               -- when linked; fall back to the contact's own designation otherwise.
               COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
@@ -119,6 +126,11 @@ export async function GET(req) {
          ${workerJoin}
          LEFT JOIN users u ON u.id = c.assigned_to_user_id
          LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations lls ON lls.id = ld.parent_id
+         LEFT JOIN locations lz ON lz.id = lls.parent_id
+         LEFT JOIN locations cz ON cz.id = c.zone_id
+         LEFT JOIN locations cls ON cls.id = c.lok_sabha_id
+         LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
          LEFT JOIN designations dsg ON dsg.id = c.designation_id
          ${where}
