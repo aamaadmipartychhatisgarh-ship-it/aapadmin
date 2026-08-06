@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
+import { resolveActingUserId } from "@/lib/actAs";
 import { getPool } from "@/lib/db";
 import { zoneMatch } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
@@ -17,10 +18,10 @@ export async function POST(req) {
     if (!session) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    if (isOversight(session)) {
+    const { userId, impersonating } = await resolveActingUserId(session);
+    if (isOversight(session) && !impersonating) {
       return NextResponse.json({ message: "Only callers can claim contacts." }, { status: 403 });
     }
-    const userId = session.user.id;
     const body = await req.json().catch(() => ({}));
     const explicitId = body.contact_id;
 

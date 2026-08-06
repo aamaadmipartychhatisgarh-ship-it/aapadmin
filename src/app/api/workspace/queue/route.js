@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
+import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { buildRulesOrMatch, zoneMatch, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
@@ -19,11 +20,12 @@ export async function GET(req) {
     if (!session) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    // Admins/supervisors don't have a calling queue.
-    if (isOversight(session)) {
+    // A Super Admin can view a specific caller's queue via the Quick Dashboard
+    // Switch (they act as that caller). Otherwise oversight roles have no queue.
+    const { userId, impersonating } = await resolveActingUserId(session);
+    if (isOversight(session) && !impersonating) {
       return NextResponse.json({ message: "Only callers have a workspace queue." }, { status: 403 });
     }
-    const userId = session.user.id;
 
     // Optional search / filters on the assigned queue.
     const { searchParams } = new URL(req.url);

@@ -15,7 +15,7 @@ import SectionTabs from "@/components/SectionTabs";
 import FloatingPopover from "@/components/FloatingPopover";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 import { primaryItems } from "@/lib/navGroups";
-import { VIEW_AS_KEY, getDashboardViewAs } from "@/lib/dashboardView";
+import { VIEW_AS_KEY, getDashboardViewAs, getViewAsUser, setViewAsUser } from "@/lib/dashboardView";
 
 async function handleSignOut() {
   try {
@@ -98,18 +98,45 @@ export default function DashboardLayout({ children }) {
   // only; see VIEW_OPTIONS above). Persisted so a refresh keeps the preview
   // active instead of silently dropping back to the real role's own view.
   const [viewAs, setViewAsState] = useState("super_admin");
+  // The specific caller a Super Admin is impersonating (Caller Dashboard
+  // submenu), the caller list to choose from, and the submenu's open state.
+  const [viewAsUser, setVAUser] = useState(null);
+  const [callers, setCallers] = useState([]);
+  const [callerSubmenuOpen, setCallerSubmenuOpen] = useState(false);
   useEffect(() => {
     setViewAsState(getDashboardViewAs());
+    setVAUser(getViewAsUser());
   }, []);
   function setViewAs(v) {
     setViewAsState(v);
     if (typeof window !== "undefined") window.localStorage.setItem(VIEW_AS_KEY, v);
+    // Leaving the Caller view (or switching to a non-caller view) stops
+    // impersonating whichever caller was selected.
+    if (v !== "caller") { setViewAsUser(null); setVAUser(null); }
+  }
+  // Pick a specific caller to act as, then jump to their workspace.
+  function pickCaller(c) {
+    setViewAsState("caller");
+    if (typeof window !== "undefined") window.localStorage.setItem(VIEW_AS_KEY, "caller");
+    setViewAsUser(c);
+    setVAUser({ id: c.id, name: c.username });
+    setCallerSubmenuOpen(false);
+    setDashboardSwitcherOpen(false);
+    router.push("/dashboard/workspace");
   }
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
     setMobileNavOpen(false);
   }, [pathname]);
+  // Load the caller list for the Super Admin's "Caller Dashboard" submenu.
+  useEffect(() => {
+    if (normalizeRole(session?.user?.role) !== ROLES.SUPER_ADMIN) return;
+    fetch("/api/users")
+      .then((r) => r.json())
+      .then((d) => setCallers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)))
+      .catch(() => {});
+  }, [session]);
   // App version — injected at build time from package.json.
   const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || "";
 
@@ -436,11 +463,49 @@ export default function DashboardLayout({ children }) {
                   width={256}
                   estimatedHeight={(VIEW_OPTIONS.length + DASHBOARD_SWITCHER.length) * 36 + 80}
                 >
-                  <div className="py-1.5">
+                  <div className="py-1.5 max-h-[80vh] overflow-y-auto">
                     <div className="px-3.5 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Quick Dashboard Switch</div>
                     {VIEW_OPTIONS.map((opt) => {
                       const Icon = opt.icon;
                       const active = viewAs === opt.key;
+                      // Caller Dashboard expands into a submenu of caller profiles
+                      // instead of opening a dashboard directly.
+                      if (opt.key === "caller") {
+                        return (
+                          <div key={opt.key}>
+                            <button
+                              type="button"
+                              onClick={() => setCallerSubmenuOpen((o) => !o)}
+                              className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-sm text-left ${active ? "bg-blue-50 text-[#164FA3] font-semibold" : "text-gray-700 hover:bg-gray-50"}`}
+                            >
+                              <Icon size={15} className="shrink-0" />
+                              <span className="flex-1">{opt.name}</span>
+                              {active && viewAsUser && <span className="text-xs text-[#164FA3] truncate max-w-[70px]">{viewAsUser.name}</span>}
+                              <span className={`text-gray-400 text-[10px] transition-transform ${callerSubmenuOpen ? "rotate-90" : ""}`}>▶</span>
+                            </button>
+                            {callerSubmenuOpen && (
+                              <div className="bg-gray-50/70 border-y border-gray-100">
+                                {callers.length === 0 ? (
+                                  <div className="pl-10 pr-3.5 py-2 text-xs text-gray-400">No caller profiles found.</div>
+                                ) : callers.map((c) => {
+                                  const on = active && String(viewAsUser?.id) === String(c.id);
+                                  return (
+                                    <button
+                                      key={c.id}
+                                      type="button"
+                                      onClick={() => pickCaller(c)}
+                                      className={`flex w-full items-center gap-2 pl-10 pr-3.5 py-1.5 text-sm text-left ${on ? "text-[#164FA3] font-semibold bg-blue-50" : "text-gray-600 hover:bg-gray-100"}`}
+                                    >
+                                      <span className="flex-1 truncate">{c.username}</span>
+                                      {on && <Check size={14} className="shrink-0 text-[#164FA3]" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
                       return (
                         <button
                           key={opt.key}
@@ -498,7 +563,10 @@ export default function DashboardLayout({ children }) {
           <div className="flex items-center justify-center gap-2 bg-amber-50 border-b border-amber-200 px-4 py-1.5 text-xs sm:text-sm text-amber-800 shrink-0">
             <span>
               Current User: <strong>Super Admin</strong> &middot; Current View:{" "}
-              <strong>{VIEW_OPTIONS.find((o) => o.key === viewAs)?.name}</strong>
+              <strong>
+                {VIEW_OPTIONS.find((o) => o.key === viewAs)?.name}
+                {viewAs === "caller" && viewAsUser ? ` — ${viewAsUser.name}` : ""}
+              </strong>
             </span>
             <button
               type="button"

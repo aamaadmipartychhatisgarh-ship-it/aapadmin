@@ -2,6 +2,7 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
+import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn } from "@/lib/contactExtras";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
@@ -98,8 +99,11 @@ export async function POST(req) {
     if (!session) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
-    // Admins and supervisors are oversight roles — they don't log calls themselves.
-    if (isOversight(session)) {
+    // Oversight roles don't log calls as themselves — EXCEPT a Super Admin
+    // operating a specific caller's dashboard via the Quick Dashboard Switch,
+    // whose calls are recorded under that caller.
+    const { userId: actingUserId, impersonating } = await resolveActingUserId(session);
+    if (isOversight(session) && !impersonating) {
       return Response.json({ message: "Admins and supervisors cannot log calls. Use a caller account." }, { status: 403 });
     }
 
@@ -162,7 +166,7 @@ export async function POST(req) {
         booth_id || null,
         status_id,
         remarks || null,
-        session.user.id,
+        actingUserId,
         duration_seconds || null,
         finalSentiment,
         is_follow_up_required ? 1 : 0,

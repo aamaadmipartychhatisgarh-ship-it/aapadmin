@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { getPool } from "@/lib/db";
+import { resolveActingUserId } from "@/lib/actAs";
 import { buildRuleMatch, zoneMatch } from "@/lib/assignmentRules";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
@@ -18,7 +19,8 @@ export async function POST() {
     if (!session) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    const userId = session.user.id;
+    // Act as the impersonated caller when a Super Admin is viewing their board.
+    const { userId } = await resolveActingUserId(session);
 
     const pool = getPool();
     const conn = await pool.getConnection();

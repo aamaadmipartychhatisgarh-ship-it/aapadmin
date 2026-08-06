@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound, Flag, Check } from "lucide-react";
 import { isAdmin, isOversight, normalizeRole, ROLES, isPressMedia, isSocialMedia } from "@/lib/permissions";
-import { getDashboardViewAs } from "@/lib/dashboardView";
+import { getDashboardViewAs, getViewAsUser } from "@/lib/dashboardView";
 import Avatar from "@/components/Avatar";
 import CallActionIcons, { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -40,9 +40,11 @@ export default function WorkspacePage() {
   // against the real role so a stale value from a previous session on the
   // same browser can never bypass a non-super_admin's redirect.
   const [previewingCaller, setPreviewingCaller] = useState(false);
+  const [viewAsCaller, setViewAsCaller] = useState(null);
   useEffect(() => {
     const previewing = normalizeRole(session?.user?.role) === ROLES.SUPER_ADMIN && getDashboardViewAs() === "caller";
     setPreviewingCaller(previewing);
+    setViewAsCaller(previewing ? getViewAsUser() : null);
     if (status === "unauthenticated") router.push("/login");
     else if (status === "authenticated" && isOversight(session) && !previewing) {
       // The workspace is for callers only. Send oversight roles to their landing page.
@@ -61,10 +63,10 @@ export default function WorkspacePage() {
   ) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
-  return <WorkspaceBody previewingCaller={previewingCaller} />;
+  return <WorkspaceBody previewingCaller={previewingCaller} viewAsCaller={viewAsCaller} />;
 }
 
-function WorkspaceBody({ previewingCaller }) {
+function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], pool_count: 0, home_district: null, active_lock: null });
   // Queue search / hierarchical geography + designation filters. Zone is not a
   // dropdown — it's the caller's own zone (shown in Your Queue) and auto-scopes
@@ -448,7 +450,9 @@ function WorkspaceBody({ previewingCaller }) {
       <div className="lg:col-span-1 space-y-4">
         {previewingCaller && (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3">
-            Previewing the Caller Dashboard as Super Admin — this queue reflects your own Super Admin account, so it's expected to be empty unless contacts are directly assigned to you.
+            {viewAsCaller
+              ? <>Viewing <strong>{viewAsCaller.name}</strong>&apos;s Caller Dashboard as Super Admin — this is their live queue and data. Actions you take here are recorded under {viewAsCaller.name}.</>
+              : <>Previewing the Caller Dashboard as Super Admin. Pick a caller from the Quick Dashboard Switch to load their queue.</>}
           </div>
         )}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">

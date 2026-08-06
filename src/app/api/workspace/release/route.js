@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 
 // Releases any lock the caller is currently holding without logging a call.
@@ -10,9 +11,10 @@ export async function POST() {
     if (!session) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
+    const { userId } = await resolveActingUserId(session);
     await query(
       `UPDATE contacts SET locked_by_user_id = NULL, locked_at = NULL WHERE locked_by_user_id = ?`,
-      [session.user.id]
+      [userId]
     );
     return NextResponse.json({ ok: true });
   } catch (err) {
