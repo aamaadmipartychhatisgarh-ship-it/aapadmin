@@ -67,6 +67,8 @@ const CALLER_NAV = [
   { name: "My Calls", href: "/dashboard/calls", icon: Database },
   { name: "Complaints", href: "/dashboard/complaints", icon: MessageSquare },
   { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+  // The Not Interested tab of the Wrong Numbers dashboard, scoped to this caller.
+  { name: "Not Interested", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
 ];
 
 // Quick Dashboard Switch — Super Admin only. Sets which nav/layout renders

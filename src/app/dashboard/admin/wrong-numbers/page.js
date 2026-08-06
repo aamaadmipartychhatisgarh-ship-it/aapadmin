@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { isOversight, isAdmin } from "@/lib/permissions";
-import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X, GitMerge, Send } from "lucide-react";
+import { isOversight, isAdmin, isCaller } from "@/lib/permissions";
+import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X, GitMerge, Send, HeartCrack } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import Avatar from "@/components/Avatar";
+import NotInterestedView from "@/components/NotInterestedView";
 import { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 
 const REASON_LABEL = Object.fromEntries(WRONG_NUMBER_REASONS.map((r) => [r.value, r.label]));
@@ -18,12 +19,61 @@ export default function Page() {
   const router = useRouter();
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isOversight(session)) router.push("/dashboard");
+    // Oversight roles get the full dashboard; callers get the Not Interested tab.
+    else if (status === "authenticated" && !isOversight(session) && !isCaller(session)) router.push("/dashboard");
   }, [status, session, router]);
-  if (status !== "authenticated" || !isOversight(session)) {
+  if (status !== "authenticated" || (!isOversight(session) && !isCaller(session))) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
-  return <Body canDelete={isAdmin(session)} />;
+  return <WrongNumbersDashboard session={session} oversight={isOversight(session)} canDelete={isAdmin(session)} />;
+}
+
+// Tabs: "Wrong Numbers" (oversight only — the existing module) + "Not Interested"
+// (all roles, data role-scoped server-side). A caller only ever sees the second.
+function WrongNumbersDashboard({ session, oversight, canDelete }) {
+  const [tab, setTab] = useState(oversight ? "wrong" : "not_interested");
+  const [niCount, setNiCount] = useState(null);
+  // Eager, unfiltered count so the tab shows "Not Interested (N)" immediately —
+  // before the tab is ever opened. Refreshed live by the view's onCount below.
+  useEffect(() => {
+    fetch("/api/not-interested?page_size=1", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setNiCount(d.total || 0); })
+      .catch(() => {});
+  }, []);
+  const Tab = ({ id, children }) => (
+    <button
+      onClick={() => setTab(id)}
+      className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+        tab === id ? "border-[#164FA3] text-[#164FA3]" : "border-transparent text-gray-500 hover:text-gray-800"
+      }`}
+    >
+      {children}
+    </button>
+  );
+  return (
+    <div className="space-y-4 animate-in fade-in duration-500">
+      <div className="flex items-center gap-1 border-b border-gray-200">
+        {oversight && <Tab id="wrong">Wrong Numbers</Tab>}
+        <Tab id="not_interested">Not Interested{niCount != null ? ` (${niCount.toLocaleString()})` : ""}</Tab>
+      </div>
+      {tab === "wrong" && oversight ? (
+        <Body canDelete={canDelete} embedded />
+      ) : (
+        <div className="space-y-4">
+          <PageHeader
+            icon={HeartCrack}
+            title="Not Interested"
+            description="Contacts flagged by their call outcomes — switched off (5+), negative sentiment, opponent, not a supporter, or rudely behaved."
+            breadcrumb={oversight
+              ? [{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Not Interested" }]
+              : [{ label: "Dashboard", href: "/dashboard" }, { label: "Not Interested" }]}
+          />
+          <NotInterestedView session={session} onCount={setNiCount} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 const fmt = (d) => d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
