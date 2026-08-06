@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
+import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 import { MessageSquare, Plus, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Search } from "lucide-react";
 import CollapsibleSection from "@/components/CollapsibleSection";
 
@@ -25,18 +26,22 @@ const STATUS_OPTS = ["open", "in_progress", "resolved", "closed"];
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // A Super Admin previewing a caller sees the caller-facing complaints page in
+  // place, instead of being redirected to the admin complaints screen.
+  const { previewingCaller, viewAsCaller } = useCallerPreview(session);
   useEffect(() => {
+    const previewing = isPreviewingCallerNow(session);
     if (status === "unauthenticated") router.push("/login");
     // Oversight roles have their own complaints page under /dashboard/admin.
-    else if (status === "authenticated" && isOversight(session)) router.push("/dashboard/admin/complaints");
+    else if (status === "authenticated" && isOversight(session) && !previewing) router.push("/dashboard/admin/complaints");
   }, [status, session, router]);
-  if (status !== "authenticated" || isOversight(session)) {
+  if (status !== "authenticated" || (isOversight(session) && !previewingCaller)) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
-  return <Body />;
+  return <Body previewingCaller={previewingCaller} viewAsCaller={viewAsCaller} />;
 }
 
-function Body() {
+function Body({ previewingCaller, viewAsCaller }) {
   const [data, setData] = useState({ complaints: [], counts: {} });
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
@@ -70,6 +75,11 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {previewingCaller && viewAsCaller && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3">
+          Viewing the Complaints page as <strong>{viewAsCaller.name}</strong> (Super Admin preview).
+        </div>
+      )}
       <div className="flex justify-between items-end gap-4 flex-wrap">
         <div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Complaints</h1>

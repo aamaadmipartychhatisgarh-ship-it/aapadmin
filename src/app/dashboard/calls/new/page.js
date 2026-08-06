@@ -5,13 +5,17 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { PhoneCall, MapPin, Save, User, FileText } from "lucide-react";
 import { isAdmin, isSupervisorRole, isOversight } from "@/lib/permissions";
+import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 
 export default function LogCall() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // A Super Admin previewing a caller stays on this page (the call is logged
+  // under the impersonated caller via /api/calls) instead of being redirected.
+  const { previewingCaller, viewAsCaller } = useCallerPreview(session);
 
   useEffect(() => {
-    if (status === "authenticated" && isOversight(session)) {
+    if (status === "authenticated" && isOversight(session) && !isPreviewingCallerNow(session)) {
       router.push(isAdmin(session) ? "/dashboard/admin" : "/dashboard/supervisor");
     }
   }, [status, session, router]);
@@ -134,6 +138,11 @@ export default function LogCall() {
         </div>
       </div>
 
+      {previewingCaller && viewAsCaller && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3 font-medium">
+          Logging as <strong>{viewAsCaller.name}</strong> — this call will be recorded under their account.
+        </div>
+      )}
       {message && <div className="bg-green-50 text-green-700 p-4 rounded-xl border border-green-200 font-medium">{message}</div>}
       {error && <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200 font-medium">{error}</div>}
 

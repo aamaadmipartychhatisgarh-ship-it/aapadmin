@@ -4,6 +4,7 @@ import { useEffect, useState, Fragment } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
+import { useCallerPreview } from "@/lib/useCallerPreview";
 import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown } from "lucide-react";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { formatDate } from "@/lib/dateFormat";
@@ -67,14 +68,17 @@ function fmtAssignedOn(v) {
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // A Super Admin previewing a caller gets the caller's task view (My Tasks
+  // only, no management actions) — matching what that caller sees on login.
+  const { previewingCaller, viewAsCaller } = useCallerPreview(session);
   useEffect(() => { if (status === "unauthenticated") router.push("/login"); }, [status, router]);
   if (status !== "authenticated" || !session) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
-  return <Body canManage={isOversight(session)} />;
+  return <Body canManage={isOversight(session) && !previewingCaller} previewingCaller={previewingCaller} viewAsCaller={viewAsCaller} />;
 }
 
-function Body({ canManage }) {
+function Body({ canManage, previewingCaller, viewAsCaller }) {
   const [data, setData] = useState({ tasks: [], counts: {} });
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState(canManage ? "all" : "mine");
@@ -146,6 +150,11 @@ function Body({ canManage }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {previewingCaller && viewAsCaller && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3">
+          Viewing <strong>{viewAsCaller.name}</strong>&apos;s tasks as Super Admin.
+        </div>
+      )}
       <PageHeader
         icon={ClipboardList}
         title="Tasks"

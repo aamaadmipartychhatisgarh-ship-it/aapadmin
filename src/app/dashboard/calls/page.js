@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Phone, Plus, Search, Loader2, Star, X, Pencil, MapPin } from "lucide-react";
 import { isOversight } from "@/lib/permissions";
+import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 import { formatDate } from "@/lib/dateFormat";
 import CollapsibleSection from "@/components/CollapsibleSection";
 
@@ -44,10 +45,14 @@ export default function CallsPage() {
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null); // call selected for view/edit
+  // A Super Admin previewing a caller sees the caller's own calls here, instead
+  // of being bounced home. /api/calls resolves the impersonated caller.
+  const { previewingCaller, viewAsCaller } = useCallerPreview(session);
 
   useEffect(() => {
+    const previewing = isPreviewingCallerNow(session);
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && isOversight(session)) {
+    else if (status === "authenticated" && isOversight(session) && !previewing) {
       // Admin/supervisor have their own pages — send them home.
       router.push("/dashboard");
     }
@@ -59,11 +64,11 @@ export default function CallsPage() {
   }, []);
 
   useEffect(() => {
-    if (status !== "authenticated" || isOversight(session)) return;
+    if (status !== "authenticated" || (isOversight(session) && !isPreviewingCallerNow(session))) return;
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, session, search, designationId, statusId, sentiment, dateFrom, dateTo]);
+  }, [status, session, previewingCaller, search, designationId, statusId, sentiment, dateFrom, dateTo]);
 
   async function load() {
     setLoading(true);
@@ -92,6 +97,11 @@ export default function CallsPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {previewingCaller && viewAsCaller && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3">
+          Viewing <strong>{viewAsCaller.name}</strong>&apos;s calls as Super Admin.
+        </div>
+      )}
       <div className="flex justify-between items-end gap-4 flex-wrap">
         <div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">My Calls</h1>

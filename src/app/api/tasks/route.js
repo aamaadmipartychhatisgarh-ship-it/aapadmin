@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
+import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
@@ -14,6 +15,9 @@ export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // A previewing Super Admin's "My Tasks" resolves to the impersonated
+    // caller's tasks (never spoofable — verified server-side).
+    const { userId: actingUserId, impersonating } = await resolveActingUserId(session);
     const { searchParams } = new URL(req.url);
     const view = searchParams.get("view") || "all";
     const statusF = searchParams.get("status");
@@ -31,11 +35,13 @@ export async function GET(req) {
       await ensureTaskContactColumn();
       where.push("t.contact_id = ?");
       params.push(contactId);
-    } else if (view === "mine" || !isOversight(session)) {
-      // Non-oversight users only see their own tasks — assigned directly or via a team they belong to.
+    } else if (view === "mine" || !isOversight(session) || impersonating) {
+      // Non-oversight users (and a Super Admin previewing a caller) only see
+      // their own tasks — assigned directly or via a team they belong to.
       await ensureUserTeamMembers();
+      const meId = impersonating ? actingUserId : session.user.id;
       where.push("(t.assigned_to_user_id = ? OR t.assigned_to_team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ?))");
-      params.push(session.user.id, session.user.id);
+      params.push(meId, meId);
     }
     if (view === "pending") where.push("t.status IN ('pending','in_progress')");
     if (statusF) { where.push("t.status = ?"); params.push(statusF); }
@@ -45,7 +51,7 @@ export async function GET(req) {
     if (search) { where.push("(t.title LIKE ? OR t.description LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
     // Geographic scope (oversight only — caller already filtered to own tasks above).
     // tasks table only has district_id, so declare that.
-    if (isOversight(session) && view !== "mine") {
+    if (isOversight(session) && view !== "mine" && !impersonating) {
       const scope = scopeFilterSync(session.user, "t", { cols: ["district_id"] });
       if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
     }

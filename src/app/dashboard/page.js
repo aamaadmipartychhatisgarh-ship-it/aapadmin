@@ -7,30 +7,38 @@ import Link from "next/link";
 import { PhoneCall, PhoneForwarded, TrendingUp, Trophy, Heart, ArrowRight, Loader2 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { isAdmin, isSupervisorRole, isPressMedia, isSocialMedia } from "@/lib/permissions";
+import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 
 export default function UserDashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  // A Super Admin previewing a caller must see the caller's personal dashboard
+  // here, not be bounced to /dashboard/admin.
+  const { previewingCaller, viewAsCaller } = useCallerPreview(session);
 
   useEffect(() => {
+    const previewing = isPreviewingCallerNow(session);
     if (status === "unauthenticated") {
       router.push("/login");
-    } else if (status === "authenticated" && isAdmin(session)) {
+    } else if (status === "authenticated" && !previewing && isAdmin(session)) {
       router.push("/dashboard/admin");
-    } else if (status === "authenticated" && isSupervisorRole(session)) {
+    } else if (status === "authenticated" && !previewing && isSupervisorRole(session)) {
       router.push("/dashboard/supervisor");
-    } else if (status === "authenticated" && isPressMedia(session)) {
+    } else if (status === "authenticated" && !previewing && isPressMedia(session)) {
       router.push("/dashboard/media");
-    } else if (status === "authenticated" && isSocialMedia(session)) {
+    } else if (status === "authenticated" && !previewing && isSocialMedia(session)) {
       router.push("/dashboard/social");
     } else if (status === "authenticated") {
+      // The caller's own stats — /api/me/stats resolves the impersonated caller
+      // server-side (see actAs.js), so a previewing Super Admin sees the
+      // selected caller's numbers, not their own.
       fetch("/api/me/stats").then((r) => r.json()).then((d) => setStats(d)).finally(() => setLoading(false));
     }
   }, [status, session, router]);
 
-  if (status === "loading" || !session || isAdmin(session) || isSupervisorRole(session) || isPressMedia(session) || isSocialMedia(session)) {
+  if (status === "loading" || !session || (!previewingCaller && (isAdmin(session) || isSupervisorRole(session) || isPressMedia(session) || isSocialMedia(session)))) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
 
@@ -44,9 +52,14 @@ export default function UserDashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
+      {previewingCaller && viewAsCaller && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3">
+          Viewing <strong>{viewAsCaller.name}</strong>&apos;s Caller Dashboard as Super Admin — these are their numbers.
+        </div>
+      )}
       <div className="flex justify-between items-end flex-wrap gap-4">
         <div className="min-w-0">
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight truncate">Welcome, {session.user.name}</h1>
+          <h1 className="text-4xl font-bold text-gray-900 tracking-tight truncate">Welcome, {previewingCaller && viewAsCaller ? viewAsCaller.name : session.user.name}</h1>
           <p className="text-gray-500 mt-2 font-medium">Your personal calling dashboard</p>
         </div>
         <Link href="/dashboard/workspace" className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-5 py-2.5 rounded-xl font-semibold shadow-md shrink-0">

@@ -14,6 +14,10 @@ export async function GET(req) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 
+    // When a Super Admin is previewing a specific caller, show that caller's
+    // own calls (My Calls) — resolved server-side, never spoofable.
+    const { userId: actingUserId, impersonating } = await resolveActingUserId(session);
+
     const { searchParams } = new URL(req.url);
     const date_from = searchParams.get("date_from");
     const date_to = searchParams.get("date_to");
@@ -32,8 +36,12 @@ export async function GET(req) {
     let where = " WHERE 1=1";
     const params = [];
 
-    // Supervisors/admins see all calls; everyone else sees only their own
-    if (!isSupervisor(session)) {
+    // A previewing Super Admin sees the impersonated caller's calls; otherwise
+    // supervisors/admins see all calls, and everyone else only their own.
+    if (impersonating) {
+      where += " AND c.user_id = ?";
+      params.push(actingUserId);
+    } else if (!isSupervisor(session)) {
       where += " AND c.user_id = ?";
       params.push(session.user.id);
     } else if (user_id) {
@@ -55,8 +63,9 @@ export async function GET(req) {
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    // Geographic scope from role (applies to oversight; callers already see only their own)
-    if (isSupervisor(session)) {
+    // Geographic scope from role (applies to oversight; callers already see only
+    // their own). Skipped while impersonating — already filtered to the caller.
+    if (isSupervisor(session) && !impersonating) {
       const scope = scopeFilterSync(session.user, "c");
       where += " " + scope.where;
       params.push(...scope.params);

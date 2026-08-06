@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 
 export async function GET() {
@@ -9,7 +10,9 @@ export async function GET() {
     if (!session) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    const userId = session.user.id;
+    // When a Super Admin is previewing a specific caller (Quick Dashboard
+    // Switch), serve THAT caller's personal stats, not the admin's own.
+    const { userId } = await resolveActingUserId(session);
 
     const [today] = await query(
       `SELECT COUNT(*) AS total,
