@@ -56,7 +56,13 @@ const MODES = {
     teamMembersUrl: (teamId) => `/api/supervisor/contacts/teams/${teamId}`,
     teamMemberType: null, // this endpoint only ever returns caller-type members
     scopeUrl: "/api/supervisor/contacts/scope",
-    canAdd: false, canImport: false, canDeleteWrong: false, canEditGeo: false,
+    addContactUrl: "/api/supervisor/contacts",
+    // Add Contact is enabled — the server stamps the new contact's geography
+    // from the supervisor's own territory (see POST /api/supervisor/contacts).
+    // Import (bulk Excel/CSV) and bulk-delete-wrong stay admin-only, and
+    // geo-editing an existing contact stays server-restricted (see the PUT
+    // /api/supervisor/contacts/[id] comment).
+    canAdd: true, canImport: false, canDeleteWrong: false, canEditGeo: false,
     territoryScoped: true,
     breadcrumbTrail: [{ label: "Dashboard", href: "/dashboard/supervisor" }, { label: "Contacts" }],
   },
@@ -859,7 +865,16 @@ export default function ContactsModule({ session, mode }) {
 
       <Pagination total={total} page={page} pageSize={PAGE_SIZE} onPage={setPage} loading={loading} />
 
-      {cfg.canAdd && showAdd && <AddContactModal addUrl={cfg.addContactUrl} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
+      {cfg.canAdd && showAdd && (
+        <AddContactModal
+          addUrl={cfg.addContactUrl}
+          territory={cfg.territoryScoped ? territory : null}
+          territoryLabel={cfg.territoryScoped ? territoryLabel : ""}
+          scopedDistricts={cfg.territoryScoped ? districts : null}
+          onClose={() => setShowAdd(false)}
+          onSaved={() => { setShowAdd(false); load(); loadCounts(); }}
+        />
+      )}
       {editingContact && (
         <EditContactModal
           contact={editingContact}
@@ -1176,15 +1191,28 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
 function ChevronLeftIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>; }
 function ChevronRightIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>; }
 
-function AddContactModal({ addUrl, onClose, onSaved }) {
-  const [form, setForm] = useState({ person_name: "", phone_number: "", address: "", designation_id: "", district_id: "" });
-  const [districts, setDistricts] = useState([]);
+// `territory` (supervisor mode only) locks the new contact to the supervisor's
+// own scope: their geography is applied server-side regardless, and the UI
+// reflects that — a fixed district for a district/assembly supervisor, or a
+// choice among the zone's districts for a zone-level supervisor.
+function AddContactModal({ addUrl, territory = null, territoryLabel = "", scopedDistricts = null, onClose, onSaved }) {
+  const districtLocked = !!(territory && territory.district); // district/assembly anchor → fixed
+  const zoneLevel = !!(territory && territory.level === "zone"); // may pick a district in-zone
+  const [form, setForm] = useState({
+    person_name: "", phone_number: "", address: "", designation_id: "",
+    district_id: territory?.district ? String(territory.district.id) : "",
+  });
+  const [districts, setDistricts] = useState(scopedDistricts || []);
   const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    // Admin: all districts. Supervisor: the parent already supplies the scoped
+    // list (its territory-filtered geo dropdown), so don't refetch everything.
+    if (!territory) {
+      fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    }
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
@@ -1204,6 +1232,11 @@ function AddContactModal({ addUrl, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
         <h2 className="text-xl font-bold text-gray-900">Add Contact</h2>
+        {territory && territoryLabel && (
+          <div className="bg-blue-50 border border-blue-100 text-[#164FA3] rounded-lg px-3 py-2 text-xs flex items-center gap-1.5">
+            <MapPin size={14} /> Added to your territory: <span className="font-semibold">{territoryLabel}</span>
+          </div>
+        )}
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
@@ -1212,10 +1245,19 @@ function AddContactModal({ addUrl, onClose, onSaved }) {
           <option value="">No designation</option>
           {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
-          <option value="">No district</option>
-          {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        {/* District: fixed for a district/assembly supervisor; a scoped choice
+            for a zone-level supervisor; a free choice of all districts for an
+            admin. */}
+        {districtLocked ? (
+          <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-500">
+            District: <span className="font-medium text-gray-700">{territory.district.name}</span>
+          </div>
+        ) : (
+          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
+            <option value="">{zoneLevel ? "Whole zone (no specific district)" : "No district"}</option>
+            {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
           <button onClick={save} disabled={saving || !form.person_name || !form.phone_number} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">

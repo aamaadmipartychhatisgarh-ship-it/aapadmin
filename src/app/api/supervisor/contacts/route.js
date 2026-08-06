@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isSupervisorRole } from "@/lib/permissions";
+import { isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { logAudit } from "@/lib/audit";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
-import { supervisorScopeFilter } from "@/lib/supervisorScope";
+import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
 
 // Supervisor-scoped mirror of GET /api/contacts (src/app/api/contacts/route.js)
 // — same filters, same shape, same pagination — but gated to the strict
@@ -110,6 +111,111 @@ export async function GET(req) {
     return NextResponse.json({ contacts, total, page, page_size: pageSize });
   } catch (err) {
     console.error("supervisor contacts GET error:", err);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}
+
+// Which of the geo columns actually exist on `contacts` in this deployment
+// (schemas have drifted across environments — same defensive detection the
+// admin route and the [id] route use).
+let contactColumnsPromise;
+async function getContactColumns() {
+  if (!contactColumnsPromise) {
+    contactColumnsPromise = query(
+      `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'`
+    )
+      .then((rows) => new Set(rows.map((r) => r.name)))
+      .catch((err) => { contactColumnsPromise = undefined; throw err; });
+  }
+  return contactColumnsPromise;
+}
+
+// POST /api/supervisor/contacts — supervisor-scoped mirror of POST
+// /api/contacts (Add Contact). Identical workflow to the admin's, with one
+// server-enforced difference: the new contact's geography is stamped from the
+// supervisor's OWN territory, never from arbitrary client input, so a created
+// contact ALWAYS lands inside the supervisor's scope (and can never be planted
+// outside it). An optional initial caller assignment is validated to be a
+// caller within the supervisor's territory, exactly like the [id] PUT.
+export async function POST(req) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || !isSupervisorRole(session)) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    const territory = await supervisorTerritory(session.user, query);
+    if (!territory) {
+      return NextResponse.json({ message: "No territory is assigned to your account, so a contact can't be placed. Ask a Super Admin to set your Zone, District, or Assembly." }, { status: 403 });
+    }
+
+    const data = await req.json();
+    const { person_name, phone_number, address, designation_id, assigned_to_user_id } = data;
+    if (!person_name || !phone_number) {
+      return NextResponse.json({ message: "Name and phone are required" }, { status: 400 });
+    }
+
+    // An initial assignment (optional) must be to a caller in this territory.
+    if (assigned_to_user_id) {
+      const callerScope = supervisorCallerScopeFilter(session.user, "u");
+      const rows = await query(
+        `SELECT id, role FROM users u WHERE u.id = ? ${callerScope.where}`,
+        [assigned_to_user_id, ...callerScope.params]
+      );
+      const target = rows[0];
+      if (!target || normalizeRole(target.role) !== ROLES.CALLER) {
+        return NextResponse.json({ message: "That caller is not in your territory." }, { status: 403 });
+      }
+    }
+
+    // Geography is dictated by the supervisor's anchor (assembly > district >
+    // zone), NOT by the client. This is exactly the column supervisorScopeFilter
+    // matches on, so the new row is guaranteed visible in the supervisor's own
+    // list rather than orphaned out of scope.
+    const geo = {};
+    if (territory.zone) geo.zone_id = territory.zone.id;
+    if (territory.lok_sabha) geo.lok_sabha_id = territory.lok_sabha.id;
+    if (territory.district) geo.district_id = territory.district.id;
+    if (territory.assembly) geo.assembly_id = territory.assembly.id;
+    // A zone-level supervisor (no fixed district) may narrow the contact to a
+    // specific district — but only one that belongs to their zone.
+    if (territory.level === "zone" && data.district_id) {
+      const rows = await query(
+        `SELECT d.id, ls.id AS lok_sabha_id
+           FROM locations d
+           JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+          WHERE d.id = ? AND ls.parent_id = ?`,
+        [data.district_id, territory.zone.id]
+      );
+      if (rows[0]) { geo.district_id = rows[0].id; geo.lok_sabha_id = rows[0].lok_sabha_id; }
+    }
+
+    const existingColumns = await getContactColumns();
+    const cols = [];
+    const vals = [];
+    const add = (col, val) => { if (existingColumns.has(col)) { cols.push(col); vals.push(val); } };
+    add("person_name", person_name);
+    add("phone_number", phone_number);
+    add("address", address || null);
+    add("designation_id", designation_id || null);
+    for (const [col, val] of Object.entries(geo)) add(col, val);
+    add("assigned_to_user_id", assigned_to_user_id || null);
+    if (assigned_to_user_id) {
+      if (existingColumns.has("assigned_at")) add("assigned_at", new Date());
+      if (existingColumns.has("assigned_by_user_id")) add("assigned_by_user_id", session.user.id);
+    }
+
+    const res = await query(
+      `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
+      vals
+    );
+    await logAudit(session, { action: "contact.create", entityType: "contact", entityId: res.insertId, details: { supervisor: true, territory: territory.level } });
+    return NextResponse.json({ id: res.insertId }, { status: 201 });
+  } catch (err) {
+    if (err.code === "ER_DUP_ENTRY") {
+      return NextResponse.json({ message: "A contact with this phone number already exists" }, { status: 409 });
+    }
+    console.error("supervisor contacts POST error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
