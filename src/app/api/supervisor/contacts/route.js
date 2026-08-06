@@ -144,10 +144,9 @@ export async function POST(req) {
     if (!session || !isSupervisorRole(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
+    // territory is null for an unconfigured (full-oversight) supervisor — they
+    // add contacts like an admin (free district choice), not locked to an anchor.
     const territory = await supervisorTerritory(session.user, query);
-    if (!territory) {
-      return NextResponse.json({ message: "No territory is assigned to your account, so a contact can't be placed. Ask a Super Admin to set your Zone, District, or Assembly." }, { status: 403 });
-    }
 
     const data = await req.json();
     const { person_name, phone_number, address, designation_id, assigned_to_user_id } = data;
@@ -155,7 +154,8 @@ export async function POST(req) {
       return NextResponse.json({ message: "Name and phone are required" }, { status: 400 });
     }
 
-    // An initial assignment (optional) must be to a caller in this territory.
+    // An initial assignment (optional) must be to a caller this supervisor may
+    // assign to (their territory, or any caller when unconfigured).
     if (assigned_to_user_id) {
       const callerScope = supervisorCallerScopeFilter(session.user, "u");
       const rows = await query(
@@ -169,25 +169,35 @@ export async function POST(req) {
     }
 
     // Geography is dictated by the supervisor's anchor (assembly > district >
-    // zone), NOT by the client. This is exactly the column supervisorScopeFilter
-    // matches on, so the new row is guaranteed visible in the supervisor's own
-    // list rather than orphaned out of scope.
+    // zone), NOT by arbitrary client input, so a new contact always lands in
+    // scope. Contacts are keyed by district_id (see supervisorScopeFilter), so
+    // every stamped contact must carry a district_id within the supervisor's
+    // reach — otherwise it would be invisible in their own (district-scoped) list.
     const geo = {};
-    if (territory.zone) geo.zone_id = territory.zone.id;
-    if (territory.lok_sabha) geo.lok_sabha_id = territory.lok_sabha.id;
-    if (territory.district) geo.district_id = territory.district.id;
-    if (territory.assembly) geo.assembly_id = territory.assembly.id;
-    // A zone-level supervisor (no fixed district) may narrow the contact to a
-    // specific district — but only one that belongs to their zone.
-    if (territory.level === "zone" && data.district_id) {
-      const rows = await query(
-        `SELECT d.id, ls.id AS lok_sabha_id
-           FROM locations d
-           JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
-          WHERE d.id = ? AND ls.parent_id = ?`,
-        [data.district_id, territory.zone.id]
-      );
-      if (rows[0]) { geo.district_id = rows[0].id; geo.lok_sabha_id = rows[0].lok_sabha_id; }
+    if (territory) {
+      if (territory.zone) geo.zone_id = territory.zone.id;
+      if (territory.lok_sabha) geo.lok_sabha_id = territory.lok_sabha.id;
+      if (territory.district) geo.district_id = territory.district.id;
+      if (territory.assembly) geo.assembly_id = territory.assembly.id;
+      // A zone-level supervisor has no fixed district, so they MUST pick one —
+      // and only a district that belongs to their zone.
+      if (territory.level === "zone") {
+        const rows = data.district_id ? await query(
+          `SELECT d.id, ls.id AS lok_sabha_id
+             FROM locations d
+             JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+            WHERE d.id = ? AND ls.parent_id = ?`,
+          [data.district_id, territory.zone.id]
+        ) : [];
+        if (!rows[0]) {
+          return NextResponse.json({ message: "Pick a district within your zone for this contact." }, { status: 400 });
+        }
+        geo.district_id = rows[0].id;
+        geo.lok_sabha_id = rows[0].lok_sabha_id;
+      }
+    } else if (data.district_id) {
+      // Unconfigured supervisor (full oversight): honor the chosen district.
+      geo.district_id = data.district_id;
     }
 
     const existingColumns = await getContactColumns();

@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSupervisorRole } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { supervisorCallerScopeFilter, supervisorHasScope } from "@/lib/supervisorScope";
+import { supervisorCallerScopeFilter } from "@/lib/supervisorScope";
 
 // GET /api/supervisor/contacts/callers — caller accounts within this
 // supervisor's own territory only. Never leaks callers belonging to other
@@ -14,9 +14,9 @@ export async function GET() {
     if (!session || !isSupervisorRole(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    if (!supervisorHasScope(session.user)) {
-      return NextResponse.json({ users: [] });
-    }
+    // A configured supervisor gets callers in their territory; an unconfigured
+    // one gets all callers (full oversight) — supervisorCallerScopeFilter
+    // returns an empty clause in that case.
     const scope = supervisorCallerScopeFilter(session.user, "u");
     const users = await query(
       `SELECT u.id, u.username, u.role, u.home_district_id, l.name AS home_district_name

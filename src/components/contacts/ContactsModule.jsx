@@ -1254,13 +1254,14 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
           </div>
         ) : (
           <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
-            <option value="">{zoneLevel ? "Whole zone (no specific district)" : "No district"}</option>
+            <option value="">{zoneLevel ? "Select a district in your zone *" : "No district"}</option>
             {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         )}
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={save} disabled={saving || !form.person_name || !form.phone_number} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">
+          {/* A zone-level supervisor must choose a district (scope is keyed on it). */}
+          <button onClick={save} disabled={saving || !form.person_name || !form.phone_number || (zoneLevel && !form.district_id)} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">
             {saving ? "Saving…" : "Save"}
           </button>
         </div>

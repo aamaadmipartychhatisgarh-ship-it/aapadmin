@@ -1,5 +1,3 @@
-import { scopeFilterSync, ROLES } from "@/lib/permissions";
-
 // Dedicated scoping for the Supervisor Contacts Distribution module ONLY.
 // scopeFilterSync (permissions.js) intentionally treats `supervisor` as
 // "sees everything" — every existing Supervisor page (Caller Performance,
@@ -12,24 +10,43 @@ import { scopeFilterSync, ROLES } from "@/lib/permissions";
 // Precedence when a supervisor has more than one scope column set: the most
 // specific wins (assembly > district > zone).
 
-// For tables with zone_id/district_id/assembly_id columns (contacts,
-// workers, calls, tasks...) — reuses scopeFilterSync's own, already-tested
-// WHERE-building by impersonating the equivalent admin tier, instead of
-// duplicating that SQL here.
-export function supervisorScopeFilter(user, alias = "", opts = {}) {
+// Territory scope for the `contacts` table. Contacts in this deployment are
+// keyed almost entirely by district_id — zone_id / lok_sabha_id / assembly_id
+// are largely unpopulated — so EVERY tier resolves to a district_id clause.
+// Keying a zone-assigned supervisor on the (empty) zone_id was the bug behind
+// "Supervisor sees 0 contacts": their zone is full of contacts, but every one
+// carries only district_id, so `c.zone_id = <zone>` matched nothing. Resolving
+// the zone down to its districts fixes it. Precedence: assembly > district >
+// zone (most specific wins).
+export function supervisorScopeFilter(user, alias = "") {
+  const tag = alias ? `${alias}.` : "";
   if (user?.scope_assembly_id) {
-    return scopeFilterSync({ ...user, role: ROLES.ASSEMBLY_ADMIN }, alias, opts);
+    // Contacts have no reliable assembly_id, so an assembly supervisor is
+    // scoped to that assembly's parent district (the finest grain the data
+    // actually supports).
+    return {
+      where: `AND ${tag}district_id = (SELECT parent_id FROM locations WHERE id = ?)`,
+      params: [user.scope_assembly_id],
+    };
   }
   if (user?.home_district_id) {
-    return scopeFilterSync({ ...user, role: ROLES.DISTRICT_ADMIN }, alias, opts);
+    return { where: `AND ${tag}district_id = ?`, params: [user.home_district_id] };
   }
   if (user?.scope_zone_id) {
-    return scopeFilterSync({ ...user, role: ROLES.ZONE_ADMIN }, alias, opts);
+    return {
+      where: `AND ${tag}district_id IN (
+        SELECT d.id FROM locations d
+        JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+        WHERE ls.parent_id = ?
+      )`,
+      params: [user.scope_zone_id],
+    };
   }
-  // No scope configured on this Supervisor account → show nothing, not
-  // everything (strict-by-default, matches scopeFilterSync's own behavior
-  // for an unscoped zone/district/assembly admin).
-  return { where: "AND 1 = 0", params: [] };
+  // No territory configured → full oversight, consistent with scopeFilterSync's
+  // supervisor default and every other Supervisor page (Caller Performance,
+  // Area Reports, ...). This previously returned "AND 1 = 0", which made the
+  // Contacts page uniquely show an empty table for an unconfigured supervisor.
+  return { where: "", params: [] };
 }
 
 // For the `users` table itself, whose geo columns are named differently
@@ -60,7 +77,9 @@ export function supervisorCallerScopeFilter(user, alias = "") {
       params: [user.scope_zone_id],
     };
   }
-  return { where: "AND 1 = 0", params: [] };
+  // No territory configured → all callers (full oversight), mirroring
+  // supervisorScopeFilter's unscoped fallback so the two stay consistent.
+  return { where: "", params: [] };
 }
 
 // True if this supervisor account has ANY scope configured. Surfaced in the

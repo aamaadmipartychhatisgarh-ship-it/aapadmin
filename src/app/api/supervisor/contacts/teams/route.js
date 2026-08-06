@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isSupervisorRole } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
-import { supervisorCallerScopeFilter, supervisorHasScope } from "@/lib/supervisorScope";
+import { supervisorCallerScopeFilter } from "@/lib/supervisorScope";
 
 // GET /api/supervisor/contacts/teams — teams that contain at least one
 // caller within this supervisor's territory (there's no direct
@@ -16,9 +16,8 @@ export async function GET() {
     if (!session || !isSupervisorRole(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    if (!supervisorHasScope(session.user)) {
-      return NextResponse.json({ teams: [] });
-    }
+    // Configured supervisor → teams containing their territory's callers;
+    // unconfigured supervisor → every team with a caller (empty scope clause).
     await ensureUserTeamMembers();
     // Same scope clause, computed once per alias — params must be passed in
     // the exact order their placeholders appear in the SQL text below (the
