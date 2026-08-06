@@ -74,20 +74,26 @@ export async function POST(req) {
         // this caller is always claimable by them (mirrors the Assigned-to-You
         // list). The zone restriction applies only to the pool fallback (terr).
         const assignedTerr = { where: "", params: [] };
-        // "Start Next Call" only ever serves a FRESH, never-worked contact: one
-        // with zero call activity (no call record → no sentiment, no
-        // disposition/outcome, no call remarks, no completed call). A contact
-        // that's already been worked — including a due call-back, Busy or
-        // Follow-up — is NOT auto-served here; the caller re-opens those by
-        // tapping them in the list (the explicit-id branch above allows that).
-        // This keeps auto-advance flowing through brand-new work in order.
+        // Auto-advance serves work in three tiers, and NEVER modifies any
+        // contact's call history / sentiment / status / recall / follow-up — it
+        // only chooses which existing row to open next.
+        //
+        //   TIER 1 — FRESH assignments: contacts assigned to this caller with
+        //   zero call activity (no call record → therefore no sentiment,
+        //   disposition, remark, callback or completed call). Ordered exactly
+        //   like My Workspace (newest assigned_at first, no-timestamp last, VIP
+        //   ahead, id tie-breaker) so "next" walks the visible fresh list in
+        //   sequence, one contact per click.
+        //
+        //   TIER 2 — EXISTING WORKFLOW: only once the fresh queue is exhausted do
+        //   we fall back to the caller's remaining DUE assigned contacts (recall
+        //   schedules, scheduled call-backs, follow-ups) in the original priority
+        //   order. Their history stays fully intact — they're simply reached
+        //   after fresh work, not before it.
+        //
+        //   TIER 3 — POOL: finally, an unclaimed territory contact.
         const freshOnly = "AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = contacts.id)";
-        // Ordered identically to My Workspace so "next" is exactly the top of the
-        // caller's visible fresh list: newest assignment first (assigned_at),
-        // rows with no timestamp last, VIPs ahead, id as the final tie-breaker.
-        const freshOrder = "ORDER BY assigned_at IS NULL ASC, assigned_at DESC, is_vip DESC, id DESC";
-        // Try caller's own assigned FRESH queue first, then fall back to the territory pool.
-        const [assignedRows] = await conn.execute(
+        const [freshRows] = await conn.execute(
           `SELECT * FROM contacts
             WHERE is_completed = 0${notWrong}
               AND assigned_to_user_id = ?
@@ -95,36 +101,52 @@ export async function POST(req) {
               ${freshOnly}
               AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
               ${assignedTerr.where}
-            ${freshOrder}
+            ORDER BY assigned_at IS NULL ASC, assigned_at DESC, is_vip DESC, id DESC
             LIMIT 1 FOR UPDATE`,
           [userId, ...assignedTerr.params]
         );
-        if (assignedRows[0]) {
-          row = assignedRows[0];
+        if (freshRows[0]) {
+          row = freshRows[0];
         } else {
-          const [poolRows] = await conn.execute(
+          // TIER 2: existing workflow for already-worked, still-due contacts.
+          const [assignedRows] = await conn.execute(
             `SELECT * FROM contacts
               WHERE is_completed = 0${notWrong}
-                AND assigned_to_user_id IS NULL
+                AND assigned_to_user_id = ?
                 AND ${dueSql}
-                ${freshOnly}
                 AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
-                ${terr.where}
-              ORDER BY id ASC
+                ${assignedTerr.where}
+              ORDER BY is_vip DESC, follow_up_date IS NOT NULL DESC, follow_up_date ASC, id ASC
               LIMIT 1 FOR UPDATE`,
-            terr.params
+            [userId, ...assignedTerr.params]
           );
-          row = poolRows[0];
+          if (assignedRows[0]) {
+            row = assignedRows[0];
+          } else {
+            // TIER 3: territory pool fallback (original behavior).
+            const [poolRows] = await conn.execute(
+              `SELECT * FROM contacts
+                WHERE is_completed = 0${notWrong}
+                  AND assigned_to_user_id IS NULL
+                  AND ${dueSql}
+                  AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
+                  ${terr.where}
+                ORDER BY id ASC
+                LIMIT 1 FOR UPDATE`,
+              terr.params
+            );
+            row = poolRows[0];
+          }
         }
       }
 
       if (!row) {
         await conn.rollback();
-        // No fresh, never-worked contact left to auto-serve. Worked contacts
-        // (call-backs, follow-ups) may still be in the list for the caller to
-        // re-open manually — this only means auto-advance has nothing new.
+        // Nothing left across all three tiers (fresh assignments, due
+        // call-backs/follow-ups, and the territory pool) — the caller is fully
+        // caught up. Any future-dated follow-ups still show in their own list.
         return NextResponse.json(
-          { message: explicitId ? "That contact is no longer available." : "No new calls are available. All assigned fresh contacts have been completed." },
+          { message: explicitId ? "That contact is no longer available." : "No calls are available right now — you're all caught up." },
           { status: 409 }
         );
       }
