@@ -246,8 +246,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     setEditing(false);
   }, [active?.id]);
 
-  async function loadQueue() {
-    setLoading(true);
+  // `silent` skips the loading spinner — used by the background auto-refresh so
+  // a supervisor/super-admin assignment appears (at the top, newest first)
+  // without flicker or a manual reload.
+  async function loadQueue({ silent = false } = {}) {
+    if (!silent) setLoading(true);
     const params = new URLSearchParams();
     if (qSearch.trim()) params.set("search", qSearch.trim());
     if (qLokSabha.length) params.set("lok_sabha_id", qLokSabha.join(","));
@@ -257,8 +260,21 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     const qs = params.toString();
     const r = await fetch(`/api/workspace/queue${qs ? `?${qs}` : ""}`);
     if (r.ok) setQueue(await r.json());
-    setLoading(false);
+    if (!silent) setLoading(false);
   }
+
+  // Auto-refresh the queue so newly (re)assigned calls surface on their own —
+  // poll on an interval and whenever the tab regains focus. Uses the latest
+  // filter values via a ref so the poll always fetches the current view.
+  const loadQueueRef = useRef(loadQueue);
+  loadQueueRef.current = loadQueue;
+  useEffect(() => {
+    const tick = () => loadQueueRef.current({ silent: true });
+    const iv = setInterval(tick, 20000);
+    const onFocus = () => tick();
+    window.addEventListener("focus", onFocus);
+    return () => { clearInterval(iv); window.removeEventListener("focus", onFocus); };
+  }, []);
 
   // Re-load the queue when search / filters change (debounced for typing).
   useEffect(() => {

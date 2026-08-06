@@ -134,11 +134,19 @@ export async function GET(req) {
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
           AND ${dueSql}${notWrong}${filterSql}
-        ORDER BY (CASE WHEN (${daily.sql}) THEN 0 ELSE 1 END) ASC,
+        -- Newest (re)assignment always on top: assigned_at is stamped NOW() on
+        -- every assignment AND reassignment (contacts PUT + bulk-distribute), so
+        -- a just-(re)assigned contact floats to the top of the caller's queue
+        -- without a manual refresh. assigned_at dominates so a fresh assignment
+        -- with no follow-up date still leads; legacy rows with no timestamp sort
+        -- last, then fall back to the older VIP / daily-rule ordering.
+        ORDER BY c.assigned_at IS NULL ASC,
+                 c.assigned_at DESC,
+                 (CASE WHEN (${daily.sql}) THEN 0 ELSE 1 END) ASC,
                  c.is_vip DESC,
                  c.follow_up_date IS NOT NULL DESC,
                  c.follow_up_date ASC,
-                 c.id ASC
+                 c.id DESC
         LIMIT 1000`,
       [...daily.params, userId, ...qParams, ...daily.params]
     );
@@ -151,7 +159,10 @@ export async function GET(req) {
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
           AND ${laterSql}${notWrong}
-        ORDER BY c.follow_up_date ASC${hasFupTime ? ", c.follow_up_time ASC" : ""}
+        -- Kept in sync with the Schedule module: latest schedule_date first,
+        -- then newest assignment first among the same date.
+        ORDER BY c.follow_up_date DESC${hasFupTime ? ", c.follow_up_time DESC" : ""},
+                 c.assigned_at IS NULL ASC, c.assigned_at DESC
         LIMIT 50`,
       [userId]
     );
