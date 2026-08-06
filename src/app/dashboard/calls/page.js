@@ -168,7 +168,7 @@ export default function CallsPage() {
                   <th className="px-4 py-3 font-semibold text-gray-600">Sentiment</th>
                   <th className="px-4 py-3 font-semibold text-gray-600 text-right">Duration</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Remarks</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600 text-right">Details</th>
+                  <th className="px-4 py-3 font-semibold text-gray-600 text-right">Call Console</th>
                 </tr>
               </thead>
               <tbody>
@@ -196,7 +196,7 @@ export default function CallsPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#164FA3]">
-                        View / Edit
+                        Call Console
                       </span>
                     </td>
                   </tr>
@@ -224,8 +224,11 @@ export default function CallsPage() {
   );
 }
 
-// View the full details of a logged call and edit the contacted person's info.
+// View the full details of a logged call. "Edit" no longer edits inline — it
+// opens the full calling console (My Workspace) for this exact contact, so any
+// change happens live on the call. Browser Back returns to the My Calls list.
 function CallDetailModal({ call, statuses, onClose, onSaved }) {
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -306,8 +309,11 @@ function CallDetailModal({ call, statuses, onClose, onSaved }) {
 
         <div className="flex justify-end gap-2 pt-2">
           {!editing ? (
-            <button onClick={() => setEditing(true)} className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 text-white rounded-lg font-semibold">
-              <Pencil size={14} /> Edit details
+            <button
+              onClick={() => router.push(call.contact_id ? `/dashboard/workspace?contact_id=${call.contact_id}` : "/dashboard/workspace")}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 text-white rounded-lg font-semibold"
+            >
+              <Pencil size={14} /> Edit in Workspace
             </button>
           ) : (
             <>

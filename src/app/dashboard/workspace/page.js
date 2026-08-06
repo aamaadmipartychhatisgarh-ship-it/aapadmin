@@ -158,6 +158,20 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(sortDesignations(d.designations || [])));
   }, []);
 
+  // Deep-link support: arriving from My Calls' "Edit in Workspace" carries a
+  // ?contact_id=, so the console opens straight onto that exact contact. Fires
+  // once; claim() surfaces its own message if the contact can't be opened (e.g.
+  // it belongs to another caller). Browser Back returns to the My Calls list.
+  const didAutoOpen = useRef(false);
+  useEffect(() => {
+    if (didAutoOpen.current) return;
+    const cid = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("contact_id") : null;
+    if (!cid) return;
+    didAutoOpen.current = true;
+    claim(Number(cid));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Lok Sabha options follow the chosen zone (all lok sabhas when no zone set).
   useEffect(() => {
     const url = edit.zone_id ? `/api/locations?parent_id=${edit.zone_id}` : "/api/locations?type=lok_sabha";
