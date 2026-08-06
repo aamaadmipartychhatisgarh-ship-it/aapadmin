@@ -125,6 +125,16 @@ export async function GET(req) {
     const assigned = await query(
       `SELECT c.*, ld.name AS district_name, lw.name AS ward_name, w.photo_url AS photo_url,
               (SELECT COUNT(*) FROM calls WHERE contact_id = c.id) AS attempts,
+              -- "Worked" = the contact has at least one call with a SAVED call
+              -- status or sentiment. This is the exact "not fresh" test: a fresh
+              -- contact has neither. (Every call in this schema carries a
+              -- status_id, so this also covers callbacks/follow-ups, which are
+              -- only ever set through a saved call.)
+              (CASE WHEN EXISTS (
+                 SELECT 1 FROM calls cx
+                  WHERE cx.contact_id = c.id
+                    AND (cx.status_id IS NOT NULL OR cx.sentiment IS NOT NULL)
+               ) THEN 1 ELSE 0 END) AS is_worked,
               (CASE WHEN (${daily.sql}) THEN 1 ELSE 0 END) AS is_daily${assignedBySelect}
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
@@ -135,21 +145,21 @@ export async function GET(req) {
           AND c.is_completed = 0
           AND ${dueSql}${notWrong}${filterSql}
         -- Two ordered sections in ONE query (grouped client-side for headers):
-        --   FRESH (attempts = 0): never-worked assignments — no call record, so
-        --     no sentiment, disposition, follow-up or completed call. These lead,
-        --     newest assigned_at first (legacy no-timestamp rows last), so callers
-        --     always work brand-new contacts before anything already touched. A
-        --     reassignment restamps assigned_at but NEVER turns a worked contact
-        --     back into fresh work.
-        --   FOLLOW-UP / RECALL (attempts > 0): anything already worked (sentiment,
-        --     call status, callback or follow-up). Sorted by the NEAREST scheduled
-        --     follow-up first (date then time), with un-dated worked contacts last.
+        --   FRESH (is_worked = 0): no saved sentiment and no saved call status —
+        --     a brand-new assignment. These lead, newest assigned_at first (legacy
+        --     no-timestamp rows last), so callers always work fresh contacts
+        --     before anything already touched. A reassignment restamps assigned_at
+        --     but NEVER turns a worked contact back into fresh work (its call
+        --     history — sentiment/status — is preserved, so is_worked stays 1).
+        --   FOLLOW-UP / RECALL (is_worked = 1): anything with a saved sentiment or
+        --     call status (incl. callback/follow-up). Sorted by the NEAREST
+        --     scheduled follow-up first (date then time), un-dated worked last.
         -- The assigned_at keys are scoped to the fresh group and the follow-up
         -- keys effectively to the worked group, so each section sorts by its own
         -- rule within a single server-side ORDER BY.
-        ORDER BY (CASE WHEN attempts = 0 THEN 0 ELSE 1 END) ASC,
-                 (CASE WHEN attempts = 0 THEN c.assigned_at END) IS NULL ASC,
-                 (CASE WHEN attempts = 0 THEN c.assigned_at END) DESC,
+        ORDER BY is_worked ASC,
+                 (CASE WHEN is_worked = 0 THEN c.assigned_at END) IS NULL ASC,
+                 (CASE WHEN is_worked = 0 THEN c.assigned_at END) DESC,
                  c.follow_up_date IS NULL ASC,
                  c.follow_up_date ASC,${hasFupTime ? "\n                 c.follow_up_time IS NULL ASC,\n                 c.follow_up_time ASC," : ""}
                  c.is_vip DESC,

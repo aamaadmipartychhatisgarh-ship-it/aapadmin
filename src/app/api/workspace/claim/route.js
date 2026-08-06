@@ -92,7 +92,10 @@ export async function POST(req) {
         //   after fresh work, not before it.
         //
         //   TIER 3 — POOL: finally, an unclaimed territory contact.
-        const freshOnly = "AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = contacts.id)";
+        // FRESH = no saved call status and no saved sentiment on any call. A
+        // worked contact (any status/sentiment, incl. callback/follow-up) is
+        // never auto-served here — it stays in the recall/follow-up workflow.
+        const freshOnly = "AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = contacts.id AND (cx.status_id IS NOT NULL OR cx.sentiment IS NOT NULL))";
         const [freshRows] = await conn.execute(
           `SELECT * FROM contacts
             WHERE is_completed = 0${notWrong}

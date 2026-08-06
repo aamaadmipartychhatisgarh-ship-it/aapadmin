@@ -561,8 +561,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                   Follow-up/Recall (already worked). Split for display only —
                   the server decides the order within each. */}
               {(() => {
-                const fresh = queue.assigned.filter((c) => !(c.attempts > 0));
-                const followup = queue.assigned.filter((c) => c.attempts > 0);
+                // Fresh = no saved sentiment and no saved call status (server
+                // sets is_worked). Split for section headers only; the server
+                // already ordered fresh-first then follow-up.
+                const fresh = queue.assigned.filter((c) => !c.is_worked);
+                const followup = queue.assigned.filter((c) => c.is_worked);
                 const showFresh = queueTab !== "followup";
                 const showFollow = queueTab !== "fresh";
                 const renderCard = (c) => (
