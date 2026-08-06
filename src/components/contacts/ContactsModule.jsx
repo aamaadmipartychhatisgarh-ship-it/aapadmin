@@ -522,20 +522,10 @@ export default function ContactsModule({ session, mode }) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
 
-  // Only shown when a Supervisor's account genuinely has no configured
-  // territory — never suppresses the module itself once a territory exists.
-  if (cfg.territoryScoped && !hasScope) {
-    return (
-      <div className="space-y-6 animate-in fade-in duration-500">
-        <PageHeader icon={UserCheck} title="Contacts" breadcrumb={cfg.breadcrumbTrail} />
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-6 text-center">
-          <MapPin className="mx-auto mb-2" size={28} />
-          <p className="font-semibold">No territory has been assigned to your account.</p>
-          <p className="text-sm mt-1">Please contact the Super Admin — set a Zone, District, or Assembly under Administration → Users.</p>
-        </div>
-      </div>
-    );
-  }
+  // A Supervisor with no configured territory used to get a full-page warning
+  // here. Instead, always render the full Contacts module — the server scopes
+  // their data strictly (an unscoped account simply sees an empty table via the
+  // normal empty state, never everyone else's contacts).
 
   const territoryLabel = territory ? [territory.zone?.name, territory.lok_sabha?.name, territory.district?.name, territory.assembly?.name].filter(Boolean).join(" → ") : "";
 
@@ -578,7 +568,7 @@ export default function ContactsModule({ session, mode }) {
         </>
       )}
 
-      {cfg.territoryScoped && (
+      {cfg.territoryScoped && territoryLabel && (
         <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 flex items-center gap-2 text-sm text-[#164FA3] font-medium">
           <MapPin size={16} /> Your territory: {territoryLabel}
         </div>
