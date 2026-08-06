@@ -31,6 +31,7 @@ const MODES = {
     bulkDistributeUrl: "/api/contacts/bulk-distribute",
     bulkUnassignUrl: "/api/contacts/bulk-unassign",
     contactUrl: (id) => `/api/contacts/${id}`,
+    photoUrl: (id) => `/api/contacts/${id}/photo`,
     callersUrl: "/api/users",
     callersNeedRoleFilter: true, // /api/users returns every user; filter to callers client-side
     teamsUrl: "/api/teams",
@@ -50,6 +51,7 @@ const MODES = {
     bulkDistributeUrl: "/api/supervisor/contacts/bulk-distribute",
     bulkUnassignUrl: "/api/supervisor/contacts/bulk-unassign",
     contactUrl: (id) => `/api/supervisor/contacts/${id}`,
+    photoUrl: (id) => `/api/supervisor/contacts/${id}/photo`,
     callersUrl: "/api/supervisor/contacts/callers",
     callersNeedRoleFilter: false, // already role- and territory-filtered server-side
     teamsUrl: "/api/supervisor/contacts/teams",
@@ -911,7 +913,26 @@ export default function ContactsModule({ session, mode }) {
         />
       )}
       {taskFor && <ContactTaskModal contact={taskFor} users={users} onClose={() => setTaskFor(null)} onSaved={() => { setTaskFor(null); setMessage(`Task assigned for ${taskFor.person_name}.`); }} />}
-      {viewingContact && <PersonDetailModal type="contact" data={viewingContact} onClose={() => setViewingContact(null)} />}
+      {viewingContact && (
+        <PersonDetailModal
+          type="contact"
+          data={viewingContact}
+          onClose={() => setViewingContact(null)}
+          canEdit
+          canEditGeo={cfg.canEditGeo}
+          canEditStatus={mode === "admin"}
+          contactUrl={cfg.contactUrl}
+          photoUrl={cfg.photoUrl}
+          users={users}
+          designations={designations}
+          onSaved={(updated) => {
+            // Reflect the change instantly in the modal AND the table row.
+            setViewingContact(updated);
+            setContacts((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+            loadCounts();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -74,7 +74,7 @@ export async function PUT(req, { params }) {
 
     // Descriptive + geographic details anyone with edit rights may change.
     const DETAIL_FIELDS = [
-      "person_name", "phone_number", "address", "designation_id",
+      "person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id",
       "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id", "booth_id",
     ];
     // Queue assignment + completion state stay admin-only (not "contact details").
