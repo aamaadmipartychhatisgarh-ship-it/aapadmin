@@ -170,9 +170,10 @@ export default function ProfilePhoto({
         />
       )}
 
-      {/* Full-image viewer */}
+      {/* Full-image viewer. z sits above app modals (e.g. the z-[100] contact
+          profile modal) so it's usable when ProfilePhoto is rendered inside one. */}
       {viewing && src && createPortal(
-        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={() => setViewing(false)}>
+        <div className="fixed inset-0 z-[130] bg-black/80 flex items-center justify-center p-4" onClick={() => setViewing(false)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={src} alt={name || "photo"} className="max-w-[90vw] max-h-[90vh] rounded-xl object-contain" />
           <button className="absolute top-4 right-4 text-white/80 hover:text-white" onClick={() => setViewing(false)}><X size={28} /></button>
@@ -180,9 +181,10 @@ export default function ProfilePhoto({
         document.body
       )}
 
-      {/* Toast */}
+      {/* Toast — above app modals so success/error is visible when uploading
+          from inside the z-[100] contact profile modal. */}
       {toast && createPortal(
-        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 ${toast.type === "success" ? "bg-emerald-600 text-white" : "bg-red-600 text-white"}`}>
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[140] px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 ${toast.type === "success" ? "bg-emerald-600 text-white" : "bg-red-600 text-white"}`}>
           {toast.type === "success" ? <CheckCircle2 size={16} /> : <X size={16} />} {toast.text}
         </div>,
         document.body
@@ -311,7 +313,7 @@ function CropDialog({ src, onCancel, onSave, saving, error }) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[65] bg-black/60 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[135] bg-black/60 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-gray-900">Crop Photo</h3>

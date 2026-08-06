@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Pencil, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -811,7 +811,7 @@ export default function ContactsModule({ session, mode }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">Address</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
-                <th className="px-4 py-3 font-semibold text-gray-600 text-right">Edit</th>
+                <th className="px-4 py-3 font-semibold text-gray-600 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -866,9 +866,9 @@ export default function ContactsModule({ session, mode }) {
                     <button onClick={() => setTaskFor(c)} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded-lg font-medium">
                       <ClipboardList size={14} /> Task
                     </button>
-                    <button onClick={() => setEditingIndex(i)} className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium">
-                      <Pencil size={14} /> Edit
-                    </button>
+                    {/* The row-level Edit was a duplicate of the profile card's Edit
+                        (open a contact via its name/avatar, then Edit there). Removed
+                        to leave a single edit entry point. */}
                     <button onClick={() => removeContact(c)} className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium">
                       <Trash2 size={14} /> Delete
                     </button>

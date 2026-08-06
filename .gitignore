@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Runtime user uploads (served via /api/media; never versioned)
+/public/uploads/

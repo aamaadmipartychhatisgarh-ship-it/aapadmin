@@ -45,14 +45,24 @@ export async function GET(_req, { params }) {
     };
 
     const id = name.slice(0, name.length - ext.length - 1);
-    const [row] = await query("SELECT data, mime_type FROM worker_photos WHERE id = ? LIMIT 1", [id]);
-    if (row) {
-      return new Response(new Uint8Array(row.data), { status: 200, headers: { ...headers, "Content-Type": row.mime_type } });
-    }
-    const [userRow] = await query("SELECT data, mime_type FROM user_photos WHERE id = ? LIMIT 1", [id]);
-    if (userRow) {
-      return new Response(new Uint8Array(userRow.data), { status: 200, headers: { ...headers, "Content-Type": userRow.mime_type } });
-    }
+    // The two DB-backed stores below are LEGACY and optional — a deployment that
+    // never ran their migrations has no worker_photos / user_photos tables. A
+    // missing table must NOT abort the request (it used to throw straight to the
+    // 404 catch, so every disk-backed upload — e.g. a freshly uploaded contact
+    // photo — silently 404'd and never displayed). Swallow per-lookup errors and
+    // fall through to the disk read.
+    try {
+      const [row] = await query("SELECT data, mime_type FROM worker_photos WHERE id = ? LIMIT 1", [id]);
+      if (row) {
+        return new Response(new Uint8Array(row.data), { status: 200, headers: { ...headers, "Content-Type": row.mime_type } });
+      }
+    } catch { /* worker_photos table absent — ignore and try the next source */ }
+    try {
+      const [userRow] = await query("SELECT data, mime_type FROM user_photos WHERE id = ? LIMIT 1", [id]);
+      if (userRow) {
+        return new Response(new Uint8Array(userRow.data), { status: 200, headers: { ...headers, "Content-Type": userRow.mime_type } });
+      }
+    } catch { /* user_photos table absent — ignore and try the next source */ }
 
     const buf = await readFile(path.join(process.cwd(), "public", "uploads", name));
     return new Response(new Uint8Array(buf), { status: 200, headers });
