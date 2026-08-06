@@ -134,28 +134,28 @@ export async function GET(req) {
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
           AND ${dueSql}${notWrong}${filterSql}
-        -- FRESH, never-worked assignments always lead. A contact is "fresh" when
-        -- it has zero call activity (no call record → therefore no sentiment, no
-        -- disposition/outcome, no call remarks, no completed call). Those float to
-        -- the top, newest assigned_at first, so a caller always works brand-new
-        -- work before anything already touched. Contacts that have ANY call
-        -- history stay below, even when just reassigned — reassignment changes the
-        -- owner but never turns a worked contact back into fresh work.
-        --
-        -- assigned_at is stamped NOW() on every assignment/reassignment (contacts
-        -- PUT + both bulk-distribute routes), so a genuinely fresh reassignment
-        -- still jumps to the top within its group. Legacy rows without a timestamp
-        -- sort last; VIP / daily-rule remain as final tiebreakers.
+        -- Two ordered sections in ONE query (grouped client-side for headers):
+        --   FRESH (attempts = 0): never-worked assignments — no call record, so
+        --     no sentiment, disposition, follow-up or completed call. These lead,
+        --     newest assigned_at first (legacy no-timestamp rows last), so callers
+        --     always work brand-new contacts before anything already touched. A
+        --     reassignment restamps assigned_at but NEVER turns a worked contact
+        --     back into fresh work.
+        --   FOLLOW-UP / RECALL (attempts > 0): anything already worked (sentiment,
+        --     call status, callback or follow-up). Sorted by the NEAREST scheduled
+        --     follow-up first (date then time), with un-dated worked contacts last.
+        -- The assigned_at keys are scoped to the fresh group and the follow-up
+        -- keys effectively to the worked group, so each section sorts by its own
+        -- rule within a single server-side ORDER BY.
         ORDER BY (CASE WHEN attempts = 0 THEN 0 ELSE 1 END) ASC,
-                 c.assigned_at IS NULL ASC,
-                 c.assigned_at DESC,
-                 (CASE WHEN (${daily.sql}) THEN 0 ELSE 1 END) ASC,
+                 (CASE WHEN attempts = 0 THEN c.assigned_at END) IS NULL ASC,
+                 (CASE WHEN attempts = 0 THEN c.assigned_at END) DESC,
+                 c.follow_up_date IS NULL ASC,
+                 c.follow_up_date ASC,${hasFupTime ? "\n                 c.follow_up_time IS NULL ASC,\n                 c.follow_up_time ASC," : ""}
                  c.is_vip DESC,
-                 c.follow_up_date IS NOT NULL DESC,
-                 c.follow_up_date ASC,
                  c.id DESC
         LIMIT 1000`,
-      [...daily.params, userId, ...qParams, ...daily.params]
+      [...daily.params, userId, ...qParams]
     );
 
     // Scheduled (future) follow-ups: surfaced so the caller can see what's coming.

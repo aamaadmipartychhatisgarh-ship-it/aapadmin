@@ -77,6 +77,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [qDistrict, setQDistrict] = useState([]);
   const [qAssembly, setQAssembly] = useState([]);
   const [qDesignation, setQDesignation] = useState([]);
+  // Quick section filter for the assigned list: "all" | "fresh" | "followup".
+  // Ordering itself stays server-side; this only chooses which section(s) show.
+  const [queueTab, setQueueTab] = useState("all");
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [statuses, setStatuses] = useState([]);
@@ -554,49 +557,96 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-[11px] text-gray-400">
-                  Showing {queue.assigned.length}{(queue.assigned_total ?? 0) > queue.assigned.length ? ` of ${queue.assigned_total}` : ""}
-                </div>
-                {queue.assigned.some((c) => c.is_daily) && (
-                  <div className="text-[11px] font-bold text-[#164FA3] bg-[#FCB712]/20 px-2 py-0.5 rounded-full">
-                    {queue.assigned.filter((c) => c.is_daily).length} daily — do first
-                  </div>
-                )}
-              </div>
-            <ul className="space-y-2 max-h-[300px] overflow-y-auto">
-              {queue.assigned.map((c) => (
-                <li key={c.id}>
-                  <button
-                    disabled={!!active}
-                    onClick={() => claim(c.id)}
-                    className={`w-full text-left p-3 rounded-lg border disabled:opacity-60 flex items-center gap-2 ${c.is_daily ? "bg-amber-50 border-amber-300 hover:bg-amber-100" : "border-gray-100 hover:bg-blue-50 disabled:hover:bg-white"}`}
-                  >
-                    <Avatar name={c.person_name} src={c.photo_url} size={36} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 text-sm flex items-center gap-1 flex-wrap">
-                        {c.is_daily ? <span className="text-[9px] font-bold uppercase bg-[#FCB712] text-[#164FA3] px-1.5 py-0.5 rounded">Daily</span> : null}
-                        {c.person_name}
-                        {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712]" /> : null}
-                        {c.attempts > 0 ? <span className="ml-1 text-[10px] font-bold text-gray-400">×{c.attempts}</span> : null}
+              {/* Two server-ordered sections: Fresh (never-worked) then
+                  Follow-up/Recall (already worked). Split for display only —
+                  the server decides the order within each. */}
+              {(() => {
+                const fresh = queue.assigned.filter((c) => !(c.attempts > 0));
+                const followup = queue.assigned.filter((c) => c.attempts > 0);
+                const showFresh = queueTab !== "followup";
+                const showFollow = queueTab !== "fresh";
+                const renderCard = (c) => (
+                  <li key={c.id}>
+                    <button
+                      disabled={!!active}
+                      onClick={() => claim(c.id)}
+                      className={`w-full text-left p-3 rounded-lg border disabled:opacity-60 flex items-center gap-2 ${c.is_daily ? "bg-amber-50 border-amber-300 hover:bg-amber-100" : "border-gray-100 hover:bg-blue-50 disabled:hover:bg-white"}`}
+                    >
+                      <Avatar name={c.person_name} src={c.photo_url} size={36} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-900 text-sm flex items-center gap-1 flex-wrap">
+                          {c.is_daily ? <span className="text-[9px] font-bold uppercase bg-[#FCB712] text-[#164FA3] px-1.5 py-0.5 rounded">Daily</span> : null}
+                          {c.person_name}
+                          {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712]" /> : null}
+                          {c.attempts > 0 ? <span className="ml-1 text-[10px] font-bold text-gray-400">×{c.attempts}</span> : null}
+                        </div>
+                        <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
+                        {c.attempts > 0 && c.follow_up_date && (
+                          <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[#164FA3] font-medium">
+                            <Calendar size={11} className="shrink-0" /> Follow-up {String(c.follow_up_date).slice(0, 10)}
+                            {c.follow_up_time ? ` · ${String(c.follow_up_time).slice(0, 5)}` : ""}
+                          </div>
+                        )}
+                        {c.assigned_by_name && (
+                          <div className="mt-1 flex items-start gap-1 text-[11px] text-gray-400 leading-tight">
+                            <UserRound size={12} className="shrink-0 mt-px" />
+                            <span className="min-w-0">
+                              Assigned by: <span className="text-gray-500 font-medium">{c.assigned_by_name}</span>
+                              {c.assigned_by_role ? ` (${roleLabel(c.assigned_by_role)})` : ""}
+                              {c.assigned_at ? <><br />{fmtAssigned(c.assigned_at)}</> : null}
+                            </span>
+                          </div>
+                        )}
                       </div>
-                      <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
-                      {c.assigned_by_name && (
-                        <div className="mt-1 flex items-start gap-1 text-[11px] text-gray-400 leading-tight">
-                          <UserRound size={12} className="shrink-0 mt-px" />
-                          <span className="min-w-0">
-                            Assigned by: <span className="text-gray-500 font-medium">{c.assigned_by_name}</span>
-                            {c.assigned_by_role ? ` (${roleLabel(c.assigned_by_role)})` : ""}
-                            {c.assigned_at ? <><br />{fmtAssigned(c.assigned_at)}</> : null}
-                          </span>
+                      <ChevronRight size={16} className="text-gray-400" />
+                    </button>
+                  </li>
+                );
+                return (
+                  <>
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                      <div className="text-[11px] text-gray-400 shrink-0">
+                        Showing {queue.assigned.length}{(queue.assigned_total ?? 0) > queue.assigned.length ? ` of ${queue.assigned_total}` : ""}
+                      </div>
+                      {/* Quick section filters */}
+                      <div className="flex items-center gap-1">
+                        {[["all", "All"], ["fresh", `Fresh${fresh.length ? ` ${fresh.length}` : ""}`], ["followup", `Follow-up${followup.length ? ` ${followup.length}` : ""}`]].map(([key, label]) => (
+                          <button
+                            key={key}
+                            onClick={() => setQueueTab(key)}
+                            className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${queueTab === key ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="max-h-[300px] overflow-y-auto space-y-3">
+                      {showFresh && fresh.length > 0 && (
+                        <div>
+                          <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-600 mb-1.5 flex items-center gap-1">
+                            <Play size={11} /> Fresh Calls · {fresh.length}
+                          </div>
+                          <ul className="space-y-2">{fresh.map(renderCard)}</ul>
+                        </div>
+                      )}
+                      {showFollow && followup.length > 0 && (
+                        <div>
+                          <div className="text-[11px] font-bold uppercase tracking-wide text-[#164FA3] mb-1.5 flex items-center gap-1">
+                            <Calendar size={11} /> Follow-up / Recall · {followup.length}
+                          </div>
+                          <ul className="space-y-2">{followup.map(renderCard)}</ul>
+                        </div>
+                      )}
+                      {((showFresh && fresh.length === 0 && queueTab === "fresh") || (showFollow && followup.length === 0 && queueTab === "followup")) && (
+                        <div className="text-gray-400 text-sm py-2">
+                          {queueTab === "fresh" ? "No fresh calls — all assigned contacts have been worked." : "No follow-up calls yet."}
                         </div>
                       )}
                     </div>
-                    <ChevronRight size={16} className="text-gray-400" />
-                  </button>
-                </li>
-              ))}
-            </ul>
+                  </>
+                );
+              })()}
             </>
           )}
         </div>
