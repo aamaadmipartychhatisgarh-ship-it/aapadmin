@@ -74,15 +74,28 @@ export async function POST(req) {
         // this caller is always claimable by them (mirrors the Assigned-to-You
         // list). The zone restriction applies only to the pool fallback (terr).
         const assignedTerr = { where: "", params: [] };
-        // Try caller's own assigned queue first (incl. due follow-ups), then fall back to the territory pool.
+        // "Start Next Call" only ever serves a FRESH, never-worked contact: one
+        // with zero call activity (no call record → no sentiment, no
+        // disposition/outcome, no call remarks, no completed call). A contact
+        // that's already been worked — including a due call-back, Busy or
+        // Follow-up — is NOT auto-served here; the caller re-opens those by
+        // tapping them in the list (the explicit-id branch above allows that).
+        // This keeps auto-advance flowing through brand-new work in order.
+        const freshOnly = "AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = contacts.id)";
+        // Ordered identically to My Workspace so "next" is exactly the top of the
+        // caller's visible fresh list: newest assignment first (assigned_at),
+        // rows with no timestamp last, VIPs ahead, id as the final tie-breaker.
+        const freshOrder = "ORDER BY assigned_at IS NULL ASC, assigned_at DESC, is_vip DESC, id DESC";
+        // Try caller's own assigned FRESH queue first, then fall back to the territory pool.
         const [assignedRows] = await conn.execute(
           `SELECT * FROM contacts
             WHERE is_completed = 0${notWrong}
               AND assigned_to_user_id = ?
               AND ${dueSql}
+              ${freshOnly}
               AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
               ${assignedTerr.where}
-            ORDER BY is_vip DESC, follow_up_date IS NOT NULL DESC, follow_up_date ASC, id ASC
+            ${freshOrder}
             LIMIT 1 FOR UPDATE`,
           [userId, ...assignedTerr.params]
         );
@@ -94,6 +107,7 @@ export async function POST(req) {
               WHERE is_completed = 0${notWrong}
                 AND assigned_to_user_id IS NULL
                 AND ${dueSql}
+                ${freshOnly}
                 AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
                 ${terr.where}
               ORDER BY id ASC
@@ -106,7 +120,13 @@ export async function POST(req) {
 
       if (!row) {
         await conn.rollback();
-        return NextResponse.json({ message: "No contacts available" }, { status: 409 });
+        // No fresh, never-worked contact left to auto-serve. Worked contacts
+        // (call-backs, follow-ups) may still be in the list for the caller to
+        // re-open manually — this only means auto-advance has nothing new.
+        return NextResponse.json(
+          { message: explicitId ? "That contact is no longer available." : "No new calls are available. All assigned fresh contacts have been completed." },
+          { status: 409 }
+        );
       }
 
       await conn.execute(

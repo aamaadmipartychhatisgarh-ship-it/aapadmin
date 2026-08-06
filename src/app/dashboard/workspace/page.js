@@ -387,7 +387,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       if (claimed) {
         setMessage(`Saved (${savedDuration}s).${followMsg} Next contact ready.`);
       } else {
-        setMessage(`Saved (${savedDuration}s).${followMsg} No more contacts available.`);
+        setMessage(`Saved (${savedDuration}s).${followMsg} No new calls are available — all assigned fresh contacts have been completed.`);
         loadQueue();
       }
     } finally {
