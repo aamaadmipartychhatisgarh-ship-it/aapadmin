@@ -3,11 +3,25 @@ import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { isAdmin, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, contactsExportFilename } from "@/lib/contactExport";
+import { contactWriteError } from "@/lib/contactWriteError";
+
+// Columns the `contacts` table actually has in this deployment — detected once
+// and cached, so the create path never references a column a given environment
+// is missing (a past cause of intermittent 500s on save).
+let contactColsPromise;
+async function getContactColumns() {
+  if (!contactColsPromise) {
+    contactColsPromise = query(
+      `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'`
+    ).then((rows) => new Set(rows.map((r) => r.name))).catch((e) => { contactColsPromise = undefined; throw e; });
+  }
+  return contactColsPromise;
+}
 
 // Parse a "1,2,3" style query value into a de-duped list of positive integers.
 function idList(raw) {
@@ -169,18 +183,32 @@ export async function POST(req) {
     if (!session || !isAdmin(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    const data = await req.json();
-    const { person_name, phone_number, address, designation_id, district_id, ward_id, booth_id, assigned_to_user_id } = data;
-    if (!person_name || !phone_number) {
-      return NextResponse.json({ message: "Name and phone are required" }, { status: 400 });
+    const data = await req.json().catch(() => ({}));
+    const { person_name, phone_number, address, designation_id, district_id, ward_id, booth_id, assigned_to_user_id, photo_url } = data;
+    if (!person_name?.trim() || !phone_number?.trim()) {
+      return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
-    // Record assignment metadata (who/when) when the new contact is created
-    // already assigned to a caller, so their "Assigned by" line has data.
-    const cols = ["person_name", "phone_number", "address", "designation_id", "district_id", "ward_id", "booth_id", "assigned_to_user_id"];
-    const vals = [person_name, phone_number, address || null, designation_id || null, district_id || null, ward_id || null, booth_id || null, assigned_to_user_id || null];
+    // Only ever write columns this deployment's schema actually has — a hardcoded
+    // column that a given environment lacks was a source of intermittent 500s.
+    const existing = await getContactColumns();
+    const desired = {
+      person_name: person_name.trim(),
+      phone_number: phone_number.trim(),
+      address: address || null,
+      designation_id: designation_id || null,
+      district_id: district_id || null,
+      ward_id: ward_id || null,
+      booth_id: booth_id || null,
+      photo_url: photo_url || null,
+      assigned_to_user_id: assigned_to_user_id || null,
+    };
+    const cols = [];
+    const vals = [];
+    for (const [k, v] of Object.entries(desired)) if (existing.has(k)) { cols.push(k); vals.push(v); }
+    // Assignment metadata (who/when) when created already assigned to a caller.
     if (assigned_to_user_id) {
-      if (await contactsHaveAssignedAt()) { cols.push("assigned_at"); vals.push(new Date()); }
-      if (await contactsHaveAssignedBy()) { cols.push("assigned_by_user_id"); vals.push(session.user.id); }
+      if (existing.has("assigned_at")) { cols.push("assigned_at"); vals.push(new Date()); }
+      if (existing.has("assigned_by_user_id")) { cols.push("assigned_by_user_id"); vals.push(session.user.id); }
     }
     const res = await query(
       `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
@@ -188,10 +216,6 @@ export async function POST(req) {
     );
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {
-    if (err.code === "ER_DUP_ENTRY") {
-      return NextResponse.json({ message: "A contact with this phone number already exists" }, { status: 409 });
-    }
-    console.error("contacts POST error:", err);
-    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+    return contactWriteError(err, "contacts POST");
   }
 }

@@ -10,6 +10,7 @@ import PersonDetailModal from "@/components/PersonDetailModal";
 import { isCaller, normalizeRole, ROLES } from "@/lib/permissions";
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
+import ProfilePhoto from "@/components/ProfilePhoto";
 
 const PAGE_SIZE = 50; // contacts per page — keeps each query light on big tables
 
@@ -926,7 +927,7 @@ export default function ContactsModule({ session, mode }) {
           territoryLabel={cfg.territoryScoped ? territoryLabel : ""}
           scopedDistricts={cfg.territoryScoped ? districts : null}
           onClose={() => setShowAdd(false)}
-          onSaved={() => { setShowAdd(false); load(); loadCounts(); }}
+          onSaved={() => { setShowAdd(false); setError(""); setMessage("Contact created successfully."); load(); loadCounts(); }}
         />
       )}
       {editingContact && (
@@ -1274,13 +1275,25 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
   const districtLocked = !!(territory && territory.district); // district/assembly anchor → fixed
   const zoneLevel = !!(territory && territory.level === "zone"); // may pick a district in-zone
   const [form, setForm] = useState({
-    person_name: "", phone_number: "", address: "", designation_id: "",
+    person_name: "", phone_number: "", address: "", designation_id: "", photo_url: "",
     district_id: territory?.district ? String(territory.district.id) : "",
   });
   const [districts, setDistricts] = useState(scopedDistricts || []);
   const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Upload the cropped image to storage now and hold its URL; it's saved onto
+  // the contact by the create request. blob === null clears the selection.
+  async function persistPhoto(blob) {
+    if (!blob) return null;
+    const fd = new FormData();
+    fd.append("file", new File([blob], "photo.jpg", { type: "image/jpeg" }));
+    const up = await fetch("/api/uploads", { method: "POST", body: fd });
+    const d = await up.json().catch(() => ({}));
+    if (!up.ok) throw new Error(d.message || "Image upload failed");
+    return d.url;
+  }
 
   useEffect(() => {
     // Admin: all districts. Supervisor: the parent already supplies the scoped
@@ -1312,6 +1325,16 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
             <MapPin size={14} /> Added to your territory: <span className="font-semibold">{territoryLabel}</span>
           </div>
         )}
+        {/* Profile photo (optional): upload / preview / change / remove before
+            saving. The image is uploaded now and its URL saved with the contact. */}
+        <div className="flex flex-col items-center gap-1.5 pb-1">
+          <ProfilePhoto
+            name={form.person_name} src={form.photo_url} size={92} square editable
+            persist={persistPhoto} onChange={(url) => setForm((f) => ({ ...f, photo_url: url || "" }))}
+            className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]"
+          />
+          <span className="text-[11px] text-gray-400">Upload Photo (optional) · JPG, PNG, WEBP</span>
+        </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />

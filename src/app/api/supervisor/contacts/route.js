@@ -9,6 +9,7 @@ import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, contactsExportFilename } from "@/lib/contactExport";
+import { contactWriteError } from "@/lib/contactWriteError";
 
 // Supervisor-scoped mirror of GET /api/contacts (src/app/api/contacts/route.js)
 // — same filters, same shape, same pagination — but gated to the strict
@@ -175,10 +176,10 @@ export async function POST(req) {
     // add contacts like an admin (free district choice), not locked to an anchor.
     const territory = await supervisorTerritory(session.user, query);
 
-    const data = await req.json();
-    const { person_name, phone_number, address, designation_id, assigned_to_user_id } = data;
-    if (!person_name || !phone_number) {
-      return NextResponse.json({ message: "Name and phone are required" }, { status: 400 });
+    const data = await req.json().catch(() => ({}));
+    const { person_name, phone_number, address, designation_id, assigned_to_user_id, photo_url } = data;
+    if (!person_name?.trim() || !phone_number?.trim()) {
+      return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
 
     // An initial assignment (optional) must be to a caller this supervisor may
@@ -231,10 +232,11 @@ export async function POST(req) {
     const cols = [];
     const vals = [];
     const add = (col, val) => { if (existingColumns.has(col)) { cols.push(col); vals.push(val); } };
-    add("person_name", person_name);
-    add("phone_number", phone_number);
+    add("person_name", person_name.trim());
+    add("phone_number", phone_number.trim());
     add("address", address || null);
     add("designation_id", designation_id || null);
+    add("photo_url", photo_url || null);
     for (const [col, val] of Object.entries(geo)) add(col, val);
     add("assigned_to_user_id", assigned_to_user_id || null);
     if (assigned_to_user_id) {
@@ -246,13 +248,9 @@ export async function POST(req) {
       `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
       vals
     );
-    await logAudit(session, { action: "contact.create", entityType: "contact", entityId: res.insertId, details: { supervisor: true, territory: territory.level } });
+    await logAudit(session, { action: "contact.create", entityType: "contact", entityId: res.insertId, details: { supervisor: true, territory: territory?.level || null } });
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {
-    if (err.code === "ER_DUP_ENTRY") {
-      return NextResponse.json({ message: "A contact with this phone number already exists" }, { status: 409 });
-    }
-    console.error("supervisor contacts POST error:", err);
-    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+    return contactWriteError(err, "supervisor contacts POST");
   }
 }
