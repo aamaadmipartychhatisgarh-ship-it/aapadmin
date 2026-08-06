@@ -134,13 +134,20 @@ export async function GET(req) {
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
           AND ${dueSql}${notWrong}${filterSql}
-        -- Newest (re)assignment always on top: assigned_at is stamped NOW() on
-        -- every assignment AND reassignment (contacts PUT + bulk-distribute), so
-        -- a just-(re)assigned contact floats to the top of the caller's queue
-        -- without a manual refresh. assigned_at dominates so a fresh assignment
-        -- with no follow-up date still leads; legacy rows with no timestamp sort
-        -- last, then fall back to the older VIP / daily-rule ordering.
-        ORDER BY c.assigned_at IS NULL ASC,
+        -- FRESH, never-worked assignments always lead. A contact is "fresh" when
+        -- it has zero call activity (no call record → therefore no sentiment, no
+        -- disposition/outcome, no call remarks, no completed call). Those float to
+        -- the top, newest assigned_at first, so a caller always works brand-new
+        -- work before anything already touched. Contacts that have ANY call
+        -- history stay below, even when just reassigned — reassignment changes the
+        -- owner but never turns a worked contact back into fresh work.
+        --
+        -- assigned_at is stamped NOW() on every assignment/reassignment (contacts
+        -- PUT + both bulk-distribute routes), so a genuinely fresh reassignment
+        -- still jumps to the top within its group. Legacy rows without a timestamp
+        -- sort last; VIP / daily-rule remain as final tiebreakers.
+        ORDER BY (CASE WHEN attempts = 0 THEN 0 ELSE 1 END) ASC,
+                 c.assigned_at IS NULL ASC,
                  c.assigned_at DESC,
                  (CASE WHEN (${daily.sql}) THEN 0 ELSE 1 END) ASC,
                  c.is_vip DESC,
