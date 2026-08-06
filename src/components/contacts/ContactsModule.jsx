@@ -163,9 +163,12 @@ export default function ContactsModule({ session, mode }) {
       const list = d.users || [];
       setUsers(cfg.callersNeedRoleFilter ? list.filter((u) => normalizeRole(u.role) === ROLES.CALLER) : list);
     });
-    if (!cfg.territoryScoped) {
-      fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
-    }
+    // Zone options: admin always, and supervisor too. A configured supervisor's
+    // zone dropdown stays locked to their own zone (see the JSX), so loading the
+    // full list is harmless there; an UNCONFIGURED (full-oversight) supervisor
+    // has no locked zone, so the dropdown must offer every zone — same list the
+    // Super Admin Contacts page uses (reuses the identical /api/locations loader).
+    fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
     fetch(cfg.teamsUrl).then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -347,15 +350,19 @@ export default function ContactsModule({ session, mode }) {
   // Sabha follows Zone, selecting a Lok Sabha shows ALL of its Vidhan Sabhas
   // (assemblies) directly, District is an optional narrower filter.
   useEffect(() => {
-    if (cfg.territoryScoped && (!territory || territory.level !== "zone")) return;
+    // Locked only when a CONFIGURED supervisor sits below the zone level. An
+    // unconfigured supervisor (territory === null) cascades freely, like admin.
+    if (cfg.territoryScoped && territory && territory.level !== "zone") return;
     const url = zoneId ? `/api/locations?parent_id=${zoneId}` : "/api/locations?type=lok_sabha";
     fetch(url).then((r) => r.json()).then((d) => setLokSabhas((d.locations || []).filter((l) => l.type === "lok_sabha")));
     if (!cfg.territoryScoped) { setLokSabhaId(""); setDistrictId(""); setAssemblyIds([]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoneId, territory]);
   useEffect(() => {
-    if (cfg.territoryScoped) {
-      if (!territory || (territory.level !== "zone" && territory.level !== "district")) return;
+    // Skip only for a CONFIGURED supervisor whose anchor locks the district
+    // (district/assembly level). Zone-level and unconfigured both cascade.
+    if (cfg.territoryScoped && territory) {
+      if (territory.level !== "zone" && territory.level !== "district") return;
       if (territory.level === "district") return; // district is the fixed anchor, no cascade needed
     }
     const url = lokSabhaId ? `/api/locations?parent_id=${lokSabhaId}` : "/api/locations?type=district";
@@ -367,7 +374,8 @@ export default function ContactsModule({ session, mode }) {
   // Assembly (Vidhan Sabha) options: if a district is picked, narrow to it;
   // otherwise if a Lok Sabha is picked, show ALL of its assemblies directly.
   useEffect(() => {
-    if (cfg.territoryScoped && (!territory || territory.level === "assembly")) return; // already at the finest grain
+    // Locked only for a CONFIGURED assembly-level supervisor; unconfigured cascades.
+    if (cfg.territoryScoped && territory && territory.level === "assembly") return; // already at the finest grain
     let url = null;
     if (districtId) url = `/api/locations?parent_id=${districtId}`;
     else if (lokSabhaId) url = `/api/locations?assemblies_of_lok_sabha=${lokSabhaId}`;
@@ -597,16 +605,16 @@ export default function ContactsModule({ session, mode }) {
             </>
           )}
         </select>
-        <select value={lokSabhaId} disabled={cfg.territoryScoped && territory?.level !== "zone"} onChange={(e) => setLokSabhaId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500">
-          {!cfg.territoryScoped || territory?.level === "zone" ? (
+        <select value={lokSabhaId} disabled={cfg.territoryScoped && territory && territory.level !== "zone"} onChange={(e) => setLokSabhaId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500">
+          {!cfg.territoryScoped || !territory || territory.level === "zone" ? (
             <>
               <option value="">All Lok Sabhas</option>
               {lokSabhas.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </>
           ) : territory?.lok_sabha ? <option value={territory.lok_sabha.id}>{territory.lok_sabha.name}</option> : <option value="">—</option>}
         </select>
-        <select value={districtId} disabled={cfg.territoryScoped && territory?.level !== "zone"} onChange={(e) => setDistrictId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500">
-          {!cfg.territoryScoped || territory?.level === "zone" ? (
+        <select value={districtId} disabled={cfg.territoryScoped && territory && territory.level !== "zone"} onChange={(e) => setDistrictId(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500">
+          {!cfg.territoryScoped || !territory || territory.level === "zone" ? (
             <>
               <option value="">All districts</option>
               {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -620,7 +628,7 @@ export default function ContactsModule({ session, mode }) {
         ) : (
           <FilterMultiSelect
             label="assemblies" items={assemblies} selected={assemblyIds} onChange={setAssemblyIds}
-            disabled={!districtId && !lokSabhaId} disabledLabel={cfg.territoryScoped ? "Pick district" : "Pick Lok Sabha"}
+            disabled={!districtId && !lokSabhaId} disabledLabel={cfg.territoryScoped && territory ? "Pick district" : "Pick Lok Sabha"}
           />
         )}
         <FilterMultiSelect
