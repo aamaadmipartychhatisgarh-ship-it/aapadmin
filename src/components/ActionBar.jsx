@@ -47,7 +47,11 @@ export default function ActionBar({ items = [], className = "" }) {
 
   if (!visible.length) return null;
 
-  if (visible.length <= 2) {
+  // `menuOnly` items are pinned to the ⋮ overflow regardless of count, so a
+  // page can force an action (e.g. Export) into the menu even with few actions.
+  const hasMenuOnly = visible.some((a) => a.menuOnly);
+
+  if (visible.length <= 2 && !hasMenuOnly) {
     return (
       <div className={`flex gap-2 flex-wrap ${className}`}>
         {visible.map((a) => <ActionButton key={a.key} a={a} />)}
@@ -55,10 +59,14 @@ export default function ActionBar({ items = [], className = "" }) {
     );
   }
 
-  const primaryIdx = visible.findIndex((a) => a.variant === "primary");
-  const inlineIdx = primaryIdx >= 0 ? primaryIdx : visible.length - 1;
-  const inline = visible[inlineIdx];
-  const overflow = visible.filter((_, i) => i !== inlineIdx);
+  // One inline anchor (the primary, else the last item that ISN'T menu-pinned);
+  // everything else — other actions plus every menuOnly item — goes to the ⋮.
+  const inlineCandidates = visible.filter((a) => !a.menuOnly);
+  const primaryIdx = inlineCandidates.findIndex((a) => a.variant === "primary");
+  const inline = inlineCandidates.length
+    ? inlineCandidates[primaryIdx >= 0 ? primaryIdx : inlineCandidates.length - 1]
+    : null;
+  const overflow = visible.filter((a) => a !== inline);
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
@@ -77,7 +85,7 @@ export default function ActionBar({ items = [], className = "" }) {
           {overflow.map((a) => <MenuRow key={a.key} a={a} onDone={() => setOpen(false)} />)}
         </div>
       </FloatingPopover>
-      <ActionButton a={inline} />
+      {inline && <ActionButton a={inline} />}
     </div>
   );
 }

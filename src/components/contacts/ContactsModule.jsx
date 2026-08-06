@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -112,6 +112,7 @@ export default function ContactsModule({ session, mode }) {
   const [taskFor, setTaskFor] = useState(null); // contact to create a task for
   const [viewingContact, setViewingContact] = useState(null); // contact row to show in the detail modal, or null
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
   const [teams, setTeams] = useState([]);
   const [bulkTeam, setBulkTeam] = useState("");
@@ -408,6 +409,39 @@ export default function ContactsModule({ session, mode }) {
     return params;
   }
 
+  // Export every contact matching the CURRENT filters (search, geo, designation,
+  // caller, status) to a formatted .xlsx — the server reuses the exact same
+  // filter + role scope as the on-screen list, so what downloads is what's shown.
+  async function exportExcel() {
+    setExporting(true); setError(""); setMessage("");
+    try {
+      const params = buildParams(1);
+      params.delete("page"); params.delete("page_size");
+      params.set("format", "xlsx");
+      const r = await fetch(`${cfg.listUrl}?${params}`, { cache: "no-store" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setError(d.message || "Export failed. Please try again.");
+        return;
+      }
+      // Filename from Content-Disposition, with a sensible fallback.
+      const cd = r.headers.get("content-disposition") || "";
+      const m = cd.match(/filename="?([^"]+)"?/i);
+      const filename = m ? m[1] : `Contacts_Export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      setMessage(`Export ready — downloading “${filename}”.`);
+    } catch {
+      setError("Export failed — network error.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function fetchContactsPage(pageNum) {
     const r = await fetch(`${cfg.listUrl}?${buildParams(pageNum)}`, { cache: "no-store" });
     if (!r.ok) return null;
@@ -567,13 +601,15 @@ export default function ContactsModule({ session, mode }) {
           )
         }
         breadcrumb={cfg.breadcrumbTrail}
-        actions={(cfg.canAdd || cfg.canImport) && (
+        actions={
           <ActionBar items={[
             cfg.canImport && { key: "impx", label: importing ? "Importing…" : "Import Excel", icon: Upload, variant: "success", loading: importing, onClick: () => excelRef.current?.click() },
             cfg.canImport && { key: "impc", label: "Upload CSV", icon: Upload, onClick: () => fileRef.current?.click() },
+            // Export is pinned to the ⋮ menu (menuOnly) for both roles.
+            { key: "export", label: exporting ? "Exporting…" : "Export to Excel (.xlsx)", icon: Download, loading: exporting, menuOnly: true, onClick: exportExcel },
             cfg.canAdd && { key: "add", label: "Add Contact", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
           ]} />
-        )}
+        }
       />
       {cfg.canImport && (
         <>

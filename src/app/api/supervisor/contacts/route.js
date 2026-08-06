@@ -8,6 +8,7 @@ import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
+import { fetchContactExportRows, buildContactsWorkbookBuffer, contactsExportFilename } from "@/lib/contactExport";
 
 // Supervisor-scoped mirror of GET /api/contacts (src/app/api/contacts/route.js)
 // — same filters, same shape, same pagination — but gated to the strict
@@ -79,6 +80,22 @@ export async function GET(req) {
     const scope = supervisorScopeFilter(session.user, "c");
     where += " " + scope.where;
     params.push(...scope.params);
+
+    // Excel export — same filters AND the supervisor's territory scope (already
+    // in `where`), every matching row. Same code path as the list, so what the
+    // supervisor downloads is exactly what they can see.
+    if (searchParams.get("format") === "xlsx") {
+      const rows = await fetchContactExportRows(where, params);
+      const buf = await buildContactsWorkbookBuffer(rows);
+      return new NextResponse(buf, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${contactsExportFilename(true)}"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
 
     const workerJoin = "LEFT JOIN workers w ON w.id = c.worker_id";
 

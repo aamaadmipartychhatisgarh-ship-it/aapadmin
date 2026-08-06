@@ -7,6 +7,7 @@ import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignment
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
+import { fetchContactExportRows, buildContactsWorkbookBuffer, contactsExportFilename } from "@/lib/contactExport";
 
 // Parse a "1,2,3" style query value into a de-duped list of positive integers.
 function idList(raw) {
@@ -92,6 +93,21 @@ export async function GET(req) {
     const scope = scopeFilterSync(session.user, "c");
     where += " " + scope.where;
     params.push(...scope.params);
+
+    // Excel export — same filters + role scope as the on-screen list (this exact
+    // `where`/`params`), just every matching row instead of one page.
+    if (searchParams.get("format") === "xlsx") {
+      const rows = await fetchContactExportRows(where, params);
+      const buf = await buildContactsWorkbookBuffer(rows);
+      return new NextResponse(buf, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${contactsExportFilename(false)}"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
 
     // Always join the linked worker: person-aware filtering resolves through it,
     // AND the displayed designation must mirror Add Workers (the worker's full
