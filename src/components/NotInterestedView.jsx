@@ -9,6 +9,17 @@ import { isCaller } from "@/lib/permissions";
 const PAGE_SIZE = 50;
 const fmt = (d) => (d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 
+// The selectable "Not Interested" reasons. Both the dropdown and the reason-badge
+// text derive from this one list, so adding a future reason here surfaces it in
+// the filter automatically (the API keys its HAVING on the same values).
+const REASON_OPTIONS = [
+  { value: "switched_off", label: "Switched Off (More than 5 Times)" },
+  { value: "negative", label: "Negative Sentiment" },
+  { value: "opponent", label: "Opponent" },
+  { value: "not_supporter", label: "Not a Supporter" },
+  { value: "rude", label: "Rudely Behaved" },
+];
+
 // The reason(s) a contact qualifies, built from the flags the API returns.
 function reasonText(r) {
   const parts = [];
@@ -40,6 +51,7 @@ export default function NotInterestedView({ session, onCount }) {
   const [assemblyId, setAssemblyId] = useState("");
   const [designationId, setDesignationId] = useState("");
   const [caller, setCaller] = useState("");
+  const [reason, setReason] = useState("");
   const [statusF, setStatusF] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -71,6 +83,7 @@ export default function NotInterestedView({ session, onCount }) {
     if (assemblyId) p.set("assembly_id", assemblyId);
     if (designationId) p.set("designation_id", designationId);
     if (caller) p.set("caller", caller);
+    if (reason) p.set("reason", reason);
     if (statusF) p.set("status", statusF);
     if (from) p.set("date_from", from);
     if (to) p.set("date_to", to);
@@ -96,7 +109,7 @@ export default function NotInterestedView({ session, onCount }) {
     const t = setTimeout(() => { setPage(1); load(1); }, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, zoneId, lokSabhaId, districtId, assemblyId, designationId, caller, statusF, from, to]);
+  }, [search, zoneId, lokSabhaId, districtId, assemblyId, designationId, caller, reason, statusF, from, to]);
   useEffect(() => { load(page); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -117,6 +130,10 @@ export default function NotInterestedView({ session, onCount }) {
           {canSeeCallers && (
             <select value={caller} onChange={(e) => setCaller(e.target.value)} className={sel}><option value="">All callers</option>{callers.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}</select>
           )}
+          <select value={reason} onChange={(e) => setReason(e.target.value)} title="Reason" className={sel}>
+            <option value="">All Reasons</option>
+            {REASON_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
           <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className={sel}><option value="">Any status</option><option value="assigned">Assigned</option><option value="unassigned">Pool (unassigned)</option><option value="done">Done</option><option value="pending">Pending</option></select>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} title="Last call from" className={sel} />
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="Last call to" className={sel} />

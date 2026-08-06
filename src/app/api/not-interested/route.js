@@ -49,6 +49,7 @@ export async function GET(req) {
     const assembly_ids = idList(searchParams.get("assembly_ids") || searchParams.get("assembly_id"));
     const designation_ids = idList(searchParams.get("designation_ids") || searchParams.get("designation_id"));
     const assigned_to = searchParams.get("caller") || searchParams.get("assigned_to");
+    const reason = searchParams.get("reason"); // switched_off | negative | opponent | not_supporter | rude
     const statusF = searchParams.get("status");
     const dateFrom = searchParams.get("date_from");
     const dateTo = searchParams.get("date_to");
@@ -106,13 +107,23 @@ export async function GET(req) {
       ) agg ON agg.contact_id = c.id
       ${where}`;
 
-    // A contact qualifies if ANY rule matches. Kept in HAVING so it reads off the
-    // computed switched_off_count alias and the aggregate flags together.
-    const HAVING = `HAVING switched_off_count > 5
+    // A contact qualifies if ANY rule matches — OR by default, or exactly ONE
+    // rule when the caller filters by a specific Reason. Kept in HAVING so it
+    // reads off the computed switched_off_count alias and the aggregate flags.
+    // Filtering happens here (server-side), so it composes with every other
+    // filter, the role scope, pagination and the count.
+    const REASON_HAVING = {
+      switched_off: "switched_off_count > 5",
+      negative: "COALESCE(has_negative,0) = 1",
+      opponent: "COALESCE(has_opponent,0) = 1",
+      not_supporter: "COALESCE(has_not_supporter,0) = 1",
+      rude: "COALESCE(has_rude,0) = 1",
+    };
+    const HAVING = `HAVING ${REASON_HAVING[reason] || `switched_off_count > 5
                        OR COALESCE(has_negative,0) = 1
                        OR COALESCE(has_opponent,0) = 1
                        OR COALESCE(has_not_supporter,0) = 1
-                       OR COALESCE(has_rude,0) = 1`;
+                       OR COALESCE(has_rude,0) = 1`}`;
 
     // Total (one row per contact) matching filters + rules.
     const countRows = await query(
