@@ -42,7 +42,6 @@ const SUPERVISOR_NAV = [
   { name: "Overview", href: "/dashboard/supervisor", icon: LayoutDashboard },
   { name: "Contacts", href: "/dashboard/supervisor/contacts", icon: UserCheck },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-  { name: "Teams", href: "/dashboard/admin/administration?tab=teams", icon: UserCog },
   { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
   { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
