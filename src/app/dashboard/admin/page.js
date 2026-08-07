@@ -15,7 +15,6 @@ import AnalyticsPanel from "@/components/AnalyticsPanel";
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "analytics", label: "Analytics" },
-  { key: "supervisor", label: "Supervisor View", topTierOnly: true },
 ];
 
 // Which report pages a role can actually reach — mirrors ADMIN_MENUS in
@@ -79,7 +78,6 @@ export default function AdminDashboard() {
   }
 
   const canonical = normalizeRole(session.user.role);
-  const isTopTier = [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN].includes(canonical);
   const reportLinks = [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.ZONE_ADMIN].includes(canonical)
     ? REPORT_LINKS_BY_TIER.top
     : canonical === ROLES.DISTRICT_ADMIN
@@ -94,7 +92,7 @@ export default function AdminDashboard() {
   };
   const title = scope ? (titleByLevel[scope.level] || "State Overview") : "State Overview";
 
-  const tabs = TABS.filter((t) => !t.topTierOnly || isTopTier);
+  const tabs = TABS;
 
   return (
     <div className="space-y-4 animate-in fade-in duration-500">
@@ -124,12 +122,12 @@ export default function AdminDashboard() {
           live from the Reports Engine. */}
       {reportsSummary && <ReportsSummaryRow summary={reportsSummary} />}
 
-      {tab === "overview" && (
+      {tab === "analytics" ? (
+        <AnalyticsPanel />
+      ) : (
+        // Overview is the default — also the fallback for any stale tab value
+        // (e.g. the removed "supervisor" view) so no blank panel can show.
         <SummaryDashboard summaryUrl="/api/admin/state-summary" exportUrl="/api/supervisor/export/summary" title={title} />
-      )}
-      {tab === "analytics" && <AnalyticsPanel />}
-      {tab === "supervisor" && isTopTier && (
-        <SummaryDashboard summaryUrl="/api/supervisor/summary" exportUrl="/api/supervisor/export/summary" title="Supervisor Overview" />
       )}
     </div>
   );
