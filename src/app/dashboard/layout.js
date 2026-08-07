@@ -30,7 +30,7 @@ async function handleSignOut() {
 const DASHBOARD_SWITCHER = [
   { name: "My Profile", href: "/dashboard/profile", icon: User },
   { name: "Media Center", href: "/dashboard/media", icon: Newspaper },
-  { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
+  { name: "Social Media", href: "/dashboard/social", icon: Share2 },
   { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
 ];
 
@@ -56,6 +56,7 @@ const SUPERVISOR_NAV = [
   { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
   { name: "Attendance", href: "/dashboard/supervisor/attendance", icon: Clock },
   { name: "Media", href: "/dashboard/media", icon: Newspaper },
+  { name: "Social Media", href: "/dashboard/social", icon: Share2 },
   { name: "Reports", href: "/dashboard/reports", icon: FileText },
   { name: "Alerts", href: "/dashboard/supervisor/alerts", icon: AlertCircle },
 ];
@@ -175,7 +176,7 @@ export default function DashboardLayout({ children }) {
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
-      { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
+      { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
@@ -196,7 +197,7 @@ export default function DashboardLayout({ children }) {
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
-      { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
+      { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
@@ -216,6 +217,7 @@ export default function DashboardLayout({ children }) {
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
+      { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
     ],
     [ROLES.DISTRICT_ADMIN]: [
@@ -276,7 +278,7 @@ export default function DashboardLayout({ children }) {
   } else if (canonical === ROLES.SOCIAL_MEDIA) {
     // Social media staff: war room + command center.
     navItems = [
-      { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
+      { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
     ];

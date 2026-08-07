@@ -102,7 +102,7 @@ export function canManageWorkers(session) {
   return isOversight(session) || isCaller(session);
 }
 // Module access: press media staff manage the Media Center; social media staff
-// manage the Social War Room + Social Command. Oversight roles keep access.
+// manage Social Media + Social Command. Oversight roles keep access.
 export function canAccessMedia(session) {
   return isOversight(session) || isPressMedia(session);
 }
