@@ -30,13 +30,28 @@ export function buildAssignedFilters(f = {}, alias = "c") {
   clauses.push(...geo.clauses);
   params.push(...geo.params);
 
-  // Designation multi-select ("none" = no designation set).
+  // Designation multi-select ("none" = no designation set). A person can hold
+  // ANY number of designations: their complete role list lives in the linked
+  // worker's multi-role `position` text (comma-separated names, same source the
+  // list displays), and the contact also carries a single primary designation_id.
+  // Match if the selected designation appears in EITHER — so a person is found
+  // through every designation they belong to, not just their primary one. This
+  // mirrors the admin Contacts list's person-aware designation filter.
   const desigSel = String(f.designation_id || "").split(",").map((s) => s.trim()).filter(Boolean);
   if (desigSel.length) {
     const hasNone = desigSel.includes("none");
     const ids = desigSel.filter((x) => x !== "none");
     const parts = [];
-    if (ids.length) { parts.push(`${a}designation_id IN (${ids.map(() => "?").join(",")})`); params.push(...ids); }
+    if (ids.length) {
+      // worker's multi-role position (', '-separated → ','-separated for FIND_IN_SET)
+      const pos = `REPLACE((SELECT wd.position FROM workers wd WHERE wd.id = ${a}worker_id), ', ', ',')`;
+      // OR across selected ids: designation NAME present in the position text...
+      const nameMatch = ids.map(() => `FIND_IN_SET((SELECT name FROM designations WHERE id = ?), ${pos})`).join(" OR ");
+      // ...OR the contact's own primary designation is one of the selected ids.
+      const ownMatch = `${a}designation_id IN (${ids.map(() => "?").join(",")})`;
+      parts.push(`((${nameMatch}) OR ${ownMatch})`);
+      params.push(...ids, ...ids);
+    }
     if (hasNone) parts.push(`${a}designation_id IS NULL`);
     if (parts.length) clauses.push(`(${parts.join(" OR ")})`);
   }
