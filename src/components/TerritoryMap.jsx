@@ -16,18 +16,61 @@ const BAND_COLOR = {
   weak: "bg-red-500 hover:bg-red-600",
 };
 
-// Every division/district is measured independently against a FIXED target of
-// 5,500 workers — Target Completion % = actual workers ÷ 5,500 × 100. The only
-// hardcoded value is the target; the worker count is always the live API value.
-// The existing Strong/Medium/Weak thresholds are applied to this new %.
-const WORKER_TARGET = 5500;
-function targetInfo(workerCount) {
-  const workers = Number(workerCount) || 0;
-  const pct = (workers / WORKER_TARGET) * 100;
+// Per-district Worker Target. Target Completion % = actual workers ÷ this
+// district's target × 100 (NO common/fixed target — each district measured
+// against its own goal). Keyed by the district names as stored in the DB, with
+// the plainer display names added as aliases so a lookup succeeds regardless of
+// which form the map data uses. The worker count is always the live API value.
+const DISTRICT_TARGETS = {
+  "Balod": 6000,
+  "Balodabazar-Bhatapara": 6000, "Baloda Bazar": 6000,
+  "Balrampur-Ramanujganj": 4000, "Balrampur": 4000,
+  "Bastar": 6000,
+  "Bemetara": 6000,
+  "Bijapur": 2000,
+  "Bilaspur": 12000,
+  "Dakshin Bastar Dantewada": 2000, "Dantewada": 2000,
+  "Dhamtari": 6000,
+  "Durg": 12000,
+  "Gariyaband": 4000,
+  "Gaurela-Pendra-Marwahi": 2000,
+  "Janjgir-Champa": 6000,
+  "Jashpur": 6000,
+  "Kabeerdham": 4000, "Kabirdham": 4000,
+  "Uttar Bastar Kanker": 6000, "Kanker": 6000,
+  "Khairagarh-Chhuikhadan-Gandai": 2000,
+  "Kondagaon": 4000,
+  "Korba": 8000,
+  "Korea": 4000, "Koriya": 4000,
+  "Manendragarh-Chirmiri-Bharatpur(M C B)": 2000, "MCB": 2000,
+  "Mahasamund": 8000,
+  "Mohla-Manpur-Ambagarh Chouki": 2000, "Mohla-Manpur-Ambagarh Chowki": 2000,
+  "Mungeli": 4000,
+  "Narayanpur": 2000,
+  "Raigarh": 8000,
+  "Raipur": 4000,
+  "Rajnandgaon": 8000,
+  "Sakti": 6000,
+  "Sarangarh-Bilaigarh": 4000,
+  "Sukma": 2000,
+  "Surajpur": 6000,
+  "Surguja": 6000,
+};
+
+// district: a map row (has .name + .worker_count). Uses the district's OWN
+// target — never a fallback of 5,500. A district missing from the mapping is
+// handled explicitly (hasTarget=false → "No target set", neutral band).
+function targetInfo(district) {
+  const workers = Number(district?.worker_count) || 0;
+  const target = DISTRICT_TARGETS[district?.name];
+  if (!target) {
+    return { workers, target: null, pct: null, band: "weak", label: null, hasTarget: false };
+  }
+  const pct = (workers / target) * 100;
   const band = pct >= 60 ? "strong" : pct >= 35 ? "medium" : "weak";
-  // Trim trailing zeros (8.35% not 8.35, 50% not 50.00).
+  // Trim trailing zeros (0.28% not 0.28, 50% not 50.00).
   const label = Number(pct.toFixed(2));
-  return { workers, pct, band, label };
+  return { workers, target, pct, band, label, hasTarget: true };
 }
 
 export default function TerritoryMap() {
@@ -88,7 +131,7 @@ export default function TerritoryMap() {
                 <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">{zone} Division</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {items.map((d) => {
-                    const t = targetInfo(d.worker_count);
+                    const t = targetInfo(d);
                     return (
                     <button
                       key={d.id}
@@ -99,8 +142,8 @@ export default function TerritoryMap() {
                       className={`${BAND_COLOR[t.band]} ${selected?.id === d.id ? "ring-4 ring-[#164FA3]/30" : ""} text-white rounded-xl p-4 text-left transition-all shadow-sm`}
                     >
                       <div className="font-bold text-sm leading-tight">{d.name}</div>
-                      <div className="text-2xl font-bold mt-2">{t.label}%</div>
-                      <div className="text-xs opacity-90">{t.workers.toLocaleString("en-IN")} / {WORKER_TARGET.toLocaleString("en-IN")} workers</div>
+                      <div className="text-2xl font-bold mt-2">{t.hasTarget ? `${t.label}%` : "—"}</div>
+                      <div className="text-xs opacity-90">{t.workers.toLocaleString("en-IN")} / {t.hasTarget ? t.target.toLocaleString("en-IN") : "—"} workers</div>
                     </button>
                     );
                   })}
@@ -117,7 +160,9 @@ export default function TerritoryMap() {
                   <MapIcon size={36} className="mx-auto text-gray-300 mb-3" />
                   Click a district tile to see its details.
                 </div>
-              ) : (
+              ) : (() => {
+                const ti = targetInfo(selected);
+                return (
                 <>
                   <div className="flex items-start justify-between">
                     <div>
@@ -126,17 +171,17 @@ export default function TerritoryMap() {
                     </div>
                     <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
                   </div>
-                  <div className={`mt-4 inline-block text-xs font-bold uppercase px-3 py-1 rounded-full text-white ${BAND_COLOR[targetInfo(selected.worker_count).band].split(" ")[0]}`}>
-                    {targetInfo(selected.worker_count).band} · {targetInfo(selected.worker_count).label}% of target
+                  <div className={`mt-4 inline-block text-xs font-bold uppercase px-3 py-1 rounded-full text-white ${BAND_COLOR[ti.band].split(" ")[0]}`}>
+                    {ti.band}{ti.hasTarget ? ` · ${ti.label}% of target` : " · no target set"}
                   </div>
-                  {/* Worker target progress against the fixed 5,500 goal. */}
+                  {/* Worker target progress against this district's own goal. */}
                   <div className="mt-4">
                     <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-                      <span>Workers: <strong className="text-gray-800">{targetInfo(selected.worker_count).workers.toLocaleString("en-IN")} / {WORKER_TARGET.toLocaleString("en-IN")}</strong></span>
-                      <span>Target Completion: <strong className="text-gray-800">{targetInfo(selected.worker_count).label}%</strong></span>
+                      <span>Workers: <strong className="text-gray-800">{ti.workers.toLocaleString("en-IN")} / {ti.hasTarget ? ti.target.toLocaleString("en-IN") : "—"}</strong></span>
+                      <span>Target Completion: <strong className="text-gray-800">{ti.hasTarget ? `${ti.label}%` : "—"}</strong></span>
                     </div>
                     <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div className={`h-full ${BAND_COLOR[targetInfo(selected.worker_count).band].split(" ")[0]}`} style={{ width: `${Math.min(100, targetInfo(selected.worker_count).pct)}%` }} />
+                      <div className={`h-full ${BAND_COLOR[ti.band].split(" ")[0]}`} style={{ width: `${ti.hasTarget ? Math.min(100, ti.pct) : 0}%` }} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4 mt-6">
@@ -151,16 +196,17 @@ export default function TerritoryMap() {
                     <Detail icon={Activity} label="Avg Activity" value={selected.avg_activity} />
                     <GrowthDetail value={selected.membership_growth_pct} />
                   </div>
-                  {targetInfo(selected.worker_count).band === "weak" && (
+                  {ti.hasTarget && ti.band === "weak" && (
                     <div className="mt-5 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
-                      ⚠ Weak area — below the 5,500-worker target; needs more workers and team coverage.
+                      ⚠ Weak area — below the {ti.target.toLocaleString("en-IN")}-worker target; needs more workers and team coverage.
                     </div>
                   )}
                   <a href="/dashboard/reports?module=workers" className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-[#164FA3] hover:underline">
                     View full report <ExternalLink size={13} />
                   </a>
                 </>
-              )}
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -173,18 +219,21 @@ export default function TerritoryMap() {
         width={220}
         estimatedHeight={190}
       >
-        {hovered && (
+        {hovered && (() => {
+          const ht = targetInfo(hovered);
+          return (
           <div className="p-3 text-sm space-y-1">
             <div className="font-bold text-gray-900">{hovered.name}</div>
-            <div className="text-xs text-gray-400 mb-1.5">{hovered.zone_name} Division · {targetInfo(hovered.worker_count).label}% of target</div>
-            <div className="flex justify-between"><span className="text-gray-500">Workers</span><strong className="text-gray-800">{targetInfo(hovered.worker_count).workers.toLocaleString("en-IN")} / {WORKER_TARGET.toLocaleString("en-IN")}</strong></div>
-            <div className="flex justify-between"><span className="text-gray-500">Target Completion</span><strong className="text-gray-800">{targetInfo(hovered.worker_count).label}%</strong></div>
+            <div className="text-xs text-gray-400 mb-1.5">{hovered.zone_name} Division{ht.hasTarget ? ` · ${ht.label}% of target` : ""}</div>
+            <div className="flex justify-between"><span className="text-gray-500">Workers</span><strong className="text-gray-800">{ht.workers.toLocaleString("en-IN")} / {ht.hasTarget ? ht.target.toLocaleString("en-IN") : "—"}</strong></div>
+            <div className="flex justify-between"><span className="text-gray-500">Target Completion</span><strong className="text-gray-800">{ht.hasTarget ? `${ht.label}%` : "—"}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Active / Pending</span><strong className="text-gray-800">{hovered.active_workers} / {hovered.pending_workers}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Contacts</span><strong className="text-gray-800">{hovered.contact_count}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Callers</span><strong className="text-gray-800">{hovered.caller_count}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Call completion</span><strong className="text-gray-800">{hovered.call_completion_pct}%</strong></div>
           </div>
-        )}
+          );
+        })()}
       </FloatingPopover>
     </div>
   );
