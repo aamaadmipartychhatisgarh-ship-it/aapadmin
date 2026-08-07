@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState, useRef, Fragment } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
@@ -11,6 +11,7 @@ import { formatDate } from "@/lib/dateFormat";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import ActionBar from "@/components/ActionBar";
+import FloatingPopover from "@/components/FloatingPopover";
 import { DURATION_PRESETS, DURATION_DAYS, addDays, daysBetween } from "@/lib/taskDuration";
 
 const SHOW_COMPLETED_KEY = "tasks_show_completed";
@@ -360,14 +361,16 @@ function AddTaskModal({ onClose, onSaved, editing }) {
         title: editing.title || "",
         priority: editing.priority || "medium",
         start_date, duration_preset, duration_days,
-        assigned_to_user_id: editing.assigned_to_user_id || "",
+        // Multi-assign: an array of user ids (strings). An existing task has at
+        // most one assignee, so it seeds a single-element array on edit.
+        assigned_user_ids: editing.assigned_to_user_id ? [String(editing.assigned_to_user_id)] : [],
         assigned_to_team_id: editing.assigned_to_team_id || "",
       };
     }
     return {
       title: "", priority: "medium",
       start_date: todayStr, duration_preset: "one_week", duration_days: DURATION_DAYS.one_week,
-      assigned_to_user_id: "", assigned_to_team_id: "",
+      assigned_user_ids: [], assigned_to_team_id: "",
     };
   });
   const durationDaysNum = form.duration_preset === "custom"
@@ -398,7 +401,13 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     const url = editing ? `/api/tasks/${editing.id}` : "/api/tasks";
     const method = editing ? "PUT" : "POST";
     const cleanSubs = subtasks.map((s) => ({ id: s.id ?? null, title: s.title.trim() })).filter((s) => s.title);
-    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, subtasks: cleanSubs }) });
+    const { assigned_user_ids, ...rest } = form;
+    // Create: fan out to every selected user (server makes one task each).
+    // Edit: a task keeps a single assignee, so send the first selected id.
+    const assign = editing
+      ? { assigned_to_user_id: assigned_user_ids[0] || "" }
+      : { assigned_to_user_ids };
+    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...rest, ...assign, subtasks: cleanSubs }) });
     if (r.ok) onSaved(); else setSaving(false);
   }
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
@@ -453,10 +462,12 @@ function AddTaskModal({ onClose, onSaved, editing }) {
           {form.duration_preset === "custom" && (
             <div className="col-span-2 text-xs text-gray-500 -mt-2">{endDate ? `Ends ${formatDate(endDate)}` : "Enter number of days to see the end date"}</div>
           )}
-          <select className={inp} value={form.assigned_to_user_id} onChange={(e) => setForm({ ...form, assigned_to_user_id: e.target.value })}>
-            <option value="">Assign to user…</option>
-            {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
-          </select>
+          <AssigneeMultiSelect
+            className={inp}
+            users={users}
+            selected={form.assigned_user_ids}
+            onChange={(ids) => setForm({ ...form, assigned_user_ids: ids })}
+          />
           <select className={inp} value={form.assigned_to_team_id} onChange={(e) => setForm({ ...form, assigned_to_team_id: e.target.value })}>
             <option value="">Assign to team…</option>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -468,5 +479,59 @@ function AddTaskModal({ onClose, onSaved, editing }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// Multi-select "Assign to users" control for the task form: a full-width
+// trigger (styled like the other fields) that opens a checkbox list. Multiple
+// users can be checked/unchecked with the panel staying open; the closed
+// trigger summarizes the selection (name or "N users selected"). Select all /
+// Clear act on the whole list. Ids are kept as strings.
+function AssigneeMultiSelect({ users, selected, onChange, className }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const ids = users.map((u) => String(u.id));
+  const allSelected = users.length > 0 && selected.length === users.length;
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  const label = selected.length === 0
+    ? "Assign to users…"
+    : selected.length === 1
+      ? (users.find((u) => String(u.id) === String(selected[0]))?.username || "1 user")
+      : `${selected.length} users selected`;
+  return (
+    <>
+      <button
+        type="button"
+        ref={ref}
+        onClick={() => setOpen((o) => !o)}
+        className={`${className} flex items-center justify-between text-left bg-white ${selected.length ? "text-gray-900" : "text-gray-400"}`}
+      >
+        <span className="truncate">{label}</span>
+        <span className="text-gray-400 ml-2 shrink-0">▾</span>
+      </button>
+      <FloatingPopover anchorRef={ref} open={open} onClose={() => setOpen(false)} width={260} estimatedHeight={300}>
+        <div className="max-h-72 overflow-y-auto p-2">
+          <div className="flex items-center justify-between px-1 pb-2 mb-1 border-b border-gray-100">
+            <button type="button" onClick={() => onChange(allSelected ? [] : ids)} className="text-[11px] font-semibold text-[#164FA3] hover:underline">
+              {allSelected ? "Clear all" : "Select all"}
+            </button>
+            {selected.length > 0 && (
+              <button type="button" onClick={() => onChange([])} className="text-[11px] font-semibold text-gray-500 hover:underline">Clear</button>
+            )}
+          </div>
+          {users.length === 0 ? (
+            <div className="px-2 py-3 text-xs text-gray-400">No users available.</div>
+          ) : users.map((u) => {
+            const id = String(u.id);
+            return (
+              <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm">
+                <input type="checkbox" checked={selected.includes(id)} onChange={() => toggle(id)} className="accent-[#164FA3]" />
+                <span className="text-gray-700 truncate">{u.username}</span>
+              </label>
+            );
+          })}
+        </div>
+      </FloatingPopover>
+    </>
   );
 }

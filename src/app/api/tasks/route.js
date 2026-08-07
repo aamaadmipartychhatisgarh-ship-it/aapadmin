@@ -128,36 +128,52 @@ export async function POST(req) {
     // The Description field has been retired from the Tasks module. The column
     // is left in place (nullable) so existing tasks keep their stored text; new
     // tasks simply never write it.
-    const res = await query(
-      `INSERT INTO tasks (title, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
-       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
-      [d.title, d.priority || "medium", deadline,
-       d.assigned_to_user_id || null, d.assigned_to_team_id || null, d.district_id || null,
-       d.contact_id || null, session.user.id,
-       ...(hasDuration ? [d.start_date || null, d.duration_preset || null, d.duration_days || null] : [])]
-    );
-    // Persist the checklist (unlimited items). Accepts an array of strings or
-    // {title} objects; blank items are ignored.
+    // Multi-assign: a task may be assigned to several users at once. Each
+    // selected user gets their OWN task record (fan-out) so it shows up
+    // independently in every assignee's list. Accepts the new
+    // assigned_to_user_ids array; falls back to the legacy single
+    // assigned_to_user_id, and to [null] (team-only / unassigned) when neither
+    // is given — so existing single-assignee and team behavior is unchanged.
+    const userIds = Array.isArray(d.assigned_to_user_ids)
+      ? [...new Set(d.assigned_to_user_ids.map((x) => String(x).trim()).filter(Boolean))]
+      : (d.assigned_to_user_id ? [String(d.assigned_to_user_id)] : []);
+    const targets = userIds.length ? userIds : [null];
+
+    // Prepare the checklist once (same items for every fanned-out task).
     const subs = Array.isArray(d.subtasks) ? d.subtasks : [];
     const titles = subs.map((s) => (typeof s === "string" ? s : s?.title) || "").map((t) => t.trim()).filter(Boolean);
-    if (titles.length && (await hasSubtasksTable())) {
-      const values = titles.map(() => "(?, ?, ?)").join(", ");
-      const params = [];
-      titles.forEach((t, i) => params.push(res.insertId, t, i));
-      await query(`INSERT INTO task_subtasks (task_id, title, sort_order) VALUES ${values}`, params);
-    }
+    const subsTable = titles.length ? await hasSubtasksTable() : false;
 
-    // Alert the assigned caller(s). Don't notify the person who created it.
-    if (d.assigned_to_user_id || d.assigned_to_team_id) {
-      await notifyTaskAssigned({
-        taskId: res.insertId,
-        title: d.title,
-        assignedToUserId: d.assigned_to_user_id || null,
-        assignedToTeamId: d.assigned_to_team_id || null,
-        excludeUserId: session.user.id,
-      });
+    const createdIds = [];
+    for (const uid of targets) {
+      const res = await query(
+        `INSERT INTO tasks (title, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
+         VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
+        [d.title, d.priority || "medium", deadline,
+         uid || null, d.assigned_to_team_id || null, d.district_id || null,
+         d.contact_id || null, session.user.id,
+         ...(hasDuration ? [d.start_date || null, d.duration_preset || null, d.duration_days || null] : [])]
+      );
+      createdIds.push(res.insertId);
+      // Persist the checklist (unlimited items) for this task.
+      if (subsTable) {
+        const values = titles.map(() => "(?, ?, ?)").join(", ");
+        const params = [];
+        titles.forEach((t, i) => params.push(res.insertId, t, i));
+        await query(`INSERT INTO task_subtasks (task_id, title, sort_order) VALUES ${values}`, params);
+      }
+      // Alert the assigned caller / team. Don't notify the person who created it.
+      if (uid || d.assigned_to_team_id) {
+        await notifyTaskAssigned({
+          taskId: res.insertId,
+          title: d.title,
+          assignedToUserId: uid || null,
+          assignedToTeamId: d.assigned_to_team_id || null,
+          excludeUserId: session.user.id,
+        });
+      }
     }
-    return NextResponse.json({ id: res.insertId }, { status: 201 });
+    return NextResponse.json({ id: createdIds[0], ids: createdIds }, { status: 201 });
   } catch (err) {
     console.error("tasks POST error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
