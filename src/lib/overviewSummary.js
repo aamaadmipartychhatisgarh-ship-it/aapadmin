@@ -109,7 +109,9 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
        LEFT JOIN workers w ON w.user_id = u.id
       ${where} AND u.role IN ('caller','user','agent')
       GROUP BY u.id
-      ORDER BY (SUM(cs.name = 'Phone Picked') / COUNT(*)) DESC, COUNT(*) DESC LIMIT 5`,
+      -- Rank STRICTLY by number of connected ('Phone Picked') calls, highest
+      -- first; ties broken by total call volume. (Not by percentage/total.)
+      ORDER BY SUM(cs.name = 'Phone Picked') DESC, COUNT(*) DESC LIMIT 5`,
     params
   );
   const top_callers = topRows.map((r) => {

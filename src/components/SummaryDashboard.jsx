@@ -260,7 +260,7 @@ export default function SummaryDashboard({
                         <Avatar name={cc.name} src={cc.photo_url} size={40} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-gray-900 text-sm truncate">{cc.name}</div>
-                          <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · Total {cc.total.toLocaleString()} · Connected {cc.connected.toLocaleString()} · {cc.follow_ups} follow-ups</div>
+                          <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · {cc.total.toLocaleString()} / {cc.connected.toLocaleString()} · {cc.follow_ups} follow-ups</div>
                         </div>
                       </button>
                       <div className="text-right shrink-0">
