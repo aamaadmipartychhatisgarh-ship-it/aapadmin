@@ -344,8 +344,8 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
         )}
       </div>
 
-      {showAdd && <AddTaskModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); setNotice("Task created successfully."); }} />}
-      {editing && <AddTaskModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); setNotice("Task updated successfully."); }} />}
+      {showAdd && <AddTaskModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); setNotice("Task created successfully."); load(); }} />}
+      {editing && <AddTaskModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setNotice("Task updated successfully."); load(); }} />}
     </div>
   );
 }
@@ -418,29 +418,44 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     const url = editing ? `/api/tasks/${editing.id}` : "/api/tasks";
     const method = editing ? "PUT" : "POST";
     const cleanSubs = subtasks.map((s) => ({ id: s.id ?? null, title: s.title.trim() })).filter((s) => s.title);
-    const { assigned_user_ids, ...rest } = form;
+    const { assigned_user_ids = [], ...rest } = form;
     // Create: fan out to every selected user (server makes one task each).
     // Edit: a task keeps a single assignee, so send the first selected id.
     const assign = editing
       ? { assigned_to_user_id: assigned_user_ids[0] || "" }
       : { assigned_to_user_ids };
+    const failMsg = editing ? "Failed to save the task. Please try again." : "Failed to create task. Please try again.";
+
+    // Settle ONLY on the create/update request. Its outcome (ok / errMsg) is
+    // computed inside try/finally so the loading state is ALWAYS reset — the
+    // success side-effects (toast, close, list refresh) run afterwards, OUTSIDE
+    // the awaited path, so a hidden error or a slow secondary refresh can never
+    // keep the button stuck on "Saving…".
+    let ok = false;
+    let errMsg = "";
     try {
       const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...rest, ...assign, subtasks: cleanSubs }) });
-      // Only treat it as a success once the backend confirms (2xx). Surface the
-      // server's message when it rejects; never claim success on an error.
-      if (!r.ok) {
+      if (r.ok) {
+        ok = true; // 2xx = backend-confirmed creation/update
+      } else {
         const data = await r.json().catch(() => ({}));
-        throw new Error(data.message || (editing ? "Failed to save the task. Please try again." : "Failed to create task. Please try again."));
+        errMsg = data.message || failMsg;
       }
-      // Hand back to the parent (shows the success toast, closes, reloads).
-      onSaved();
-    } catch (e) {
-      // Network failure, timeout, or a rejected response — keep the form open
-      // and show a clear error instead of hanging on "Saving…".
-      setError(e?.message || (editing ? "Failed to save the task. Please try again." : "Failed to create task. Please try again."));
+    } catch {
+      // Network failure / timeout / aborted request.
+      errMsg = failMsg;
     } finally {
-      // Reset the loading state in every case so the button never sticks.
+      // Reset the loading state in EVERY case so the button never sticks.
       setSaving(false);
+    }
+
+    if (ok) {
+      // Parent handles the success toast, closing the modal and refreshing the
+      // list. Guarded so even if that throws, the save flow is already settled.
+      try { onSaved(); } catch { /* refresh/close issues never re-block Save */ }
+    } else {
+      // Keep the form open and show a clear error.
+      setError(errMsg || failMsg);
     }
   }
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
