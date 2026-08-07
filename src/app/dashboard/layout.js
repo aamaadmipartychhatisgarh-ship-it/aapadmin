@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -50,11 +50,9 @@ const SUPERVISOR_NAV = [
   { name: "Sentiment", href: "/dashboard/supervisor/sentiment", icon: MessageSquare },
   { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
   { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
-  { name: "Attendance", href: "/dashboard/supervisor/attendance", icon: Clock },
   { name: "Media", href: "/dashboard/media", icon: Newspaper },
   { name: "Social Media", href: "/dashboard/social", icon: Share2 },
   { name: "Reports", href: "/dashboard/reports", icon: FileText },
-  { name: "Alerts", href: "/dashboard/supervisor/alerts", icon: AlertCircle },
 ];
 const CALLER_NAV = [
   { name: "My Workspace", href: "/dashboard/workspace", icon: Headphones },
