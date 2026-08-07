@@ -95,7 +95,14 @@ export default function DashboardLayout({ children }) {
   // The specific caller a Super Admin is impersonating (Caller Dashboard
   // submenu), the caller list to choose from, and the submenu's open state.
   const [viewAsUser, setVAUser] = useState(null);
-  const [callers, setCallers] = useState([]);
+  // Full user list (Super Admin only) — each row carries photo_url so the
+  // dashboard switcher can render every option against its OWN user's photo.
+  const [allUsers, setAllUsers] = useState([]);
+  const callers = allUsers.filter((u) => normalizeRole(u.role) === ROLES.CALLER);
+  // The supervisor account whose photo represents the "Supervisor Dashboard"
+  // view option. Resolved from real user data (not a hardcoded username); null
+  // → the Avatar falls back to a clean default DP.
+  const supervisorUser = allUsers.find((u) => normalizeRole(u.role) === ROLES.SUPERVISOR) || null;
   const [callerSubmenuOpen, setCallerSubmenuOpen] = useState(false);
   useEffect(() => {
     setViewAsState(getDashboardViewAs());
@@ -128,7 +135,7 @@ export default function DashboardLayout({ children }) {
     if (normalizeRole(session?.user?.role) !== ROLES.SUPER_ADMIN) return;
     fetch("/api/users")
       .then((r) => r.json())
-      .then((d) => setCallers((d.users || []).filter((u) => normalizeRole(u.role) === ROLES.CALLER)))
+      .then((d) => setAllUsers(d.users || []))
       .catch(() => {});
   }, [session]);
   // App version — injected at build time from package.json.
@@ -449,8 +456,18 @@ export default function DashboardLayout({ children }) {
                   <div className="py-1.5 max-h-[80vh] overflow-y-auto">
                     <div className="px-3.5 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Quick Dashboard Switch</div>
                     {VIEW_OPTIONS.map((opt) => {
-                      const Icon = opt.icon;
                       const active = viewAs === opt.key;
+                      // Resolve each dashboard option's avatar against its OWN
+                      // user's photo (never a shared/hardcoded image): the
+                      // Super Admin option → the signed-in super admin; the
+                      // Supervisor option → the real supervisor account; the
+                      // Caller option → the caller currently being previewed.
+                      // A missing photo → Avatar's clean default DP.
+                      const impCaller = callers.find((c) => String(c.id) === String(viewAsUser?.id));
+                      const optAvatar =
+                        opt.key === "super_admin" ? { name: session.user.name, src: session.user.photo_url }
+                        : opt.key === "supervisor" ? { name: supervisorUser?.username || "Supervisor", src: supervisorUser?.photo_url }
+                        : { name: (active && viewAsUser?.name) || "Caller", src: (active && impCaller?.photo_url) || null };
                       // Caller Dashboard expands into a submenu of caller profiles
                       // instead of opening a dashboard directly.
                       if (opt.key === "caller") {
@@ -461,7 +478,7 @@ export default function DashboardLayout({ children }) {
                               onClick={() => setCallerSubmenuOpen((o) => !o)}
                               className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-sm text-left ${active ? "bg-blue-50 text-[#164FA3] font-semibold" : "text-gray-700 hover:bg-gray-50"}`}
                             >
-                              <Icon size={15} className="shrink-0" />
+                              <Avatar name={optAvatar.name} src={optAvatar.src} size={24} className="border border-gray-200 bg-gray-50" textClassName="text-[#0B3A82]" />
                               <span className="flex-1">{opt.name}</span>
                               {active && viewAsUser && <span className="text-xs text-[#164FA3] truncate max-w-[70px]">{viewAsUser.name}</span>}
                               <span className={`text-gray-400 text-[10px] transition-transform ${callerSubmenuOpen ? "rotate-90" : ""}`}>▶</span>
@@ -477,8 +494,9 @@ export default function DashboardLayout({ children }) {
                                       key={c.id}
                                       type="button"
                                       onClick={() => pickCaller(c)}
-                                      className={`flex w-full items-center gap-2 pl-10 pr-3.5 py-1.5 text-sm text-left ${on ? "text-[#164FA3] font-semibold bg-blue-50" : "text-gray-600 hover:bg-gray-100"}`}
+                                      className={`flex w-full items-center gap-2 pl-6 pr-3.5 py-1.5 text-sm text-left ${on ? "text-[#164FA3] font-semibold bg-blue-50" : "text-gray-600 hover:bg-gray-100"}`}
                                     >
+                                      <Avatar name={c.username} src={c.photo_url} size={22} className="border border-gray-200 bg-white" textClassName="text-[#0B3A82]" />
                                       <span className="flex-1 truncate">{c.username}</span>
                                       {on && <Check size={14} className="shrink-0 text-[#164FA3]" />}
                                     </button>
@@ -500,7 +518,7 @@ export default function DashboardLayout({ children }) {
                           }}
                           className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-sm text-left ${active ? "bg-blue-50 text-[#164FA3] font-semibold" : "text-gray-700 hover:bg-gray-50"}`}
                         >
-                          <Icon size={15} className="shrink-0" />
+                          <Avatar name={optAvatar.name} src={optAvatar.src} size={24} className="border border-gray-200 bg-gray-50" textClassName="text-[#0B3A82]" />
                           <span className="flex-1">{opt.name}</span>
                           {active && <Check size={15} className="shrink-0 text-[#164FA3]" />}
                         </button>

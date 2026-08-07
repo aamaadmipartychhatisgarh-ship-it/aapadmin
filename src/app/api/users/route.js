@@ -57,7 +57,7 @@ export async function GET() {
     const users = await query(
       `SELECT u.id, u.username, u.role, u.created_at, u.last_seen_at, u.is_active,
               u.home_district_id, l.name AS home_district_name,
-              u.scope_zone_id, u.scope_assembly_id
+              u.scope_zone_id, u.scope_assembly_id, u.photo_url
          FROM users u
          LEFT JOIN locations l ON l.id = u.home_district_id`
     );
