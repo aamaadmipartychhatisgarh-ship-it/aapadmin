@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -53,12 +53,21 @@ const SUPERVISOR_NAV = [
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
     ],
   },
-  { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-  { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
   { name: "Media", href: "/dashboard/media", icon: Newspaper },
   { name: "Social Media", href: "/dashboard/social", icon: Share2 },
-  { name: "Reports", href: "/dashboard/reports", icon: FileText },
+  // Reports is a collapsible parent — Area Reports is nested beneath it as a
+  // child page (supervisor dashboard only). Analytics is intentionally NOT
+  // listed here (removed from the supervisor sidebar); its page/route/API stay
+  // intact and reachable directly, just not shown in this nav.
+  {
+    name: "Reports",
+    href: "/dashboard/reports",
+    icon: FileText,
+    children: [
+      { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
+    ],
+  },
 ];
 const CALLER_NAV = [
   { name: "My Workspace", href: "/dashboard/workspace", icon: Headphones },
