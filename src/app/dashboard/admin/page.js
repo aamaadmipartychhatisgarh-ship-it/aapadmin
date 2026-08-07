@@ -41,6 +41,10 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState("overview");
   const [strength, setStrength] = useState(null);
   const [reportsSummary, setReportsSummary] = useState(null);
+  // Actual total contacts, read from the SAME endpoint the Contacts Dashboard
+  // People list uses (/api/contacts → `total`), so the Worker Membership card
+  // never drifts from the Contacts total.
+  const [contactsTotal, setContactsTotal] = useState(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -70,8 +74,26 @@ export default function AdminDashboard() {
       fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ module, time: "all", group_by }) })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
-    Promise.all([run("tasks", "status"), run("complaints", "status"), run("workers", "membership_status")])
-      .then(([tasks, complaints, workers]) => setReportsSummary({ tasks, complaints, workers }));
+    Promise.all([run("tasks", "status"), run("complaints", "status")])
+      .then(([tasks, complaints]) => setReportsSummary({ tasks, complaints }));
+  }, [status, session]);
+
+  // Total contacts for the Worker Membership card — fetched from the exact same
+  // endpoint (and therefore the same filters/scope/dedup rules) as the Contacts
+  // Dashboard People list. page_size=1 keeps the payload tiny; we only read the
+  // `total`. Re-fetches on focus so add/delete/import changes show on return.
+  useEffect(() => {
+    if (status !== "authenticated" || !isAdmin(session)) return;
+    const load = () =>
+      fetch("/api/contacts?page=1&page_size=1")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d && typeof d.total === "number") setContactsTotal(d.total); })
+        .catch(() => {});
+    load();
+    const onFocus = () => { if (document.visibilityState === "visible") load(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
   }, [status, session]);
 
   if (status !== "authenticated" || !isAdmin(session)) {
@@ -121,7 +143,7 @@ export default function AdminDashboard() {
 
       {/* Reports summary — snapshot of Tasks / Complaints / Workers, sourced
           live from the Reports Engine. */}
-      {reportsSummary && <ReportsSummaryRow summary={reportsSummary} />}
+      {(reportsSummary || contactsTotal != null) && <ReportsSummaryRow summary={reportsSummary || {}} contactsTotal={contactsTotal} />}
 
       {tab === "analytics" ? (
         <AnalyticsPanel />
@@ -166,15 +188,34 @@ function StrengthStrip({ summary }) {
 const SUMMARY_CARDS = [
   { key: "tasks", label: "Tasks", icon: ClipboardList, color: "text-[#164FA3]", bg: "bg-blue-50" },
   { key: "complaints", label: "Complaints", icon: MessageSquareWarning, color: "text-amber-600", bg: "bg-amber-50" },
-  { key: "workers", label: "Workers (membership)", icon: Users, color: "text-emerald-600", bg: "bg-emerald-50" },
+  // Worker Membership shows the ACTUAL total contacts (Contacts Dashboard total),
+  // not a workers/membership table count.
+  { key: "contacts", label: "Worker Membership", icon: Users, color: "text-emerald-600", bg: "bg-emerald-50", isContactsTotal: true },
 ];
 
-function ReportsSummaryRow({ summary }) {
+function ReportsSummaryRow({ summary, contactsTotal }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
       {SUMMARY_CARDS.map((c) => {
-        const r = summary[c.key];
         const Icon = c.icon;
+        // Worker Membership: the actual Contacts total, linked to the People list.
+        if (c.isContactsTotal) {
+          return (
+            <a
+              key={c.key}
+              href="/dashboard/admin/contacts"
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:shadow-md transition-shadow"
+            >
+              <div className="flex items-center gap-2 mb-2.5">
+                <div className={`w-7 h-7 rounded-lg ${c.bg} ${c.color} flex items-center justify-center shrink-0`}><Icon size={15} /></div>
+                <span className="font-semibold text-gray-800 text-sm flex-1 truncate">{c.label}</span>
+              </div>
+              <div className="text-2xl font-bold text-gray-900">{contactsTotal == null ? "—" : contactsTotal.toLocaleString("en-IN")}</div>
+              <p className="text-xs text-gray-400 mt-0.5">Actual No. of Contacts</p>
+            </a>
+          );
+        }
+        const r = summary[c.key];
         const rows = (r?.rows || []).slice(0, 4);
         return (
           <a
