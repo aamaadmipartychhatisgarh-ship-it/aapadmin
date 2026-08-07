@@ -85,6 +85,13 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
   const [view, setView] = useState(canManage ? "all" : "mine");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  // Transient success toast (e.g. after creating a task). Auto-dismisses.
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
@@ -151,6 +158,12 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Success toast — confirms the task was actually saved by the backend. */}
+      {notice && (
+        <div className="fixed top-4 right-4 z-[60] flex items-center gap-2 bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg animate-in fade-in slide-in-from-top-2">
+          <CheckCircle2 size={16} /> {notice}
+        </div>
+      )}
       {previewingCaller && viewAsCaller && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3">
           Viewing <strong>{viewAsCaller.name}</strong>&apos;s tasks as Super Admin.
@@ -331,8 +344,8 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
         )}
       </div>
 
-      {showAdd && <AddTaskModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
-      {editing && <AddTaskModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {showAdd && <AddTaskModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); setNotice("Task created successfully."); }} />}
+      {editing && <AddTaskModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); setNotice("Task updated successfully."); }} />}
     </div>
   );
 }
@@ -386,6 +399,7 @@ function AddTaskModal({ onClose, onSaved, editing }) {
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((d) => setUsers(d.users || [])).catch(() => {});
@@ -397,7 +411,10 @@ function AddTaskModal({ onClose, onSaved, editing }) {
   const removeSub = (i) => setSubtasks((s) => (s.length === 1 ? [{ id: null, title: "" }] : s.filter((_, j) => j !== i)));
 
   async function save() {
+    // Guard against double-submit: ignore clicks while a save is in flight.
+    if (saving) return;
     setSaving(true);
+    setError("");
     const url = editing ? `/api/tasks/${editing.id}` : "/api/tasks";
     const method = editing ? "PUT" : "POST";
     const cleanSubs = subtasks.map((s) => ({ id: s.id ?? null, title: s.title.trim() })).filter((s) => s.title);
@@ -407,8 +424,24 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     const assign = editing
       ? { assigned_to_user_id: assigned_user_ids[0] || "" }
       : { assigned_to_user_ids };
-    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...rest, ...assign, subtasks: cleanSubs }) });
-    if (r.ok) onSaved(); else setSaving(false);
+    try {
+      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...rest, ...assign, subtasks: cleanSubs }) });
+      // Only treat it as a success once the backend confirms (2xx). Surface the
+      // server's message when it rejects; never claim success on an error.
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.message || (editing ? "Failed to save the task. Please try again." : "Failed to create task. Please try again."));
+      }
+      // Hand back to the parent (shows the success toast, closes, reloads).
+      onSaved();
+    } catch (e) {
+      // Network failure, timeout, or a rejected response — keep the form open
+      // and show a clear error instead of hanging on "Saving…".
+      setError(e?.message || (editing ? "Failed to save the task. Please try again." : "Failed to create task. Please try again."));
+    } finally {
+      // Reset the loading state in every case so the button never sticks.
+      setSaving(false);
+    }
   }
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
   return (
@@ -418,6 +451,7 @@ function AddTaskModal({ onClose, onSaved, editing }) {
           <h2 className="text-xl font-bold text-gray-900">{editing ? "Edit Task" : "Create Task"}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
+        {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2.5 text-sm">{error}</div>}
         <input className={inp} placeholder="Task title *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
 
         {/* Sub-task builder — unlimited checklist items */}
