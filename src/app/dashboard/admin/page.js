@@ -19,15 +19,16 @@ const TABS = [
 
 // Which report pages a role can actually reach — mirrors ADMIN_MENUS in
 // dashboard/layout.js, used only to decide what the quick-jump dropdown offers.
+// Quick-jump options shown next to the dashboard's Full Ranking link. The
+// "Reports Center" and "Caller Report" options were removed here per request;
+// both pages still exist and stay reachable from the sidebar / their own routes
+// — only these Full-Ranking dropdown entries are gone.
 const REPORT_LINKS_BY_TIER = {
   top: [ // super_admin, state_admin, zone_admin
-    { href: "/dashboard/reports", label: "Reports Center" },
     { href: "/dashboard/rankings", label: "Rankings" },
     { href: "/dashboard/strength", label: "Strength" },
-    { href: "/dashboard/admin/caller-report", label: "Caller Report" },
   ],
   district: [
-    { href: "/dashboard/reports", label: "Reports Center" },
     { href: "/dashboard/rankings", label: "Rankings" },
   ],
   none: [],
