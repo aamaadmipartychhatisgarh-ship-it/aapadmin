@@ -462,16 +462,16 @@ function AddTaskModal({ onClose, onSaved, editing }) {
           {form.duration_preset === "custom" && (
             <div className="col-span-2 text-xs text-gray-500 -mt-2">{endDate ? `Ends ${formatDate(endDate)}` : "Enter number of days to see the end date"}</div>
           )}
+          <select className={inp} value={form.assigned_to_team_id} onChange={(e) => setForm({ ...form, assigned_to_team_id: e.target.value })}>
+            <option value="">Assign to team…</option>
+            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
           <AssigneeMultiSelect
             className={inp}
             users={users}
             selected={form.assigned_user_ids}
             onChange={(ids) => setForm({ ...form, assigned_user_ids: ids })}
           />
-          <select className={inp} value={form.assigned_to_team_id} onChange={(e) => setForm({ ...form, assigned_to_team_id: e.target.value })}>
-            <option value="">Assign to team…</option>
-            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
