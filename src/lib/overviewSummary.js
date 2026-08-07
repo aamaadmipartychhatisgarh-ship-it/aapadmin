@@ -91,9 +91,13 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
   const hourly = [];
   for (let h = 0; h <= maxHour; h++) hourly.push({ hour: h, calls: hourCounts[h] || 0 });
 
-  // ---- Best caller (actual caller roles only) ----
-  // Top 5 callers for the range. Photo/designation come from the caller's linked
-  // worker (workers.user_id) when available; completion% = connected ÷ total.
+  // ---- Top 5 callers by CONNECTED-CALL % (actual caller roles only) ----
+  // connected_pct = connected ("Phone Picked") ÷ total call attempts × 100. The
+  // Top 5 are ranked by that percentage (highest first), tie-broken by call
+  // volume so a higher-volume caller leads at an equal rate. Every returned row
+  // has ≥1 call (they come from `calls`), so the SQL ratio never divides by
+  // zero; the JS still guards total===0 → 0% for safety. Photo/designation come
+  // from the caller's linked worker when available.
   const topRows = await query(
     `SELECT u.id, u.username AS name, w.photo_url AS photo_url, w.position AS designation,
             COUNT(*) AS total,
@@ -104,7 +108,8 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
        LEFT JOIN workers w ON w.user_id = u.id
       ${where} AND u.role IN ('caller','user','agent')
-      GROUP BY u.id ORDER BY total DESC, connected DESC LIMIT 5`,
+      GROUP BY u.id
+      ORDER BY (SUM(cs.name = 'Phone Picked') / COUNT(*)) DESC, COUNT(*) DESC LIMIT 5`,
     params
   );
   const top_callers = topRows.map((r) => {
@@ -112,7 +117,8 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
     return {
       id: r.id, name: r.name, photo_url: r.photo_url || null, designation: r.designation || null,
       total, connected, follow_ups: n(r.follow_ups),
-      completion: total ? Math.round((connected / total) * 100) : 0,
+      // Connected-call percentage; 0 when there are no attempts (never NaN/Infinity).
+      connected_pct: total ? Math.round((connected / total) * 100) : 0,
     };
   });
 
