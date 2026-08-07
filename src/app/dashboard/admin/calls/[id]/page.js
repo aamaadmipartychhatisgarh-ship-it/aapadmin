@@ -89,7 +89,7 @@ export default function EditCallPage({ params }) {
           <PhoneCall size={24} />
         </div>
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Edit Call Record</h1>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Call Records</h1>
           <p className="text-gray-500 font-medium mt-1">Update details for this specific call.</p>
         </div>
       </div>
