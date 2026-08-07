@@ -171,8 +171,6 @@ export default function DashboardLayout({ children }) {
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Strength", href: "/dashboard/strength", icon: Gauge },
-      { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
