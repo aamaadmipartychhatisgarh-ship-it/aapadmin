@@ -9,13 +9,12 @@ export const GROUPS = [
   // third tab here) was removed entirely. Future modules (Roles, Permissions,
   // Departments, Designations, …) belong here too.
   { key: "people", label: "Administration", hrefs: ["/dashboard/admin/administration"] },
-  // People: the day-to-day calling/contact operations. Administration is
-  // cross-listed here too (not just under its own group above) so this
-  // header row reads "Contacts | Administration | Call Records | Wrong
-  // Numbers" as one set, same as Workers used to be cross-listed in both
-  // groups. Daily Assignments has its own dedicated page now, so it's no
-  // longer a tab here (still reachable from the sidebar).
-  { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/administration", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers"] },
+  // People: the day-to-day calling/contact operations. The header row reads
+  // "Contacts | Call Records | Wrong Numbers" as one set. Administration is NOT
+  // cross-listed here — it was removed from the Contacts module tabs and now
+  // lives only under its own group above (still reachable from the sidebar).
+  // Daily Assignments has its own dedicated page now, so it's not a tab here.
+  { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers"] },
   { key: "tasks", label: "Task Management", hrefs: ["/dashboard/tasks", "/dashboard/admin/events", "/dashboard/admin/complaints"] },
   // Every report/analytics page links to every other one (and to the main
   // Reports Center) via this single group — a page only appears here if the
