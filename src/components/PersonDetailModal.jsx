@@ -297,6 +297,8 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       <div className="grid grid-cols-2 gap-3">
         <Field label="Full Name *" full><input className={inp} value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} /></Field>
         <Field label="Mobile Number *"><input className={phoneDup ? `${inp} border-red-400 ring-1 ring-red-300 bg-red-50` : inp} value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} /></Field>
+        {/* Address follows Phone, matching the Add Contact field order. */}
+        <Field label="Address" full><input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
         <Field label="Designation">
           <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
             <option value="">No designation</option>
@@ -337,9 +339,23 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
             </Field>
           </>
         )}
+        {/* Supervisor: geography is fixed to their territory (server-enforced —
+            a supervisor cannot re-scope a contact), so the same Zone / Lok Sabha
+            / District / Assembly / Block fields are shown here PRE-FILLED but
+            read-only, matching the Add Contact field set without granting an
+            out-of-territory move. Admin (canEditGeo) gets the editable cascade
+            above. */}
+        {!canEditGeo && (
+          <>
+            <Field label="Zone"><select className={inp} value="_" disabled><option value="_">{contact?.zone_name || "—"}</option></select></Field>
+            <Field label="Lok Sabha"><select className={inp} value="_" disabled><option value="_">{contact?.lok_sabha_name || "—"}</option></select></Field>
+            <Field label="District"><select className={inp} value="_" disabled><option value="_">{contact?.district_name || "—"}</option></select></Field>
+            <Field label="Assembly"><select className={inp} value="_" disabled><option value="_">{contact?.assembly_name || "—"}</option></select></Field>
+            <Field label="Block"><select className={inp} value="_" disabled><option value="_">{contact?.ward_name || "—"}</option></select></Field>
+          </>
+        )}
         <Field label="Village / City"><input className={inp} value={form.village} onChange={(e) => setForm({ ...form, village: e.target.value })} /></Field>
         <Field label="Pincode"><input className={inp} value={form.pincode} onChange={(e) => setForm({ ...form, pincode: e.target.value })} /></Field>
-        <Field label="Address" full><input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
         <Field label="Assigned Caller">
           <select className={inp} value={form.assigned_to_user_id} onChange={(e) => setForm({ ...form, assigned_to_user_id: e.target.value })}>
             <option value="">— Pool (unassigned) —</option>
