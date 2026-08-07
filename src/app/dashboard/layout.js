@@ -305,6 +305,18 @@ export default function DashboardLayout({ children }) {
   // Supervisor/Caller never sees.
   const sidebarItems = (isUserAdmin && !previewing) ? primaryItems(navItems) : navItems;
 
+  // Supervisor Reports section: hide the "Reports" and "Remarks" cross-link
+  // tabs from the SectionTabs header row. Both stay reachable — Reports from
+  // the sidebar, Remarks under the Contacts submenu — and their pages/routes
+  // are untouched. Scoped to the supervisor view only, so Super Admin's own
+  // SectionTabs (and every other role's) are unchanged. sidebarItems is a
+  // separate list, so the Reports sidebar menu item is unaffected.
+  const inSupervisorView = isSupervisor || (previewing && viewAs === "supervisor");
+  const HIDE_SUPERVISOR_TABS = new Set(["/dashboard/reports", "/dashboard/supervisor/remarks"]);
+  const sectionTabItems = inSupervisorView
+    ? navItems.filter((i) => !HIDE_SUPERVISOR_TABS.has(i.href))
+    : navItems;
+
   return (
     <div className="h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
       <Heartbeat />
@@ -592,7 +604,7 @@ export default function DashboardLayout({ children }) {
 
         {/* Section tabs — sibling pages of the current section as plain text
             links (replaces what the old sidebar accordion used to reveal) */}
-        <SectionTabs items={navItems} pathname={pathname} />
+        <SectionTabs items={sectionTabItems} pathname={pathname} />
 
         {/* Scrollable Main Content */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8 relative">
