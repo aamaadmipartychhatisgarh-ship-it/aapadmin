@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -43,12 +43,9 @@ const SUPERVISOR_NAV = [
   { name: "Contacts", href: "/dashboard/supervisor/contacts", icon: UserCheck },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Caller Performance", href: "/dashboard/supervisor/callers", icon: TrendingUp },
-  { name: "Live Status", href: "/dashboard/supervisor/live", icon: Activity },
   { name: "Teams", href: "/dashboard/admin/administration?tab=teams", icon: UserCog },
   { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
   { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
-  { name: "Strength", href: "/dashboard/strength", icon: Gauge },
-  { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
   { name: "Sentiment", href: "/dashboard/supervisor/sentiment", icon: MessageSquare },
   { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
