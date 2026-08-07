@@ -6,6 +6,7 @@ import { query, getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
+import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 
 // Supervisor-scoped mirror of PUT /api/contacts/[id] — assign/reassign a
 // contact and edit its details, but ONLY within the supervisor's own
@@ -46,6 +47,13 @@ export async function PUT(req, { params }) {
     }
     const { id } = await params;
     const data = await req.json();
+
+    // Editing may keep the contact's OWN mobile but must not collide with a
+    // DIFFERENT contact's number — exceptId excludes this contact.
+    if ("phone_number" in data && String(data.phone_number ?? "").trim()
+        && await phoneAlreadyRegistered(data.phone_number, id)) {
+      return duplicatePhoneResponse();
+    }
 
     // The profile modal always sends the contact's CURRENT assigned_to_user_id,
     // even when the edit only touches another field (e.g. designation). Treat
@@ -128,6 +136,7 @@ export async function PUT(req, { params }) {
     return NextResponse.json({ ok: true, contact: updated });
   } catch (err) {
     console.error("supervisor contacts PUT error:", err);
+    if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

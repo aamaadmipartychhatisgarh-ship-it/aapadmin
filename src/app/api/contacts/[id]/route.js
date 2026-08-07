@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
+import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 
 // The contacts table has been extended over several migrations, and a given
 // deployment may not have every column yet (e.g. assembly_id/booth_id). Naming
@@ -47,6 +48,13 @@ export async function PUT(req, { params }) {
       }
     }
     const data = await req.json();
+
+    // Editing may keep the contact's OWN mobile (same row) but must not collide
+    // with a DIFFERENT contact's number — exceptId excludes this contact.
+    if ("phone_number" in data && String(data.phone_number ?? "").trim()
+        && await phoneAlreadyRegistered(data.phone_number, id)) {
+      return duplicatePhoneResponse();
+    }
 
     // The profile modal always sends the contact's CURRENT assigned_to_user_id
     // even when only another field changed (e.g. designation). Drop it when it's
@@ -136,6 +144,7 @@ export async function PUT(req, { params }) {
     return NextResponse.json({ ok: true, contact: updated });
   } catch (err) {
     console.error("contacts PUT error:", err);
+    if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

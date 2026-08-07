@@ -10,6 +10,7 @@ import { notWrongNumberClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
+import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 
 // Supervisor-scoped mirror of GET /api/contacts (src/app/api/contacts/route.js)
 // — same filters, same shape, same pagination — but gated to the strict
@@ -181,6 +182,9 @@ export async function POST(req) {
     if (!person_name?.trim() || !phone_number?.trim()) {
       return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
+    // Reject a duplicate mobile up front with a clear message (the uniq_phone
+    // index is the race-safe backstop, surfaced via contactWriteError below).
+    if (await phoneAlreadyRegistered(phone_number)) return duplicatePhoneResponse();
 
     // An initial assignment (optional) must be to a caller this supervisor may
     // assign to (their territory, or any caller when unconfigured).

@@ -1282,6 +1282,8 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
   const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Highlights the mobile field when the server rejects a duplicate number.
+  const [phoneDup, setPhoneDup] = useState(false);
 
   // Upload the cropped image to storage now and hold its URL; it's saved onto
   // the contact by the create request. blob === null clears the selection.
@@ -1305,14 +1307,16 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
   }, []);
 
   async function save() {
-    setSaving(true); setError("");
+    setSaving(true); setError(""); setPhoneDup(false);
     const r = await fetch(addUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    const data = await r.json();
-    if (!r.ok) { setError(data.message || "Save failed"); setSaving(false); return; }
+    const data = await r.json().catch(() => ({}));
+    // On any error the modal stays open with every field intact so the user can
+    // fix just the mobile number; a 409 is the duplicate-number case.
+    if (!r.ok) { setError(data.message || "Save failed"); if (r.status === 409) setPhoneDup(true); setSaving(false); return; }
     onSaved();
   }
 
@@ -1337,7 +1341,7 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
         </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
-        <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
+        <input className={`w-full border rounded-lg px-3 py-2 text-sm ${phoneDup ? "border-red-400 ring-1 ring-red-300 bg-red-50" : "border-gray-200"}`} placeholder="Phone number *" value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
           <option value="">No designation</option>

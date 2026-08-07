@@ -8,6 +8,7 @@ import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
+import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 
 // Columns the `contacts` table actually has in this deployment — detected once
 // and cached, so the create path never references a column a given environment
@@ -188,6 +189,9 @@ export async function POST(req) {
     if (!person_name?.trim() || !phone_number?.trim()) {
       return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
+    // Reject a duplicate mobile up front with a clear message (the uniq_phone
+    // index is the race-safe backstop, surfaced via contactWriteError below).
+    if (await phoneAlreadyRegistered(phone_number)) return duplicatePhoneResponse();
     // Only ever write columns this deployment's schema actually has — a hardcoded
     // column that a given environment lacks was a source of intermittent 500s.
     const existing = await getContactColumns();

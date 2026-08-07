@@ -192,6 +192,8 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
   const [form, setForm] = useState(() => emptyForm(contact, canEditGeo));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Highlights the mobile field when the server rejects a duplicate number.
+  const [phoneDup, setPhoneDup] = useState(false);
   // Geo cascade option lists (admin only): Zone → Lok Sabha → District → Assembly.
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -225,7 +227,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       setError("Name and phone are required.");
       return;
     }
-    setSaving(true); setError("");
+    setSaving(true); setError(""); setPhoneDup(false);
     const body = {
       person_name: form.person_name.trim(),
       phone_number: form.phone_number.trim(),
@@ -250,7 +252,9 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(d.message || "Save failed"); setSaving(false); return; }
+      // Keep the edit form open with all fields intact so only the mobile needs
+      // fixing; a 409 flags the duplicate-number case for the field highlight.
+      if (!r.ok) { setError(d.message || "Save failed"); if (r.status === 409) setPhoneDup(true); setSaving(false); return; }
       // Resolve display names client-side so the view + table update instantly.
       const desig = designations.find((x) => String(x.id) === String(form.designation_id));
       const caller = users.find((x) => String(x.id) === String(form.assigned_to_user_id));
@@ -284,7 +288,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Full Name *" full><input className={inp} value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} /></Field>
-        <Field label="Mobile Number *"><input className={inp} value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} /></Field>
+        <Field label="Mobile Number *"><input className={phoneDup ? `${inp} border-red-400 ring-1 ring-red-300 bg-red-50` : inp} value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} /></Field>
         <Field label="Designation">
           <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
             <option value="">No designation</option>

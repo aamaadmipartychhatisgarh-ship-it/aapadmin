@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 export function contactWriteError(err, tag = "contact write") {
   console.error(`${tag} error:`, err); // full stack stays on the server
   const map = {
-    ER_DUP_ENTRY: [409, "A contact with this mobile number already exists."],
+    ER_DUP_ENTRY: [409, "This mobile number is already registered."],
     ER_NO_REFERENCED_ROW: [400, "Invalid selection — please re-check the designation, district or caller."],
     ER_NO_REFERENCED_ROW_2: [400, "Invalid selection — please re-check the designation, district or caller."],
     ER_BAD_NULL_ERROR: [400, "A required field is missing."],
