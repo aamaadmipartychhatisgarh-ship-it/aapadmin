@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
+import Avatar from "@/components/Avatar";
 import { Trophy, Award, MapPin, Loader2, Medal } from "lucide-react";
 
 export default function Page() {
@@ -26,30 +27,31 @@ function Body() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Top workers */}
+        {/* Worker Membership Ranking — callers ranked by members registered. */}
         <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-5 border-b border-gray-100 flex items-center gap-2">
             <Trophy size={18} className="text-[#FCB712]" />
-            <h2 className="font-bold text-gray-900">Top Workers</h2>
+            <h2 className="font-bold text-gray-900">Top Members Registered</h2>
           </div>
-          <ul className="divide-y divide-gray-100">
-            {data.topWorkers.map((w, i) => (
-              <li key={w.id} className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50">
-                <span className={`w-7 text-center font-bold ${i < 3 ? MEDAL[i] : "text-gray-400"}`}>
-                  {i < 3 ? <Medal size={18} className="inline" /> : i + 1}
-                </span>
-                <div className="flex-1">
-                  <div className="font-medium text-gray-900">{w.name}</div>
-                  <div className="text-xs text-gray-500">{w.position || "—"} · {w.district_name || "—"}</div>
-                </div>
-                {w.badge_count > 0 && <span className="text-xs text-gray-500 flex items-center gap-1"><Award size={13} className="text-[#FCB712]" /> {w.badge_count}</span>}
-                <div className="flex items-center gap-2 w-40">
-                  <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3]" style={{ width: `${w.activity_score}%` }} /></div>
-                  <span className="text-sm font-bold text-gray-700 w-7">{w.activity_score}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
+          {data.topWorkers.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-gray-400">No member registrations yet.</div>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {data.topWorkers.map((w) => (
+                <li key={w.user_id} className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50">
+                  <span className={`w-7 text-center font-bold ${w.rank <= 3 ? MEDAL[w.rank - 1] : "text-gray-400"}`}>
+                    {w.rank <= 3 ? <Medal size={18} className="inline" /> : w.rank}
+                  </span>
+                  <Avatar name={w.name} size={32} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-gray-900 truncate">{w.name}</div>
+                    <div className="text-xs text-gray-500">Members registered</div>
+                  </div>
+                  <span className="text-lg font-bold text-[#164FA3] tabular-nums">{w.members.toLocaleString("en-IN")}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {/* Area rankings + badges */}

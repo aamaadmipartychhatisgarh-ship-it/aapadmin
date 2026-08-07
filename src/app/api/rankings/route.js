@@ -9,18 +9,50 @@ export async function GET() {
     const session = await getServerSession(authOptions);
     if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
-    // Geographic scope on workers (top performers within the admin's territory).
-    const wScope = scopeFilterSync(session.user, "w");
-    const topWorkers = await query(
-      `SELECT w.id, w.name, w.position, w.activity_score, ld.name AS district_name,
-              (SELECT COUNT(*) FROM worker_badges wb WHERE wb.worker_id = w.id) AS badge_count
-         FROM workers w
-         LEFT JOIN locations ld ON ld.id = w.district_id
-        WHERE w.status = 'active' ${wScope.where}
-        ORDER BY w.activity_score DESC
-        LIMIT 20`,
-      wScope.params
-    );
+    // Worker Membership Ranking — callers ranked by how many DISTINCT members
+    // (contacts) they have registered. A "valid membership" is a contact the
+    // caller recorded a positive / supporter outcome for; COUNT(DISTINCT
+    // contact_id) means re-calling the same member never inflates the count
+    // (duplicate handling). Scope is applied on the MEMBER's geography, so a
+    // Super Admin sees every registration while a territory admin/supervisor
+    // sees only members within their own area.
+    //
+    // Feature-detected so a lagging schema degrades instead of 500-ing:
+    //   - no `sentiment` column  → count distinct members the caller engaged
+    //   - no `contact_id` column → count positive calls (can't dedup by member)
+    const callCols = await query(
+      `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'calls'`
+    ).then((rows) => new Set(rows.map((r) => r.name))).catch(() => new Set());
+    const hasSentiment = callCols.has("sentiment");
+    const hasContactId = callCols.has("contact_id");
+    const validMembership = hasSentiment ? "AND c.sentiment IN ('positive','supporter')" : "";
+    const memberCount = hasContactId ? "COUNT(DISTINCT c.contact_id)" : "COUNT(c.id)";
+    // Scope the registered MEMBERS (contacts) to the admin's territory.
+    const mScope = hasContactId ? scopeFilterSync(session.user, "ct") : { where: "", params: [] };
+    const memberJoin = hasContactId ? "JOIN contacts ct ON ct.id = c.contact_id" : "";
+    const ranked = hasContactId || hasSentiment
+      ? await query(
+          `SELECT u.id AS user_id, u.username AS name, ${memberCount} AS members
+             FROM users u
+             JOIN calls c ON c.user_id = u.id ${hasContactId ? "AND c.contact_id IS NOT NULL" : ""} ${validMembership}
+             ${memberJoin}
+            WHERE u.role IN ('caller','user','agent') ${mScope.where}
+            GROUP BY u.id, u.username
+           HAVING members > 0
+            ORDER BY members DESC, u.username ASC
+            LIMIT 50`,
+          mScope.params
+        )
+      : [];
+    // Competition ranking (1,1,3): equal member counts share a rank, the next
+    // distinct count skips accordingly.
+    let lastCount = null, lastRank = 0;
+    const topWorkers = ranked.map((r, i) => {
+      const members = Number(r.members) || 0;
+      if (members !== lastCount) { lastRank = i + 1; lastCount = members; }
+      return { user_id: r.user_id, name: r.name, members, rank: lastRank };
+    });
 
     // Area rankings — limit to districts within the admin's territory.
     const role = normalizeRole(session.user.role);
