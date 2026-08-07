@@ -168,7 +168,6 @@ export default function DashboardLayout({ children }) {
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
-      { name: "Audit Logs", href: "/dashboard/admin/audit", icon: Shield },
     ],
     [ROLES.STATE_ADMIN]: [
       // Same as super_admin except no Users management
