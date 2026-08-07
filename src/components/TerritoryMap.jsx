@@ -16,6 +16,20 @@ const BAND_COLOR = {
   weak: "bg-red-500 hover:bg-red-600",
 };
 
+// Every division/district is measured independently against a FIXED target of
+// 5,500 workers — Target Completion % = actual workers ÷ 5,500 × 100. The only
+// hardcoded value is the target; the worker count is always the live API value.
+// The existing Strong/Medium/Weak thresholds are applied to this new %.
+const WORKER_TARGET = 5500;
+function targetInfo(workerCount) {
+  const workers = Number(workerCount) || 0;
+  const pct = (workers / WORKER_TARGET) * 100;
+  const band = pct >= 60 ? "strong" : pct >= 35 ? "medium" : "weak";
+  // Trim trailing zeros (8.35% not 8.35, 50% not 50.00).
+  const label = Number(pct.toFixed(2));
+  return { workers, pct, band, label };
+}
+
 export default function TerritoryMap() {
   const [districts, setDistricts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -73,20 +87,23 @@ export default function TerritoryMap() {
               <div key={zone}>
                 <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">{zone} Division</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {items.map((d) => (
+                  {items.map((d) => {
+                    const t = targetInfo(d.worker_count);
+                    return (
                     <button
                       key={d.id}
                       ref={(el) => { tileRefs.current[d.id] = el; }}
                       onClick={() => setSelected(d)}
                       onMouseEnter={() => setHoveredId(d.id)}
                       onMouseLeave={() => setHoveredId((cur) => (cur === d.id ? null : cur))}
-                      className={`${BAND_COLOR[d.band]} ${selected?.id === d.id ? "ring-4 ring-[#164FA3]/30" : ""} text-white rounded-xl p-4 text-left transition-all shadow-sm`}
+                      className={`${BAND_COLOR[t.band]} ${selected?.id === d.id ? "ring-4 ring-[#164FA3]/30" : ""} text-white rounded-xl p-4 text-left transition-all shadow-sm`}
                     >
                       <div className="font-bold text-sm leading-tight">{d.name}</div>
-                      <div className="text-2xl font-bold mt-2">{d.score}</div>
-                      <div className="text-xs opacity-90">{d.worker_count} workers</div>
+                      <div className="text-2xl font-bold mt-2">{t.label}%</div>
+                      <div className="text-xs opacity-90">{t.workers.toLocaleString("en-IN")} / {WORKER_TARGET.toLocaleString("en-IN")} workers</div>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -109,8 +126,18 @@ export default function TerritoryMap() {
                     </div>
                     <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
                   </div>
-                  <div className={`mt-4 inline-block text-xs font-bold uppercase px-3 py-1 rounded-full text-white ${BAND_COLOR[selected.band].split(" ")[0]}`}>
-                    {selected.band} · {selected.score}/100
+                  <div className={`mt-4 inline-block text-xs font-bold uppercase px-3 py-1 rounded-full text-white ${BAND_COLOR[targetInfo(selected.worker_count).band].split(" ")[0]}`}>
+                    {targetInfo(selected.worker_count).band} · {targetInfo(selected.worker_count).label}% of target
+                  </div>
+                  {/* Worker target progress against the fixed 5,500 goal. */}
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                      <span>Workers: <strong className="text-gray-800">{targetInfo(selected.worker_count).workers.toLocaleString("en-IN")} / {WORKER_TARGET.toLocaleString("en-IN")}</strong></span>
+                      <span>Target Completion: <strong className="text-gray-800">{targetInfo(selected.worker_count).label}%</strong></span>
+                    </div>
+                    <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                      <div className={`h-full ${BAND_COLOR[targetInfo(selected.worker_count).band].split(" ")[0]}`} style={{ width: `${Math.min(100, targetInfo(selected.worker_count).pct)}%` }} />
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4 mt-6">
                     <Detail icon={Users} label="Total Members" value={selected.worker_count} />
@@ -124,9 +151,9 @@ export default function TerritoryMap() {
                     <Detail icon={Activity} label="Avg Activity" value={selected.avg_activity} />
                     <GrowthDetail value={selected.membership_growth_pct} />
                   </div>
-                  {selected.band === "weak" && (
+                  {targetInfo(selected.worker_count).band === "weak" && (
                     <div className="mt-5 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
-                      ⚠ Weak area — needs more workers and team coverage.
+                      ⚠ Weak area — below the 5,500-worker target; needs more workers and team coverage.
                     </div>
                   )}
                   <a href="/dashboard/reports?module=workers" className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-[#164FA3] hover:underline">
@@ -149,8 +176,9 @@ export default function TerritoryMap() {
         {hovered && (
           <div className="p-3 text-sm space-y-1">
             <div className="font-bold text-gray-900">{hovered.name}</div>
-            <div className="text-xs text-gray-400 mb-1.5">{hovered.zone_name} Division · score {hovered.score}/100</div>
-            <div className="flex justify-between"><span className="text-gray-500">Members</span><strong className="text-gray-800">{hovered.worker_count}</strong></div>
+            <div className="text-xs text-gray-400 mb-1.5">{hovered.zone_name} Division · {targetInfo(hovered.worker_count).label}% of target</div>
+            <div className="flex justify-between"><span className="text-gray-500">Workers</span><strong className="text-gray-800">{targetInfo(hovered.worker_count).workers.toLocaleString("en-IN")} / {WORKER_TARGET.toLocaleString("en-IN")}</strong></div>
+            <div className="flex justify-between"><span className="text-gray-500">Target Completion</span><strong className="text-gray-800">{targetInfo(hovered.worker_count).label}%</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Active / Pending</span><strong className="text-gray-800">{hovered.active_workers} / {hovered.pending_workers}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Contacts</span><strong className="text-gray-800">{hovered.contact_count}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Callers</span><strong className="text-gray-800">{hovered.caller_count}</strong></div>
