@@ -48,7 +48,7 @@ const DISTRICT_TARGETS = {
   "Mungeli": 4000,
   "Narayanpur": 2000,
   "Raigarh": 8000,
-  "Raipur": 4000,
+  "Raipur": 14000,
   "Rajnandgaon": 8000,
   "Sakti": 6000,
   "Sarangarh-Bilaigarh": 4000,
