@@ -184,7 +184,7 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
       <CollapsibleSection title="Search & Filters">
       <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title or description" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">All statuses</option>
           <option value="pending">Pending</option>
@@ -264,7 +264,6 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
                         )}
                         <div className="min-w-0">
                           <div className="font-medium text-gray-900">{t.title}</div>
-                          {t.description && <div className="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{t.description}</div>}
                           {t.district_name && <div className="text-xs text-gray-400">{t.district_name}</div>}
                           {hasSubs && (
                             <div className="flex items-center gap-2 mt-1 max-w-[200px]">
@@ -358,7 +357,7 @@ function AddTaskModal({ onClose, onSaved, editing }) {
       else if (editing.deadline) duration_days = daysBetween(start_date, editing.deadline);
       else duration_days = "";
       return {
-        title: editing.title || "", description: editing.description || "",
+        title: editing.title || "",
         priority: editing.priority || "medium",
         start_date, duration_preset, duration_days,
         assigned_to_user_id: editing.assigned_to_user_id || "",
@@ -366,7 +365,7 @@ function AddTaskModal({ onClose, onSaved, editing }) {
       };
     }
     return {
-      title: "", description: "", priority: "medium",
+      title: "", priority: "medium",
       start_date: todayStr, duration_preset: "one_week", duration_days: DURATION_DAYS.one_week,
       assigned_to_user_id: "", assigned_to_team_id: "",
     };
@@ -411,7 +410,6 @@ function AddTaskModal({ onClose, onSaved, editing }) {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
         <input className={inp} placeholder="Task title *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <textarea className={inp} rows={2} placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
 
         {/* Sub-task builder — unlimited checklist items */}
         <div className="border border-gray-200 rounded-lg p-3 space-y-2">

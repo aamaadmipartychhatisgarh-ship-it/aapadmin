@@ -48,7 +48,7 @@ export async function GET(req) {
     if (priority) { where.push("t.priority = ?"); params.push(priority); }
     if (districtId) { where.push("t.district_id = ?"); params.push(districtId); }
     if (assignedTo) { where.push("t.assigned_to_user_id = ?"); params.push(assignedTo); }
-    if (search) { where.push("(t.title LIKE ? OR t.description LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
+    if (search) { where.push("t.title LIKE ?"); params.push(`%${search}%`); }
     // Geographic scope (oversight only — caller already filtered to own tasks above).
     // tasks table only has district_id, so declare that.
     if (isOversight(session) && view !== "mine" && !impersonating) {
@@ -125,10 +125,13 @@ export async function POST(req) {
     // is only a fallback for callers that don't use the duration picker.
     const deadline = (hasDuration && d.start_date && d.duration_days)
       ? addDays(d.start_date, d.duration_days) : (d.deadline || null);
+    // The Description field has been retired from the Tasks module. The column
+    // is left in place (nullable) so existing tasks keep their stored text; new
+    // tasks simply never write it.
     const res = await query(
-      `INSERT INTO tasks (title, description, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
-       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
-      [d.title, d.description || null, d.priority || "medium", deadline,
+      `INSERT INTO tasks (title, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
+       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
+      [d.title, d.priority || "medium", deadline,
        d.assigned_to_user_id || null, d.assigned_to_team_id || null, d.district_id || null,
        d.contact_id || null, session.user.id,
        ...(hasDuration ? [d.start_date || null, d.duration_preset || null, d.duration_days || null] : [])]
@@ -149,7 +152,6 @@ export async function POST(req) {
       await notifyTaskAssigned({
         taskId: res.insertId,
         title: d.title,
-        description: d.description,
         assignedToUserId: d.assigned_to_user_id || null,
         assignedToTeamId: d.assigned_to_team_id || null,
         excludeUserId: session.user.id,

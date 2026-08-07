@@ -899,7 +899,6 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                             t.priority === "medium" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
                           }`}>{t.priority}</span>
                         </div>
-                        {t.description && <div className="text-xs text-gray-500 mt-0.5">{t.description}</div>}
                         {t.deadline && <div className="text-[11px] text-gray-400 mt-0.5">Due {t.deadline.slice(0, 10)}</div>}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
@@ -1136,21 +1135,6 @@ function fmtTaskAssigned(v) {
 
 // Task description: multi-line, wraps, preserves line breaks; clamps to 5 lines
 // with a Show More toggle only when the text is long. Renders nothing when empty.
-function TaskDescription({ text }) {
-  const [open, setOpen] = useState(false);
-  const longish = text.length > 200 || text.split(/\r?\n/).length > 5;
-  return (
-    <div className="mb-2">
-      <div className={`text-sm text-gray-700 whitespace-pre-wrap break-words ${open ? "" : "line-clamp-5"}`}>{text}</div>
-      {longish && (
-        <button onClick={() => setOpen(!open)} className="text-xs font-semibold text-[#164FA3] mt-0.5">
-          {open ? "Show Less" : "Show More"}
-        </button>
-      )}
-    </div>
-  );
-}
-
 function TodaysTaskPanel({ onLogComplaint }) {
   const [tasks, setTasks] = useState(undefined); // undefined = loading
   const [busy, setBusy] = useState({});
@@ -1212,8 +1196,6 @@ function TodaysTaskPanel({ onLogComplaint }) {
               <div className="text-[11px] text-gray-400 mt-0.5 mb-2">
                 Assigned: {fmtTaskAssigned(t.assigned_at || t.created_at) || "—"}{t.created_by_name ? ` · by ${t.created_by_name}` : ""} · Deadline: {deadlineLabel(t.deadline)}
               </div>
-              {/* Main description — always between the title/meta and the checklist. */}
-              {t.description && t.description.trim() && <TaskDescription text={t.description} />}
               {t.subtask_total > 0 ? (
                 <SubtaskChecklist compact subtasks={t.subtasks} onProgress={(done, total, status) => { if (status === "completed") setTimeout(load, 600); }} />
               ) : (
