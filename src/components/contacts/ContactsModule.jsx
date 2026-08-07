@@ -1276,9 +1276,20 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
   const zoneLevel = !!(territory && territory.level === "zone"); // may pick a district in-zone
   const [form, setForm] = useState({
     person_name: "", phone_number: "", address: "", designation_id: "", photo_url: "",
+    // Full location hierarchy. For a supervisor the levels their territory fixes
+    // are pre-filled (and shown locked); the rest cascade from what's chosen.
+    zone_id: territory?.zone ? String(territory.zone.id) : "",
+    lok_sabha_id: territory?.lok_sabha ? String(territory.lok_sabha.id) : "",
     district_id: territory?.district ? String(territory.district.id) : "",
+    assembly_id: territory?.assembly ? String(territory.assembly.id) : "",
+    ward_id: "",
   });
+  // Cascading option lists — every value comes from the location master data.
+  const [zones, setZones] = useState([]);
+  const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState(scopedDistricts || []);
+  const [assemblies, setAssemblies] = useState([]);
+  const [blocks, setBlocks] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1298,13 +1309,39 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
   }
 
   useEffect(() => {
-    // Admin: all districts. Supervisor: the parent already supplies the scoped
-    // list (its territory-filtered geo dropdown), so don't refetch everything.
-    if (!territory) {
-      fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
-    }
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
+
+  // ----- Location cascade (Zone → Lok Sabha → District → Assembly → Block) ----
+  // An admin picks freely from the top; a supervisor's upper levels are fixed by
+  // territory, so those fetches are skipped and only Assembly/Block cascade.
+  const adminGeo = !territory; // full free hierarchy only for admins
+  useEffect(() => {
+    if (!adminGeo) return;
+    fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
+  }, [adminGeo]);
+  // Lok Sabha follows the chosen Zone (all Lok Sabhas when none picked).
+  useEffect(() => {
+    if (!adminGeo) return;
+    const url = form.zone_id ? `/api/locations?parent_id=${form.zone_id}` : "/api/locations?type=lok_sabha";
+    fetch(url).then((r) => r.json()).then((d) => setLokSabhas((d.locations || []).filter((l) => l.type === "lok_sabha")));
+  }, [adminGeo, form.zone_id]);
+  // District follows the chosen Lok Sabha (all districts when none picked).
+  useEffect(() => {
+    if (!adminGeo) return;
+    const url = form.lok_sabha_id ? `/api/locations?parent_id=${form.lok_sabha_id}` : "/api/locations?type=district";
+    fetch(url).then((r) => r.json()).then((d) => setDistricts((d.locations || []).filter((l) => l.type === "district")));
+  }, [adminGeo, form.lok_sabha_id]);
+  // Assembly follows the district (admin AND supervisor).
+  useEffect(() => {
+    if (!form.district_id) { setAssemblies([]); return; }
+    fetch(`/api/locations?parent_id=${form.district_id}`).then((r) => r.json()).then((d) => setAssemblies((d.locations || []).filter((l) => l.type === "assembly")));
+  }, [form.district_id]);
+  // Block (ward) follows the assembly.
+  useEffect(() => {
+    if (!form.assembly_id) { setBlocks([]); return; }
+    fetch(`/api/locations?parent_id=${form.assembly_id}`).then((r) => r.json()).then((d) => setBlocks(d.locations || []));
+  }, [form.assembly_id]);
 
   async function save() {
     setSaving(true); setError(""); setPhoneDup(false);
@@ -1320,9 +1357,12 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
     onSaved();
   }
 
+  const sel = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white disabled:bg-gray-50 disabled:text-gray-400";
+  const locked = "w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-500";
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-auto">
         <h2 className="text-xl font-bold text-gray-900">Add Contact</h2>
         {territory && territoryLabel && (
           <div className="bg-blue-50 border border-blue-100 text-[#164FA3] rounded-lg px-3 py-2 text-xs flex items-center gap-1.5">
@@ -1347,18 +1387,54 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
           <option value="">No designation</option>
           {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        {/* District: fixed for a district/assembly supervisor; a scoped choice
-            for a zone-level supervisor; a free choice of all districts for an
-            admin. */}
-        {districtLocked ? (
-          <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-500">
-            District: <span className="font-medium text-gray-700">{territory.district.name}</span>
+        {/* Location hierarchy: Zone → Lok Sabha → District → Assembly → Block.
+            Admin picks freely; a supervisor's territory-fixed levels are shown
+            locked and only the levels below their anchor are selectable. */}
+        {adminGeo ? (
+          <div className="grid grid-cols-2 gap-2">
+            <select className={sel} value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value, lok_sabha_id: "", district_id: "", assembly_id: "", ward_id: "" })}>
+              <option value="">Zone</option>
+              {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+            </select>
+            <select className={sel} value={form.lok_sabha_id} onChange={(e) => setForm({ ...form, lok_sabha_id: e.target.value, district_id: "", assembly_id: "", ward_id: "" })}>
+              <option value="">Lok Sabha</option>
+              {lokSabhas.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+            <select className={sel} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "", ward_id: "" })}>
+              <option value="">District</option>
+              {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+            <select className={sel} value={form.assembly_id} disabled={!form.district_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value, ward_id: "" })}>
+              <option value="">{form.district_id ? "Assembly" : "Pick district"}</option>
+              {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <select className={sel} value={form.ward_id} disabled={!form.assembly_id} onChange={(e) => setForm({ ...form, ward_id: e.target.value })}>
+              <option value="">{form.assembly_id ? "Block" : "Pick assembly"}</option>
+              {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
           </div>
         ) : (
-          <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
-            <option value="">{zoneLevel ? "Select a district in your zone *" : "No district"}</option>
-            {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          <div className="space-y-2">
+            {/* Supervisor: upper geography comes from their territory. */}
+            {territory.zone && <div className={locked}>Zone: <span className="font-medium text-gray-700">{territory.zone.name}</span></div>}
+            {territory.lok_sabha && <div className={locked}>Lok Sabha: <span className="font-medium text-gray-700">{territory.lok_sabha.name}</span></div>}
+            {districtLocked ? (
+              <div className={locked}>District: <span className="font-medium text-gray-700">{territory.district.name}</span></div>
+            ) : (
+              <select className={sel} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "", ward_id: "" })}>
+                <option value="">{zoneLevel ? "Select a district in your zone *" : "District"}</option>
+                {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            )}
+            <select className={sel} value={form.assembly_id} disabled={!form.district_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value, ward_id: "" })}>
+              <option value="">{form.district_id ? "Assembly" : "Pick district"}</option>
+              {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <select className={sel} value={form.ward_id} disabled={!form.assembly_id} onChange={(e) => setForm({ ...form, ward_id: e.target.value })}>
+              <option value="">{form.assembly_id ? "Block" : "Pick assembly"}</option>
+              {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
         )}
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>

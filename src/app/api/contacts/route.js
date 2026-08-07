@@ -185,7 +185,7 @@ export async function POST(req) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const data = await req.json().catch(() => ({}));
-    const { person_name, phone_number, address, designation_id, district_id, ward_id, booth_id, assigned_to_user_id, photo_url } = data;
+    const { person_name, phone_number, address, designation_id, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, assigned_to_user_id, photo_url } = data;
     if (!person_name?.trim() || !phone_number?.trim()) {
       return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
@@ -200,7 +200,11 @@ export async function POST(req) {
       phone_number: phone_number.trim(),
       address: address || null,
       designation_id: designation_id || null,
+      // Full location hierarchy (Zone → Lok Sabha → District → Assembly → Block).
+      zone_id: zone_id || null,
+      lok_sabha_id: lok_sabha_id || null,
       district_id: district_id || null,
+      assembly_id: assembly_id || null,
       ward_id: ward_id || null,
       booth_id: booth_id || null,
       photo_url: photo_url || null,

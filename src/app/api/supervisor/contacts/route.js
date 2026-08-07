@@ -232,6 +232,24 @@ export async function POST(req) {
       geo.district_id = data.district_id;
     }
 
+    // Assembly + Block (ward) can be chosen within the supervisor's district.
+    // Validate the parentage so an out-of-territory id can't be injected: the
+    // assembly must belong to the stamped district, the block to that assembly.
+    // (An assembly-anchored supervisor already has geo.assembly_id fixed above.)
+    if (!geo.assembly_id && data.assembly_id && geo.district_id) {
+      const rows = await query(
+        "SELECT id FROM locations WHERE id = ? AND parent_id = ? AND type = 'assembly'",
+        [data.assembly_id, geo.district_id]
+      );
+      if (!rows[0]) return NextResponse.json({ message: "Selected assembly is not in your district." }, { status: 400 });
+      geo.assembly_id = rows[0].id;
+    }
+    if (data.ward_id && geo.assembly_id) {
+      const rows = await query("SELECT id FROM locations WHERE id = ? AND parent_id = ?", [data.ward_id, geo.assembly_id]);
+      if (!rows[0]) return NextResponse.json({ message: "Selected block is not in your assembly." }, { status: 400 });
+      geo.ward_id = rows[0].id;
+    }
+
     const existingColumns = await getContactColumns();
     const cols = [];
     const vals = [];

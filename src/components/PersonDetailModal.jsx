@@ -185,6 +185,7 @@ const emptyForm = (c, canEditGeo) => ({
     lok_sabha_id: c?.lok_sabha_id || "",
     district_id: c?.district_id || "",
     assembly_id: c?.assembly_id || "",
+    ward_id: c?.ward_id || "",
   } : {}),
 });
 
@@ -199,6 +200,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
   const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [assemblies, setAssemblies] = useState([]);
+  const [blocks, setBlocks] = useState([]);
 
   useEffect(() => {
     if (!canEditGeo) return;
@@ -221,6 +223,11 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
     if (!canEditGeo || !form.district_id) { setAssemblies([]); return; }
     fetch(`/api/locations?parent_id=${form.district_id}`).then((r) => r.json()).then((d) => setAssemblies((d.locations || []).filter((l) => l.type === "assembly")));
   }, [canEditGeo, form.district_id]);
+  // Block (ward) follows Assembly.
+  useEffect(() => {
+    if (!canEditGeo || !form.assembly_id) { setBlocks([]); return; }
+    fetch(`/api/locations?parent_id=${form.assembly_id}`).then((r) => r.json()).then((d) => setBlocks(d.locations || []));
+  }, [canEditGeo, form.assembly_id]);
 
   async function save() {
     if (!form.person_name.trim() || !form.phone_number.trim()) {
@@ -243,6 +250,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         lok_sabha_id: form.lok_sabha_id || null,
         district_id: form.district_id || null,
         assembly_id: form.assembly_id || null,
+        ward_id: form.ward_id || null,
       } : {}),
     };
     try {
@@ -298,27 +306,33 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         {canEditGeo && (
           <>
             <Field label="Zone">
-              <select className={inp} value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value, lok_sabha_id: "", district_id: "", assembly_id: "" })}>
+              <select className={inp} value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value, lok_sabha_id: "", district_id: "", assembly_id: "", ward_id: "" })}>
                 <option value="">No zone</option>
                 {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
               </select>
             </Field>
             <Field label="Lok Sabha">
-              <select className={inp} value={form.lok_sabha_id} onChange={(e) => setForm({ ...form, lok_sabha_id: e.target.value, district_id: "", assembly_id: "" })}>
+              <select className={inp} value={form.lok_sabha_id} onChange={(e) => setForm({ ...form, lok_sabha_id: e.target.value, district_id: "", assembly_id: "", ward_id: "" })}>
                 <option value="">No Lok Sabha</option>
                 {lokSabhas.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </Field>
             <Field label="District">
-              <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "" })}>
+              <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "", ward_id: "" })}>
                 <option value="">No district</option>
                 {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </Field>
             <Field label="Assembly">
-              <select className={inp} value={form.assembly_id} disabled={!form.district_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value })}>
+              <select className={inp} value={form.assembly_id} disabled={!form.district_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value, ward_id: "" })}>
                 <option value="">{form.district_id ? "No assembly" : "Pick district"}</option>
                 {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Block">
+              <select className={inp} value={form.ward_id} disabled={!form.assembly_id} onChange={(e) => setForm({ ...form, ward_id: e.target.value })}>
+                <option value="">{form.assembly_id ? "No block" : "Pick assembly"}</option>
+                {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </Field>
           </>
