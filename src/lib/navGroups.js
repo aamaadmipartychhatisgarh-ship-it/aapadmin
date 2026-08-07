@@ -21,8 +21,12 @@ export const GROUPS = [
   // Reports Center) via this single group — a page only appears here if the
   // signed-in role actually has it in their nav (see SectionTabs).
   {
+    // Rankings (/dashboard/rankings) and Strength (/dashboard/strength) were
+    // removed from this Reports & Analytics tab group per request, so they no
+    // longer show as tabs in the Reports navigation. Both pages still exist and
+    // stay reachable from the sidebar (not exclusive to Reports → no redirect).
     key: "analytics", label: "Reports & Analytics", hrefs: [
-      "/dashboard/analytics", "/dashboard/reports", "/dashboard/rankings", "/dashboard/strength",
+      "/dashboard/analytics", "/dashboard/reports",
       "/dashboard/admin/caller-report",
       "/dashboard/supervisor/areas", "/dashboard/supervisor/sentiment", "/dashboard/supervisor/remarks",
       "/dashboard/supervisor/attendance", "/dashboard/supervisor/callers",
