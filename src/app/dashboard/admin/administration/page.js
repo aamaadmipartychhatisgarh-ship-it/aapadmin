@@ -8,10 +8,12 @@ import { isOversight, isSuperAdmin } from "@/lib/permissions";
 import PageHeader from "@/components/PageHeader";
 import TeamsTab from "./TeamsTab";
 import UsersTab from "./UsersTab";
+import MasterDataSettings from "../settings/page";
 
 const TABS = [
   { key: "teams", label: "Teams" },
   { key: "users", label: "Users" },
+  { key: "master", label: "Master Data" },
 ];
 
 // The people-management hub — Teams and Users are tabs on one page rather
@@ -43,7 +45,7 @@ function Body({ session }) {
   const [tab, setTab] = useState(() => {
     if (typeof window !== "undefined") {
       const t = new URLSearchParams(window.location.search).get("tab");
-      if (t === "users" && canSeeUsers) return "users";
+      if ((t === "users" || t === "master") && canSeeUsers) return t;
     }
     return "teams";
   });
@@ -54,7 +56,7 @@ function Body({ session }) {
   // params directly.
   useEffect(() => {
     const t = searchParams.get("tab");
-    if (t === "users" && canSeeUsers) setTab("users");
+    if ((t === "users" || t === "master") && canSeeUsers) setTab(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, canSeeUsers]);
 
@@ -69,7 +71,9 @@ function Body({ session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visibleTabs = TABS.filter((t) => t.key === "teams" || (t.key === "users" && canSeeUsers));
+  // Master Data (like Users) is shown to super admins here — it was moved off
+  // the Super Admin sidebar into this Administration tab.
+  const visibleTabs = TABS.filter((t) => t.key === "teams" || ((t.key === "users" || t.key === "master") && canSeeUsers));
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -98,6 +102,7 @@ function Body({ session }) {
 
       {tab === "teams" && <TeamsTab session={session} />}
       {tab === "users" && canSeeUsers && <UsersTab session={session} />}
+      {tab === "master" && canSeeUsers && <MasterDataSettings embedded />}
     </div>
   );
 }

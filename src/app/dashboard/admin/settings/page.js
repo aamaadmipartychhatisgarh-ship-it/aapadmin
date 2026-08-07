@@ -3,7 +3,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X, Search } from "lucide-react";
 
-export default function MasterDataSettings() {
+// `embedded` hides the standalone page header so this same component can render
+// as the "Master Data" tab inside Administration (native tab look) while the
+// direct /dashboard/admin/settings route keeps its own header.
+export default function MasterDataSettings({ embedded = false }) {
   const [statuses, setStatuses] = useState([]);
   const [newStatus, setNewStatus] = useState("");
   const [statusLoading, setStatusLoading] = useState(false);
@@ -54,16 +57,18 @@ export default function MasterDataSettings() {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 max-w-6xl mx-auto">
-      <div className="flex items-center gap-4 mb-8">
-        <div className="w-12 h-12 rounded-full bg-[#164FA3] flex items-center justify-center text-white shadow-lg shadow-blue-900/20">
-          <SettingsIcon size={24} />
+    <div className={`space-y-6 animate-in fade-in duration-500 ${embedded ? "" : "max-w-6xl mx-auto"}`}>
+      {!embedded && (
+        <div className="flex items-center gap-4 mb-8">
+          <div className="w-12 h-12 rounded-full bg-[#164FA3] flex items-center justify-center text-white shadow-lg shadow-blue-900/20">
+            <SettingsIcon size={24} />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Master Data Settings</h1>
+            <p className="text-gray-500 font-medium mt-1">Configure calling statuses, designations, and political geography.</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Master Data Settings</h1>
-          <p className="text-gray-500 font-medium mt-1">Configure calling statuses, designations, and political geography.</p>
-        </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Call Statuses */}

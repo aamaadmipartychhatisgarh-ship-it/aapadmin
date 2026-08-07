@@ -172,7 +172,6 @@ export default function DashboardLayout({ children }) {
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
-      { name: "Master Data", href: "/dashboard/admin/settings", icon: Settings },
       { name: "Audit Logs", href: "/dashboard/admin/audit", icon: Shield },
     ],
     [ROLES.STATE_ADMIN]: [
