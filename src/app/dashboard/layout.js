@@ -40,13 +40,22 @@ const DASHBOARD_SWITCHER = [
 // re-derived approximation of it.
 const SUPERVISOR_NAV = [
   { name: "Overview", href: "/dashboard/supervisor", icon: LayoutDashboard },
-  { name: "Contacts", href: "/dashboard/supervisor/contacts", icon: UserCheck },
+  // Contacts is a collapsible parent — Follow-Ups, Remarks and Wrong Numbers
+  // are nested beneath it as child pages (supervisor dashboard only). Their
+  // routes/pages are unchanged; only the sidebar grouping moved.
+  {
+    name: "Contacts",
+    href: "/dashboard/supervisor/contacts",
+    icon: UserCheck,
+    children: [
+      { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
+      { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
+      { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+    ],
+  },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-  { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
   { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
-  { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
-  { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
   { name: "Media", href: "/dashboard/media", icon: Newspaper },
   { name: "Social Media", href: "/dashboard/social", icon: Share2 },
   { name: "Reports", href: "/dashboard/reports", icon: FileText },

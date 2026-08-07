@@ -11,7 +11,7 @@ import {
   verticalListSortingStrategy, sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, MoreVertical, Pin, PinOff, Star, Lock, Search, X } from "lucide-react";
+import { GripVertical, MoreVertical, Pin, PinOff, Star, Lock, Search, X, ChevronDown } from "lucide-react";
 
 // Customizable sidebar navigation. Preserves the exact AAP link markup and adds:
 // drag-to-reorder (dnd-kit — pointer/touch/keyboard), pin to top/bottom, favourites,
@@ -46,6 +46,18 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
   const [q, setQ] = useState("");
   const [loaded, setLoaded] = useState(false);
   const saveTimer = useRef(null);
+  // Expand/collapse state for parent items that have children (e.g. the
+  // supervisor "Contacts" group). Keyed by parent href. Absent key → default:
+  // expanded when one of its children is the active page, so the active child
+  // is always visible and highlighted after a refresh/deep-link.
+  const [expandedMap, setExpandedMap] = useState({});
+  const isExpanded = (item) => {
+    if (!item?.children?.length) return false;
+    if (item.href in expandedMap) return expandedMap[item.href];
+    return item.children.some((c) => pathname === c.href);
+  };
+  const toggleExpand = (item) =>
+    setExpandedMap((m) => ({ ...m, [item.href]: !isExpanded(item) }));
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), // click still navigates
@@ -102,7 +114,6 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
   // Search mode: flat filtered list, no drag.
   const query = q.trim().toLowerCase();
   const searching = query.length > 0;
-  const matches = (href) => byHref[href]?.name.toLowerCase().includes(query);
 
   const renderRow = (href, { fav } = {}) => {
     const item = byHref[href];
@@ -113,6 +124,7 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
         favorited={groupOf(href) === "fav"} group={groupOf(href)} disabled={searching}
         onPinTop={() => moveTo(href, "top")} onPinBottom={() => moveTo(href, "bottom")}
         onUnpin={() => moveTo(href, "main")} onToggleFav={() => toggleFav(href)}
+        expanded={isExpanded(item)} onToggleExpand={() => toggleExpand(item)}
       />
     );
   };
@@ -136,14 +148,17 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
 
       {/* Locked primary item (always on top, not draggable) */}
       {lockedItem && (!searching || lockedItem.name.toLowerCase().includes(query)) && (
-        <NavLink item={lockedItem} isActive={pathname === lockedItem.href} onNavigate={onNavigate} locked />
+        <NavLink item={lockedItem} isActive={pathname === lockedItem.href} onNavigate={onNavigate} locked
+          pathname={pathname} expanded={isExpanded(lockedItem)} onToggleExpand={() => toggleExpand(lockedItem)} />
       )}
 
       {searching ? (
-        // Flat filtered results (no drag while searching)
+        // Flat filtered results (no drag while searching). Child pages of a
+        // collapsible parent are included so search still reaches them.
         [...groups.fav, ...groups.top, ...groups.main, ...groups.bottom]
-          .filter(matches)
-          .map((href) => <NavLink key={href} item={byHref[href]} isActive={pathname === byHref[href]?.href} onNavigate={onNavigate} />)
+          .flatMap((href) => { const it = byHref[href]; return it ? [{ ...it, children: undefined }, ...(it.children || [])] : []; })
+          .filter((it) => it.name.toLowerCase().includes(query))
+          .map((it) => <NavLink key={it.href} item={it} isActive={pathname === it.href} onNavigate={onNavigate} />)
       ) : loaded ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           {/* Favourites + Pinned top */}
@@ -173,39 +188,83 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
 
 // The exact AAP link row (reused for locked + search results). `dragProps` and
 // `extra` let the sortable version overlay a grip + kebab without changing markup.
-function NavLink({ item, isActive, onNavigate, locked, innerRef, style, dragAttrs, dragListeners, extra }) {
+function NavLink({ item, isActive, onNavigate, locked, innerRef, style, dragAttrs, dragListeners, extra, pathname, expanded, onToggleExpand }) {
   const Icon = item.icon;
+  const children = item.children || [];
+  const hasChildren = children.length > 0;
+  // Keep the parent highlighted (without the strong active bar) while one of
+  // its child pages is open, so the group reads as the current section.
+  const childActive = hasChildren && children.some((c) => pathname === c.href);
   return (
     <div ref={innerRef} style={style} className="relative group/navitem">
-      <Link
-        href={item.href}
-        onClick={onNavigate}
-        className={`flex items-center gap-3 px-6 py-3 transition-all ${
-          isActive
-            ? "bg-[#1d4c94] text-white border-l-4 border-white font-semibold"
-            : "text-blue-100 hover:text-white hover:bg-white/5 border-l-4 border-transparent font-medium"
-        }`}
-      >
-        <Icon size={20} className={isActive ? "text-white" : "text-blue-200"} />
-        <span className="flex-1 truncate">{item.name}</span>
-        {locked && <Lock size={13} className="text-blue-300/70 shrink-0" />}
-      </Link>
-      {/* Drag handle (hover) */}
-      {dragListeners && (
-        <button
-          {...dragAttrs} {...dragListeners}
-          aria-label="Drag to reorder"
-          className="absolute left-1 top-1/2 -translate-y-1/2 text-blue-300/60 hover:text-white opacity-0 group-hover/navitem:opacity-100 cursor-grab active:cursor-grabbing touch-none"
+      <div className="relative">
+        <Link
+          href={item.href}
+          onClick={onNavigate}
+          className={`flex items-center gap-3 px-6 py-3 transition-all ${
+            isActive
+              ? "bg-[#1d4c94] text-white border-l-4 border-white font-semibold"
+              : childActive
+                ? "text-white bg-white/5 border-l-4 border-white/40 font-semibold"
+                : "text-blue-100 hover:text-white hover:bg-white/5 border-l-4 border-transparent font-medium"
+          }`}
         >
-          <GripVertical size={14} />
-        </button>
+          <Icon size={20} className={isActive || childActive ? "text-white" : "text-blue-200"} />
+          <span className="flex-1 truncate">{item.name}</span>
+          {hasChildren && (
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleExpand?.(); }}
+              aria-label={expanded ? "Collapse" : "Expand"}
+              aria-expanded={!!expanded}
+              className="shrink-0 mr-4 p-0.5 text-blue-200 hover:text-white"
+            >
+              <ChevronDown size={16} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
+            </button>
+          )}
+          {locked && <Lock size={13} className="text-blue-300/70 shrink-0" />}
+        </Link>
+        {/* Drag handle (hover) */}
+        {dragListeners && (
+          <button
+            {...dragAttrs} {...dragListeners}
+            aria-label="Drag to reorder"
+            className="absolute left-1 top-1/2 -translate-y-1/2 text-blue-300/60 hover:text-white opacity-0 group-hover/navitem:opacity-100 cursor-grab active:cursor-grabbing touch-none"
+          >
+            <GripVertical size={14} />
+          </button>
+        )}
+        {extra}
+      </div>
+      {/* Collapsible child pages — indented, own active highlight */}
+      {hasChildren && expanded && (
+        <div className="bg-black/10">
+          {children.map((ch) => {
+            const CIcon = ch.icon;
+            const cActive = pathname === ch.href;
+            return (
+              <Link
+                key={ch.href}
+                href={ch.href}
+                onClick={onNavigate}
+                className={`flex items-center gap-3 pl-14 pr-6 py-2.5 text-sm transition-all ${
+                  cActive
+                    ? "bg-[#1d4c94] text-white border-l-4 border-white font-semibold"
+                    : "text-blue-100/90 hover:text-white hover:bg-white/5 border-l-4 border-transparent font-medium"
+                }`}
+              >
+                {CIcon && <CIcon size={16} className={cActive ? "text-white" : "text-blue-200"} />}
+                <span className="flex-1 truncate">{ch.name}</span>
+              </Link>
+            );
+          })}
+        </div>
       )}
-      {extra}
     </div>
   );
 }
 
-function SortableRow({ item, pathname, onNavigate, favorited, group, disabled, onPinTop, onPinBottom, onUnpin, onToggleFav }) {
+function SortableRow({ item, pathname, onNavigate, favorited, group, disabled, onPinTop, onPinBottom, onUnpin, onToggleFav, expanded, onToggleExpand }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.href, disabled });
   const [menuOpen, setMenuOpen] = useState(false);
   const isActive = pathname === item.href;
@@ -240,6 +299,7 @@ function SortableRow({ item, pathname, onNavigate, favorited, group, disabled, o
       <NavLink
         item={item} isActive={isActive} onNavigate={onNavigate}
         innerRef={setNodeRef} style={style} dragAttrs={attributes} dragListeners={listeners} extra={kebab}
+        pathname={pathname} expanded={expanded} onToggleExpand={onToggleExpand}
       />
     </div>
   );
