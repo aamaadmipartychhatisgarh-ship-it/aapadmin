@@ -73,7 +73,24 @@ export async function GET(req) {
       if (hasNone) parts.push("c.designation_id IS NULL");
       if (parts.length) qFilters.push(`(${parts.join(" OR ")})`);
     }
-    const filterSql = qFilters.length ? " AND " + qFilters.join(" AND ") : "";
+    // Call History filter — based on the contact's COMPLETE call history (every
+    // past call for this contact, regardless of date, caller, or assignment):
+    //   blank      → the contact has NO call record at all (never called once)
+    //   picked / not_picked / busy → the contact's MOST RECENT call had that
+    //                 outcome (uses the stored call_statuses name)
+    // The value comes from a fixed server whitelist, so the status literal is
+    // safe to inline (never raw client text) and needs no bound parameter.
+    const CALL_HIST_STATUS = { picked: "Phone Picked", not_picked: "Not Picked", busy: "Busy" };
+    const callHistory = searchParams.get("call_history");
+    let callHistSql = "";
+    if (callHistory === "blank") {
+      callHistSql = " AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = c.id)";
+    } else if (CALL_HIST_STATUS[callHistory]) {
+      const nm = CALL_HIST_STATUS[callHistory].replace(/[^A-Za-z ]/g, "");
+      callHistSql = ` AND (SELECT cs.name FROM calls cx JOIN call_statuses cs ON cs.id = cx.status_id
+                             WHERE cx.contact_id = c.id ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1) = '${nm}'`;
+    }
+    const filterSql = (qFilters.length ? " AND " + qFilters.join(" AND ") : "") + callHistSql;
 
     // Wrong-number contacts belong only in the dedicated list, never the queue —
     // exclude them explicitly (not just via is_completed) so a wrong number that

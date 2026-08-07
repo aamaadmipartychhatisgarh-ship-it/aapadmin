@@ -77,6 +77,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [qDistrict, setQDistrict] = useState([]);
   const [qAssembly, setQAssembly] = useState([]);
   const [qDesignation, setQDesignation] = useState([]);
+  // Call History filter (single-select): "" | blank | picked | not_picked | busy.
+  // Filters the assigned list by the contact's COMPLETE past-call history.
+  const [qCallHistory, setQCallHistory] = useState("");
   // Quick section filter for the assigned list: "all" | "fresh" | "followup".
   // Ordering itself stays server-side; this only chooses which section(s) show.
   const [queueTab, setQueueTab] = useState("all");
@@ -260,6 +263,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     if (qDistrict.length) params.set("district_id", qDistrict.join(","));
     if (qAssembly.length) params.set("assembly_id", qAssembly.join(","));
     if (qDesignation.length) params.set("designation_id", qDesignation.join(","));
+    if (qCallHistory) params.set("call_history", qCallHistory);
     const qs = params.toString();
     const r = await fetch(`/api/workspace/queue${qs ? `?${qs}` : ""}`);
     if (r.ok) setQueue(await r.json());
@@ -285,7 +289,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     const t = setTimeout(() => loadQueue(), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qSearch, qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(",")]);
+  }, [qSearch, qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(","), qCallHistory]);
 
   // Cascade pruning: when a parent's selection changes, drop any child selection
   // that no longer belongs to a selected parent ([] parent = "All" → no pruning).
@@ -547,13 +551,26 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               <MultiSelect options={assemblyOptions} value={qAssembly} onChange={setQAssembly} allLabel="All Assemblies" />
               <MultiSelect options={designationOptions} value={qDesignation} onChange={setQDesignation} allLabel="All Designations" />
             </div>
+            {/* Call History — filters the assigned list by the contact's complete
+                past-call history. "" shows all; Blank = never called. */}
+            <select
+              value={qCallHistory}
+              onChange={(e) => setQCallHistory(e.target.value)}
+              className={`w-full h-9 px-3 rounded-lg border text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3] ${qCallHistory ? "border-[#164FA3] text-[#164FA3] font-medium" : "border-gray-200 text-gray-600"}`}
+            >
+              <option value="">Call History (all)</option>
+              <option value="blank">Blank — never called</option>
+              <option value="picked">Call Picked</option>
+              <option value="not_picked">Not Picked</option>
+              <option value="busy">Busy Call</option>
+            </select>
           </div>
 
           {loading ? (
             <div className="text-gray-400 text-sm">Loading…</div>
           ) : queue.assigned.length === 0 ? (
             <div className="text-gray-400 text-sm">
-              {qSearch || qLokSabha.length || qDistrict.length || qAssembly.length || qDesignation.length ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
+              {qSearch || qLokSabha.length || qDistrict.length || qAssembly.length || qDesignation.length || qCallHistory ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
             </div>
           ) : (
             <>
