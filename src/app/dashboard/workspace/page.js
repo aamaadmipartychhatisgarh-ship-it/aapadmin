@@ -318,13 +318,27 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     setError("");
   }
 
+  // The active "Assigned to You" filters — sent with Start Next Call so the blue
+  // card opens the next contact from the SAME filtered list the caller sees.
+  function currentQueueFilters() {
+    return {
+      search: qSearch.trim() || undefined,
+      lok_sabha_id: qLokSabha.length ? qLokSabha.join(",") : undefined,
+      district_id: qDistrict.length ? qDistrict.join(",") : undefined,
+      assembly_id: qAssembly.length ? qAssembly.join(",") : undefined,
+      designation_id: qDesignation.length ? qDesignation.join(",") : undefined,
+      call_history: qCallHistory || undefined,
+    };
+  }
+
   async function claim(contact_id) {
     setMessage("");
     setError("");
     const r = await fetch("/api/workspace/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(contact_id ? { contact_id } : {}),
+      // A specific contact is claimed directly; "next" carries the active filters.
+      body: JSON.stringify(contact_id ? { contact_id } : { filters: currentQueueFilters() }),
     });
     const data = await r.json();
     if (!r.ok) {

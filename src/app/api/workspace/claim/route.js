@@ -7,6 +7,7 @@ import { getPool } from "@/lib/db";
 import { zoneMatch } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
 import { dueClause } from "@/lib/followup";
+import { buildAssignedFilters } from "@/lib/workspaceFilters";
 
 // Body: { contact_id?: number }
 // If contact_id given: claim that specific contact (must be assigned to user OR in pool with same district).
@@ -24,6 +25,10 @@ export async function POST(req) {
     }
     const body = await req.json().catch(() => ({}));
     const explicitId = body.contact_id;
+    // The caller's active "Assigned to You" filters travel with Start Next Call
+    // so it opens the NEXT contact from the SAME filtered dataset the caller sees
+    // — never a random/unfiltered one. Same builder the queue list uses.
+    const af = buildAssignedFilters(body.filters || {}, "contacts");
 
     // Wrong-number contacts must never be claimable from the queue — they live in
     // their own list until restored. Feature-detected so it's a no-op pre-migration.
@@ -103,30 +108,33 @@ export async function POST(req) {
               AND ${dueSql}
               ${freshOnly}
               AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
-              ${assignedTerr.where}
+              ${assignedTerr.where}${af.where}
             ORDER BY assigned_at IS NULL ASC, assigned_at DESC, is_vip DESC, id DESC
             LIMIT 1 FOR UPDATE`,
-          [userId, ...assignedTerr.params]
+          [userId, ...assignedTerr.params, ...af.params]
         );
         if (freshRows[0]) {
           row = freshRows[0];
         } else {
-          // TIER 2: existing workflow for already-worked, still-due contacts.
+          // TIER 2: existing workflow for already-worked, still-due contacts —
+          // ordered to match the My Workspace follow-up section (nearest first).
           const [assignedRows] = await conn.execute(
             `SELECT * FROM contacts
               WHERE is_completed = 0${notWrong}
                 AND assigned_to_user_id = ?
                 AND ${dueSql}
                 AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
-                ${assignedTerr.where}
-              ORDER BY is_vip DESC, follow_up_date IS NOT NULL DESC, follow_up_date ASC, id ASC
+                ${assignedTerr.where}${af.where}
+              ORDER BY follow_up_date IS NULL ASC, follow_up_date ASC, is_vip DESC, id DESC
               LIMIT 1 FOR UPDATE`,
-            [userId, ...assignedTerr.params]
+            [userId, ...assignedTerr.params, ...af.params]
           );
           if (assignedRows[0]) {
             row = assignedRows[0];
-          } else {
-            // TIER 3: territory pool fallback (original behavior).
+          } else if (!af.active) {
+            // TIER 3: territory pool fallback — ONLY when no filter is active.
+            // With an active filter, Start Next Call must never leave the
+            // caller's filtered "Assigned to You" dataset (no random/pool pick).
             const [poolRows] = await conn.execute(
               `SELECT * FROM contacts
                 WHERE is_completed = 0${notWrong}
@@ -145,13 +153,15 @@ export async function POST(req) {
 
       if (!row) {
         await conn.rollback();
-        // Nothing left across all three tiers (fresh assignments, due
-        // call-backs/follow-ups, and the territory pool) — the caller is fully
-        // caught up. Any future-dated follow-ups still show in their own list.
-        return NextResponse.json(
-          { message: explicitId ? "That contact is no longer available." : "No calls are available right now — you're all caught up." },
-          { status: 409 }
-        );
+        // Nothing available. With an active filter this means the filtered list
+        // is exhausted (never fall back to a random/unfiltered contact); with no
+        // filter, the caller is fully caught up across all tiers.
+        const message = explicitId
+          ? "That contact is no longer available."
+          : af.active
+          ? "No more contacts available for the selected filters."
+          : "No calls are available right now — you're all caught up.";
+        return NextResponse.json({ message }, { status: 409 });
       }
 
       await conn.execute(

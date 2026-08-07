@@ -6,8 +6,8 @@ import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { buildRulesOrMatch, zoneMatch, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
-import { geoFilter } from "@/lib/geoFilter";
 import { dueClause, laterClause } from "@/lib/followup";
+import { buildAssignedFilters } from "@/lib/workspaceFilters";
 
 // Returns:
 //   assigned: contacts explicitly assigned to this caller, not yet completed
@@ -43,54 +43,23 @@ export async function GET(req) {
       [userId]
     );
 
-    const qFilters = [];
-    const qParams = [];
-    if (search) { qFilters.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); qParams.push(`%${search}%`, `%${search}%`); }
-
-    // NOTE: contacts EXPLICITLY assigned to this caller (assigned_to_user_id =
-    // them) always appear here regardless of zone — an admin/supervisor
-    // deliberately assigned them, so a zone auto-filter must not hide them (that
-    // was causing "assigned 17, only 6 show"). The zone restriction applies only
-    // to the POOL the caller pulls from (see pool count + claim/topup below).
-
-    // User-selected hierarchical filters (Lok Sabha → District → Assembly).
-    const geo = geoFilter("c", {
+    // NOTE: contacts EXPLICITLY assigned to this caller always appear regardless
+    // of zone — an admin/supervisor deliberately assigned them. The zone
+    // restriction applies only to the POOL the caller pulls from (claim/topup).
+    //
+    // All "Assigned to You" filters (search / geography / designation / Call
+    // History) are built by the SHARED helper, so this list and Start Next Call
+    // (/api/workspace/claim) apply the exact same conditions.
+    const af = buildAssignedFilters({
+      search,
       lok_sabha_id: searchParams.get("lok_sabha_id"),
       district_id: searchParams.get("district_id"),
       assembly_id: searchParams.get("assembly_id"),
-    });
-    qFilters.push(...geo.clauses);
-    qParams.push(...geo.params);
-
-    // Designation is multi-select: comma-separated ids, with "none" meaning
-    // "no designation set". Match ANY selected id, plus NULLs when "none" chosen.
-    const desigSel = (designationId || "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (desigSel.length) {
-      const hasNone = desigSel.includes("none");
-      const ids = desigSel.filter((x) => x !== "none");
-      const parts = [];
-      if (ids.length) { parts.push(`c.designation_id IN (${ids.map(() => "?").join(",")})`); qParams.push(...ids); }
-      if (hasNone) parts.push("c.designation_id IS NULL");
-      if (parts.length) qFilters.push(`(${parts.join(" OR ")})`);
-    }
-    // Call History filter — based on the contact's COMPLETE call history (every
-    // past call for this contact, regardless of date, caller, or assignment):
-    //   blank      → the contact has NO call record at all (never called once)
-    //   picked / not_picked / busy → the contact's MOST RECENT call had that
-    //                 outcome (uses the stored call_statuses name)
-    // The value comes from a fixed server whitelist, so the status literal is
-    // safe to inline (never raw client text) and needs no bound parameter.
-    const CALL_HIST_STATUS = { picked: "Phone Picked", not_picked: "Not Picked", busy: "Busy" };
-    const callHistory = searchParams.get("call_history");
-    let callHistSql = "";
-    if (callHistory === "blank") {
-      callHistSql = " AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = c.id)";
-    } else if (CALL_HIST_STATUS[callHistory]) {
-      const nm = CALL_HIST_STATUS[callHistory].replace(/[^A-Za-z ]/g, "");
-      callHistSql = ` AND (SELECT cs.name FROM calls cx JOIN call_statuses cs ON cs.id = cx.status_id
-                             WHERE cx.contact_id = c.id ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1) = '${nm}'`;
-    }
-    const filterSql = (qFilters.length ? " AND " + qFilters.join(" AND ") : "") + callHistSql;
+      designation_id: designationId,
+      call_history: searchParams.get("call_history"),
+    }, "c");
+    const filterSql = af.where;
+    const qParams = af.params;
 
     // Wrong-number contacts belong only in the dedicated list, never the queue —
     // exclude them explicitly (not just via is_completed) so a wrong number that
