@@ -10,7 +10,9 @@ export async function PUT(req, { params }) {
     if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
     const d = await req.json();
-    const fields = ["status", "assigned_team_id", "resolution_notes", "type", "description"];
+    // Editable fields — includes the citizen/person details the edit modal sends
+    // (previously omitted, so editing name/phone/district silently didn't save).
+    const fields = ["citizen_name", "citizen_phone", "district_id", "status", "assigned_team_id", "resolution_notes", "type", "description"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     if (d.status === "resolved" || d.status === "closed") sets.push("resolved_at = NOW()");

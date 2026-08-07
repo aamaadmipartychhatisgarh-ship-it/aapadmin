@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
 import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
+import CollapsibleSection from "@/components/CollapsibleSection";
 
 const TYPE_META = {
   water: { label: "Water", icon: Droplet, color: "text-sky-600 bg-sky-50" },
