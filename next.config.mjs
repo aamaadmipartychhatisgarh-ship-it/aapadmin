@@ -36,6 +36,11 @@ const nextConfig = {
       // The standalone Map page was merged into the dashboard (SummaryDashboard);
       // send the old URL to the dashboard, which role-routes to the right page.
       { source: "/dashboard/map", destination: "/dashboard", permanent: true },
+      // The Daily Assignment module (assignment-rules) was removed; its old URLs
+      // go to the dashboard (role-routed). The assignment_rules table and the
+      // workspace's use of it (Call Assignment) are intentionally kept.
+      { source: "/dashboard/admin/assignment-rules", destination: "/dashboard", permanent: true },
+      { source: "/dashboard/admin/assignment-rules/:path*", destination: "/dashboard", permanent: true },
     ];
   },
   async headers() {

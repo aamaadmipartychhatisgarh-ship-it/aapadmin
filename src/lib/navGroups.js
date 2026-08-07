@@ -13,7 +13,8 @@ export const GROUPS = [
   // "Contacts | Call Records | Wrong Numbers" as one set. Administration is NOT
   // cross-listed here — it was removed from the Contacts module tabs and now
   // lives only under its own group above (still reachable from the sidebar).
-  // Daily Assignments has its own dedicated page now, so it's not a tab here.
+  // (The Daily Assignment module was removed; the workspace's Call Assignment
+  // logic that reads the assignment_rules table is unaffected.)
   { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers"] },
   { key: "tasks", label: "Task Management", hrefs: ["/dashboard/tasks", "/dashboard/admin/events", "/dashboard/admin/complaints"] },
   // Every report/analytics page links to every other one (and to the main
