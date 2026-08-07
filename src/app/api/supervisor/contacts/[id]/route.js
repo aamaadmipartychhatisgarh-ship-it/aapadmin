@@ -37,7 +37,7 @@ async function getContactColumns() {
 // Rather than add a second scope check against the requested new values,
 // geography simply isn't editable here — a supervisor can relocate/reassign
 // WHO owns a contact, not WHERE it lives.
-const DETAIL_FIELDS = ["person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id"];
+const DETAIL_FIELDS = ["person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id", "photo_url"];
 
 export async function PUT(req, { params }) {
   try {

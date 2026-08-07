@@ -1079,11 +1079,13 @@ function contactToForm(contact, canEditGeo) {
     phone_number: contact.phone_number || "",
     address: contact.address || "",
     designation_id: contact.designation_id || "",
+    photo_url: contact.photo_url || "",
   };
   if (!canEditGeo) return base;
   return {
     ...base,
     zone_id: contact.zone_id || "",
+    lok_sabha_id: contact.lok_sabha_id || "",
     district_id: contact.district_id || "",
     assembly_id: contact.assembly_id || "",
     ward_id: contact.ward_id || "",
@@ -1100,13 +1102,25 @@ function contactToForm(contact, canEditGeo) {
 function EditContactModal({ contact, contactUrl, canEditGeo, position, total, hasPrev, hasNext, navBusy, onPrev, onNext, onClose, onSaved }) {
   const [form, setForm] = useState(() => contactToForm(contact, canEditGeo));
   const [zones, setZones] = useState([]);
+  const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [assemblies, setAssemblies] = useState([]);
   const [wards, setWards] = useState([]);
-  const [booths, setBooths] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Upload the newly cropped photo now and hold its URL; the PUT saves it onto
+  // the contact. Same flow as Add Contact (persistPhoto). blob === null clears.
+  async function persistPhoto(blob) {
+    if (!blob) return null;
+    const fd = new FormData();
+    fd.append("file", new File([blob], "photo.jpg", { type: "image/jpeg" }));
+    const up = await fetch("/api/uploads", { method: "POST", body: fd });
+    const d = await up.json().catch(() => ({}));
+    if (!up.ok) throw new Error(d.message || "Image upload failed");
+    return d.url;
+  }
 
   // The modal stays mounted across Prev/Next/save-and-advance — reset the
   // form (and the dirty baseline) whenever a DIFFERENT contact is handed in,
@@ -1149,27 +1163,34 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, hasPrev, hasNext]);
 
+  // Location cascade (Zone → Lok Sabha → District → Assembly → Block) — the
+  // SAME dependent behavior as Add Contact. On open the pre-filled ids drive
+  // each fetch so every existing selection's option list is present and the
+  // value shows; changing an upper level refetches and clears the lower ones.
   useEffect(() => {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
     if (!canEditGeo) return;
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
-    fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Cascade the geography: assembly ← district, ward ← assembly, booth ← ward.
+  useEffect(() => {
+    if (!canEditGeo) return;
+    const url = form.zone_id ? `/api/locations?parent_id=${form.zone_id}` : "/api/locations?type=lok_sabha";
+    fetch(url).then((r) => r.json()).then((d) => setLokSabhas((d.locations || []).filter((l) => l.type === "lok_sabha")));
+  }, [canEditGeo, form.zone_id]);
+  useEffect(() => {
+    if (!canEditGeo) return;
+    const url = form.lok_sabha_id ? `/api/locations?parent_id=${form.lok_sabha_id}` : "/api/locations?type=district";
+    fetch(url).then((r) => r.json()).then((d) => setDistricts((d.locations || []).filter((l) => l.type === "district")));
+  }, [canEditGeo, form.lok_sabha_id]);
   useEffect(() => {
     if (!canEditGeo || !form.district_id) { setAssemblies([]); return; }
-    fetch(`/api/locations?parent_id=${form.district_id}`).then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
+    fetch(`/api/locations?parent_id=${form.district_id}`).then((r) => r.json()).then((d) => setAssemblies((d.locations || []).filter((l) => l.type === "assembly")));
   }, [canEditGeo, form.district_id]);
   useEffect(() => {
     if (!canEditGeo || !form.assembly_id) { setWards([]); return; }
     fetch(`/api/locations?parent_id=${form.assembly_id}`).then((r) => r.json()).then((d) => setWards(d.locations || []));
   }, [canEditGeo, form.assembly_id]);
-  useEffect(() => {
-    if (!canEditGeo || !form.ward_id) { setBooths([]); return; }
-    fetch(`/api/locations?parent_id=${form.ward_id}`).then((r) => r.json()).then((d) => setBooths(d.locations || []));
-  }, [canEditGeo, form.ward_id]);
 
   async function save() {
     setSaving(true); setError("");
@@ -1178,8 +1199,10 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
       phone_number: form.phone_number,
       address: form.address,
       designation_id: form.designation_id || null,
+      photo_url: form.photo_url || null,
       ...(canEditGeo ? {
         zone_id: form.zone_id || null,
+        lok_sabha_id: form.lok_sabha_id || null,
         district_id: form.district_id || null,
         assembly_id: form.assembly_id || null,
         ward_id: form.ward_id || null,
@@ -1198,6 +1221,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
   }
 
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white";
+  const lockedGeo = "w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-500 truncate";
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) guardedExit(onClose); }}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
@@ -1218,6 +1242,17 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
             </button>
           </div>
         </div>
+        {/* Profile photo: shows the existing photo (or a blank default) and lets
+            the user upload / change / remove it. Same control & formats as Add
+            Contact; the new URL is saved onto the contact by the PUT below. */}
+        <div className="flex flex-col items-center gap-1.5 pb-1">
+          <ProfilePhoto
+            name={form.person_name} src={form.photo_url} size={92} square editable
+            persist={persistPhoto} onChange={(url) => setForm((f) => ({ ...f, photo_url: url || "" }))}
+            className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]"
+          />
+          <span className="text-[11px] text-gray-400">Upload Photo (optional) · JPG, PNG, WEBP</span>
+        </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className={inp} placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className={inp} placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
@@ -1226,29 +1261,44 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
           <option value="">No designation</option>
           {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        {canEditGeo && (
-          <div className="grid grid-cols-2 gap-3">
-            <select className={inp} value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value })}>
-              <option value="">No zone</option>
+        {/* Location hierarchy — same field set, order and dependent cascade as
+            Add Contact (Zone → Lok Sabha → District → Assembly → Block). Admins
+            edit it freely; each existing value is pre-selected. */}
+        {canEditGeo ? (
+          <div className="grid grid-cols-2 gap-2">
+            <select className={inp} value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value, lok_sabha_id: "", district_id: "", assembly_id: "", ward_id: "" })}>
+              <option value="">Zone</option>
               {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
             </select>
-            <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "", ward_id: "", booth_id: "" })}>
-              <option value="">No district</option>
+            <select className={inp} value={form.lok_sabha_id} onChange={(e) => setForm({ ...form, lok_sabha_id: e.target.value, district_id: "", assembly_id: "", ward_id: "" })}>
+              <option value="">Lok Sabha</option>
+              {lokSabhas.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+            <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value, assembly_id: "", ward_id: "" })}>
+              <option value="">District</option>
               {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
-            <select className={inp} value={form.assembly_id} disabled={!form.district_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value, ward_id: "", booth_id: "" })}>
-              <option value="">{form.district_id ? "No assembly" : "Pick district"}</option>
+            <select className={inp} value={form.assembly_id} disabled={!form.district_id} onChange={(e) => setForm({ ...form, assembly_id: e.target.value, ward_id: "" })}>
+              <option value="">{form.district_id ? "Assembly" : "Pick district"}</option>
               {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
-            <select className={inp} value={form.ward_id} disabled={!form.assembly_id} onChange={(e) => setForm({ ...form, ward_id: e.target.value, booth_id: "" })}>
-              <option value="">{form.assembly_id ? "No ward" : "Pick assembly"}</option>
+            <select className={inp} value={form.ward_id} disabled={!form.assembly_id} onChange={(e) => setForm({ ...form, ward_id: e.target.value })}>
+              <option value="">{form.assembly_id ? "Block" : "Pick assembly"}</option>
               {wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
             </select>
-            <select className={inp} value={form.booth_id} disabled={!form.ward_id} onChange={(e) => setForm({ ...form, booth_id: e.target.value })}>
-              <option value="">{form.ward_id ? "No booth" : "Pick ward"}</option>
-              {booths.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
           </div>
+        ) : (
+          // Supervisor: geography is fixed to their territory and not editable
+          // here (server-enforced), so the contact's current Zone / Lok Sabha /
+          // District / Assembly are shown read-only rather than as dropdowns.
+          (contact.zone_name || contact.lok_sabha_name || contact.district_name || contact.assembly_name) && (
+            <div className="grid grid-cols-2 gap-2">
+              {contact.zone_name && <div className={lockedGeo}>Zone: <span className="font-medium text-gray-700">{contact.zone_name}</span></div>}
+              {contact.lok_sabha_name && <div className={lockedGeo}>Lok Sabha: <span className="font-medium text-gray-700">{contact.lok_sabha_name}</span></div>}
+              {contact.district_name && <div className={lockedGeo}>District: <span className="font-medium text-gray-700">{contact.district_name}</span></div>}
+              {contact.assembly_name && <div className={lockedGeo}>Assembly: <span className="font-medium text-gray-700">{contact.assembly_name}</span></div>}
+            </div>
+          )
         )}
         <div className="flex items-center justify-between gap-2 pt-2">
           <span className="text-[11px] text-gray-400">Esc to close · ← → to move between contacts</span>
