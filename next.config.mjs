@@ -33,6 +33,9 @@ const nextConfig = {
     return [
       { source: "/dashboard/admin/workers", destination: "/dashboard/admin/administration?tab=teams", permanent: true },
       { source: "/dashboard/admin/workers/:path*", destination: "/dashboard/admin/administration?tab=teams", permanent: true },
+      // The standalone Map page was merged into the dashboard (SummaryDashboard);
+      // send the old URL to the dashboard, which role-routes to the right page.
+      { source: "/dashboard/map", destination: "/dashboard", permanent: true },
     ];
   },
   async headers() {

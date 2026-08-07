@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Map, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, Activity, MapPin, MessageSquare, AlertCircle, Clock, TrendingUp, FileText, Headphones, BarChart3, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -48,7 +48,6 @@ const SUPERVISOR_NAV = [
   { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
   { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
   { name: "Area Reports", href: "/dashboard/supervisor/areas", icon: MapPin },
-  { name: "Map", href: "/dashboard/map", icon: Map },
   { name: "Strength", href: "/dashboard/strength", icon: Gauge },
   { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
@@ -174,7 +173,6 @@ export default function DashboardLayout({ children }) {
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Map", href: "/dashboard/map", icon: Map },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
@@ -196,7 +194,6 @@ export default function DashboardLayout({ children }) {
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Map", href: "/dashboard/map", icon: Map },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Social War Room", href: "/dashboard/social", icon: Share2 },
@@ -217,7 +214,6 @@ export default function DashboardLayout({ children }) {
       { name: "Daily Assignments", href: "/dashboard/admin/assignment-rules", icon: CalendarClock },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Map", href: "/dashboard/map", icon: Map },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },

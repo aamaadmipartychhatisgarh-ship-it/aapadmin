@@ -27,7 +27,7 @@ export const GROUPS = [
       "/dashboard/supervisor/attendance", "/dashboard/supervisor/callers",
     ],
   },
-  { key: "monitoring", label: "Monitoring", hrefs: ["/dashboard/map", "/dashboard/social", "/dashboard/social-management"] },
+  { key: "monitoring", label: "Monitoring", hrefs: ["/dashboard/social", "/dashboard/social-management"] },
   { key: "content", label: "Content", hrefs: ["/dashboard/media"] },
   // Renamed from "Administration" to "System" — that label now belongs to
   // the Workers/Teams/Users group above, per the nav restructure.

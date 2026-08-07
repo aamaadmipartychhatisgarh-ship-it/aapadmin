@@ -1,11 +1,24 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-import { PhoneCall, PhoneForwarded, PhoneOff, PowerOff, Clock, AlertTriangle, ThumbsDown, CalendarClock, Download, Award, Calendar, Newspaper, Share2 } from "lucide-react";
+import { PhoneCall, PhoneForwarded, PhoneOff, PowerOff, Clock, AlertTriangle, ThumbsDown, CalendarClock, Download, Award, Calendar, Newspaper, Share2, Loader2 } from "lucide-react";
 import Avatar from "@/components/Avatar";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import { formatDate, formatDateTimeDot } from "@/lib/dateFormat";
+
+// The Organization Map is embedded here (it used to be a standalone /dashboard/map
+// page). Lazy-loaded client-side so its markup/data never blocks the dashboard's
+// first paint, and it fetches /api/map once on mount (no duplicate requests).
+const TerritoryMap = dynamic(() => import("@/components/TerritoryMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex h-48 items-center justify-center">
+      <Loader2 className="animate-spin text-[#164FA3]" />
+    </div>
+  ),
+});
 
 // Shared overview dashboard used by BOTH the Supervisor Overview and the State
 // Overview. The layout, cards, charts, date filter and live refresh are
@@ -260,6 +273,9 @@ export default function SummaryDashboard({
               )}
             </div>
           </div>
+
+          {/* Organization Map — merged in from the former standalone Map page. */}
+          <TerritoryMap />
 
           {/* Team snapshots — Super Admin dashboard only */}
           {(media || social) && (
