@@ -110,12 +110,20 @@ export async function GET(req) {
   }
 }
 
+// Build marker so the LIVE deploy can be identified from a task response header
+// (X-Tasks-Build) and the server logs — confirms which code is actually running.
+const BUILD = process.env.NEXT_PUBLIC_APP_VERSION || "dev";
+
 export async function POST(req) {
+  const t0 = Date.now();
   try {
+    console.log(`[TASK] POST START build=${BUILD}`);
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || !isOversight(session)) { console.log("[TASK] AUTH FAIL 401"); return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: { "X-Tasks-Build": BUILD } }); }
+    console.log("[TASK] AUTH OK user=", session.user?.id);
     const d = await req.json();
-    if (!d.title) return NextResponse.json({ message: "Title required" }, { status: 400 });
+    if (!d.title) { console.log("[TASK] VALIDATION FAIL: no title"); return NextResponse.json({ message: "Title required" }, { status: 400, headers: { "X-Tasks-Build": BUILD } }); }
+    console.log("[TASK] VALIDATION OK title.len=", String(d.title).length, "userIds=", Array.isArray(d.assigned_to_user_ids) ? d.assigned_to_user_ids.length : "single", "team=", d.assigned_to_team_id ? "y" : "n", "subs=", Array.isArray(d.subtasks) ? d.subtasks.length : 0);
     // Read-only schema probes (cached). The create path NEVER runs DDL: the old
     // ensureTaskContactColumn() issued an ALTER TABLE + FOREIGN KEY that can
     // block on a metadata lock under concurrent load and hang the whole POST
@@ -124,6 +132,7 @@ export async function POST(req) {
     const stampAssigned = await hasTaskAssignedAt();
     const hasDuration = await hasTaskDurationColumns();
     const hasContactCol = await hasTaskContactColumn();
+    console.log(`[TASK] PROBES OK (${Date.now() - t0}ms) assignedAt=${stampAssigned} duration=${hasDuration} contactCol=${hasContactCol}`);
     // The deadline is derived from start_date + duration_days when both are
     // given (the normal path, via the duration picker); an explicit d.deadline
     // is only a fallback for callers that don't use the duration picker.
@@ -147,6 +156,7 @@ export async function POST(req) {
     const subs = Array.isArray(d.subtasks) ? d.subtasks : [];
     const titles = subs.map((s) => (typeof s === "string" ? s : s?.title) || "").map((t) => t.trim()).filter(Boolean);
     const subsTable = titles.length ? await hasSubtasksTable() : false;
+    console.log(`[TASK] BEFORE INSERT (${Date.now() - t0}ms) targets=${targets.length} subsTable=${subsTable}`);
 
     const createdIds = [];
     for (const uid of targets) {
@@ -160,6 +170,7 @@ export async function POST(req) {
          ...(hasDuration ? [d.start_date || null, d.duration_preset || null, d.duration_days || null] : [])]
       );
       createdIds.push(res.insertId);
+      console.log(`[TASK] AFTER INSERT (${Date.now() - t0}ms) id=${res.insertId} uid=${uid || "none"}`);
       // Everything past the task INSERT is best-effort: the task row already
       // exists, so a checklist or notification hiccup must NOT fail (or hang)
       // the response. Each is isolated in its own try/catch.
@@ -187,9 +198,10 @@ export async function POST(req) {
         } catch (e) { console.error("task notify failed:", e); }
       }
     }
-    return NextResponse.json({ id: createdIds[0], ids: createdIds }, { status: 201 });
+    console.log(`[TASK] RESPONSE 201 (${Date.now() - t0}ms) ids=${createdIds.join(",")}`);
+    return NextResponse.json({ id: createdIds[0], ids: createdIds }, { status: 201, headers: { "X-Tasks-Build": BUILD } });
   } catch (err) {
-    console.error("tasks POST error:", err);
-    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+    console.error(`[TASK] ERROR (${Date.now() - t0}ms):`, err?.code || "", err?.message || err);
+    return NextResponse.json({ message: err?.sqlMessage || "Internal server error" }, { status: 500, headers: { "X-Tasks-Build": BUILD } });
   }
 }

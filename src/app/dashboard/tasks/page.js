@@ -413,6 +413,7 @@ function AddTaskModal({ onClose, onSaved, editing }) {
   async function save() {
     // Guard against double-submit: ignore clicks while a save is in flight.
     if (saving) return;
+    console.log("[TASK UI] SUBMIT START", { editing: !!editing });
     setSaving(true);
     setError("");
     const url = editing ? `/api/tasks/${editing.id}` : "/api/tasks";
@@ -439,6 +440,7 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     // setTimeout that hides the bug. 45s is well beyond any normal create.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
+    console.log("[TASK UI] REQUEST START", method, url);
     try {
       const r = await fetch(url, {
         method,
@@ -446,14 +448,18 @@ function AddTaskModal({ onClose, onSaved, editing }) {
         body: JSON.stringify({ ...rest, ...assign, subtasks: cleanSubs }),
         signal: controller.signal,
       });
+      console.log("[TASK UI] RESPONSE RECEIVED status=", r.status, "build=", r.headers.get("X-Tasks-Build") || "?");
       if (r.ok) {
         ok = true; // 2xx = backend-confirmed creation/update
+        console.log("[TASK UI] SUCCESS (2xx)");
       } else {
         const data = await r.json().catch(() => ({}));
         errMsg = data.message || failMsg;
+        console.log("[TASK UI] NON-OK RESPONSE", r.status, errMsg);
       }
     } catch (e) {
       // Network failure / aborted (timed-out) / other fetch error.
+      console.log("[TASK UI] FETCH ERROR", e?.name, e?.message);
       errMsg = e?.name === "AbortError"
         ? "The request timed out — the task may not have been created. Please try again."
         : failMsg;
@@ -461,12 +467,13 @@ function AddTaskModal({ onClose, onSaved, editing }) {
       clearTimeout(timeoutId);
       // Reset the loading state in EVERY case so the button never sticks.
       setSaving(false);
+      console.log("[TASK UI] SAVING FALSE");
     }
 
     if (ok) {
       // Parent handles the success toast, closing the modal and refreshing the
       // list. Guarded so even if that throws, the save flow is already settled.
-      try { onSaved(); } catch { /* refresh/close issues never re-block Save */ }
+      try { onSaved(); console.log("[TASK UI] MODAL CLOSE + REFRESH"); } catch (e) { console.log("[TASK UI] onSaved threw (ignored)", e?.message); }
     } else {
       // Keep the form open and show a clear error.
       setError(errMsg || failMsg);
