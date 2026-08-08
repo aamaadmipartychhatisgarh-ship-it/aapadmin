@@ -5,13 +5,12 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
 import { useCallerPreview } from "@/lib/useCallerPreview";
-import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown } from "lucide-react";
+import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown, Users, Check } from "lucide-react";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { formatDate } from "@/lib/dateFormat";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import ActionBar from "@/components/ActionBar";
-import FloatingPopover from "@/components/FloatingPopover";
 import { DURATION_PRESETS, DURATION_DAYS, addDays, daysBetween } from "@/lib/taskDuration";
 
 const SHOW_COMPLETED_KEY = "tasks_show_completed";
@@ -364,6 +363,17 @@ function SumCard({ label, value, accent, danger }) {
   );
 }
 
+
+// ===========================================================================
+// Create / Edit Task
+// ---------------------------------------------------------------------------
+// One clean creation flow. The form is the single source of truth for task
+// state; on submit it builds ONE payload object whose field names match the
+// /api/tasks contract exactly (create → assigned_to_user_ids[], edit →
+// assigned_to_user_id). The backend re-validates everything and performs the
+// atomic create; this component never fakes success and never sticks on
+// "Creating…". A task always starts as `pending` (set by the server).
+// ===========================================================================
 function AddTaskModal({ onClose, onSaved, editing }) {
   const todayStr = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState(() => {
@@ -379,10 +389,10 @@ function AddTaskModal({ onClose, onSaved, editing }) {
         title: editing.title || "",
         priority: editing.priority || "medium",
         start_date, duration_preset, duration_days,
-        // Multi-assign: an array of user ids (strings). An existing task has at
-        // most one assignee, so it seeds a single-element array on edit.
+        // Multi-assign is an array of user-id strings. An existing task carries at
+        // most one assignee, so edit seeds a single-element array.
         assigned_user_ids: editing.assigned_to_user_id ? [String(editing.assigned_to_user_id)] : [],
-        assigned_to_team_id: editing.assigned_to_team_id || "",
+        assigned_to_team_id: editing.assigned_to_team_id ? String(editing.assigned_to_team_id) : "",
       };
     }
     return {
@@ -391,228 +401,377 @@ function AddTaskModal({ onClose, onSaved, editing }) {
       assigned_user_ids: [], assigned_to_team_id: "",
     };
   });
+
+  // Derived end date from start + duration (custom uses the typed day count).
   const durationDaysNum = form.duration_preset === "custom"
     ? (form.duration_days === "" ? null : Number(form.duration_days))
     : DURATION_DAYS[form.duration_preset];
   const endDate = form.start_date && durationDaysNum != null && !isNaN(durationDaysNum)
     ? addDays(form.start_date, durationDaysNum) : null;
-  // Checklist builder — unlimited items. Keep ids on edit so completion state is
-  // preserved; new items have id null.
+
+  // Checklist builder — unlimited items. Existing items keep their id so their
+  // completion state survives an edit; new rows have id null. Blank rows are
+  // dropped at submit (never sent).
   const [subtasks, setSubtasks] = useState(
     editing?.subtasks?.length ? editing.subtasks.map((s) => ({ id: s.id, title: s.title })) : [{ id: null, title: "" }]
   );
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [loadingRefs, setLoadingRefs] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState("");        // top-level (backend / network) error
+  const [fieldErr, setFieldErr] = useState({});  // per-field validation messages
 
   useEffect(() => {
-    fetch("/api/users").then((r) => r.json()).then((d) => setUsers(d.users || [])).catch(() => {});
-    fetch("/api/teams").then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
+    let alive = true;
+    Promise.all([
+      fetch("/api/users", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { users: [] })).catch(() => ({ users: [] })),
+      fetch("/api/teams", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { teams: [] })).catch(() => ({ teams: [] })),
+    ]).then(([u, t]) => {
+      if (!alive) return;
+      setUsers(u.users || []);
+      setTeams(t.teams || []);
+      setLoadingRefs(false);
+    });
+    return () => { alive = false; };
   }, []);
 
   const setSub = (i, title) => setSubtasks((s) => s.map((x, j) => (j === i ? { ...x, title } : x)));
   const addSub = () => setSubtasks((s) => [...s, { id: null, title: "" }]);
   const removeSub = (i) => setSubtasks((s) => (s.length === 1 ? [{ id: null, title: "" }] : s.filter((_, j) => j !== i)));
 
-  async function save() {
-    // Guard against double-submit: ignore clicks while a save is in flight.
-    if (saving) return;
-    console.log("[TASK UI] SUBMIT START", { editing: !!editing });
-    // Frontend validation (the backend re-validates all of this too).
-    if (!form.title.trim()) { setError("Task title is required."); return; }
+  const setUserIds = (ids) => setForm((f) => ({ ...f, assigned_user_ids: ids }));
+
+  // ---- validation (mirrored on the backend; this only guards the UX) ----
+  function validate() {
+    const e = {};
+    if (!form.title.trim()) e.title = "Task title is required.";
+    if (!form.start_date) e.start_date = "Start date is required.";
     if (form.duration_preset === "custom") {
       const dd = Number(form.duration_days);
-      if (!Number.isFinite(dd) || dd < 1) { setError("Enter a valid duration (at least 1 day)."); return; }
+      if (!Number.isFinite(dd) || dd < 1) e.duration = "Enter a valid duration (at least 1 day).";
     }
-    setSaving(true);
+    if (endDate && form.start_date && endDate < form.start_date) e.duration = "End date cannot be before the start date.";
+    // An assignee is required: at least one user, or a whole team.
+    if (form.assigned_user_ids.length === 0 && !form.assigned_to_team_id) {
+      e.assignees = "Assign the task to at least one user or a team.";
+    }
+    return e;
+  }
+
+  async function save() {
+    if (saving) return; // guard against double-submit
+    const e = validate();
+    setFieldErr(e);
     setError("");
+    if (Object.keys(e).length) return; // block submit while invalid
+
+    setSaving(true);
+
+    // Build ONE payload whose keys match the /api/tasks contract exactly.
+    // Dedup + stringify assignee ids so no duplicate/blank id is ever sent.
+    const assignedToUserIds = [...new Set(form.assigned_user_ids.map((x) => String(x).trim()).filter(Boolean))];
+    const cleanSubs = subtasks.map((s) => ({ id: s.id ?? null, title: s.title.trim() })).filter((s) => s.title);
+    const base = {
+      title: form.title.trim(),
+      priority: form.priority,
+      start_date: form.start_date,
+      duration_preset: form.duration_preset,
+      duration_days: durationDaysNum,
+      deadline: endDate,
+      assigned_to_team_id: form.assigned_to_team_id || "",
+      subtasks: cleanSubs,
+    };
+    // Create fans out to every selected user (server makes one task each).
+    // Edit keeps a single assignee, so it sends the first selected id.
+    const payload = editing
+      ? { ...base, assigned_to_user_id: assignedToUserIds[0] || "" }
+      : { ...base, assigned_to_user_ids: assignedToUserIds };
+
     const url = editing ? `/api/tasks/${editing.id}` : "/api/tasks";
     const method = editing ? "PUT" : "POST";
-    const cleanSubs = subtasks.map((s) => ({ id: s.id ?? null, title: s.title.trim() })).filter((s) => s.title);
-    const { assigned_user_ids = [], ...rest } = form;
-    // Create: fan out to every selected user (server makes one task each).
-    // Edit: a task keeps a single assignee, so send the first selected id.
-    const assign = editing
-      ? { assigned_to_user_id: assigned_user_ids[0] || "" }
-      : { assigned_to_user_ids };
-    const failMsg = editing ? "Failed to save the task. Please try again." : "Failed to create task. Please try again.";
+    const failMsg = editing ? "Failed to save the task. Please try again." : "Failed to create the task. Please try again.";
 
-    // Settle ONLY on the create/update request. Its outcome (ok / errMsg) is
-    // computed inside try/finally so the loading state is ALWAYS reset — the
-    // success side-effects (toast, close, list refresh) run afterwards, OUTSIDE
-    // the awaited path, so a hidden error or a slow secondary refresh can never
-    // keep the button stuck on "Saving…".
-    let ok = false;
-    let errMsg = "";
-    // Hard request timeout: if the server never responds (a true hang), abort
-    // the request so the UI shows an error instead of "Saving…" forever. This
-    // is a REAL request timeout that surfaces a failure — NOT a fake-success
-    // setTimeout that hides the bug. 45s is well beyond any normal create.
+    // Outcome is settled inside try/finally so the loading state is ALWAYS
+    // cleared — a slow refresh or a hidden throw can never leave the button
+    // stuck. A hard 45s abort surfaces a real timeout error (never fake success).
+    let ok = false, errMsg = "";
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
-    console.log("[TASK UI] REQUEST START", method, url);
     try {
       const r = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...rest, ...assign, subtasks: cleanSubs }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
-      console.log("[TASK UI] RESPONSE RECEIVED status=", r.status, "build=", r.headers.get("X-Tasks-Build") || "?");
       if (r.ok) {
-        ok = true; // 2xx = backend-confirmed creation/update
-        console.log("[TASK UI] SUCCESS (2xx)");
+        ok = true;
       } else {
         const data = await r.json().catch(() => ({}));
-        errMsg = data.message || failMsg;
-        console.log("[TASK UI] NON-OK RESPONSE", r.status, errMsg);
+        // Surface the REAL backend message; map status codes to useful text.
+        errMsg = data.message
+          || ({ 401: "Your session has expired — please sign in again.",
+                403: "You don't have permission to create tasks.",
+                404: "The task could not be found.",
+                409: "This task conflicts with an existing one.",
+              }[r.status])
+          || failMsg;
       }
-    } catch (e) {
-      // Network failure / aborted (timed-out) / other fetch error.
-      console.log("[TASK UI] FETCH ERROR", e?.name, e?.message);
-      errMsg = e?.name === "AbortError"
+    } catch (err) {
+      errMsg = err?.name === "AbortError"
         ? "The request timed out — the task may not have been created. Please try again."
-        : failMsg;
+        : failMsg; // network failure / other fetch error
     } finally {
       clearTimeout(timeoutId);
-      // Reset the loading state in EVERY case so the button never sticks.
-      setSaving(false);
-      console.log("[TASK UI] SAVING FALSE");
+      setSaving(false); // reset in EVERY case so the button never sticks
     }
 
     if (ok) {
-      // Parent handles the success toast, closing the modal and refreshing the
-      // list. Guarded so even if that throws, the save flow is already settled.
-      try { onSaved(); console.log("[TASK UI] MODAL CLOSE + REFRESH"); } catch (e) { console.log("[TASK UI] onSaved threw (ignored)", e?.message); }
+      try { onSaved(); } catch { /* parent already handled; save is settled */ }
     } else {
-      // Keep the form open and show a clear error.
       setError(errMsg || failMsg);
     }
   }
+
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  const errInp = "border-red-300 focus:ring-red-200";
+  const Section = ({ icon: Icon, title, children }) => (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+        {Icon && <Icon size={13} />}{title}
+      </div>
+      {children}
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-3 max-h-[90vh] overflow-auto">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-gray-900">{editing ? "Edit Task" : "Create Task"}</h2>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[92vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">{editing ? "Edit Task" : "Create New Task"}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
-        {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2.5 text-sm">{error}</div>}
-        <input className={inp} placeholder="Task title *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
 
-        {/* Sub-task builder — unlimited checklist items */}
-        <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Sub Tasks (checklist)</div>
-          {subtasks.map((s, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-md border border-gray-300 shrink-0" />
-              <input
-                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
-                placeholder={`Checklist item ${i + 1}`}
-                value={s.title}
-                onChange={(e) => setSub(i, e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSub(); } }}
-              />
-              <button type="button" onClick={() => removeSub(i)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><X size={15} /></button>
+        {/* Body */}
+        <div className="px-6 py-5 space-y-6 overflow-y-auto">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2.5 text-sm flex items-start gap-2">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{error}</span>
             </div>
-          ))}
-          <button type="button" onClick={addSub} className="inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline">
-            <Plus size={14} /> Add Another Task
+          )}
+
+          {/* Task Details */}
+          <Section icon={ClipboardList} title="Task Details">
+            <div>
+              <input
+                className={`${inp} ${fieldErr.title ? errInp : ""}`}
+                placeholder="Task title *"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+              />
+              {fieldErr.title && <p className="text-xs text-red-600 mt-1">{fieldErr.title}</p>}
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-1.5">Priority</div>
+              <div className="grid grid-cols-4 gap-2">
+                {["low", "medium", "high", "urgent"].map((p) => (
+                  <button
+                    key={p} type="button"
+                    onClick={() => setForm({ ...form, priority: p })}
+                    className={`text-xs font-semibold py-2 rounded-lg border capitalize transition
+                      ${form.priority === p ? `${PRIORITY[p]} border-transparent ring-2 ring-[#164FA3]/30` : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </Section>
+
+          {/* Schedule */}
+          <Section icon={Calendar} title="Schedule">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-gray-500">Start date *</label>
+                <input type="date" className={`${inp} mt-1 ${fieldErr.start_date ? errInp : ""}`} value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+                {fieldErr.start_date && <p className="text-xs text-red-600 mt-1">{fieldErr.start_date}</p>}
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">Duration</label>
+                <select
+                  className={`${inp} mt-1`} value={form.duration_preset}
+                  onChange={(e) => {
+                    const preset = e.target.value;
+                    setForm((f) => ({ ...f, duration_preset: preset, duration_days: DURATION_DAYS[preset] ?? f.duration_days }));
+                  }}
+                >
+                  {DURATION_PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">{form.duration_preset === "custom" ? "Number of days *" : "End date"}</label>
+                {form.duration_preset === "custom" ? (
+                  <input type="number" min={1} className={`${inp} mt-1 ${fieldErr.duration ? errInp : ""}`} placeholder="e.g. 5" value={form.duration_days} onChange={(e) => setForm({ ...form, duration_days: e.target.value })} />
+                ) : (
+                  <div className={`${inp} mt-1 bg-gray-50 text-gray-500 flex items-center`}>{endDate ? formatDate(endDate) : "—"}</div>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-400">{form.duration_preset === "custom" && endDate ? `Ends ${formatDate(endDate)}` : ""}</span>
+              {fieldErr.duration && <span className="text-red-600">{fieldErr.duration}</span>}
+            </div>
+          </Section>
+
+          {/* Checklist */}
+          <Section icon={CheckCircle2} title="Checklist (optional)">
+            <div className="space-y-2">
+              {subtasks.map((s, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-4 h-4 rounded border border-gray-300 shrink-0" />
+                  <input
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
+                    placeholder={`Checklist item ${i + 1}`}
+                    value={s.title}
+                    onChange={(e) => setSub(i, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSub(); } }}
+                  />
+                  <button type="button" onClick={() => removeSub(i)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><X size={15} /></button>
+                </div>
+              ))}
+              <button type="button" onClick={addSub} className="inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline">
+                <Plus size={14} /> Add another subtask
+              </button>
+            </div>
+          </Section>
+
+          {/* Assignment */}
+          <Section icon={Users} title="Assignment">
+            <div>
+              <label className="text-xs text-gray-500">Assign to team (optional)</label>
+              <select className={`${inp} mt-1`} value={form.assigned_to_team_id} onChange={(e) => setForm({ ...form, assigned_to_team_id: e.target.value })}>
+                <option value="">No team</option>
+                {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">Assign to users {editing ? "" : "(select one or more)"}</label>
+              <AssignUsers
+                users={users}
+                loading={loadingRefs}
+                selected={form.assigned_user_ids}
+                single={!!editing}
+                onChange={setUserIds}
+                error={fieldErr.assignees}
+              />
+              {fieldErr.assignees && <p className="text-xs text-red-600 mt-1">{fieldErr.assignees}</p>}
+            </div>
+          </Section>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
+          <button onClick={onClose} disabled={saving} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Cancel</button>
+          <button onClick={save} disabled={saving} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-60 text-white rounded-lg font-semibold inline-flex items-center gap-2">
+            {saving && <Loader2 size={15} className="animate-spin" />}
+            {saving ? (editing ? "Saving…" : "Creating…") : (editing ? "Save Changes" : "Create Task")}
           </button>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <select className={inp} value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-            <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option>
-          </select>
-          <input type="date" className={inp} value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} title="Start date" />
-          <select
-            className={inp} value={form.duration_preset}
-            onChange={(e) => {
-              const preset = e.target.value;
-              setForm((f) => ({ ...f, duration_preset: preset, duration_days: DURATION_DAYS[preset] ?? f.duration_days }));
-            }}
-          >
-            {DURATION_PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-          </select>
-          {form.duration_preset === "custom" ? (
-            <input type="number" min={1} className={inp} placeholder="Number of days" value={form.duration_days} onChange={(e) => setForm({ ...form, duration_days: e.target.value })} />
-          ) : (
-            <div className={`${inp} bg-gray-50 text-gray-500 flex items-center`}>{endDate ? `Ends ${formatDate(endDate)}` : "—"}</div>
-          )}
-          {form.duration_preset === "custom" && (
-            <div className="col-span-2 text-xs text-gray-500 -mt-2">{endDate ? `Ends ${formatDate(endDate)}` : "Enter number of days to see the end date"}</div>
-          )}
-          <select className={inp} value={form.assigned_to_team_id} onChange={(e) => setForm({ ...form, assigned_to_team_id: e.target.value })}>
-            <option value="">Assign to team…</option>
-            {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-          <AssigneeMultiSelect
-            className={inp}
-            users={users}
-            selected={form.assigned_user_ids}
-            onChange={(ids) => setForm({ ...form, assigned_user_ids: ids })}
-          />
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={save} disabled={saving || !form.title || (form.duration_preset === "custom" && !form.duration_days)} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : (editing ? "Save" : "Create")}</button>
         </div>
       </div>
     </div>
   );
 }
 
-// Multi-select "Assign to users" control for the task form: a full-width
-// trigger (styled like the other fields) that opens a checkbox list. Multiple
-// users can be checked/unchecked with the panel staying open; the closed
-// trigger summarizes the selection (name or "N users selected"). Select all /
-// Clear act on the whole list. Ids are kept as strings.
-function AssigneeMultiSelect({ users, selected, onChange, className }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const ids = users.map((u) => String(u.id));
+// ---------------------------------------------------------------------------
+// AssignUsers — searchable, chip-based multi-select for task assignment.
+// Selected users show as removable chips; the list below is filterable and
+// supports Select all / Clear all. When `single` (edit mode) only one user can
+// be chosen. Ids are kept as strings throughout so they match the API.
+// ---------------------------------------------------------------------------
+function AssignUsers({ users, selected, onChange, single, loading, error }) {
+  const [q, setQ] = useState("");
+  const roleLabel = (r) => String(r || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const byId = (id) => users.find((u) => String(u.id) === String(id));
+  const allIds = users.map((u) => String(u.id));
   const allSelected = users.length > 0 && selected.length === users.length;
-  const toggle = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
-  const label = selected.length === 0
-    ? "Assign to users…"
-    : selected.length === 1
-      ? (users.find((u) => String(u.id) === String(selected[0]))?.username || "1 user")
-      : `${selected.length} users selected`;
+
+  const filtered = users.filter((u) => {
+    const t = `${u.username} ${u.role || ""}`.toLowerCase();
+    return t.includes(q.trim().toLowerCase());
+  });
+
+  const toggle = (id) => {
+    id = String(id);
+    if (single) { onChange(selected.includes(id) ? [] : [id]); return; }
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  };
+
   return (
-    <>
-      <button
-        type="button"
-        ref={ref}
-        onClick={() => setOpen((o) => !o)}
-        className={`${className} flex items-center justify-between text-left bg-white ${selected.length ? "text-gray-900" : "text-gray-400"}`}
-      >
-        <span className="truncate">{label}</span>
-        <span className="text-gray-400 ml-2 shrink-0">▾</span>
-      </button>
-      <FloatingPopover anchorRef={ref} open={open} onClose={() => setOpen(false)} width={260} estimatedHeight={300}>
-        <div className="max-h-72 overflow-y-auto p-2">
-          <div className="flex items-center justify-between px-1 pb-2 mb-1 border-b border-gray-100">
-            <button type="button" onClick={() => onChange(allSelected ? [] : ids)} className="text-[11px] font-semibold text-[#164FA3] hover:underline">
-              {allSelected ? "Clear all" : "Select all"}
-            </button>
-            {selected.length > 0 && (
-              <button type="button" onClick={() => onChange([])} className="text-[11px] font-semibold text-gray-500 hover:underline">Clear</button>
-            )}
-          </div>
-          {users.length === 0 ? (
-            <div className="px-2 py-3 text-xs text-gray-400">No users available.</div>
-          ) : users.map((u) => {
-            const id = String(u.id);
+    <div className={`mt-1 border rounded-lg ${error ? "border-red-300" : "border-gray-200"}`}>
+      {/* Selected chips */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 p-2 border-b border-gray-100">
+          {selected.map((id) => {
+            const u = byId(id);
             return (
-              <label key={u.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm">
-                <input type="checkbox" checked={selected.includes(id)} onChange={() => toggle(id)} className="accent-[#164FA3]" />
-                <span className="text-gray-700 truncate">{u.username}</span>
-              </label>
+              <span key={id} className="inline-flex items-center gap-1 bg-blue-50 text-[#164FA3] text-xs font-semibold pl-2 pr-1 py-1 rounded-full">
+                {u?.username || `User ${id}`}
+                <button type="button" onClick={() => toggle(id)} className="hover:bg-blue-100 rounded-full p-0.5"><X size={12} /></button>
+              </span>
             );
           })}
         </div>
-      </FloatingPopover>
-    </>
+      )}
+
+      {/* Search + bulk actions */}
+      <div className="flex items-center gap-2 px-2 py-2 border-b border-gray-100">
+        <Search size={14} className="text-gray-400 shrink-0" />
+        <input
+          className="flex-1 text-sm outline-none bg-transparent"
+          placeholder="Search users…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        {!single && users.length > 0 && (
+          <button type="button" onClick={() => onChange(allSelected ? [] : allIds)} className="text-[11px] font-semibold text-[#164FA3] hover:underline shrink-0">
+            {allSelected ? "Clear all" : "Select all"}
+          </button>
+        )}
+        {selected.length > 0 && (
+          <button type="button" onClick={() => onChange([])} className="text-[11px] font-semibold text-gray-500 hover:underline shrink-0">Clear</button>
+        )}
+      </div>
+
+      {/* User rows */}
+      <div className="max-h-52 overflow-y-auto p-1">
+        {loading ? (
+          <div className="px-2 py-4 text-xs text-gray-400 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading users…</div>
+        ) : filtered.length === 0 ? (
+          <div className="px-2 py-4 text-xs text-gray-400">{users.length === 0 ? "No users available." : "No users match your search."}</div>
+        ) : filtered.map((u) => {
+          const id = String(u.id);
+          const on = selected.includes(id);
+          return (
+            <button
+              key={u.id} type="button" onClick={() => toggle(id)}
+              className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-left transition ${on ? "bg-blue-50" : "hover:bg-gray-50"}`}
+            >
+              <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? "bg-[#164FA3] border-[#164FA3]" : "border-gray-300"}`}>
+                {on && <Check size={12} className="text-white" />}
+              </span>
+              {u.photo_url
+                ? <img src={u.photo_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                : <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-500 text-[11px] font-bold flex items-center justify-center shrink-0">{(u.username || "?").slice(0, 1).toUpperCase()}</span>}
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm text-gray-800 truncate">{u.username}</span>
+                <span className="block text-[11px] text-gray-400 truncate">{roleLabel(u.role)}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
