@@ -21,26 +21,26 @@ const REQUIRED_WORKERS_TARGETS = [
   [2000,  ["Dantewada", "Dakshin Bastar Dantewada"]],
   [6000,  ["Dhamtari"]],
   [12000, ["Durg"]],
-  [4000,  ["Gariaband", "Gariyaband"]],
+  [4000,  ["Gariyaband", "Gariaband"]],
   [2000,  ["Gaurela-Pendra-Marwahi", "Gaurella-Pendra-Marwahi"]],
   [6000,  ["Janjgir-Champa", "Janjgir Champa"]],
   [6000,  ["Jashpur"]],
   [4000,  ["Kabirdham", "Kabeerdham", "Kawardha"]],
   [6000,  ["Kanker", "Uttar Bastar Kanker"]],
-  [4000,  ["Khairagarh-Chhuikhadan-Gandai", "Khairagarh Chhuikhadan Gandai"]],
-  [2000,  ["Kondagaon"]],
+  [2000,  ["Khairagarh-Chhuikhadan-Gandai", "Khairagarh Chhuikhadan Gandai"]],
+  [4000,  ["Kondagaon"]],
   [8000,  ["Korba"]],
   [4000,  ["Koriya", "Korea", "Koria"]],
-  [2000,  ["MCB", "Manendragarh-Chirmiri-Bharatpur", "Manendragarh-Chirmiri-Bharatpur(M C B)", "Manendragarh Chirmiri Bharatpur"]],
+  [2000,  ["Manendragarh-Chirmiri-Bharatpur", "MCB", "Manendragarh-Chirmiri-Bharatpur(M C B)", "Manendragarh Chirmiri Bharatpur"]],
   [8000,  ["Mahasamund"]],
   [2000,  ["Mohla-Manpur-Ambagarh Chowki", "Mohla-Manpur-Ambagarh Chouki", "Mohla Manpur Ambagarh Chowki"]],
-  [2000,  ["Mungeli"]],
-  [4000,  ["Narayanpur"]],
-  [2000,  ["Raigarh"]],
-  [8000,  ["Raipur"]],
+  [4000,  ["Mungeli"]],
+  [2000,  ["Narayanpur"]],
+  [8000,  ["Raigarh"]],
+  [14000, ["Raipur"]],
   [8000,  ["Rajnandgaon"]],
   [6000,  ["Sakti"]],
-  [8000,  ["Sarangarh-Bilaigarh", "Sarangarh Bilaigarh"]],
+  [4000,  ["Sarangarh-Bilaigarh", "Sarangarh Bilaigarh"]],
   [2000,  ["Sukma"]],
   [6000,  ["Surajpur"]],
   [6000,  ["Surguja"]],
@@ -49,7 +49,8 @@ const REQUIRED_WORKERS_TARGETS = [
 // Canonicalize a district name for matching: lowercase, drop any parenthetical
 // suffix (e.g. "(M C B)"), then strip everything that isn't a letter/digit so
 // spaces, hyphens and punctuation differences never split one district in two.
-function normDistrict(s) {
+// Reused for both the Required-Workers alias table and any future name joins.
+export function normDistrict(s) {
   return String(s || "")
     .toLowerCase()
     .replace(/\(.*?\)/g, " ")
@@ -71,8 +72,65 @@ function requiredWorkersFor(dbName) {
 // are never counted here.
 const WORKER_ROLES = ["caller", "worker", "user", "agent"];
 
+// Resolve every ACTIVE worker/caller user to exactly one district and return a
+// Map<district_id, count>. A user's district is taken from the first REAL
+// signal that exists, in priority order:
+//   1. users.home_district_id      — the district set in Administration → Users
+//   2. workers.district_id          — via the workers row linked by workers.user_id
+//   3. calls.district_id            — the district where they log the most calls
+// This fixes "Workers = 0" when home_district_id was never filled in, without
+// inventing any number: every count still comes from a real existing relation.
+// Three grouped queries (no per-user fan-out) keep it efficient.
+async function workersByDistrict() {
+  const rolePlaceholders = WORKER_ROLES.map(() => "?").join(",");
+  const users = await query(
+    `SELECT id, home_district_id FROM users
+      WHERE is_active = 1 AND role IN (${rolePlaceholders})`,
+    WORKER_ROLES
+  );
+  if (users.length === 0) return new Map();
+
+  const ids = users.map((u) => u.id);
+  const idPlaceholders = ids.map(() => "?").join(",");
+
+  // workers.user_id → a district (one per user; MIN is arbitrary-but-stable).
+  const workerRows = await query(
+    `SELECT user_id, MIN(district_id) AS district_id
+       FROM workers
+      WHERE user_id IN (${idPlaceholders}) AND district_id IS NOT NULL
+      GROUP BY user_id`,
+    ids
+  );
+  const workerDistrict = new Map(workerRows.map((r) => [r.user_id, r.district_id]));
+
+  // calls.user_id → the district they called into most often.
+  const callRows = await query(
+    `SELECT user_id, district_id, COUNT(*) AS n
+       FROM calls
+      WHERE user_id IN (${idPlaceholders}) AND district_id IS NOT NULL
+      GROUP BY user_id, district_id`,
+    ids
+  );
+  const topCallDistrict = new Map();
+  const bestN = new Map();
+  for (const r of callRows) {
+    if (!bestN.has(r.user_id) || r.n > bestN.get(r.user_id)) {
+      bestN.set(r.user_id, r.n);
+      topCallDistrict.set(r.user_id, r.district_id);
+    }
+  }
+
+  const counts = new Map();
+  for (const u of users) {
+    const did = u.home_district_id ?? workerDistrict.get(u.id) ?? topCallDistrict.get(u.id) ?? null;
+    if (did == null) continue;
+    counts.set(did, (counts.get(did) || 0) + 1);
+  }
+  return counts;
+}
+
 // Organization strength score per district, combining the actual workforce
-// (real users/callers assigned to the district) and calling performance
+// (real active users/callers assigned to the district) and calling performance
 // (attempt volume + connect rate). Teams and per-worker "activity score" are no
 // longer part of this view.
 export async function GET() {
@@ -99,30 +157,30 @@ export async function GET() {
       dParams.push(u.scope_assembly_id);
     }
 
-    const workerRolePlaceholders = WORKER_ROLES.map(() => "?").join(",");
-    const rows = await query(
-      `SELECT ld.id, ld.name,
-              (SELECT COUNT(*) FROM users usr
-                 WHERE usr.home_district_id = ld.id
-                   AND usr.role IN (${workerRolePlaceholders})) AS worker_count,
-              (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
-              (SELECT COUNT(*) FROM calls c JOIN call_statuses cs ON cs.id=c.status_id
-                 WHERE c.district_id = ld.id AND cs.name='Phone Picked') AS connected_count
-         FROM locations ld
-        WHERE ld.type = 'district' ${districtFilter}
-        ORDER BY ld.name`,
-      [...WORKER_ROLES, ...dParams]
-    );
+    const [rows, workerCounts] = await Promise.all([
+      query(
+        `SELECT ld.id, ld.name,
+                (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
+                (SELECT COUNT(*) FROM calls c JOIN call_statuses cs ON cs.id=c.status_id
+                   WHERE c.district_id = ld.id AND cs.name='Phone Picked') AS connected_count
+           FROM locations ld
+          WHERE ld.type = 'district' ${districtFilter}
+          ORDER BY ld.name`,
+        dParams
+      ),
+      workersByDistrict(),
+    ]);
 
     // Normalize the workforce + calling factors 0-100 across districts, then a
     // weighted composite. Weights (sum 1.0): workforce 45, calling volume 30,
     // connect rate 25 — the Teams/activity weights were removed with those
     // columns and redistributed onto the metrics this table now shows.
+    const withWorkers = rows.map((r) => ({ ...r, worker_count: workerCounts.get(r.id) || 0 }));
     const max = {
-      worker: Math.max(1, ...rows.map((r) => r.worker_count)),
-      call: Math.max(1, ...rows.map((r) => r.call_count)),
+      worker: Math.max(1, ...withWorkers.map((r) => r.worker_count)),
+      call: Math.max(1, ...withWorkers.map((r) => r.call_count)),
     };
-    const scored = rows.map((r) => {
+    const scored = withWorkers.map((r) => {
       const workerScore = (r.worker_count / max.worker) * 100;
       const callScore = (r.call_count / max.call) * 100;
       const connectRate = r.call_count > 0 ? (r.connected_count / r.call_count) * 100 : 0;
@@ -142,7 +200,8 @@ export async function GET() {
         worker_count: r.worker_count,
         call_count: r.call_count,
       };
-    }).sort((a, b) => b.score - a.score);
+      // Sort by strength desc, then attempt calls desc as the tie-breaker.
+    }).sort((a, b) => b.score - a.score || b.attemptCalls - a.attemptCalls);
 
     const summary = {
       strong: scored.filter((s) => s.band === "strong").length,
