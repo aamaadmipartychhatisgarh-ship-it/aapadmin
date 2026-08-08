@@ -318,12 +318,20 @@ function Overview({ onOpen }) {
 const EMPTY_ASM = { name: "", number: "", district: "", lok_sabha: "", total_voters: "", total_polling_stations: "", total_booths: "", election_year: "", population: "", notes: "" };
 function Assemblies({ assemblies, loading, canDelete, onChange, flash, fail, onOpen }) {
   const [q, setQ] = useState("");
+  const [districtFilter, setDistrictFilter] = useState("");
   const [editing, setEditing] = useState(null);
+  const districtOptions = useMemo(
+    () => [...new Set(assemblies.map((a) => a.district).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [assemblies]
+  );
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return assemblies;
-    return assemblies.filter((a) => [a.name, a.number, a.district, a.lok_sabha].some((v) => String(v || "").toLowerCase().includes(s)));
-  }, [q, assemblies]);
+    return assemblies.filter((a) => {
+      if (districtFilter && a.district !== districtFilter) return false;
+      if (!s) return true;
+      return [a.name, a.number, a.district, a.lok_sabha].some((v) => String(v || "").toLowerCase().includes(s));
+    });
+  }, [q, districtFilter, assemblies]);
   async function del(a) {
     if (!confirm(`Delete assembly "${a.name}" and ALL its assessment data? This cannot be undone.`)) return;
     try { await api(`/api/leader-assessment/assemblies/${a.id}`, { method: "DELETE" }); flash("Assembly deleted."); onChange(); } catch (e) { fail(e.message); }
@@ -332,10 +340,14 @@ function Assemblies({ assemblies, loading, canDelete, onChange, flash, fail, onO
     <Card title="Assemblies" icon={Building2} right={
       <div className="flex items-center gap-2">
         <div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name / district…" className={`${inp} pl-8 w-48 h-9`} /></div>
+        <select value={districtFilter} onChange={(e) => setDistrictFilter(e.target.value)} className={`${inp} w-44 h-9`} aria-label="Filter by district">
+          <option value="">All districts</option>
+          {districtOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
         <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Assembly</button>
       </div>
     }>
-      {loading ? <LoadingBlock /> : filtered.length === 0 ? <Empty msg={q ? "No assemblies match your search." : "No assemblies yet."} action={!q && <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Assembly</button>} /> : (
+      {loading ? <LoadingBlock /> : filtered.length === 0 ? <Empty msg={(q || districtFilter) ? "No assemblies match your filters." : "No assemblies yet."} action={!q && !districtFilter && <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Assembly</button>} /> : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Assembly", "No.", "District", "Lok Sabha", "Voters", "Booths", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>

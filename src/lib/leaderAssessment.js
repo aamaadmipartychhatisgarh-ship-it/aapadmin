@@ -145,7 +145,37 @@ export async function ensureLeaderAssessmentTables() {
   await ensureColumn("la_aap_candidates", "current_position", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_elections", "runner_up", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_elections", "runner_up_votes", "INT NULL");
+  await seedAssembliesFromLocations();
   ensured = true;
+}
+
+// One-time master seed so the module is usable out of the box: expose the
+// Chhattisgarh districts as the assembly master list. Uses ONLY real location
+// data — each row's name/district is a real district and lok_sabha is its
+// parent in the existing `locations` hierarchy. NO MLA, candidate, election,
+// vote or caste data is fabricated; those stay empty and surface as
+// "Not Available"/"Not Added" until a real value is entered.
+//
+// Safety: runs only when la_assemblies is empty (never overwrites or re-seeds
+// an admin-curated list), and each insert is guarded by NOT EXISTS on the name
+// so a cold-start race can't create duplicates. Mirrors the lazy, migration-
+// free approach the rest of this module uses.
+async function seedAssembliesFromLocations() {
+  try {
+    const existing = await query("SELECT COUNT(*) AS n FROM la_assemblies");
+    if (Number(existing[0]?.n || 0) > 0) return;
+    await query(
+      `INSERT INTO la_assemblies (name, district, lok_sabha)
+         SELECT d.name, d.name, ls.name
+           FROM locations d
+           LEFT JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+          WHERE d.type = 'district'
+            AND NOT EXISTS (SELECT 1 FROM la_assemblies a WHERE a.name = d.name)
+          ORDER BY d.name ASC`
+    );
+  } catch (e) {
+    console.error("[LA] seedAssembliesFromLocations:", e?.message || e);
+  }
 }
 
 // Add a column only if it's missing (cross-DB safe: check information_schema
