@@ -71,45 +71,60 @@ export async function POST(req) {
     if (parsed.error) {
       return NextResponse.json({ message: parsed.error }, { status: 400 });
     }
-    const { validRows, rowErrors, summary, totalRows, unmatchedDistricts, unmatchedAssemblies, existingContactByPhone } = parsed;
-    const errorRows = rowErrors.filter((e) => e.severity === "error");
-    const warningRows = rowErrors.filter((e) => e.severity === "warning");
+    const { validRows, rowErrors, summary, totalRows, unmatchedDistricts, unmatchedAssemblies, existingNormalizedPhones } = parsed;
+    // Row classification for the Total / Added / Duplicate / Invalid summary:
+    //  - "duplicate" severity = same phone repeated earlier in THIS file.
+    //  - "error" severity     = truly invalid (e.g. missing name).
+    const withinFileDuplicates = rowErrors.filter((e) => e.severity === "duplicate").length;
+    const invalidNameRows = rowErrors.filter((e) => e.severity === "error").length;
+
+    // Rows that carry a phone (the ones we can safely de-duplicate). Rows with no
+    // phone can't be matched by number and are not inserted — counted as invalid.
+    const withPhone = validRows.filter((r) => r.phone);
+    const noPhoneCount = validRows.length - withPhone.length;
+
+    // The core rule: skip any row whose NORMALIZED phone already exists in the
+    // contacts table (one bulk in-memory Set lookup — no per-row SELECT), so an
+    // existing contact is never re-imported or overwritten. Only the rest insert.
+    const toInsert = withPhone.filter((r) => !existingNormalizedPhones.has(r.phoneKey));
+    const existingDuplicates = withPhone.length - toInsert.length;
+
+    const summarize = (added) => ({
+      total_rows: totalRows,
+      added,
+      duplicates: withinFileDuplicates + existingDuplicates + (toInsert.length - added),
+      duplicates_in_file: withinFileDuplicates,
+      duplicates_existing: existingDuplicates,
+      invalid: invalidNameRows + noPhoneCount,
+      invalid_no_phone: noPhoneCount,
+      // Back-compat fields still read by older UI builds.
+      contacts_inserted: added,
+      contacts_updated: 0,
+      contacts_skipped_no_phone: noPhoneCount,
+      row_errors: rowErrors,
+      summary,
+      unmatched_districts: unmatchedDistricts,
+      unmatched_assemblies: unmatchedAssemblies,
+    });
 
     if (dryRun) {
-      return NextResponse.json({
-        total_rows: totalRows,
-        valid_count: validRows.length,
-        error_count: errorRows.length,
-        warning_count: warningRows.length,
-        summary,
-        unmatched_districts: unmatchedDistricts,
-        unmatched_assemblies: unmatchedAssemblies,
-        row_errors: rowErrors,
-      });
+      return NextResponse.json({ ...summarize(toInsert.length), dry_run: true });
     }
 
-    // ---------------------------------------------------------- COMMIT ----
-    if (validRows.length === 0) {
-      return NextResponse.json({
-        total_rows: totalRows, contacts_inserted: 0, contacts_updated: 0, contacts_skipped_no_phone: 0,
-        row_errors: rowErrors, summary,
-        unmatched_districts: unmatchedDistricts, unmatched_assemblies: unmatchedAssemblies,
-      });
+    // Nothing new to write — return the counts without opening a transaction.
+    if (toInsert.length === 0) {
+      return NextResponse.json(summarize(0));
     }
 
-    const withPhone = validRows.filter((r) => r.phone);
-    const contactsSkippedNoPhone = validRows.length - withPhone.length;
-
-    let contactsInserted = 0;
-    let contactsUpdated = 0;
+    let added = 0;
     const conn = await getPool().getConnection();
     try {
       await conn.beginTransaction();
 
-      const designationIds = await resolveDesignationIds(conn, withPhone.map((r) => r.position));
+      const designationIds = await resolveDesignationIds(conn, toInsert.map((r) => r.position));
 
-      for (let i = 0; i < withPhone.length; i += INSERT_CHUNK) {
-        const chunk = withPhone.slice(i, i + INSERT_CHUNK);
+      for (let i = 0; i < toInsert.length; i += INSERT_CHUNK) {
+        const chunk = toInsert.slice(i, i + INSERT_CHUNK);
         const placeholders = chunk.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(",");
         const vals = [];
         for (const r of chunk) {
@@ -118,32 +133,19 @@ export async function POST(req) {
             designationIds.get(String(r.position || "").trim()) || null
           );
         }
-        await conn.query(
-          `INSERT INTO contacts (person_name, phone_number, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, designation_id)
-           VALUES ${placeholders}
-           ON DUPLICATE KEY UPDATE person_name=VALUES(person_name), address=VALUES(address),
-             zone_id=VALUES(zone_id), lok_sabha_id=VALUES(lok_sabha_id),
-             district_id=VALUES(district_id), assembly_id=VALUES(assembly_id),
-             ward_id=VALUES(ward_id), booth_id=VALUES(booth_id), designation_id=VALUES(designation_id)`,
+        // INSERT IGNORE (NOT ON DUPLICATE KEY UPDATE): only new rows are written;
+        // an existing contact is never modified. `affectedRows` is the number
+        // actually inserted, so the "added" count reflects real DB writes.
+        const [res] = await conn.query(
+          `INSERT IGNORE INTO contacts (person_name, phone_number, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, designation_id)
+           VALUES ${placeholders}`,
           vals
         );
-        for (const r of chunk) {
-          if (existingContactByPhone.has(r.phone)) contactsUpdated++; else contactsInserted++;
-        }
+        added += res.affectedRows || 0;
       }
 
       await conn.commit();
-
-      return NextResponse.json({
-        total_rows: totalRows,
-        contacts_inserted: contactsInserted,
-        contacts_updated: contactsUpdated,
-        contacts_skipped_no_phone: contactsSkippedNoPhone,
-        row_errors: rowErrors,
-        summary,
-        unmatched_districts: unmatchedDistricts,
-        unmatched_assemblies: unmatchedAssemblies,
-      });
+      return NextResponse.json(summarize(added));
     } catch (e) {
       await conn.rollback();
       throw e;

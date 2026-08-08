@@ -48,6 +48,17 @@ function norm(s) {
   return String(s || "").trim().replace(/\s+/g, " ").toUpperCase();
 }
 
+// Canonical phone for duplicate comparison: strip everything non-digit and keep
+// the last 10 digits, so all of "9876543210", "+91 9876543210", "91-9876543210"
+// and "+919876543210" collapse to the same key "9876543210". Returns null when
+// there are no digits. (Matches the last-10 rule the Contacts "duplicates"
+// filter already uses.)
+export function normalizePhone(raw) {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
 // Map common spelling variants in member lists -> the canonical DB name (normalized).
 const DISTRICT_ALIASES = {
   "BALODABAJAR": "BALODABAZAR-BHATAPARA",
@@ -156,6 +167,9 @@ export async function parseAndValidateWorkbook(rows) {
     query("SELECT id, phone_number FROM contacts"),
   ]);
   const existingContactByPhone = new Map(contactRows.map((r) => [String(r.phone_number), r.id]));
+  // Normalized set of EVERY existing contact phone — the bulk lookup the import
+  // uses to skip contacts that already exist (regardless of stored format).
+  const existingNormalizedPhones = new Set(contactRows.map((r) => normalizePhone(r.phone_number)).filter(Boolean));
   const zoneByName = new Map(zoneRows.map((r) => [norm(r.name), r.id]));
   const lokSabhaByName = new Map(lokSabhaRows.map((r) => [norm(r.name), r.id]));
   const districtByName = new Map(districtRows.map((r) => [norm(r.name), r.id]));
@@ -197,13 +211,18 @@ export async function parseAndValidateWorkbook(rows) {
     }
 
     const phone = String(get(row, "mobile") || "").trim().replace(/[^\d+]/g, "") || null;
-    if (phone) {
-      if (seenMobiles.has(phone)) {
+    // Canonical key for de-duplication (handles +91 / 91 / spaces / dashes).
+    const phoneKey = normalizePhone(phone);
+    if (phoneKey) {
+      if (seenMobiles.has(phoneKey)) {
+        // Same phone appears earlier in THIS file — keep the first, skip this one.
+        // Classified as a DUPLICATE (not invalid), so it lands in the summary's
+        // "Duplicate" bucket, matching the same-file de-dup requirement.
         summary.duplicate_mobile++;
-        rowErrors.push({ row: rowNum, name, mobile: phone, severity: "error", reasons: [`Duplicate mobile — also row ${seenMobiles.get(phone)}`] });
-        continue; // ambiguous which row should win — skip, don't silently pick one
+        rowErrors.push({ row: rowNum, name, mobile: phone, severity: "duplicate", reasons: [`Duplicate of row ${seenMobiles.get(phoneKey)} in this file (same phone)`] });
+        continue;
       }
-      seenMobiles.set(phone, rowNum);
+      seenMobiles.set(phoneKey, rowNum);
     }
 
     const zoneName = norm(get(row, "zone"));
@@ -268,7 +287,7 @@ export async function parseAndValidateWorkbook(rows) {
     if (reasons.length) rowErrors.push({ row: rowNum, name, mobile: phone || "", severity: "warning", reasons });
 
     validRows.push({
-      row: rowNum, name, phone, zoneId, lokSabhaId, districtId, assemblyId, wardId, boothId, address,
+      row: rowNum, name, phone, phoneKey, zoneId, lokSabhaId, districtId, assemblyId, wardId, boothId, address,
       position, workerType, membershipNo,
     });
   }
@@ -285,6 +304,7 @@ export async function parseAndValidateWorkbook(rows) {
     workerByMobile,
     workerByName,
     existingContactByPhone,
+    existingNormalizedPhones,
   };
 }
 

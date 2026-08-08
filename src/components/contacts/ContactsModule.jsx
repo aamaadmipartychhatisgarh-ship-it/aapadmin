@@ -1535,13 +1535,15 @@ function ImportModal({ url, onClose, onImported }) {
       const r = await fetch(url, { method: "POST", body: fd, signal: controller.signal });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.message || "Import failed. Check the file and try again."); return; }
+      // Rows that failed validation (missing name, etc.) — shown as detail.
       const failedRows = (Array.isArray(d.row_errors) ? d.row_errors : []).filter((e) => e.severity === "error");
       setResult({
         total: d.total_rows || 0,
-        imported: d.contacts_inserted || 0,
-        updated: d.contacts_updated || 0,
-        skipped: d.contacts_skipped_no_phone || 0,
-        failed: failedRows.length,
+        added: d.added ?? d.contacts_inserted ?? 0,
+        duplicates: d.duplicates ?? 0,
+        duplicatesInFile: d.duplicates_in_file ?? 0,
+        duplicatesExisting: d.duplicates_existing ?? 0,
+        invalid: d.invalid ?? failedRows.length,
         failedRows: failedRows.slice(0, 50),
         unmatchedAssemblies: d.unmatched_assemblies || [],
         unmatchedDistricts: d.unmatched_districts || [],
@@ -1608,20 +1610,24 @@ function ImportModal({ url, onClose, onImported }) {
             </>
           ) : (
             <>
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 text-emerald-800 font-bold"><CheckCircle2 size={18} /> Import complete</div>
+              <div className={`${result.added > 0 ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-gray-50 border-gray-200 text-gray-700"} border rounded-xl p-4`}>
+                <div className="flex items-center gap-2 font-bold"><CheckCircle2 size={18} /> {result.added > 0 ? "Import completed successfully" : "Import completed — nothing new to add"}</div>
                 <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
-                  <div className="text-gray-600"><span className="font-bold text-gray-900">{result.imported}</span> imported</div>
-                  <div className="text-gray-600"><span className="font-bold text-gray-900">{result.updated}</span> updated</div>
-                  <div className="text-gray-600"><span className="font-bold text-gray-900">{result.skipped}</span> skipped (no phone)</div>
-                  <div className="text-gray-600"><span className={`font-bold ${result.failed ? "text-red-600" : "text-gray-900"}`}>{result.failed}</span> failed</div>
+                  <div className="text-gray-600"><span className="font-bold text-gray-900">{result.total}</span> total rows</div>
+                  <div className="text-gray-600"><span className="font-bold text-emerald-700">{result.added}</span> new contacts added</div>
+                  <div className="text-gray-600"><span className="font-bold text-gray-900">{result.duplicates}</span> duplicates skipped</div>
+                  <div className="text-gray-600"><span className={`font-bold ${result.invalid ? "text-red-600" : "text-gray-900"}`}>{result.invalid}</span> invalid rows</div>
                 </div>
-                <div className="text-xs text-gray-400 mt-2">{result.total} data row{result.total === 1 ? "" : "s"} processed.</div>
+                {(result.duplicatesInFile > 0 || result.duplicatesExisting > 0) && (
+                  <div className="text-[11px] text-gray-400 mt-1.5">
+                    Duplicates: {result.duplicatesExisting} already in the database, {result.duplicatesInFile} repeated in this file — existing contacts were left unchanged.
+                  </div>
+                )}
               </div>
 
-              {result.failed > 0 && (
+              {result.invalid > 0 && result.failedRows.length > 0 && (
                 <div className="border border-red-100 rounded-xl overflow-hidden">
-                  <div className="bg-red-50 px-3 py-2 text-xs font-bold text-red-700 uppercase tracking-wide">Failed rows</div>
+                  <div className="bg-red-50 px-3 py-2 text-xs font-bold text-red-700 uppercase tracking-wide">Invalid rows</div>
                   <div className="max-h-48 overflow-y-auto divide-y divide-gray-100">
                     {result.failedRows.map((e, i) => (
                       <div key={i} className="px-3 py-1.5 text-xs text-gray-600 flex gap-2">
