@@ -130,19 +130,36 @@ export async function GET(req) {
       heatmap[d][r.hour] = Number(r.n);
     });
 
-    // 7. Treemap: calls per district (full set, with zone label for color grouping)
-    const treemap = await query(
-      `SELECT ld.name AS district, lz.name AS zone, COUNT(c.id) AS n
-         FROM calls c
-         JOIN locations ld ON ld.id = c.district_id
-         LEFT JOIN locations lls ON lls.id = ld.parent_id
-         LEFT JOIN locations lz ON lz.id = lls.parent_id
-         ${where}
-         GROUP BY ld.id, ld.name, lz.name
-         HAVING n > 0
-         ORDER BY n DESC`,
-      params
-    );
+    // 7. Treemap: number of WORKERS assigned to each district (the actual
+    // workers.district_id count — NOT calls/contacts). Permission-scoped to the
+    // viewer's territory; districts with zero workers are omitted (HAVING). The
+    // date filter does not apply (workers aren't date-based). Wrapped so a
+    // missing/legacy `workers` table degrades to an empty treemap instead of
+    // failing the whole analytics response.
+    let treemap = [];
+    try {
+      const wParams = [];
+      let wWhere = "WHERE w.district_id IS NOT NULL";
+      if (districtId) { wWhere += " AND w.district_id = ?"; wParams.push(districtId); }
+      const wScope = scopeFilterSync(session.user, "w");
+      wWhere += " " + wScope.where;
+      wParams.push(...wScope.params);
+      treemap = await query(
+        `SELECT ld.name AS district, lz.name AS zone, COUNT(w.id) AS count
+           FROM workers w
+           JOIN locations ld ON ld.id = w.district_id
+           LEFT JOIN locations lls ON lls.id = ld.parent_id
+           LEFT JOIN locations lz ON lz.id = lls.parent_id
+           ${wWhere}
+           GROUP BY ld.id, ld.name, lz.name
+           HAVING count > 0
+           ORDER BY count DESC`,
+        wParams
+      );
+    } catch (e) {
+      console.error("analytics treemap (workers by district) failed:", e?.code || e?.message);
+      treemap = [];
+    }
 
     return NextResponse.json({
       line,

@@ -123,12 +123,12 @@ export default function AnalyticsPanel() {
 
   const treemapData = useMemo(() => {
     const rows = data?.treemap || [];
-    // Group districts under zones
+    // Group districts under zones; block size = worker count for that district.
     const zoneMap = {};
     rows.forEach((r) => {
       const z = r.zone || "Unzoned";
       if (!zoneMap[z]) zoneMap[z] = { name: z, children: [] };
-      zoneMap[z].children.push({ name: r.district, size: Number(r.n) });
+      zoneMap[z].children.push({ name: r.district, size: Number(r.count) });
     });
     return Object.values(zoneMap);
   }, [data]);
@@ -300,9 +300,11 @@ export default function AnalyticsPanel() {
             )}
           </Panel>
 
-          {/* Row 6: Treemap */}
-          <Panel title="Calls by District (treemap)" icon={Layers}>
-            {treemapData.length === 0 ? <Empty /> : (
+          {/* Row 6: Treemap — workers assigned per district */}
+          <Panel title="Workers by District (treemap)" icon={Layers}>
+            {treemapData.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-gray-400 text-sm">No district data available.</div>
+            ) : (
               <ResponsiveContainer width="100%" height={400}>
                 <Treemap
                   data={treemapData}
