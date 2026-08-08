@@ -16,9 +16,10 @@ export async function PUT(req, { params }) {
     const d = await req.json().catch(() => ({}));
     if (numOrNull(d.election_year) == null) return NextResponse.json({ message: "Election year is required." }, { status: 400 });
     const res = await query(
-      `UPDATE la_mla_elections SET election_year=?, election_type=?, party=?, candidate=?, status=?, votes=?, vote_percentage=?, margin=?, result=? WHERE id=?`,
+      `UPDATE la_mla_elections SET election_year=?, election_type=?, party=?, candidate=?, status=?, votes=?, vote_percentage=?, margin=?, result=?, runner_up=?, runner_up_votes=? WHERE id=?`,
       [numOrNull(d.election_year), strOrNull(d.election_type), strOrNull(d.party), strOrNull(d.candidate),
-       strOrNull(d.status), numOrNull(d.votes), numOrNull(d.vote_percentage), numOrNull(d.margin), strOrNull(d.result), eid]
+       strOrNull(d.status), numOrNull(d.votes), numOrNull(d.vote_percentage), numOrNull(d.margin), strOrNull(d.result),
+       strOrNull(d.runner_up), numOrNull(d.runner_up_votes), eid]
     );
     if (!res.affectedRows) return NextResponse.json({ message: "Election record not found." }, { status: 404 });
     return NextResponse.json({ ok: true }, { headers: noStore });

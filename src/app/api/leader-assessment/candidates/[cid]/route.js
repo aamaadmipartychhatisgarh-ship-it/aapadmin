@@ -18,9 +18,10 @@ export async function PUT(req, { params }) {
     const name = strOrNull(d.name);
     if (!name) return NextResponse.json({ message: "Candidate name is required." }, { status: 400 });
     const res = await query(
-      `UPDATE la_aap_candidates SET photo_url=?, name=?, phone=?, address=?, date_of_birth=?, caste=?, net_worth=?, business=?, monthly_income=? WHERE id=?`,
+      `UPDATE la_aap_candidates SET photo_url=?, name=?, phone=?, address=?, date_of_birth=?, caste=?, net_worth=?, business=?, monthly_income=?, education=?, political_experience=?, organization_experience=?, previous_elections=?, current_position=? WHERE id=?`,
       [strOrNull(d.photo_url), name, strOrNull(d.phone), strOrNull(d.address), dateOrNull(d.date_of_birth),
-       strOrNull(d.caste), strOrNull(d.net_worth), strOrNull(d.business), strOrNull(d.monthly_income), cid]
+       strOrNull(d.caste), strOrNull(d.net_worth), strOrNull(d.business), strOrNull(d.monthly_income),
+       strOrNull(d.education), strOrNull(d.political_experience), strOrNull(d.organization_experience), strOrNull(d.previous_elections), strOrNull(d.current_position), cid]
     );
     if (!res.affectedRows) return NextResponse.json({ message: "Candidate not found." }, { status: 404 });
     return NextResponse.json({ ok: true }, { headers: noStore });

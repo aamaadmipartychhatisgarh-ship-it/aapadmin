@@ -51,6 +51,9 @@ export async function GET(_req, { params }) {
         id: c.id, assembly_id: c.assembly_id, photo_url: c.photo_url, name: c.name, phone: c.phone,
         address: c.address, date_of_birth: c.date_of_birth, age: ageFromDob(c.date_of_birth),
         caste: c.caste, net_worth: c.net_worth, business: c.business, monthly_income: c.monthly_income,
+        education: c.education, political_experience: c.political_experience,
+        organization_experience: c.organization_experience, previous_elections: c.previous_elections,
+        current_position: c.current_position,
         assessment, total, assessment_done: anyScore, created_at: c.created_at, updated_at: c.updated_at,
       };
     });

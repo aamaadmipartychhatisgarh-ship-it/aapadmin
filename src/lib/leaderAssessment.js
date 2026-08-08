@@ -136,7 +136,31 @@ export async function ensureLeaderAssessmentTables() {
      )`,
   ];
   for (const stmt of ddl) await query(stmt);
+  // Optional columns added after the initial release. Ensured idempotently so
+  // both fresh and already-created deployments get them without a manual step.
+  await ensureColumn("la_aap_candidates", "education", "VARCHAR(255) NULL");
+  await ensureColumn("la_aap_candidates", "political_experience", "VARCHAR(500) NULL");
+  await ensureColumn("la_aap_candidates", "organization_experience", "VARCHAR(500) NULL");
+  await ensureColumn("la_aap_candidates", "previous_elections", "VARCHAR(500) NULL");
+  await ensureColumn("la_aap_candidates", "current_position", "VARCHAR(255) NULL");
+  await ensureColumn("la_mla_elections", "runner_up", "VARCHAR(255) NULL");
+  await ensureColumn("la_mla_elections", "runner_up_votes", "INT NULL");
   ensured = true;
+}
+
+// Add a column only if it's missing (cross-DB safe: check information_schema
+// first, so no reliance on ADD COLUMN IF NOT EXISTS which MySQL lacks).
+async function ensureColumn(table, column, def) {
+  try {
+    const rows = await query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [table, column]
+    );
+    if (Number(rows[0]?.n || 0) === 0) {
+      await query(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+    }
+  } catch (e) { console.error(`[LA] ensureColumn ${table}.${column}:`, e?.message || e); }
 }
 
 // The 10 assessment parameters. `key` = column suffix, `label` = UI label.
@@ -177,7 +201,7 @@ export function ageFromDob(dob) {
 // Ability, (2) Public Acceptability, (3) lowest candidate id (stable). Ranking
 // is fully derived — never user-editable.
 export function rankCandidates(candidates) {
-  return [...candidates]
+  const sorted = [...candidates]
     .map((c) => ({ ...c, total: assessmentTotal(c.assessment) }))
     .sort((a, b) => {
       if (b.total !== a.total) return b.total - a.total;
@@ -186,8 +210,14 @@ export function rankCandidates(candidates) {
       const pa = (Number(b.assessment?.s_acceptability) || 0) - (Number(a.assessment?.s_acceptability) || 0);
       if (pa !== 0) return pa;
       return a.id - b.id;
-    })
-    .map((c, i) => ({ ...c, rank: i + 1 }));
+    });
+  // Competition ranking: equal totals share the same rank (e.g. 85,85,74 →
+  // ranks 1,1,3). `tied` flags a shared rank for the UI.
+  return sorted.map((c) => {
+    const rank = 1 + sorted.filter((o) => o.total > c.total).length;
+    const tied = sorted.filter((o) => o.total === c.total).length > 1;
+    return { ...c, rank, tied };
+  });
 }
 
 // Validate a single 0–10 score. Returns a number, or null for empty; throws a
