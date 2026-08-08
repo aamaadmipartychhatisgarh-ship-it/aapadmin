@@ -175,8 +175,6 @@ const emptyForm = (c, canEditGeo) => ({
   phone_number: c?.phone_number || "",
   designation_id: c?.designation_id || "",
   address: c?.address || "",
-  pincode: c?.pincode || "",
-  village: c?.village || "",
   remarks: c?.remarks || "",
   assigned_to_user_id: c?.assigned_to_user_id || "",
   is_completed: c?.is_completed ? 1 : 0,
@@ -240,8 +238,6 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       phone_number: form.phone_number.trim(),
       designation_id: form.designation_id || null,
       address: form.address,
-      pincode: form.pincode,
-      village: form.village,
       remarks: form.remarks,
       assigned_to_user_id: form.assigned_to_user_id || null,
       ...(canEditStatus ? { is_completed: form.is_completed ? 1 : 0 } : {}),
@@ -354,8 +350,6 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
             <Field label="Block"><select className={inp} value="_" disabled><option value="_">{contact?.ward_name || "—"}</option></select></Field>
           </>
         )}
-        <Field label="Village / City"><input className={inp} value={form.village} onChange={(e) => setForm({ ...form, village: e.target.value })} /></Field>
-        <Field label="Pincode"><input className={inp} value={form.pincode} onChange={(e) => setForm({ ...form, pincode: e.target.value })} /></Field>
         <Field label="Assigned Caller">
           <select className={inp} value={form.assigned_to_user_id} onChange={(e) => setForm({ ...form, assigned_to_user_id: e.target.value })}>
             <option value="">— Pool (unassigned) —</option>
