@@ -407,7 +407,9 @@ function TreemapNode(props) {
         <text x={x + 6} y={y + 16} fill="#fff" fontSize="11" fontWeight="600">{name}</text>
       )}
       {depth === 2 && width > 60 && height > 50 && (
-        <text x={x + 6} y={y + 32} fill="#fff" fontSize="10" opacity={0.85}>{props.size}</text>
+        <text x={x + 6} y={y + 32} fill="#fff" fontSize="10" opacity={0.85}>
+          {props.size} Worker{props.size === 1 ? "" : "s"}
+        </text>
       )}
     </g>
   );

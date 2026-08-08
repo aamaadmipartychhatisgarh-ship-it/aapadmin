@@ -146,22 +146,28 @@ export async function GET(req) {
 
     // 7. Treemap: number of WORKERS assigned to each district (the actual
     // workers.district_id count — NOT calls/contacts). Permission-scoped to the
-    // viewer's territory; districts with zero workers are omitted (HAVING). The
-    // date filter does not apply (workers aren't date-based). Wrapped so a
-    // missing/legacy `workers` table degrades to an empty treemap instead of
-    // failing the whole analytics response.
+    // viewer's territory. Workers with no district (NULL district_id) are NOT
+    // dropped — they're bucketed under "Unassigned" (via a LEFT JOIN +
+    // COALESCE) so the sum of all blocks equals the total number of workers
+    // analyzed. Districts with zero workers are omitted (HAVING) since an empty
+    // block can't render. The date filter does not apply (workers aren't
+    // date-based). Wrapped so a missing/legacy `workers` table degrades to an
+    // empty treemap instead of failing the whole analytics response.
     let treemap = [];
     try {
       const wParams = [];
-      let wWhere = "WHERE w.district_id IS NOT NULL";
+      let wWhere = "WHERE 1=1";
+      // A single-district filter naturally excludes NULL-district workers — the
+      // viewer asked for one district, so "Unassigned" doesn't apply.
       if (districtId) { wWhere += " AND w.district_id = ?"; wParams.push(districtId); }
       const wScope = scopeFilterSync(session.user, "w");
       wWhere += " " + wScope.where;
       wParams.push(...wScope.params);
       treemap = await query(
-        `SELECT ld.name AS district, lz.name AS zone, COUNT(w.id) AS count
+        `SELECT COALESCE(ld.name, 'Unassigned') AS district,
+                lz.name AS zone, COUNT(w.id) AS count
            FROM workers w
-           JOIN locations ld ON ld.id = w.district_id
+           LEFT JOIN locations ld ON ld.id = w.district_id
            LEFT JOIN locations lls ON lls.id = ld.parent_id
            LEFT JOIN locations lz ON lz.id = lls.parent_id
            ${wWhere}
