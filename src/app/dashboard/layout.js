@@ -54,6 +54,7 @@ const SUPERVISOR_NAV = [
     ],
   },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+  { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
   { name: "Media", href: "/dashboard/media", icon: Newspaper },
   { name: "Social Media", href: "/dashboard/social", icon: Share2 },
   // Reports is a collapsible parent — Area Reports is nested beneath it as a
@@ -186,6 +187,7 @@ export default function DashboardLayout({ children }) {
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+      { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Social Media", href: "/dashboard/social", icon: Share2 },
