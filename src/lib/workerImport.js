@@ -14,10 +14,12 @@ import { WORKER_TYPES } from "@/lib/workerTypes";
 //   S.NO | DATE | NAME | CONTACT NO | JILA | VIDHANSABHA | BLOCK | WARD
 // plus optional Designation / Membership No / Polling Booth columns.
 const COLUMN_MAP = {
-  name: ["name", "member name", "full name"],
-  mobile: ["contact no", "contact", "mobile", "phone", "phone number", "mobile no", "contact number"],
+  name: ["name", "person name", "person_name", "member name", "full name", "contact name", "contact person"],
+  mobile: ["contact no", "contact", "mobile", "mobile number", "mobile_number", "phone", "phone number", "phone_number", "phone no", "mobile no", "contact number", "contact_no", "whatsapp", "whatsapp number"],
+  zone: ["zone"],
+  lok_sabha: ["lok sabha", "lok_sabha", "loksabha", "lok sabha constituency", "loksabha constituency", "parliament", "parliamentary constituency", "ls"],
   district: ["jila", "district", "zila"],
-  assembly: ["vidhansabha", "vidhan sabha", "assembly", "constituency"],
+  assembly: ["vidhansabha", "vidhan sabha", "assembly", "assembly constituency", "constituency", "ac"],
   block: ["block", "mandal", "ward"], // "Block" in the product spec = the `ward` location type
   booth: ["polling booth", "polling station", "booth", "booth no", "booth number"],
   address: ["address", "village", "gram", "city"],
@@ -29,10 +31,14 @@ const COLUMN_MAP = {
 function buildHeaderIndex(headerRow) {
   const idx = {};
   headerRow.forEach((h, i) => {
-    const key = String(h || "").trim().toLowerCase();
+    // Normalise: trim, lowercase, collapse internal whitespace, drop trailing
+    // punctuation (e.g. "Phone No." / "Person  Name") so header variants match.
+    const key = String(h || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/[.:]+$/, "");
     if (!key) return;
     for (const [field, names] of Object.entries(COLUMN_MAP)) {
-      if (names.includes(key)) idx[field] = i;
+      // First match wins, so an earlier exact column isn't overwritten by a
+      // later looser alias.
+      if (idx[field] === undefined && names.includes(key)) idx[field] = i;
     }
   });
   return idx;
@@ -138,7 +144,9 @@ export async function parseAndValidateWorkbook(rows) {
   // skips worker/membership matching entirely — contacts still import normally.
   const workersExists = await hasWorkersTable();
   const membershipExists = workersExists && (await hasWorkersMembershipCol());
-  const [districtRows, assemblyRows, wardRows, boothRows, workerRows, membershipRows, contactRows] = await Promise.all([
+  const [zoneRows, lokSabhaRows, districtRows, assemblyRows, wardRows, boothRows, workerRows, membershipRows, contactRows] = await Promise.all([
+    query("SELECT id, name FROM locations WHERE type = 'zone'"),
+    query("SELECT id, name FROM locations WHERE type = 'lok_sabha'"),
     query("SELECT id, name FROM locations WHERE type = 'district'"),
     query("SELECT id, name FROM locations WHERE type = 'assembly'"),
     query("SELECT id, name, parent_id FROM locations WHERE type = 'ward'"),
@@ -148,6 +156,8 @@ export async function parseAndValidateWorkbook(rows) {
     query("SELECT id, phone_number FROM contacts"),
   ]);
   const existingContactByPhone = new Map(contactRows.map((r) => [String(r.phone_number), r.id]));
+  const zoneByName = new Map(zoneRows.map((r) => [norm(r.name), r.id]));
+  const lokSabhaByName = new Map(lokSabhaRows.map((r) => [norm(r.name), r.id]));
   const districtByName = new Map(districtRows.map((r) => [norm(r.name), r.id]));
   const assemblyByName = new Map(assemblyRows.map((r) => [norm(r.name), r.id]));
   const wardByKey = new Map(wardRows.map((r) => [`${r.parent_id}|${norm(r.name)}`, r.id]));
@@ -196,10 +206,16 @@ export async function parseAndValidateWorkbook(rows) {
       seenMobiles.set(phone, rowNum);
     }
 
+    const zoneName = norm(get(row, "zone"));
+    const lokSabhaName = norm(get(row, "lok_sabha"));
     const districtName = norm(get(row, "district"));
     const assemblyName = norm(get(row, "assembly"));
+    const zoneId = zoneName ? (zoneByName.get(zoneName) || null) : null;
+    const lokSabhaId = lokSabhaName ? (lokSabhaByName.get(lokSabhaName) || null) : null;
     const districtId = resolveLoc(districtName, districtByName, DISTRICT_ALIASES);
     const assemblyId = resolveLoc(assemblyName, assemblyByName, ASSEMBLY_ALIASES);
+    if (zoneName && !zoneId) reasons.push(`Invalid zone "${get(row, "zone")}"`);
+    if (lokSabhaName && !lokSabhaId) reasons.push(`Invalid lok sabha "${get(row, "lok_sabha")}"`);
     if (districtName && !districtId) { summary.invalid_district++; unmatchedDistricts.add(districtName); reasons.push(`Invalid district "${get(row, "district")}"`); }
     if (assemblyName && !assemblyId) { summary.invalid_assembly++; unmatchedAssemblies.add(assemblyName); reasons.push(`Invalid assembly "${get(row, "assembly")}"`); }
 
@@ -252,7 +268,7 @@ export async function parseAndValidateWorkbook(rows) {
     if (reasons.length) rowErrors.push({ row: rowNum, name, mobile: phone || "", severity: "warning", reasons });
 
     validRows.push({
-      row: rowNum, name, phone, districtId, assemblyId, wardId, boothId, address,
+      row: rowNum, name, phone, zoneId, lokSabhaId, districtId, assemblyId, wardId, boothId, address,
       position, workerType, membershipNo,
     });
   }

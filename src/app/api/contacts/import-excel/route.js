@@ -110,18 +110,19 @@ export async function POST(req) {
 
       for (let i = 0; i < withPhone.length; i += INSERT_CHUNK) {
         const chunk = withPhone.slice(i, i + INSERT_CHUNK);
-        const placeholders = chunk.map(() => "(?,?,?,?,?,?,?,?)").join(",");
+        const placeholders = chunk.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(",");
         const vals = [];
         for (const r of chunk) {
           vals.push(
-            r.name, r.phone, r.address, r.districtId, r.assemblyId, r.wardId, r.boothId,
+            r.name, r.phone, r.address, r.zoneId, r.lokSabhaId, r.districtId, r.assemblyId, r.wardId, r.boothId,
             designationIds.get(String(r.position || "").trim()) || null
           );
         }
         await conn.query(
-          `INSERT INTO contacts (person_name, phone_number, address, district_id, assembly_id, ward_id, booth_id, designation_id)
+          `INSERT INTO contacts (person_name, phone_number, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, designation_id)
            VALUES ${placeholders}
            ON DUPLICATE KEY UPDATE person_name=VALUES(person_name), address=VALUES(address),
+             zone_id=VALUES(zone_id), lok_sabha_id=VALUES(lok_sabha_id),
              district_id=VALUES(district_id), assembly_id=VALUES(assembly_id),
              ward_id=VALUES(ward_id), booth_id=VALUES(booth_id), designation_id=VALUES(designation_id)`,
           vals
