@@ -364,6 +364,31 @@ function SumCard({ label, value, accent, danger }) {
 }
 
 
+// Stable, unique React keys for checklist rows. A subtask's DB `id` is null for
+// new rows (and several new rows would collide on null), and the typed title
+// must NEVER be used as a key — a key that changes as you type remounts the
+// input and drops focus. So each row carries its own `_k` client key, assigned
+// once at creation and never derived from its value. `_k` is render-only and is
+// stripped out before the payload is built.
+let subKeySeq = 0;
+const newSub = (title = "", id = null) => ({ id, title, _k: `sk${++subKeySeq}` });
+
+// Grouped section wrapper for the Create/Edit Task modal. MUST live at module
+// scope (not inside AddTaskModal): a component defined inside the render body
+// gets a new function identity on every keystroke, which makes React remount
+// its whole subtree — including the inputs — so text fields would lose focus
+// after a single character. A stable module-level identity keeps them mounted.
+function Section({ icon: Icon, title, children }) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-gray-400">
+        {Icon && <Icon size={13} />}{title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ===========================================================================
 // Create / Edit Task
 // ---------------------------------------------------------------------------
@@ -413,7 +438,7 @@ function AddTaskModal({ onClose, onSaved, editing }) {
   // completion state survives an edit; new rows have id null. Blank rows are
   // dropped at submit (never sent).
   const [subtasks, setSubtasks] = useState(
-    editing?.subtasks?.length ? editing.subtasks.map((s) => ({ id: s.id, title: s.title })) : [{ id: null, title: "" }]
+    editing?.subtasks?.length ? editing.subtasks.map((s) => newSub(s.title, s.id)) : [newSub()]
   );
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -436,9 +461,11 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     return () => { alive = false; };
   }, []);
 
-  const setSub = (i, title) => setSubtasks((s) => s.map((x, j) => (j === i ? { ...x, title } : x)));
-  const addSub = () => setSubtasks((s) => [...s, { id: null, title: "" }]);
-  const removeSub = (i) => setSubtasks((s) => (s.length === 1 ? [{ id: null, title: "" }] : s.filter((_, j) => j !== i)));
+  // Update by _k (not index) so the row's identity — and its mounted input —
+  // is never affected by edits to other rows.
+  const setSub = (k, title) => setSubtasks((s) => s.map((x) => (x._k === k ? { ...x, title } : x)));
+  const addSub = () => setSubtasks((s) => [...s, newSub()]);
+  const removeSub = (k) => setSubtasks((s) => (s.length === 1 ? [newSub()] : s.filter((x) => x._k !== k)));
 
   const setUserIds = (ids) => setForm((f) => ({ ...f, assigned_user_ids: ids }));
 
@@ -536,14 +563,6 @@ function AddTaskModal({ onClose, onSaved, editing }) {
 
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
   const errInp = "border-red-300 focus:ring-red-200";
-  const Section = ({ icon: Icon, title, children }) => (
-    <div className="space-y-2.5">
-      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-gray-400">
-        {Icon && <Icon size={13} />}{title}
-      </div>
-      {children}
-    </div>
-  );
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -629,16 +648,16 @@ function AddTaskModal({ onClose, onSaved, editing }) {
           <Section icon={CheckCircle2} title="Checklist (optional)">
             <div className="space-y-2">
               {subtasks.map((s, i) => (
-                <div key={i} className="flex items-center gap-2">
+                <div key={s._k} className="flex items-center gap-2">
                   <span className="w-4 h-4 rounded border border-gray-300 shrink-0" />
                   <input
                     className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
                     placeholder={`Checklist item ${i + 1}`}
                     value={s.title}
-                    onChange={(e) => setSub(i, e.target.value)}
+                    onChange={(e) => setSub(s._k, e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSub(); } }}
                   />
-                  <button type="button" onClick={() => removeSub(i)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><X size={15} /></button>
+                  <button type="button" onClick={() => removeSub(s._k)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><X size={15} /></button>
                 </div>
               ))}
               <button type="button" onClick={addSub} className="inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline">
