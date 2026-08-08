@@ -7,7 +7,7 @@ import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
 import { notifyTaskAssigned } from "@/lib/notify";
-import { subtasksByTask, hasSubtasksTable, hasTaskAssignedAt, hasTaskDurationColumns } from "@/lib/tasks";
+import { subtasksByTask, hasSubtasksTable, hasTaskAssignedAt, hasTaskDurationColumns, hasTaskContactColumn } from "@/lib/tasks";
 import { addDays } from "@/lib/taskDuration";
 
 // GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
@@ -116,12 +116,14 @@ export async function POST(req) {
     if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const d = await req.json();
     if (!d.title) return NextResponse.json({ message: "Title required" }, { status: 400 });
-    // Best-effort: a schema check/migration hiccup must not fail task creation
-    // (the contact_id column already exists in this deployment).
-    try { await ensureTaskContactColumn(); } catch (e) { console.error("ensureTaskContactColumn:", e); }
-    // Stamp assigned_at at creation (this is the initial assignment time).
+    // Read-only schema probes (cached). The create path NEVER runs DDL: the old
+    // ensureTaskContactColumn() issued an ALTER TABLE + FOREIGN KEY that can
+    // block on a metadata lock under concurrent load and hang the whole POST
+    // (reads keep working, creates hang — the exact production symptom). We just
+    // detect whether the optional columns exist and adapt the INSERT.
     const stampAssigned = await hasTaskAssignedAt();
     const hasDuration = await hasTaskDurationColumns();
+    const hasContactCol = await hasTaskContactColumn();
     // The deadline is derived from start_date + duration_days when both are
     // given (the normal path, via the duration picker); an explicit d.deadline
     // is only a fallback for callers that don't use the duration picker.
@@ -149,11 +151,12 @@ export async function POST(req) {
     const createdIds = [];
     for (const uid of targets) {
       const res = await query(
-        `INSERT INTO tasks (title, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id, contact_id, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
-         VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
+        `INSERT INTO tasks (title, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id${hasContactCol ? ", contact_id" : ""}, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
+         VALUES (?, ?, 'pending', ?, ?, ?, ?${hasContactCol ? ", ?" : ""}, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
         [d.title, d.priority || "medium", deadline,
          uid || null, d.assigned_to_team_id || null, d.district_id || null,
-         d.contact_id || null, session.user.id,
+         ...(hasContactCol ? [d.contact_id || null] : []),
+         session.user.id,
          ...(hasDuration ? [d.start_date || null, d.duration_preset || null, d.duration_days || null] : [])]
       );
       createdIds.push(res.insertId);

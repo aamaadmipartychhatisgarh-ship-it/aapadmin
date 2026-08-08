@@ -14,6 +14,22 @@ export async function hasSubtasksTable() {
   return hasSubtasksPromise;
 }
 
+// Whether tasks.contact_id exists yet. Cached, READ-ONLY (never runs DDL) so it
+// is safe to call on the write path — unlike ensureTaskContactColumn(), which
+// issues an ALTER TABLE + FK that can block on a metadata lock under concurrent
+// load and hang the request. Task creation includes contact_id only when this
+// says the column is present; otherwise the column is simply omitted.
+let hasContactColPromise;
+export async function hasTaskContactColumn() {
+  if (!hasContactColPromise) {
+    hasContactColPromise = query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks' AND COLUMN_NAME = 'contact_id'`
+    ).then((r) => Number(r[0]?.n || 0) > 0).catch(() => { hasContactColPromise = undefined; return false; });
+  }
+  return hasContactColPromise;
+}
+
 // Whether tasks.assigned_at exists yet (added by add-task-assigned-at). Cached.
 let hasAssignedAtPromise;
 export async function hasTaskAssignedAt() {
