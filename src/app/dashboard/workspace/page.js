@@ -1164,19 +1164,34 @@ function fmtTaskAssigned(v) {
   return `${date} • ${time}`;
 }
 
-// Task description: multi-line, wraps, preserves line breaks; clamps to 5 lines
-// with a Show More toggle only when the text is long. Renders nothing when empty.
+// Today's Tasks — the caller's own assigned tasks that are relevant TODAY:
+// open tasks whose date range (start_date … deadline) includes today, plus any
+// overdue task (past deadline, not completed). Date-driven from the DB via
+// view=mine (server-scoped to this caller — never another caller's tasks).
 function TodaysTaskPanel({ onLogComplaint }) {
   const [tasks, setTasks] = useState(undefined); // undefined = loading
   const [busy, setBusy] = useState({});
+  const today = new Date().toISOString().slice(0, 10);
 
   async function load() {
     try {
-      const r = await fetch("/api/tasks?view=mine");
+      const r = await fetch("/api/tasks?view=mine", { cache: "no-store" });
       if (!r.ok) { setTasks([]); return; }
       const all = (await r.json()).tasks || [];
-      // Show every OPEN master task assigned to this caller (all in one card).
-      setTasks(all.filter((t) => t.status === "pending" || t.status === "in_progress"));
+      const open = all.filter((t) => t.status === "pending" || t.status === "in_progress");
+      const relevant = open.filter((t) => {
+        if (t.is_overdue) return true; // keep overdue visible
+        const start = t.start_date ? String(t.start_date).slice(0, 10) : null;
+        const dl = t.deadline ? String(t.deadline).slice(0, 10) : null;
+        const afterStart = !start || start <= today;
+        const beforeEnd = !dl || dl >= today;
+        return afterStart && beforeEnd; // active date range includes today
+      });
+      relevant.sort((a, b) =>
+        (b.is_overdue - a.is_overdue) || (b.due_today - a.due_today) ||
+        String(a.deadline || "9999-12-31").localeCompare(String(b.deadline || "9999-12-31"))
+      );
+      setTasks(relevant);
     } catch { setTasks([]); }
   }
   useEffect(() => {
@@ -1194,45 +1209,48 @@ function TodaysTaskPanel({ onLogComplaint }) {
     setBusy((b) => ({ ...b, [id]: false }));
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const deadlineLabel = (d) => {
-    if (!d) return "No deadline";
-    const day = d.slice(0, 10);
-    return day === today ? "Today" : new Date(day).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
-  };
+  const todayLabel = new Date().toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short" });
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-bold text-gray-900 flex items-center gap-2"><ListChecks size={16} className="text-[#164FA3]" /> Today's Tasks</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="font-bold text-gray-900 flex items-center gap-2"><ListChecks size={16} className="text-[#164FA3]" /> Today's Tasks</h3>
+          <span className="text-[11px] font-medium text-gray-400">Today, {todayLabel}</span>
+        </div>
         {Array.isArray(tasks) && tasks.length > 0 && <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700">{tasks.length}</span>}
       </div>
 
       {tasks === undefined ? (
-        <div className="text-gray-400 text-sm py-4 text-center"><Loader2 className="inline animate-spin" /></div>
+        <div className="space-y-2.5 py-1">
+          {[0, 1].map((i) => <div key={i} className="h-16 rounded-xl bg-gray-100 animate-pulse" />)}
+        </div>
       ) : tasks.length === 0 ? (
         <div className="text-center py-6">
-          <CheckCircle2 size={32} className="mx-auto text-emerald-400 mb-2" />
-          <div className="font-semibold text-gray-800">No Tasks Assigned</div>
-          <p className="text-sm text-gray-500 mt-1">You&apos;re all caught up. New tasks from your Supervisor appear here automatically.</p>
+          <CheckCircle2 size={26} className="mx-auto text-emerald-400 mb-2" />
+          <div className="font-semibold text-gray-700 text-sm">You&apos;re all caught up for today.</div>
+          <p className="text-xs text-gray-400 mt-0.5">No tasks are scheduled for today.</p>
         </div>
       ) : (
         <div className="space-y-3 max-h-[440px] overflow-y-auto">
           {tasks.map((t) => (
-            <div key={t.id} className="border border-gray-100 rounded-xl p-3">
+            <div key={t.id} className={`border rounded-xl p-3 ${t.is_overdue ? "border-red-200 bg-red-50/40" : "border-gray-100"}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="font-semibold text-gray-900 text-sm min-w-0 truncate">{t.title}</div>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${PRIORITY_BADGE[t.priority] || "bg-gray-100 text-gray-600"}`}>{t.priority}</span>
               </div>
-              <div className="text-[11px] text-gray-400 mt-0.5 mb-2">
-                Assigned: {fmtTaskAssigned(t.assigned_at || t.created_at) || "—"}{t.created_by_name ? ` · by ${t.created_by_name}` : ""} · Deadline: {deadlineLabel(t.deadline)}
+              <div className="flex items-center gap-1.5 mt-1 mb-2 flex-wrap">
+                {t.is_overdue ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">OVERDUE</span>
+                  : t.due_today ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">DUE TODAY</span> : null}
+                {t.subtask_total > 0 && <span className="text-[11px] text-gray-500">{t.subtask_done}/{t.subtask_total} completed</span>}
+                {t.created_by_name && <span className="text-[11px] text-gray-400">· by {t.created_by_name}</span>}
               </div>
               {t.subtask_total > 0 ? (
                 <SubtaskChecklist compact subtasks={t.subtasks} onProgress={(done, total, status) => { if (status === "completed") setTimeout(load, 600); }} />
               ) : (
                 <div className="flex flex-wrap gap-2">
-                  {t.status === "pending" && <button onClick={() => setStatus(t.id, "in_progress")} disabled={busy[t.id]} className="text-xs font-semibold border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50 disabled:opacity-50">Mark In Progress</button>}
-                  <button onClick={() => setStatus(t.id, "completed")} disabled={busy[t.id]} className="text-xs font-semibold border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50">Completed</button>
+                  {t.status === "pending" && <button onClick={() => setStatus(t.id, "in_progress")} disabled={busy[t.id]} className="text-xs font-semibold border border-[#164FA3]/30 text-[#164FA3] px-3 py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50">Start Task</button>}
+                  <button onClick={() => setStatus(t.id, "completed")} disabled={busy[t.id]} className="text-xs font-semibold border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 disabled:opacity-50">Complete Task</button>
                 </div>
               )}
             </div>

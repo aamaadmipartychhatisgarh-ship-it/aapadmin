@@ -152,7 +152,7 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
   }
 
   const views = canManage
-    ? [{ k: "all", l: "All Tasks" }, { k: "pending", l: "Pending" }, { k: "mine", l: "My Tasks" }]
+    ? [{ k: "all", l: "All" }, { k: "mine", l: "My Tasks" }, { k: "pending", l: "Pending" }, { k: "in_progress", l: "In Progress" }, { k: "completed", l: "Completed" }, { k: "overdue", l: "Overdue" }]
     : [{ k: "mine", l: "My Tasks" }];
   const c = data.counts || {};
   const today = new Date().toISOString().slice(0, 10);
@@ -186,6 +186,7 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
         <SumCard label="Pending" value={c.pending || 0} />
         <SumCard label="In Progress" value={c.in_progress || 0} />
         <SumCard label="Completed" value={c.completed || 0} />
+        <SumCard label="Due Today" value={c.due_today || 0} />
         <SumCard label="Overdue" value={c.overdue || 0} danger={Number(c.overdue) > 0} />
       </div>
 

@@ -52,7 +52,14 @@ export async function GET(req) {
       where.push("(t.assigned_to_user_id = ? OR t.assigned_to_team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ?))");
       params.push(meId, meId);
     }
-    if (view === "pending") where.push("t.status IN ('pending','in_progress')");
+    // Status/overdue views for the Tasks page tabs. Overdue is DERIVED (deadline
+    // past + not completed), never a stored status.
+    if (view === "pending") where.push("t.status = 'pending'");
+    else if (view === "in_progress") where.push("t.status = 'in_progress'");
+    else if (view === "completed") where.push("t.status = 'completed'");
+    else if (view === "overdue") where.push("t.deadline < CURDATE() AND t.status IN ('pending','in_progress')");
+    // Due-today filter (used by the Due Today card / caller widget).
+    if (searchParams.get("due") === "today") where.push("t.deadline = CURDATE()");
     if (statusF) { where.push("t.status = ?"); params.push(statusF); }
     if (priority) { where.push("t.priority = ?"); params.push(priority); }
     if (districtId) { where.push("t.district_id = ?"); params.push(districtId); }
@@ -100,16 +107,22 @@ export async function GET(req) {
          SUM(status='pending') AS pending,
          SUM(status='in_progress') AS in_progress,
          SUM(status='completed') AS completed,
-         SUM(deadline < CURDATE() AND status IN ('pending','in_progress')) AS overdue
+         SUM(deadline < CURDATE() AND status IN ('pending','in_progress')) AS overdue,
+         SUM(deadline = CURDATE() AND status IN ('pending','in_progress')) AS due_today
        FROM tasks t ${whereSql}`, params
     ).then((r) => [r]);
 
-    // Attach each master task's checklist (one query, grouped) + progress.
+    // Attach each master task's checklist (one query, grouped) + progress, plus
+    // a DERIVED overdue flag (deadline past & not completed) for the UI.
+    const todayStr = new Date().toISOString().slice(0, 10);
     const subMap = await subtasksByTask(tasks.map((t) => t.id));
     for (const t of tasks) {
       t.subtasks = subMap[t.id] || [];
       t.subtask_total = t.subtasks.length;
       t.subtask_done = t.subtasks.filter((s) => s.is_completed).length;
+      const dl = t.deadline ? String(t.deadline).slice(0, 10) : null;
+      t.is_overdue = !!(dl && dl < todayStr && t.status !== "completed" && t.status !== "cancelled");
+      t.due_today = !!(dl && dl === todayStr && t.status !== "completed" && t.status !== "cancelled");
     }
 
     return NextResponse.json({ tasks, counts }, { headers: NO_STORE });
