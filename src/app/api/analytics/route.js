@@ -3,7 +3,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // Powers /dashboard/analytics. Returns datasets for all charts in one round-trip.
 export async function GET(req) {
@@ -117,40 +116,7 @@ export async function GET(req) {
       heatmap[d][r.hour] = Number(r.n);
     });
 
-    // 7. Radar: 5 axes per agent — callers only
-    const radarAgents = await query(
-      `SELECT u.username AS agent,
-              COUNT(c.id) AS total,
-              SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
-              COALESCE(ROUND(AVG(c.duration_seconds)), 0) AS avg_duration,
-              SUM(CASE WHEN c.sentiment IN ('positive','supporter') THEN 1 ELSE 0 END) AS interested,
-              SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END) AS follow_ups
-         FROM calls c
-         JOIN users u ON u.id = c.user_id
-         LEFT JOIN call_statuses cs ON cs.id = c.status_id
-         ${where}
-           AND u.role IN ('caller','user','agent')
-         GROUP BY u.id, u.username
-         ORDER BY total DESC
-         LIMIT 5`,
-      params
-    );
-
-    // 8. Funnel: contacts pipeline (NOT range-filtered — pipeline is structural)
-    const funnelParams = [];
-    let fundWhere = "WHERE 1=1";
-    if (districtId) { fundWhere += " AND ct.district_id = ?"; funnelParams.push(districtId); }
-    fundWhere += await notWrongNumberClause("ct");
-    const [[funnel]] = await query(
-      `SELECT
-         (SELECT COUNT(*) FROM contacts ct ${fundWhere}) AS loaded,
-         (SELECT COUNT(*) FROM contacts ct ${fundWhere} AND assigned_to_user_id IS NOT NULL) AS assigned,
-         (SELECT COUNT(*) FROM contacts ct ${fundWhere} AND id IN (SELECT DISTINCT contact_id FROM calls WHERE contact_id IS NOT NULL)) AS attempted,
-         (SELECT COUNT(*) FROM contacts ct ${fundWhere} AND is_completed = 1) AS completed`,
-      [...funnelParams, ...funnelParams, ...funnelParams, ...funnelParams]
-    ).then((r) => [r]);
-
-    // 9. Treemap: calls per district (full set, with zone label for color grouping)
+    // 7. Treemap: calls per district (full set, with zone label for color grouping)
     const treemap = await query(
       `SELECT ld.name AS district, lz.name AS zone, COUNT(c.id) AS n
          FROM calls c
@@ -171,8 +137,6 @@ export async function GET(req) {
       stackedDistrict,
       cumulative,
       heatmap,
-      radarAgents,
-      funnel,
       treemap,
     });
   } catch (err) {

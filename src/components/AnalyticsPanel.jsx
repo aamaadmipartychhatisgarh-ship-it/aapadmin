@@ -3,11 +3,10 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
-  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  Treemap, FunnelChart, Funnel, LabelList,
+  Treemap,
   CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { Loader2, Filter, BarChart3, PieChart as PieIcon, TrendingUp, Layers, Activity, Radar as RadarIcon, GitBranch, Grid3x3, Radio } from "lucide-react";
+import { Loader2, Filter, BarChart3, PieChart as PieIcon, TrendingUp, Layers, Activity, Grid3x3, Radio } from "lucide-react";
 import { useLiveAnalytics } from "@/hooks/useLiveAnalytics";
 
 const STATUS_COLORS = {
@@ -22,7 +21,6 @@ const ZONE_COLORS = {
   Raipur: "#164FA3", Bilaspur: "#10B981", Surguja: "#FCB712",
   Durg: "#EF4444", Bastar: "#8B5CF6",
 };
-const RADAR_COLORS = ["#164FA3", "#FCB712", "#10B981", "#EF4444", "#8B5CF6"];
 
 // Full analytics charts suite — extracted from the old standalone /dashboard/analytics
 // page so it can be embedded as a tab inside the Dashboard Overview (see
@@ -96,48 +94,6 @@ export default function AnalyticsPanel() {
   const barData = useMemo(() =>
     (data?.topAgents || []).map((r) => ({ agent: r.agent, calls: Number(r.calls), connected: Number(r.connected) })),
   [data]);
-
-  // Radar — normalize each metric to 0-100 so all axes share one scale
-  const radarData = useMemo(() => {
-    const agents = data?.radarAgents || [];
-    if (agents.length === 0) return { data: [], series: [] };
-    const max = {
-      total:        Math.max(1, ...agents.map((a) => Number(a.total))),
-      connected:    Math.max(1, ...agents.map((a) => Number(a.connected))),
-      avg_duration: Math.max(1, ...agents.map((a) => Number(a.avg_duration))),
-      interested:   Math.max(1, ...agents.map((a) => Number(a.interested))),
-      follow_ups:   Math.max(1, ...agents.map((a) => Number(a.follow_ups))),
-    };
-    const axes = ["Total", "Connected", "Avg duration", "Interested", "Follow-ups"];
-    const rows = axes.map((axis) => {
-      const row = { axis };
-      agents.forEach((a) => {
-        const v = axis === "Total" ? a.total
-                : axis === "Connected" ? a.connected
-                : axis === "Avg duration" ? a.avg_duration
-                : axis === "Interested" ? a.interested
-                : a.follow_ups;
-        const key = axis === "Total" ? "total"
-                  : axis === "Connected" ? "connected"
-                  : axis === "Avg duration" ? "avg_duration"
-                  : axis === "Interested" ? "interested"
-                  : "follow_ups";
-        row[a.agent] = Math.round((Number(v) / max[key]) * 100);
-      });
-      return row;
-    });
-    return { data: rows, series: agents.map((a) => a.agent) };
-  }, [data]);
-
-  const funnelData = useMemo(() => {
-    if (!data?.funnel) return [];
-    return [
-      { name: "Loaded",    value: Number(data.funnel.loaded || 0),    fill: "#164FA3" },
-      { name: "Assigned",  value: Number(data.funnel.assigned || 0),  fill: "#3B82F6" },
-      { name: "Attempted", value: Number(data.funnel.attempted || 0), fill: "#F59E0B" },
-      { name: "Completed", value: Number(data.funnel.completed || 0), fill: "#10B981" },
-    ];
-  }, [data]);
 
   const treemapData = useMemo(() => {
     const rows = data?.treemap || [];
@@ -281,46 +237,6 @@ export default function AnalyticsPanel() {
               </ResponsiveContainer>
             )}
           </Panel>
-
-          {/* Row 4: Radar + Funnel */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Panel title="Top-5 Agent Profile (normalized)" icon={RadarIcon}>
-              {radarData.data.length === 0 ? <Empty /> : (
-                <ResponsiveContainer width="100%" height={350}>
-                  <RadarChart data={radarData.data}>
-                    <PolarGrid stroke="#e5e7eb" />
-                    <PolarAngleAxis dataKey="axis" tick={{ fill: "#6B7280", fontSize: 11 }} />
-                    <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fill: "#9CA3AF", fontSize: 10 }} />
-                    <Tooltip />
-                    <Legend />
-                    {radarData.series.map((agent, i) => (
-                      <Radar
-                        key={agent}
-                        name={agent}
-                        dataKey={agent}
-                        stroke={RADAR_COLORS[i % RADAR_COLORS.length]}
-                        fill={RADAR_COLORS[i % RADAR_COLORS.length]}
-                        fillOpacity={0.15}
-                      />
-                    ))}
-                  </RadarChart>
-                </ResponsiveContainer>
-              )}
-            </Panel>
-            <Panel title="Contact Pipeline Funnel" icon={GitBranch}>
-              {funnelData.every((d) => d.value === 0) ? <Empty /> : (
-                <ResponsiveContainer width="100%" height={350}>
-                  <FunnelChart>
-                    <Tooltip />
-                    <Funnel dataKey="value" data={funnelData} isAnimationActive>
-                      <LabelList position="right" fill="#111827" stroke="none" dataKey="name" />
-                      <LabelList position="left" fill="#fff" stroke="none" dataKey="value" />
-                    </Funnel>
-                  </FunnelChart>
-                </ResponsiveContainer>
-              )}
-            </Panel>
-          </div>
 
           {/* Row 5: Heatmap (custom CSS grid) */}
           <Panel title="Activity Heatmap (hour × day of week)" icon={Grid3x3}>
