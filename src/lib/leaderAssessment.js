@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { CG_ASSEMBLIES, normDistrict } from "@/lib/chhattisgarhAssemblies";
 
 // ---------------------------------------------------------------------------
 // Leader / Assembly Assessment module — schema (lazy, idempotent) + shared
@@ -145,36 +146,70 @@ export async function ensureLeaderAssessmentTables() {
   await ensureColumn("la_aap_candidates", "current_position", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_elections", "runner_up", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_elections", "runner_up_votes", "INT NULL");
-  await seedAssembliesFromLocations();
+  // Required-worker target (fixed reference value) and a FK to the real
+  // locations district (used to compute the LIVE worker count).
+  await ensureColumn("la_assemblies", "required_workers", "INT NULL");
+  await ensureColumn("la_assemblies", "district_id", "INT NULL");
+  await seedLeaderAssemblies();
   ensured = true;
 }
 
-// One-time master seed so the module is usable out of the box: expose the
-// Chhattisgarh districts as the assembly master list. Uses ONLY real location
-// data — each row's name/district is a real district and lok_sabha is its
-// parent in the existing `locations` hierarchy. NO MLA, candidate, election,
-// vote or caste data is fabricated; those stay empty and surface as
-// "Not Available"/"Not Added" until a real value is entered.
+// Idempotent master seed for the 33 Chhattisgarh assemblies (names + fixed
+// Required-Worker targets from src/lib/chhattisgarhAssemblies.js). This is
+// deterministic — it does NOT depend on the contents of `locations` for the
+// insert, so it populates reliably on any deployment. For each assembly it also
+// resolves the matching `locations` district id (via the alias table) and
+// stores it as district_id, which powers the live worker count. NO MLA,
+// candidate, election, vote or caste data is created — those remain empty and
+// render as "Not Available"/"Not Added" until entered through the UI.
 //
-// Safety: runs only when la_assemblies is empty (never overwrites or re-seeds
-// an admin-curated list), and each insert is guarded by NOT EXISTS on the name
-// so a cold-start race can't create duplicates. Mirrors the lazy, migration-
-// free approach the rest of this module uses.
-async function seedAssembliesFromLocations() {
+// Idempotency: an assembly is matched to any existing row by normalized name
+// (canonical name OR any alias), so running repeatedly — or after the earlier
+// district-named seed — never creates duplicates. Existing rows are only
+// BACK-FILLED (required_workers / district_id set when NULL); an admin-edited
+// name is never overwritten. New assemblies are inserted with the canonical
+// name. End state: exactly one row per assembly.
+async function seedLeaderAssemblies() {
   try {
-    const existing = await query("SELECT COUNT(*) AS n FROM la_assemblies");
-    if (Number(existing[0]?.n || 0) > 0) return;
-    await query(
-      `INSERT INTO la_assemblies (name, district, lok_sabha)
-         SELECT d.name, d.name, ls.name
-           FROM locations d
-           LEFT JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
-          WHERE d.type = 'district'
-            AND NOT EXISTS (SELECT 1 FROM la_assemblies a WHERE a.name = d.name)
-          ORDER BY d.name ASC`
-    );
+    const districts = await query("SELECT id, name FROM locations WHERE type = 'district'");
+    const districtByNorm = new Map();
+    for (const d of districts) districtByNorm.set(normDistrict(d.name), d.id);
+
+    const existing = await query("SELECT id, name FROM la_assemblies");
+    const existingByNorm = new Map();
+    for (const r of existing) existingByNorm.set(normDistrict(r.name), r);
+
+    for (const a of CG_ASSEMBLIES) {
+      let districtId = null;
+      for (const al of a.aliases) {
+        const id = districtByNorm.get(normDistrict(al));
+        if (id) { districtId = id; break; }
+      }
+      let row = null;
+      for (const al of [a.name, ...a.aliases]) {
+        const r = existingByNorm.get(normDistrict(al));
+        if (r) { row = r; break; }
+      }
+      if (row) {
+        // Back-fill reference fields only; never clobber an admin-edited name.
+        await query(
+          `UPDATE la_assemblies
+              SET required_workers = COALESCE(required_workers, ?),
+                  district_id = COALESCE(district_id, ?)
+            WHERE id = ?`,
+          [a.requiredWorkers, districtId, row.id]
+        );
+      } else {
+        const res = await query(
+          `INSERT INTO la_assemblies (name, district, required_workers, district_id)
+           VALUES (?, ?, ?, ?)`,
+          [a.name, a.name, a.requiredWorkers, districtId]
+        );
+        existingByNorm.set(normDistrict(a.name), { id: res.insertId, name: a.name });
+      }
+    }
   } catch (e) {
-    console.error("[LA] seedAssembliesFromLocations:", e?.message || e);
+    console.error("[LA] seedLeaderAssemblies:", e?.message || e);
   }
 }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
 import { assessmentTotal } from "@/lib/leaderAssessment";
+import { workersByDistrict } from "@/lib/workerCounts";
 
 export const dynamic = "force-dynamic";
 
@@ -49,9 +50,15 @@ export async function GET(req) {
       const cur = topByAsm[c.assembly_id];
       if (!cur || total > cur.total) topByAsm[c.assembly_id] = { name: c.name, total };
     }
+    // Live worker count per assembly: resolved from real users/workers keyed by
+    // the assembly's district_id (never stored, so it auto-updates as workers
+    // are added / removed / reassigned).
+    const workerMap = await workersByDistrict();
     const assemblies = rows.map((r) => ({
       ...r,
       candidate_count: Number(r.candidate_count) || 0,
+      required_workers: r.required_workers != null ? Number(r.required_workers) : null,
+      worker_count: r.district_id != null ? (workerMap.get(r.district_id) || 0) : 0,
       top_candidate: topByAsm[r.id]?.name || null,
       top_score: topByAsm[r.id]?.total ?? null,
     }));

@@ -42,6 +42,12 @@ const lbl = "block text-[11px] font-semibold uppercase tracking-wide text-gray-4
 const RANK_ICON = [Trophy, Medal, Award];
 const RANK_COLOR = ["text-[#FCB712]", "text-gray-400", "text-amber-700"];
 const nfmt = (v) => (v == null || v === "" ? null : Number(v).toLocaleString("en-IN"));
+function fmtDate(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
 
 async function api(url, opts) {
   const r = await fetch(url, { cache: "no-store", ...opts });
@@ -264,9 +270,11 @@ function Overview({ onOpen }) {
   if (loading) return <LoadingBlock />;
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         <Stat label="Total Assemblies" value={s?.total_assemblies} />
         <Stat label="With MLA Data" value={s?.assemblies_with_mla} />
+        <Stat label="Total Workers" value={s?.total_workers != null ? nfmt(s.total_workers) : null} hint="live from user/worker records" />
+        <Stat label="Required Workers" value={s?.total_required_workers != null ? nfmt(s.total_required_workers) : null} hint="fixed target" />
         <Stat label="With AAP Candidates" value={s?.assemblies_with_candidates} />
         <Stat label="Total Candidates" value={s?.total_candidates} />
         <Stat label="Assessments Done" value={s?.assessments_completed} />
@@ -350,23 +358,31 @@ function Assemblies({ assemblies, loading, canDelete, onChange, flash, fail, onO
       {loading ? <LoadingBlock /> : filtered.length === 0 ? <Empty msg={(q || districtFilter) ? "No assemblies match your filters." : "No assemblies yet."} action={!q && !districtFilter && <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Assembly</button>} /> : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Assembly", "No.", "District", "Lok Sabha", "Voters", "Booths", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Assembly", "District", "Workers", "Required", "MLA", "Candidates", "Updated", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-gray-100">
-              {filtered.map((a) => (
+              {filtered.map((a) => {
+                const req = a.required_workers ?? 0;
+                const wk = a.worker_count ?? 0;
+                const shortfall = req > 0 && wk < req;
+                return (
                 <tr key={a.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2.5 font-semibold text-gray-900">{a.name}</td>
-                  <td className="px-3 py-2.5">{a.number || "—"}</td>
-                  <td className="px-3 py-2.5">{a.district || "—"}</td>
-                  <td className="px-3 py-2.5">{a.lok_sabha || "—"}</td>
-                  <td className="px-3 py-2.5">{nfmt(a.total_voters) || "—"}</td>
-                  <td className="px-3 py-2.5">{a.total_booths ?? "—"}</td>
+                  <td className="px-3 py-2.5 text-gray-600">{a.district || "—"}</td>
+                  <td className="px-3 py-2.5"><span className={`font-semibold ${shortfall ? "text-amber-600" : "text-gray-800"}`}>{nfmt(wk) ?? 0}</span></td>
+                  <td className="px-3 py-2.5 text-gray-600">{req ? nfmt(req) : "—"}</td>
+                  <td className="px-3 py-2.5">{a.mla_name
+                    ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Added</span>
+                    : <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not added</span>}</td>
+                  <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{a.candidate_count}/3</span></td>
+                  <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(a.updated_at)}</td>
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                    <button onClick={() => onOpen(a.id)} className="text-[#164FA3] text-xs font-semibold hover:underline mr-3">Assessment</button>
+                    <button onClick={() => onOpen(a.id)} className="text-[#164FA3] text-xs font-semibold hover:underline mr-3">Open →</button>
                     <button onClick={() => setEditing(a)} className="text-gray-500 hover:text-[#164FA3] p-1"><Pencil size={14} /></button>
                     {canDelete && <button onClick={() => del(a)} className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

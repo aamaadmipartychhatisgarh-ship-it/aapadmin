@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
 import { ASSESSMENT_PARAMS, assessmentTotal } from "@/lib/leaderAssessment";
+import { workersByDistrict } from "@/lib/workerCounts";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,15 @@ export async function GET() {
     const avg = scored.length ? Math.round((scored.reduce((s, r) => s + r.total, 0) / scored.length) * 10) / 10 : 0;
     const top = [...scored].sort((x, y) => y.total - x.total).slice(0, 5);
 
+    // Aggregate workforce: total required (fixed targets) and total live workers
+    // (only those whose resolved district maps to a seeded assembly, so the two
+    // figures describe the same 33 assemblies).
+    const [[rw]] = await query("SELECT COALESCE(SUM(required_workers),0) AS total FROM la_assemblies").then((r) => [r]);
+    const asmDistricts = await query("SELECT district_id FROM la_assemblies WHERE district_id IS NOT NULL");
+    const workerMap = await workersByDistrict();
+    let totalWorkers = 0;
+    for (const a2 of asmDistricts) totalWorkers += workerMap.get(a2.district_id) || 0;
+
     return NextResponse.json({
       stats: {
         total_assemblies: Number(a.total) || 0,
@@ -36,6 +46,8 @@ export async function GET() {
         total_candidates: Number(tc.n) || 0,
         assessments_completed: Number(ad.n) || 0,
         average_score: avg,
+        total_workers: totalWorkers,
+        total_required_workers: Number(rw.total) || 0,
       },
       top_candidates: top,
     }, { headers: noStore });
