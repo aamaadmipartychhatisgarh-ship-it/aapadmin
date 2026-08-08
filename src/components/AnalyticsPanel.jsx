@@ -35,6 +35,13 @@ export default function AnalyticsPanel() {
   const [dateTo, setDateTo] = useState("");
   const [districtId, setDistrictId] = useState("");
   const [lastUpdated, setLastUpdated] = useState(null);
+  // Top Agents card has its OWN date filter, independent of the shared filter
+  // bar above — so changing it refreshes ONLY the Top Agents chart, never the
+  // other charts. Empty from/to = the default (all-time) period, same as before.
+  const [taFrom, setTaFrom] = useState("");
+  const [taTo, setTaTo] = useState("");
+  const [taData, setTaData] = useState(null);
+  const [taLoading, setTaLoading] = useState(true);
   // Silent background refetches (live-event/poll-triggered) skip the
   // full-panel loading spinner — only the very first load and explicit
   // filter changes should blank the charts out.
@@ -59,11 +66,28 @@ export default function AnalyticsPanel() {
   // Re-run whenever a filter changes (also covers the initial load).
   useEffect(() => { firstLoad.current = true; load(); }, [load]);
 
+  // Top Agents: fetch ONLY this section for its own date range. Runs on mount
+  // (default period) and whenever the card's date filter changes. `silent` skips
+  // the loading spinner for background (live/poll) refreshes.
+  const loadTopAgents = useCallback((silent = false) => {
+    if (!silent) setTaLoading(true);
+    const p = new URLSearchParams({ section: "top_agents" });
+    if (taFrom) p.set("from", taFrom);
+    if (taTo)   p.set("to", taTo);
+    fetch(`/api/analytics?${p}`)
+      .then((r) => (r.ok ? r.json() : { topAgents: [] }))
+      .then((d) => setTaData(d))
+      .catch(() => setTaData({ topAgents: [] }))
+      .finally(() => setTaLoading(false));
+  }, [taFrom, taTo]);
+  useEffect(() => { loadTopAgents(); }, [loadTopAgents]);
+
   // Live refresh: SSE push (instant) + 60s safety-net poll + focus/visibility
   // refetch — see src/hooks/useLiveAnalytics.js for why all three are needed
-  // on Hostinger's hosting. Reacts to: call logged, wrong number added, task
-  // completed, worker added, contact assigned.
-  useLiveAnalytics(load);
+  // on Hostinger's hosting. One handler refreshes the main charts and the Top
+  // Agents card (the latter silently, keeping its own selected date range).
+  const liveRefresh = useCallback(() => { load(); loadTopAgents(true); }, [load, loadTopAgents]);
+  useLiveAnalytics(liveRefresh);
 
   const lineData = useMemo(() =>
     (data?.line || []).map((r) => ({ day: fmtDay(r.day), calls: Number(r.calls) })),
@@ -91,9 +115,11 @@ export default function AnalyticsPanel() {
     })),
   [data]);
 
+  // Top Agents bar data comes from the card's OWN date-scoped fetch (taData),
+  // not the shared analytics payload, so its date filter is fully independent.
   const barData = useMemo(() =>
-    (data?.topAgents || []).map((r) => ({ agent: r.agent, calls: Number(r.calls), connected: Number(r.connected) })),
-  [data]);
+    (taData?.topAgents || []).map((r) => ({ agent: r.agent, calls: Number(r.calls), connected: Number(r.connected) })),
+  [taData]);
 
   const treemapData = useMemo(() => {
     const rows = data?.treemap || [];
@@ -182,7 +208,36 @@ export default function AnalyticsPanel() {
           {/* Row 2: Bar + Area */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <Panel title="Top Agents" icon={BarChart3} className="lg:col-span-2">
-              {barData.length === 0 ? <Empty /> : (
+              {/* Top Agents' OWN date filter (independent of the shared bar) */}
+              <div className="flex flex-wrap items-end gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => { const d = istDate(0); setTaFrom(d); setTaTo(d); }}
+                  className={`h-8 px-3 rounded-lg text-xs font-semibold border ${taFrom === istDate(0) && taTo === istDate(0) ? "bg-[#164FA3] text-white border-[#164FA3]" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+                >Today</button>
+                <button
+                  type="button"
+                  onClick={() => { const d = istDate(-1); setTaFrom(d); setTaTo(d); }}
+                  className={`h-8 px-3 rounded-lg text-xs font-semibold border ${taFrom === istDate(-1) && taTo === istDate(-1) ? "bg-[#164FA3] text-white border-[#164FA3]" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+                >Yesterday</button>
+                <label className="flex flex-col text-[10px] font-semibold uppercase tracking-wide text-gray-400">From
+                  <input type="date" value={taFrom} max={taTo || undefined} onChange={(e) => setTaFrom(e.target.value)} className="h-8 px-2 rounded-lg border border-gray-200 text-xs bg-white mt-0.5" />
+                </label>
+                <label className="flex flex-col text-[10px] font-semibold uppercase tracking-wide text-gray-400">To
+                  <input type="date" value={taTo} min={taFrom || undefined} onChange={(e) => setTaTo(e.target.value)} className="h-8 px-2 rounded-lg border border-gray-200 text-xs bg-white mt-0.5" />
+                </label>
+                {(taFrom || taTo) && (
+                  <button type="button" onClick={() => { setTaFrom(""); setTaTo(""); }} className="h-8 px-3 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50">Clear</button>
+                )}
+                <span className="ml-auto self-center text-[11px] font-medium text-gray-400">
+                  {taFrom || taTo ? `${taFrom ? fmtDateLabel(taFrom) : "start"} – ${taTo ? fmtDateLabel(taTo) : "now"}` : "All time"}
+                </span>
+              </div>
+              {taLoading ? (
+                <div className="h-[300px] flex items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
+              ) : barData.length === 0 ? (
+                <div className="h-[300px] flex items-center justify-center text-gray-400 text-sm">No calls for the selected period.</div>
+              ) : (
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={barData}>
                     <CartesianGrid stroke="#eee" strokeDasharray="5 5" vertical={false} />
@@ -190,8 +245,8 @@ export default function AnalyticsPanel() {
                     <YAxis tick={{ fill: "#6B7280", fontSize: 12 }} />
                     <Tooltip />
                     <Legend />
-                    <Bar dataKey="calls" fill="#164FA3" radius={[6, 6, 0, 0]} />
-                    <Bar dataKey="connected" fill="#10B981" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="calls" name="Calls" fill="#164FA3" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="connected" name="Connected" fill="#10B981" radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -364,4 +419,23 @@ const inputCls = "h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white o
 
 function fmtDay(d) {
   return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
+
+// "YYYY-MM-DD" for today (offset 0), yesterday (-1)… in the app timezone
+// (Asia/Kolkata) so the Top Agents quick filters match how calls are dated
+// server-side, regardless of the viewer's local timezone.
+function istDate(offsetDays = 0) {
+  const now = new Date();
+  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  ist.setDate(ist.getDate() + offsetDays);
+  const y = ist.getFullYear();
+  const m = String(ist.getMonth() + 1).padStart(2, "0");
+  const d = String(ist.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+// "01 Aug" style label for a YYYY-MM-DD string (no timezone shift).
+function fmtDateLabel(s) {
+  if (!s) return "";
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
 }

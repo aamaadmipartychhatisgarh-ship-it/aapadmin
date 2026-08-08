@@ -13,9 +13,15 @@ export async function GET(req) {
     }
 
     const { searchParams } = new URL(req.url);
-    const dateFrom = searchParams.get("date_from");
-    const dateTo = searchParams.get("date_to");
+    // `from`/`to` are accepted alongside the legacy `date_from`/`date_to` so the
+    // Top Agents card can drive its own independent date filter.
+    const dateFrom = searchParams.get("from") || searchParams.get("date_from");
+    const dateTo = searchParams.get("to") || searchParams.get("date_to");
     const districtId = searchParams.get("district_id");
+    // When set (e.g. "top_agents") the route returns ONLY that section's data —
+    // used by the Top Agents card so its date filter never disturbs the other
+    // charts (which keep using the shared filter bar).
+    const section = searchParams.get("section");
 
     const params = [];
     let where = "WHERE 1=1";
@@ -38,7 +44,9 @@ export async function GET(req) {
       params
     );
 
-    // 2. Bar: top agents by total calls — only count actual callers, not oversight roles
+    // 2. Bar: top agents for the selected period — total calls + connected
+    // ("Phone Picked"), only actual callers (not oversight roles). Ranked by
+    // connected calls (then total), matching the caller-ranking preference.
     const topAgents = await query(
       `SELECT u.username AS agent, COUNT(c.id) AS calls,
               SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected
@@ -48,10 +56,16 @@ export async function GET(req) {
          ${where}
            AND u.role IN ('caller','user','agent')
          GROUP BY u.id, u.username
-         ORDER BY calls DESC
+         ORDER BY connected DESC, calls DESC
          LIMIT 10`,
       params
     );
+
+    // Independent Top Agents fetch (its own date range) — return ONLY this
+    // section so the other charts are never affected.
+    if (section === "top_agents") {
+      return NextResponse.json({ topAgents });
+    }
 
     // 3. Pie: status breakdown
     const statusPie = await query(
