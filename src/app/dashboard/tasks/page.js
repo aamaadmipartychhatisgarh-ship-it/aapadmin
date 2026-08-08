@@ -138,7 +138,11 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
     if (districtId) p.set("district_id", districtId);
     if (assignedTo) p.set("assigned_to", assignedTo);
     if (sort) p.set("sort", sort);
-    const r = await fetch(`/api/tasks?${p}`);
+    // Always fetch fresh: no-store defeats the browser/proxy HTTP cache, and the
+    // _ cache-buster makes each refetch a unique URL so a newly-created task
+    // shows immediately instead of a stale cached list being returned.
+    p.set("_", String(Date.now()));
+    const r = await fetch(`/api/tasks?${p}`, { cache: "no-store" });
     if (r.ok) setData(await r.json());
     setLoading(false);
   }

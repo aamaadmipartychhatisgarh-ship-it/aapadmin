@@ -10,6 +10,15 @@ import { notifyTaskAssigned } from "@/lib/notify";
 import { subtasksByTask, hasSubtasksTable, hasTaskAssignedAt, hasTaskDurationColumns, hasTaskContactColumn } from "@/lib/tasks";
 import { addDays } from "@/lib/taskDuration";
 
+// The task list must ALWAYS reflect the latest data — never a cached response.
+// Without this, a GET to the same URL (e.g. /api/tasks?view=all) can be served
+// from the browser/proxy (LiteSpeed) HTTP cache in production, so the refetch
+// right after creating a task returns the stale list WITHOUT the new task.
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
+
 // GET /api/tasks?view=mine|all|pending&status=&priority=&district_id=&assigned_to=&search=
 export async function GET(req) {
   try {
@@ -103,10 +112,10 @@ export async function GET(req) {
       t.subtask_done = t.subtasks.filter((s) => s.is_completed).length;
     }
 
-    return NextResponse.json({ tasks, counts });
+    return NextResponse.json({ tasks, counts }, { headers: NO_STORE });
   } catch (err) {
     console.error("tasks GET error:", err);
-    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });
   }
 }
 
