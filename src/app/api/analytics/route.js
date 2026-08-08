@@ -77,7 +77,23 @@ export async function GET(req) {
       params
     );
 
-    // 4. Stacked bar: status mix per district (top 8 districts)
+    // 4. Stacked bar: status mix for EVERY district in the master list
+    // (Chhattisgarh's full set), so a district with no calls still appears with
+    // zeros. Starts FROM the district master and LEFT JOINs calls; the date +
+    // role-scope conditions live in the JOIN's ON clause so they filter the
+    // calls WITHOUT dropping any district. The single-district global filter is
+    // intentionally NOT applied here — this chart's whole point is the
+    // all-districts breakdown.
+    const sdParams = [];
+    let sdOn = "c.district_id = ld.id";
+    if (dateFrom) { sdOn += " AND DATE(c.called_at) >= ?"; sdParams.push(dateFrom); }
+    if (dateTo)   { sdOn += " AND DATE(c.called_at) <= ?"; sdParams.push(dateTo); }
+    // Scope the CALLS to the viewer's territory (empty for super_admin/state_admin/
+    // supervisor → all calls). Applied in the ON clause so out-of-scope districts
+    // still show, just with zero counts.
+    const sdScope = scopeFilterSync(session.user, "c");
+    sdOn += " " + sdScope.where;
+    sdParams.push(...sdScope.params);
     const stackedDistrict = await query(
       `SELECT ld.name AS district,
               SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
@@ -87,15 +103,13 @@ export async function GET(req) {
               SUM(CASE WHEN cs.name = 'Busy' THEN 1 ELSE 0 END) AS busy,
               SUM(CASE WHEN cs.name = 'Switched Off' THEN 1 ELSE 0 END) AS switched_off,
               COUNT(c.id) AS total
-         FROM calls c
+         FROM locations ld
+         LEFT JOIN calls c ON ${sdOn}
          LEFT JOIN call_statuses cs ON cs.id = c.status_id
-         LEFT JOIN locations ld ON ld.id = c.district_id
-         ${where}
-         GROUP BY c.district_id, ld.name
-         HAVING ld.name IS NOT NULL
-         ORDER BY total DESC
-         LIMIT 8`,
-      params
+        WHERE ld.type = 'district'
+        GROUP BY ld.id, ld.name
+        ORDER BY total DESC, ld.name ASC`,
+      sdParams
     );
 
     // 5. Area: cumulative completed contacts over time (uses calls timeline as proxy)

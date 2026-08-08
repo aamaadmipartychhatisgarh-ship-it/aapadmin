@@ -275,21 +275,27 @@ export default function AnalyticsPanel() {
           {/* Row 3: Stacked bar — district status mix */}
           <Panel title="District × Status Mix" icon={Layers}>
             {stackedData.length === 0 ? <Empty /> : (
-              <ResponsiveContainer width="100%" height={350}>
-                <BarChart data={stackedData}>
-                  <CartesianGrid stroke="#eee" strokeDasharray="5 5" vertical={false} />
-                  <XAxis dataKey="district" tick={{ fill: "#6B7280", fontSize: 11 }} angle={-15} textAnchor="end" height={70} interval={0} />
-                  <YAxis tick={{ fill: "#6B7280", fontSize: 12 }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="Connected" stackId="a" fill="#10B981" />
-                  <Bar dataKey="No Answer" stackId="a" fill="#F59E0B" />
-                  <Bar dataKey="Wrong Number" stackId="a" fill="#6B7280" />
-                  <Bar dataKey="Rejected" stackId="a" fill="#EF4444" />
-                  <Bar dataKey="Busy" stackId="a" fill="#8B5CF6" />
-                  <Bar dataKey="Switched Off" stackId="a" fill="#0EA5E9" />
-                </BarChart>
-              </ResponsiveContainer>
+              // All 33 districts always show — scroll horizontally so every bar +
+              // its label stays legible instead of being squeezed to fit.
+              <div className="overflow-x-auto">
+                <div style={{ minWidth: Math.max(700, stackedData.length * 44), height: 350 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stackedData}>
+                      <CartesianGrid stroke="#eee" strokeDasharray="5 5" vertical={false} />
+                      <XAxis dataKey="district" tick={{ fill: "#6B7280", fontSize: 11 }} angle={-35} textAnchor="end" height={90} interval={0} />
+                      <YAxis tick={{ fill: "#6B7280", fontSize: 12 }} allowDecimals={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="Connected" stackId="a" fill="#10B981" />
+                      <Bar dataKey="No Answer" stackId="a" fill="#F59E0B" />
+                      <Bar dataKey="Wrong Number" stackId="a" fill="#6B7280" />
+                      <Bar dataKey="Rejected" stackId="a" fill="#EF4444" />
+                      <Bar dataKey="Busy" stackId="a" fill="#8B5CF6" />
+                      <Bar dataKey="Switched Off" stackId="a" fill="#0EA5E9" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             )}
           </Panel>
 
