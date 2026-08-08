@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
 
 // Accepts text/csv (or text/plain) body with header row:
@@ -44,7 +44,9 @@ async function resolveLocation(name, type) {
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    // Available to oversight roles (admins + supervisors) so the shared Contacts
+    // toolbar behaves identically across both dashboards.
+    if (!session || !isOversight(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { isOversight } from "@/lib/permissions";
 import { getPool } from "@/lib/db";
 import * as XLSX from "xlsx";
 import { parseAndValidateWorkbook } from "@/lib/workerImport";
@@ -37,7 +37,10 @@ async function resolveDesignationIds(conn, names) {
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    // Contacts bulk import is available to oversight roles (Super Admin + State/
+    // Zone/District/Assembly admins + Supervisors) so the shared Contacts toolbar
+    // works identically in both the admin and supervisor dashboards.
+    if (!session || !isOversight(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 

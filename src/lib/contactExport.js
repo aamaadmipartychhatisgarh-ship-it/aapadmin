@@ -116,13 +116,27 @@ export async function buildContactsWorkbookBuffer(rows) {
   return Buffer.from(buf);
 }
 
-// Descriptive, timestamped filename (application timezone).
-export function contactsExportFilename(isSupervisor) {
+// Build a UTF-8 CSV string from the SAME COLUMNS as the .xlsx export, so both
+// formats are byte-for-byte consistent in content. A leading BOM makes Excel
+// open Unicode (Hindi) correctly; RFC-4180 quoting handles commas/quotes/newlines.
+export function buildContactsCsv(rows) {
+  const esc = (v) => {
+    const s = v == null ? "" : String(v);
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [COLUMNS.map((col) => esc(col.header)).join(",")];
+  for (const c of rows) lines.push(COLUMNS.map((col) => esc(col.get(c))).join(","));
+  return "\uFEFF" + lines.join("\r\n");
+}
+
+// Descriptive, timestamped filename (application timezone). `ext` picks the
+// extension so the same helper serves both the .xlsx and .csv exports.
+export function contactsExportFilename(isSupervisor, ext = "xlsx") {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hour12: false,
   }).formatToParts(new Date());
   const g = (t) => parts.find((x) => x.type === t)?.value || "";
   const stamp = `${g("year")}-${g("month")}-${g("day")}_${g("hour")}-${g("minute")}`;
-  return `${isSupervisor ? "Supervisor_Contacts_Export" : "Contacts_Export"}_${stamp}.xlsx`;
+  return `${isSupervisor ? "Supervisor_Contacts_Export" : "Contacts_Export"}_${stamp}.${ext}`;
 }

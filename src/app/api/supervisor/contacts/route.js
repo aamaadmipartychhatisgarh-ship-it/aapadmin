@@ -8,7 +8,7 @@ import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
-import { fetchContactExportRows, buildContactsWorkbookBuffer, contactsExportFilename } from "@/lib/contactExport";
+import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 
@@ -83,11 +83,23 @@ export async function GET(req) {
     where += " " + scope.where;
     params.push(...scope.params);
 
-    // Excel export — same filters AND the supervisor's territory scope (already
-    // in `where`), every matching row. Same code path as the list, so what the
-    // supervisor downloads is exactly what they can see.
-    if (searchParams.get("format") === "xlsx") {
+    // Export — same filters AND the supervisor's territory scope (already in
+    // `where`), every matching row. Same code path as the list, so what the
+    // supervisor downloads is exactly what they can see. CSV + Excel share the
+    // identical dataset + columns.
+    const format = searchParams.get("format");
+    if (format === "csv" || format === "xlsx") {
       const rows = await fetchContactExportRows(where, params);
+      if (format === "csv") {
+        return new NextResponse(buildContactsCsv(rows), {
+          status: 200,
+          headers: {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${contactsExportFilename(true, "csv")}"`,
+            "Cache-Control": "no-store",
+          },
+        });
+      }
       const buf = await buildContactsWorkbookBuffer(rows);
       return new NextResponse(buf, {
         status: 200,

@@ -60,12 +60,15 @@ const MODES = {
     teamMemberType: null, // this endpoint only ever returns caller-type members
     scopeUrl: "/api/supervisor/contacts/scope",
     addContactUrl: "/api/supervisor/contacts",
+    // CSV Import / Upload reuse the shared contacts endpoints (now open to
+    // oversight roles) so the 3-dot menu is identical in both dashboards.
+    importExcelUrl: "/api/contacts/import-excel",
+    uploadCsvUrl: "/api/contacts/upload-csv",
     // Add Contact is enabled — the server stamps the new contact's geography
     // from the supervisor's own territory (see POST /api/supervisor/contacts).
-    // Import (bulk Excel/CSV) and bulk-delete-wrong stay admin-only, and
-    // geo-editing an existing contact stays server-restricted (see the PUT
-    // /api/supervisor/contacts/[id] comment).
-    canAdd: true, canImport: false, canDeleteWrong: false, canEditGeo: false,
+    // bulk-delete-wrong stays admin-only, and geo-editing an existing contact
+    // stays server-restricted (see the PUT /api/supervisor/contacts/[id] comment).
+    canAdd: true, canImport: true, canDeleteWrong: false, canEditGeo: false,
     territoryScoped: true,
     breadcrumbTrail: [{ label: "Dashboard", href: "/dashboard/supervisor" }, { label: "Contacts" }],
   },
@@ -113,6 +116,7 @@ export default function ContactsModule({ session, mode }) {
   const [taskFor, setTaskFor] = useState(null); // contact to create a task for
   const [viewingContact, setViewingContact] = useState(null); // contact row to show in the detail modal, or null
   const [importing, setImporting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
   const [teams, setTeams] = useState([]);
@@ -411,14 +415,15 @@ export default function ContactsModule({ session, mode }) {
   }
 
   // Export every contact matching the CURRENT filters (search, geo, designation,
-  // caller, status) to a formatted .xlsx — the server reuses the exact same
-  // filter + role scope as the on-screen list, so what downloads is what's shown.
-  async function exportExcel() {
+  // caller, status) to a .csv — the server reuses the exact same filter + role
+  // scope as the on-screen list, so what downloads is what's shown (and, for a
+  // supervisor, only their territory).
+  async function exportCsv() {
     setExporting(true); setError(""); setMessage("");
     try {
       const params = buildParams(1);
       params.delete("page"); params.delete("page_size");
-      params.set("format", "xlsx");
+      params.set("format", "csv");
       const r = await fetch(`${cfg.listUrl}?${params}`, { cache: "no-store" });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
@@ -428,7 +433,7 @@ export default function ContactsModule({ session, mode }) {
       // Filename from Content-Disposition, with a sensible fallback.
       const cd = r.headers.get("content-disposition") || "";
       const m = cd.match(/filename="?([^"]+)"?/i);
-      const filename = m ? m[1] : `Contacts_Export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const filename = m ? m[1] : `Contacts_Export_${new Date().toISOString().slice(0, 10)}.csv`;
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -493,18 +498,32 @@ export default function ContactsModule({ session, mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
+  // Upload CSV: inserts new contacts and SKIPS duplicates (unique phone), so it
+  // never creates duplicate contacts. Reports processed vs. failed counts.
   async function uploadCsv(file) {
     setMessage(""); setError("");
-    const text = await file.text();
-    const r = await fetch(cfg.uploadCsvUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/csv" },
-      body: text,
-    });
-    const data = await r.json();
-    if (!r.ok) { setError(data.message || "Upload failed"); return; }
-    setMessage(`Uploaded ${data.inserted} new contacts (${data.duplicates} duplicates skipped of ${data.total_rows} rows).`);
-    load();
+    setUploading(true);
+    try {
+      const text = await file.text();
+      const r = await fetch(cfg.uploadCsvUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/csv" },
+        body: text,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(data.message || "Upload failed. Check the CSV columns and try again."); return; }
+      const failed = Array.isArray(data.errors) ? data.errors.length : 0;
+      let msg = `Upload complete: ${data.inserted} added, ${data.duplicates} duplicate${data.duplicates === 1 ? "" : "s"} skipped`;
+      if (failed) msg += `, ${failed} failed`;
+      msg += ` (of ${data.total_rows} rows).`;
+      setMessage(msg);
+      load();
+    } catch {
+      setError("Upload failed — network error.");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
   }
 
   // Import contacts from an Excel/CSV file (e.g. MEMBER LIST.xlsx).
@@ -603,11 +622,14 @@ export default function ContactsModule({ session, mode }) {
         }
         breadcrumb={cfg.breadcrumbTrail}
         actions={
+          // One shared 3-dot (⋮) menu — identical in the admin and supervisor
+          // dashboards — holding exactly Import CSV / Export CSV / Upload CSV.
+          // Add Contact stays its own primary button, immediately to the right
+          // of the ⋮ (ActionBar renders the menu first, then the primary).
           <ActionBar items={[
-            cfg.canImport && { key: "impx", label: importing ? "Importing…" : "Import Excel", icon: Upload, variant: "success", loading: importing, onClick: () => excelRef.current?.click() },
-            cfg.canImport && { key: "impc", label: "Upload CSV", icon: Upload, onClick: () => fileRef.current?.click() },
-            // Export is pinned to the ⋮ menu (menuOnly) for both roles.
-            { key: "export", label: exporting ? "Exporting…" : "Export to Excel (.xlsx)", icon: Download, loading: exporting, menuOnly: true, onClick: exportExcel },
+            cfg.canImport && { key: "import", label: importing ? "Importing…" : "Import CSV", icon: Upload, loading: importing, menuOnly: true, onClick: () => excelRef.current?.click() },
+            { key: "export", label: exporting ? "Exporting…" : "Export CSV", icon: Download, loading: exporting, menuOnly: true, onClick: exportCsv },
+            cfg.canImport && { key: "upload", label: uploading ? "Uploading…" : "Upload CSV", icon: Upload, loading: uploading, menuOnly: true, onClick: () => fileRef.current?.click() },
             cfg.canAdd && { key: "add", label: "Add Contact", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
           ]} />
         }
