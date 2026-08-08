@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ShieldAlert, Zap, Pencil, Trash2 } from "lucide-react";
+import { ShieldAlert, Zap, Pencil, Trash2, Loader2 } from "lucide-react";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import { isTopAdmin, ASSIGNABLE_ROLES, roleLabel, normalizeRole } from "@/lib/permissions";
 
@@ -20,6 +20,7 @@ export default function UsersTab({ session }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [editing, setEditing] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [viewingUser, setViewingUser] = useState(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
@@ -62,11 +63,19 @@ export default function UsersTab({ session }) {
 
   const deleteUser = async (u) => {
     setError(""); setSuccess("");
+    if (deletingId) return; // guard against double-clicks / concurrent deletes
     if (!confirm(`Delete user "${u.username}"? This cannot be undone. Their assigned contacts/tasks return to the pool.`)) return;
-    const r = await fetch(`/api/users/${u.id}`, { method: "DELETE" });
-    const d = await r.json().catch(() => ({}));
-    if (r.ok) { setSuccess(`Deleted ${u.username}.`); fetchUsers(); }
-    else setError(d.message || "Delete failed");
+    setDeletingId(u.id);
+    try {
+      const r = await fetch(`/api/users/${u.id}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { setSuccess(`User deleted successfully.`); await fetchUsers(); }
+      else setError(d.message || "Unable to delete user.");
+    } catch {
+      setError("Unable to delete user. Please try again.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleCreateUser = async (e) => {
@@ -280,8 +289,8 @@ export default function UsersTab({ session }) {
                           <button onClick={() => setEditing(u)} title="Edit" className="p-1.5 rounded-lg text-blue-100 hover:bg-white/15 hover:text-white">
                             <Pencil size={16} />
                           </button>
-                          <button onClick={() => deleteUser(u)} disabled={String(u.id) === String(session.user.id)} title={String(u.id) === String(session.user.id) ? "You can't delete yourself" : "Delete"} className="p-1.5 rounded-lg text-red-200 hover:bg-red-500/30 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">
-                            <Trash2 size={16} />
+                          <button onClick={() => deleteUser(u)} disabled={String(u.id) === String(session.user.id) || deletingId != null} title={String(u.id) === String(session.user.id) ? "You can't delete yourself" : (deletingId === u.id ? "Deleting…" : "Delete")} className="p-1.5 rounded-lg text-red-200 hover:bg-red-500/30 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed">
+                            {deletingId === u.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                           </button>
                         </div>
                       </td>
