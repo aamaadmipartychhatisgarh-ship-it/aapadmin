@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -115,7 +115,7 @@ export default function ContactsModule({ session, mode }) {
   const [editNavBusy, setEditNavBusy] = useState(false); // fetching an adjacent page mid-edit
   const [taskFor, setTaskFor] = useState(null); // contact to create a task for
   const [viewingContact, setViewingContact] = useState(null); // contact row to show in the detail modal, or null
-  const [importing, setImporting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
@@ -136,7 +136,6 @@ export default function ContactsModule({ session, mode }) {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [selectingAll, setSelectingAll] = useState(false);
   const fileRef = useRef(null);
-  const excelRef = useRef(null);
   const loadSeq = useRef(0);
   const countSeq = useRef(0);
 
@@ -526,29 +525,9 @@ export default function ContactsModule({ session, mode }) {
     }
   }
 
-  // Import contacts from an Excel/CSV file (e.g. MEMBER LIST.xlsx).
-  async function importExcel(file) {
-    setMessage(""); setError("");
-    setImporting(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const r = await fetch(cfg.importExcelUrl, { method: "POST", body: fd });
-      const d = await r.json();
-      if (!r.ok) { setError(d.message || "Import failed"); return; }
-      let msg = `Contacts: ${d.contacts_inserted} new, ${d.contacts_updated} updated`;
-      if (d.contacts_skipped_no_phone) msg += ` (${d.contacts_skipped_no_phone} rows had no phone)`;
-      msg += ".";
-      if (d.unmatched_assemblies?.length) msg += ` Unmatched assemblies: ${d.unmatched_assemblies.slice(0, 5).join(", ")}${d.unmatched_assemblies.length > 5 ? "…" : ""}.`;
-      setMessage(msg);
-      load();
-    } catch {
-      setError("Import failed — file too large or network error.");
-    } finally {
-      setImporting(false);
-      if (excelRef.current) excelRef.current.value = "";
-    }
-  }
+  // Import Excel/CSV is handled by the self-contained <ImportModal> (opened from
+  // the ⋮ menu). It POSTs to cfg.importExcelUrl, shows filename/size/progress and
+  // the imported/updated/skipped/failed result, then refreshes the list here.
 
   // Delete every wrong-number contact in the current view (optionally scoped to
   // the selected district). The endpoint only ever targets wrong numbers.
@@ -627,20 +606,23 @@ export default function ContactsModule({ session, mode }) {
           // Add Contact stays its own primary button, immediately to the right
           // of the ⋮ (ActionBar renders the menu first, then the primary).
           <ActionBar items={[
-            cfg.canImport && { key: "import", label: importing ? "Importing…" : "Import CSV", icon: Upload, loading: importing, menuOnly: true, onClick: () => excelRef.current?.click() },
+            cfg.canImport && { key: "import", label: "Import Excel", icon: Upload, menuOnly: true, onClick: () => setShowImport(true) },
             { key: "export", label: exporting ? "Exporting…" : "Export CSV", icon: Download, loading: exporting, menuOnly: true, onClick: exportCsv },
-            cfg.canImport && { key: "upload", label: uploading ? "Uploading…" : "Upload CSV", icon: Upload, loading: uploading, menuOnly: true, onClick: () => fileRef.current?.click() },
+            cfg.canImport && { key: "upload", label: uploading ? "Uploading…" : "Upload", icon: Upload, loading: uploading, menuOnly: true, onClick: () => fileRef.current?.click() },
             cfg.canAdd && { key: "add", label: "Add Contact", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
           ]} />
         }
       />
       {cfg.canImport && (
-        <>
-          <input ref={excelRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden"
-                 onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
-          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
-                 onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
-        </>
+        <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+               onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
+      )}
+      {showImport && (
+        <ImportModal
+          url={cfg.importExcelUrl}
+          onClose={() => setShowImport(false)}
+          onImported={() => load()}
+        />
       )}
 
       {cfg.territoryScoped && territoryLabel && (
@@ -1514,6 +1496,165 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
           <button onClick={save} disabled={saving || !form.person_name || !form.phone_number || (zoneLevel && !form.district_id)} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">
             {saving ? "Saving…" : "Save"}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Import Excel/CSV modal — self-contained. Pick an .xlsx/.xls/.csv file, see its
+// name + size, then Import. Shows a spinner while the request runs (button
+// disabled, no double-submit), a hard 2-minute abort so it can never hang, the
+// imported / updated / skipped / failed result with per-row failure reasons, or
+// the real backend error (modal stays open to retry). On success it refreshes
+// the contacts list via onImported().
+// ---------------------------------------------------------------------------
+function ImportModal({ url, onClose, onImported }) {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const inputRef = useRef(null);
+
+  const fmtSize = (n) => {
+    if (n == null) return "";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  async function doImport() {
+    if (!file || busy) return; // guard against double-submit
+    setBusy(true); setError(""); setResult(null);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2-min hard cap
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch(url, { method: "POST", body: fd, signal: controller.signal });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.message || "Import failed. Check the file and try again."); return; }
+      const failedRows = (Array.isArray(d.row_errors) ? d.row_errors : []).filter((e) => e.severity === "error");
+      setResult({
+        total: d.total_rows || 0,
+        imported: d.contacts_inserted || 0,
+        updated: d.contacts_updated || 0,
+        skipped: d.contacts_skipped_no_phone || 0,
+        failed: failedRows.length,
+        failedRows: failedRows.slice(0, 50),
+        unmatchedAssemblies: d.unmatched_assemblies || [],
+        unmatchedDistricts: d.unmatched_districts || [],
+      });
+      onImported(); // refresh the contacts list so new rows appear immediately
+    } catch (e) {
+      setError(e?.name === "AbortError"
+        ? "Import timed out. Try a smaller file or split it into batches."
+        : "Import failed — network error. Please try again.");
+    } finally {
+      clearTimeout(timeoutId);
+      setBusy(false);
+    }
+  }
+
+  const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm";
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">Import Contacts (Excel / CSV)</h2>
+          <button onClick={onClose} disabled={busy} className="text-gray-400 hover:text-gray-600 disabled:opacity-40"><X size={20} /></button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4 overflow-y-auto">
+          {!result ? (
+            <>
+              <p className="text-sm text-gray-500">
+                Accepted formats: <span className="font-medium text-gray-700">.xlsx, .xls, .csv</span>. Columns are matched
+                by header name (Name, Phone/Mobile, District, Assembly, Designation, Address…), in any order.
+              </p>
+
+              <input
+                ref={inputRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                className="hidden"
+                onChange={(e) => { setError(""); setFile(e.target.files?.[0] || null); }}
+              />
+
+              {file ? (
+                <div className="flex items-center gap-3 border border-gray-200 rounded-xl p-3">
+                  <FileSpreadsheet size={22} className="text-emerald-600 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-gray-800 truncate">{file.name}</div>
+                    <div className="text-xs text-gray-400">{fmtSize(file.size)}</div>
+                  </div>
+                  <button onClick={() => inputRef.current?.click()} disabled={busy} className="text-xs font-semibold text-[#164FA3] hover:underline disabled:opacity-40">Change</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => inputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-[#164FA3]/40 hover:bg-blue-50/30"
+                >
+                  <Upload size={22} className="mx-auto text-gray-400 mb-1.5" />
+                  <div className="text-sm font-semibold text-gray-700">Choose a file</div>
+                  <div className="text-xs text-gray-400 mt-0.5">.xlsx, .xls or .csv</div>
+                </button>
+              )}
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2.5 text-sm flex items-start gap-2">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{error}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 text-emerald-800 font-bold"><CheckCircle2 size={18} /> Import complete</div>
+                <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+                  <div className="text-gray-600"><span className="font-bold text-gray-900">{result.imported}</span> imported</div>
+                  <div className="text-gray-600"><span className="font-bold text-gray-900">{result.updated}</span> updated</div>
+                  <div className="text-gray-600"><span className="font-bold text-gray-900">{result.skipped}</span> skipped (no phone)</div>
+                  <div className="text-gray-600"><span className={`font-bold ${result.failed ? "text-red-600" : "text-gray-900"}`}>{result.failed}</span> failed</div>
+                </div>
+                <div className="text-xs text-gray-400 mt-2">{result.total} data row{result.total === 1 ? "" : "s"} processed.</div>
+              </div>
+
+              {result.failed > 0 && (
+                <div className="border border-red-100 rounded-xl overflow-hidden">
+                  <div className="bg-red-50 px-3 py-2 text-xs font-bold text-red-700 uppercase tracking-wide">Failed rows</div>
+                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-100">
+                    {result.failedRows.map((e, i) => (
+                      <div key={i} className="px-3 py-1.5 text-xs text-gray-600 flex gap-2">
+                        <span className="font-semibold text-gray-500 shrink-0">Row {e.row}</span>
+                        <span className="truncate">{e.name || e.mobile || "—"} — {(e.reasons || []).join("; ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(result.unmatchedAssemblies?.length > 0 || result.unmatchedDistricts?.length > 0) && (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Some geography names didn’t match and were left blank
+                  {result.unmatchedDistricts?.length ? ` — districts: ${result.unmatchedDistricts.slice(0, 5).join(", ")}${result.unmatchedDistricts.length > 5 ? "…" : ""}` : ""}
+                  {result.unmatchedAssemblies?.length ? ` — assemblies: ${result.unmatchedAssemblies.slice(0, 5).join(", ")}${result.unmatchedAssemblies.length > 5 ? "…" : ""}` : ""}.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100">
+          {!result ? (
+            <>
+              <button onClick={onClose} disabled={busy} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Cancel</button>
+              <button onClick={doImport} disabled={!file || busy} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-60 text-white rounded-lg font-semibold inline-flex items-center gap-2">
+                {busy && <Loader2 size={15} className="animate-spin" />}{busy ? "Importing…" : "Import"}
+              </button>
+            </>
+          ) : (
+            <button onClick={onClose} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 text-white rounded-lg font-semibold">Done</button>
+          )}
         </div>
       </div>
     </div>

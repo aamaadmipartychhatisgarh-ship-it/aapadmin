@@ -85,6 +85,29 @@ function resolveLoc(name, byName, aliases) {
   return null;
 }
 
+// Worker Management was removed, so a deployed DB may no longer have the
+// `workers` table (or its `membership_no` column). The contacts importer must
+// NOT crash when they're absent — worker/membership matching is irrelevant to
+// writing contacts and is simply skipped. Probed once per process, cached.
+let _hasWorkersTable; // undefined = unknown
+async function hasWorkersTable() {
+  if (_hasWorkersTable !== undefined) return _hasWorkersTable;
+  try {
+    const rows = await query("SHOW TABLES LIKE 'workers'");
+    _hasWorkersTable = rows.length > 0;
+  } catch { _hasWorkersTable = false; }
+  return _hasWorkersTable;
+}
+let _hasMembershipCol;
+async function hasWorkersMembershipCol() {
+  if (_hasMembershipCol !== undefined) return _hasMembershipCol;
+  try {
+    const rows = await query("SHOW COLUMNS FROM workers LIKE 'membership_no'");
+    _hasMembershipCol = rows.length > 0;
+  } catch { _hasMembershipCol = false; }
+  return _hasMembershipCol;
+}
+
 const WORKER_TYPE_VALUES = new Set(WORKER_TYPES.map((t) => t.value));
 function resolveWorkerType(raw) {
   const s = String(raw || "").trim().toLowerCase().replace(/\s+/g, "_");
@@ -110,13 +133,18 @@ export async function parseAndValidateWorkbook(rows) {
     return { error: "Could not find a NAME column in the sheet." };
   }
 
+  // The `workers` table + `membership_no` column are optional (Worker Management
+  // was removed). Only query them when they still exist; otherwise the importer
+  // skips worker/membership matching entirely — contacts still import normally.
+  const workersExists = await hasWorkersTable();
+  const membershipExists = workersExists && (await hasWorkersMembershipCol());
   const [districtRows, assemblyRows, wardRows, boothRows, workerRows, membershipRows, contactRows] = await Promise.all([
     query("SELECT id, name FROM locations WHERE type = 'district'"),
     query("SELECT id, name FROM locations WHERE type = 'assembly'"),
     query("SELECT id, name, parent_id FROM locations WHERE type = 'ward'"),
     query("SELECT id, name, parent_id FROM locations WHERE type = 'booth'"),
-    query("SELECT id, name, mobile FROM workers"),
-    query("SELECT id, membership_no FROM workers WHERE membership_no IS NOT NULL"),
+    workersExists ? query("SELECT id, name, mobile FROM workers") : Promise.resolve([]),
+    membershipExists ? query("SELECT id, membership_no FROM workers WHERE membership_no IS NOT NULL") : Promise.resolve([]),
     query("SELECT id, phone_number FROM contacts"),
   ]);
   const existingContactByPhone = new Map(contactRows.map((r) => [String(r.phone_number), r.id]));
