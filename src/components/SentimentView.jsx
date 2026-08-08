@@ -33,10 +33,14 @@ export default function SentimentView() {
       .finally(() => setLoading(false));
   }, []);
 
-  const pie = data ? Object.entries(data)
-    .filter(([_, v]) => v > 0)
-    .map(([k, v]) => ({ name: LABELS[k], value: v, color: COLORS[k] })) : [];
-  const total = data ? Object.values(data).reduce((a, b) => a + b, 0) : 0;
+  // Sort sentiments by their actual count, highest first — recomputed whenever
+  // `data` changes. Both the distribution donut and the Counts list use this
+  // same ordered array so they always agree.
+  const sorted = data ? Object.entries(data).sort((a, b) => Number(b[1]) - Number(a[1])) : [];
+  const pie = sorted
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => ({ name: LABELS[k], value: v, color: COLORS[k] }));
+  const total = data ? Object.values(data).reduce((a, b) => a + Number(b), 0) : 0;
 
   if (loading) return <div className="text-gray-400">Loading…</div>;
   if (total === 0) {
@@ -66,7 +70,7 @@ export default function SentimentView() {
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
         <h2 className="font-bold text-lg text-gray-900 mb-6">Counts</h2>
         <ul className="space-y-3">
-          {Object.entries(data).map(([k, v]) => (
+          {sorted.map(([k, v]) => (
             <li key={k} className="flex items-center justify-between border-b border-gray-100 pb-3">
               <span className="flex items-center gap-3">
                 <span className="w-3 h-3 rounded-full" style={{ background: COLORS[k] }} />
