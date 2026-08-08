@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -37,6 +37,9 @@ export default function AdminCallRecords() {
   const router = useRouter();
 
   const [calls, setCalls] = useState([]);
+  // Summary totals come from the API (computed over the whole matching dataset,
+  // independent of the status filter and uncapped by the row limit).
+  const [summary, setSummary] = useState({ total: 0, picked: 0, notPicked: 0, followUps: 0, avgDuration: null });
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -104,7 +107,11 @@ export default function AdminCallRecords() {
     if (dateTo) params.set("date_to", dateTo);
     try {
       const r = await fetch(`/api/calls?${params}`);
-      if (r.ok) setCalls((await r.json()).calls || []);
+      if (r.ok) {
+        const d = await r.json();
+        setCalls(d.calls || []);
+        if (d.summary) setSummary(d.summary);
+      }
     } finally {
       setLoading(false);
     }
@@ -130,18 +137,6 @@ export default function AdminCallRecords() {
     setDateFrom(""); setDateTo("");
   };
 
-  const summary = useMemo(() => {
-    const total = calls.length;
-    const connected = calls.filter((c) => c.status_name === "Phone Picked").length;
-    const noAnswer = calls.filter((c) => c.status_name === "Not Picked").length;
-    const followUps = calls.filter((c) => c.is_follow_up_required).length;
-    const avgDur = (() => {
-      const withDur = calls.filter((c) => c.duration_seconds);
-      if (withDur.length === 0) return null;
-      return Math.round(withDur.reduce((a, c) => a + c.duration_seconds, 0) / withDur.length);
-    })();
-    return { total, connected, noAnswer, followUps, avgDur };
-  }, [calls]);
 
   if (status !== "authenticated" || !isAdmin(session)) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
@@ -159,11 +154,11 @@ export default function AdminCallRecords() {
 
       {/* Summary strip */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <SumCard label="Matching" value={summary.total} accent />
-        <SumCard label="Connected" value={summary.connected} />
-        <SumCard label="No Answer" value={summary.noAnswer} />
+        <SumCard label="Total Calls" value={summary.total} accent />
+        <SumCard label="Picked Calls" value={summary.picked} />
+        <SumCard label="Not Picked Calls" value={summary.notPicked} />
         <SumCard label="Follow-ups" value={summary.followUps} />
-        <SumCard label="Avg duration" value={summary.avgDur != null ? fmtDur(summary.avgDur) : "—"} />
+        <SumCard label="Avg Duration" value={summary.avgDuration != null ? fmtDur(summary.avgDuration) : "—"} />
       </div>
 
       {/* Filters */}

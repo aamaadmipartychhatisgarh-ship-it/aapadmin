@@ -55,7 +55,11 @@ export async function GET(req) {
     if (lok_sabha_id) { where += " AND c.lok_sabha_id = ?"; params.push(lok_sabha_id); }
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
     if (assembly_id) { where += " AND c.assembly_id = ?"; params.push(assembly_id); }
-    if (status_id) { where += " AND c.status_id = ?"; params.push(status_id); }
+    // NOTE: the status filter is deliberately NOT part of this base WHERE. It is
+    // applied ONLY to the table/list query below, so the summary counts
+    // (Total / Picked / Not Picked / Follow-ups / Avg Duration) are computed over
+    // the dataset matching every OTHER filter and stay stable no matter which
+    // status is selected — picking "Phone Picked" must not make Picked == Total.
     if (designation_id) { where += " AND c.designation_id = ?"; params.push(designation_id); }
     if (sentiment) { where += " AND c.sentiment = ?"; params.push(sentiment); }
     if (search) {
@@ -70,6 +74,36 @@ export async function GET(req) {
       where += " " + scope.where;
       params.push(...scope.params);
     }
+
+    // --- Summary: computed over the base (no-status) dataset with SQL
+    // aggregates, so it is never skewed by the status filter and never capped by
+    // the 1000-row display limit. Each call is classified by its ACTUAL stored
+    // status (call_statuses.name), never inferred from the selected filter. ---
+    const [sum] = await query(
+      `SELECT
+         COUNT(*) AS total,
+         COALESCE(SUM(cs.name = 'Phone Picked'), 0) AS picked,
+         COALESCE(SUM(cs.name = 'Not Picked'), 0) AS not_picked,
+         COALESCE(SUM(c.is_follow_up_required = 1), 0) AS follow_ups,
+         AVG(NULLIF(c.duration_seconds, 0)) AS avg_dur
+       FROM calls c
+       LEFT JOIN call_statuses cs ON c.status_id = cs.id
+       ${where}`,
+      params
+    );
+    const summary = {
+      total: Number(sum?.total) || 0,
+      picked: Number(sum?.picked) || 0,
+      notPicked: Number(sum?.not_picked) || 0,
+      followUps: Number(sum?.follow_ups) || 0,
+      avgDuration: sum?.avg_dur != null ? Math.round(Number(sum.avg_dur)) : null,
+    };
+
+    // The table/list applies the status filter (on top of the base filters) so
+    // selecting a status shows only calls whose ACTUAL status matches it.
+    let listWhere = where;
+    const listParams = [...params];
+    if (status_id) { listWhere += " AND c.status_id = ?"; listParams.push(status_id); }
 
     const sql = `
       SELECT
@@ -89,13 +123,14 @@ export async function GET(req) {
       LEFT JOIN locations lls ON c.lok_sabha_id = lls.id
       LEFT JOIN locations ld ON c.district_id = ld.id
       LEFT JOIN locations la ON c.assembly_id = la.id
-      ${where}
+      ${listWhere}
       ORDER BY c.called_at DESC LIMIT 1000`;
 
-    const calls = await query(sql, params);
-    // Total matching the SAME filters (uncapped by the 1000 row display limit).
-    const [{ total }] = await query(`SELECT COUNT(*) AS total FROM calls c ${where}`, params);
-    return Response.json({ calls, total: Number(total) || 0 }, { status: 200 });
+    const calls = await query(sql, listParams);
+    // Total rows matching the CURRENT view (all filters incl. status), uncapped
+    // by the 1000-row display limit — kept for callers that show "N matching".
+    const [{ total }] = await query(`SELECT COUNT(*) AS total FROM calls c ${listWhere}`, listParams);
+    return Response.json({ calls, total: Number(total) || 0, summary }, { status: 200 });
   } catch (error) {
     console.error("Error fetching calls:", error);
     return Response.json({ message: "Internal server error" }, { status: 500 });
