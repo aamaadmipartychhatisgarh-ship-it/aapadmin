@@ -42,10 +42,9 @@ export default function StrengthView() {
             <tr>
               <th className="px-4 py-3 font-semibold text-gray-600">#</th>
               <th className="px-4 py-3 font-semibold text-gray-600">District</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Required Workers</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Workers</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Avg Activity</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Teams</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Calls</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Attempt Calls</th>
               <th className="px-4 py-3 font-semibold text-gray-600 w-64">Strength</th>
             </tr>
           </thead>
@@ -55,11 +54,10 @@ export default function StrengthView() {
               return (
                 <tr key={a.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-400 font-bold">{i + 1}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{a.name}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.worker_count}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.avg_activity}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.team_count}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.call_count}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">{a.district ?? a.name}</td>
+                  <td className="px-4 py-3 text-gray-600">{Number(a.requiredWorkers || 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-gray-600">{Number(a.workers ?? a.worker_count ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-gray-600">{Number(a.attemptCalls ?? a.call_count ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${meta.color}`} style={{ width: `${a.score}%` }} /></div>
