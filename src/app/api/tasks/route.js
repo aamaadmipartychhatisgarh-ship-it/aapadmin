@@ -116,7 +116,9 @@ export async function POST(req) {
     if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const d = await req.json();
     if (!d.title) return NextResponse.json({ message: "Title required" }, { status: 400 });
-    await ensureTaskContactColumn();
+    // Best-effort: a schema check/migration hiccup must not fail task creation
+    // (the contact_id column already exists in this deployment).
+    try { await ensureTaskContactColumn(); } catch (e) { console.error("ensureTaskContactColumn:", e); }
     // Stamp assigned_at at creation (this is the initial assignment time).
     const stampAssigned = await hasTaskAssignedAt();
     const hasDuration = await hasTaskDurationColumns();
@@ -155,22 +157,31 @@ export async function POST(req) {
          ...(hasDuration ? [d.start_date || null, d.duration_preset || null, d.duration_days || null] : [])]
       );
       createdIds.push(res.insertId);
+      // Everything past the task INSERT is best-effort: the task row already
+      // exists, so a checklist or notification hiccup must NOT fail (or hang)
+      // the response. Each is isolated in its own try/catch.
       // Persist the checklist (unlimited items) for this task.
       if (subsTable) {
-        const values = titles.map(() => "(?, ?, ?)").join(", ");
-        const params = [];
-        titles.forEach((t, i) => params.push(res.insertId, t, i));
-        await query(`INSERT INTO task_subtasks (task_id, title, sort_order) VALUES ${values}`, params);
+        try {
+          const values = titles.map(() => "(?, ?, ?)").join(", ");
+          const params = [];
+          titles.forEach((t, i) => params.push(res.insertId, t, i));
+          await query(`INSERT INTO task_subtasks (task_id, title, sort_order) VALUES ${values}`, params);
+        } catch (e) { console.error("task subtasks insert failed:", e); }
       }
-      // Alert the assigned caller / team. Don't notify the person who created it.
+      // Alert the assigned caller / team. Don't notify the person who created
+      // it. notifyTaskAssigned already swallows its own errors, but guard here
+      // too so it can never bubble up and fail the create response.
       if (uid || d.assigned_to_team_id) {
-        await notifyTaskAssigned({
-          taskId: res.insertId,
-          title: d.title,
-          assignedToUserId: uid || null,
-          assignedToTeamId: d.assigned_to_team_id || null,
-          excludeUserId: session.user.id,
-        });
+        try {
+          await notifyTaskAssigned({
+            taskId: res.insertId,
+            title: d.title,
+            assignedToUserId: uid || null,
+            assignedToTeamId: d.assigned_to_team_id || null,
+            excludeUserId: session.user.id,
+          });
+        } catch (e) { console.error("task notify failed:", e); }
       }
     }
     return NextResponse.json({ id: createdIds[0], ids: createdIds }, { status: 201 });

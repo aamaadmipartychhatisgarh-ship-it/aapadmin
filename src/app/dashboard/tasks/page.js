@@ -433,18 +433,32 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     // keep the button stuck on "Saving…".
     let ok = false;
     let errMsg = "";
+    // Hard request timeout: if the server never responds (a true hang), abort
+    // the request so the UI shows an error instead of "Saving…" forever. This
+    // is a REAL request timeout that surfaces a failure — NOT a fake-success
+    // setTimeout that hides the bug. 45s is well beyond any normal create.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
-      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...rest, ...assign, subtasks: cleanSubs }) });
+      const r = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...rest, ...assign, subtasks: cleanSubs }),
+        signal: controller.signal,
+      });
       if (r.ok) {
         ok = true; // 2xx = backend-confirmed creation/update
       } else {
         const data = await r.json().catch(() => ({}));
         errMsg = data.message || failMsg;
       }
-    } catch {
-      // Network failure / timeout / aborted request.
-      errMsg = failMsg;
+    } catch (e) {
+      // Network failure / aborted (timed-out) / other fetch error.
+      errMsg = e?.name === "AbortError"
+        ? "The request timed out — the task may not have been created. Please try again."
+        : failMsg;
     } finally {
+      clearTimeout(timeoutId);
       // Reset the loading state in EVERY case so the button never sticks.
       setSaving(false);
     }
