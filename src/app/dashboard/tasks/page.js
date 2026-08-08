@@ -414,6 +414,12 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     // Guard against double-submit: ignore clicks while a save is in flight.
     if (saving) return;
     console.log("[TASK UI] SUBMIT START", { editing: !!editing });
+    // Frontend validation (the backend re-validates all of this too).
+    if (!form.title.trim()) { setError("Task title is required."); return; }
+    if (form.duration_preset === "custom") {
+      const dd = Number(form.duration_days);
+      if (!Number.isFinite(dd) || dd < 1) { setError("Enter a valid duration (at least 1 day)."); return; }
+    }
     setSaving(true);
     setError("");
     const url = editing ? `/api/tasks/${editing.id}` : "/api/tasks";

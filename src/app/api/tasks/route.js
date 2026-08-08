@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
 import { resolveActingUserId } from "@/lib/actAs";
-import { query } from "@/lib/db";
+import { query, getPool } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
 import { notifyTaskAssigned } from "@/lib/notify";
@@ -114,94 +114,119 @@ export async function GET(req) {
 // (X-Tasks-Build) and the server logs — confirms which code is actually running.
 const BUILD = process.env.NEXT_PUBLIC_APP_VERSION || "dev";
 
+const VALID_PRIORITIES = ["low", "medium", "high", "urgent"];
+const H = () => ({ "X-Tasks-Build": BUILD });
+const bad = (message, status = 400) => NextResponse.json({ message }, { status, headers: H() });
+
 export async function POST(req) {
   const t0 = Date.now();
+  let conn;
   try {
     console.log(`[TASK] POST START build=${BUILD}`);
+    // --- auth ---
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) { console.log("[TASK] AUTH FAIL 401"); return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: { "X-Tasks-Build": BUILD } }); }
+    if (!session || !isOversight(session)) { console.log("[TASK] AUTH FAIL 401"); return bad("Unauthorized", 401); }
     console.log("[TASK] AUTH OK user=", session.user?.id);
-    const d = await req.json();
-    if (!d.title) { console.log("[TASK] VALIDATION FAIL: no title"); return NextResponse.json({ message: "Title required" }, { status: 400, headers: { "X-Tasks-Build": BUILD } }); }
-    console.log("[TASK] VALIDATION OK title.len=", String(d.title).length, "userIds=", Array.isArray(d.assigned_to_user_ids) ? d.assigned_to_user_ids.length : "single", "team=", d.assigned_to_team_id ? "y" : "n", "subs=", Array.isArray(d.subtasks) ? d.subtasks.length : 0);
-    // Read-only schema probes (cached). The create path NEVER runs DDL: the old
-    // ensureTaskContactColumn() issued an ALTER TABLE + FOREIGN KEY that can
-    // block on a metadata lock under concurrent load and hang the whole POST
-    // (reads keep working, creates hang — the exact production symptom). We just
-    // detect whether the optional columns exist and adapt the INSERT.
-    const stampAssigned = await hasTaskAssignedAt();
-    const hasDuration = await hasTaskDurationColumns();
-    const hasContactCol = await hasTaskContactColumn();
-    console.log(`[TASK] PROBES OK (${Date.now() - t0}ms) assignedAt=${stampAssigned} duration=${hasDuration} contactCol=${hasContactCol}`);
-    // The deadline is derived from start_date + duration_days when both are
-    // given (the normal path, via the duration picker); an explicit d.deadline
-    // is only a fallback for callers that don't use the duration picker.
-    const deadline = (hasDuration && d.start_date && d.duration_days)
-      ? addDays(d.start_date, d.duration_days) : (d.deadline || null);
-    // The Description field has been retired from the Tasks module. The column
-    // is left in place (nullable) so existing tasks keep their stored text; new
-    // tasks simply never write it.
-    // Multi-assign: a task may be assigned to several users at once. Each
-    // selected user gets their OWN task record (fan-out) so it shows up
-    // independently in every assignee's list. Accepts the new
-    // assigned_to_user_ids array; falls back to the legacy single
-    // assigned_to_user_id, and to [null] (team-only / unassigned) when neither
-    // is given — so existing single-assignee and team behavior is unchanged.
+    const d = await req.json().catch(() => null);
+    if (!d || typeof d !== "object") return bad("Invalid request body");
+
+    // --- backend validation (never trust the client alone) ---
+    const title = String(d.title ?? "").trim();
+    if (!title) { console.log("[TASK] VALIDATION FAIL: no title"); return bad("Task title is required."); }
+    const priority = d.priority ? String(d.priority) : "medium";
+    if (!VALID_PRIORITIES.includes(priority)) return bad("Invalid priority.");
+
+    // Assignees: dedup the multi-select ids; fall back to the legacy single id.
     const userIds = Array.isArray(d.assigned_to_user_ids)
       ? [...new Set(d.assigned_to_user_ids.map((x) => String(x).trim()).filter(Boolean))]
       : (d.assigned_to_user_id ? [String(d.assigned_to_user_id)] : []);
-    const targets = userIds.length ? userIds : [null];
+    const teamId = d.assigned_to_team_id ? String(d.assigned_to_team_id).trim() : null;
 
-    // Prepare the checklist once (same items for every fanned-out task).
-    const subs = Array.isArray(d.subtasks) ? d.subtasks : [];
-    const titles = subs.map((s) => (typeof s === "string" ? s : s?.title) || "").map((t) => t.trim()).filter(Boolean);
+    // Schema probes (cached, read-only — the create path runs NO DDL).
+    const stampAssigned = await hasTaskAssignedAt();
+    const hasDuration = await hasTaskDurationColumns();
+    const hasContactCol = await hasTaskContactColumn();
+
+    // Dates: start + duration → deadline; validate the derived range.
+    const startDate = (hasDuration && d.start_date) ? String(d.start_date).slice(0, 10) : null;
+    let durationDays = (d.duration_days === "" || d.duration_days == null) ? null : Number(d.duration_days);
+    if (durationDays != null && (!Number.isFinite(durationDays) || durationDays < 1)) return bad("Duration must be at least 1 day.");
+    const deadline = (hasDuration && startDate && durationDays) ? addDays(startDate, durationDays) : (d.deadline || null);
+    if (startDate && deadline && String(deadline) < String(startDate)) return bad("End date cannot be before the start date.");
+
+    // Validate assignees/team exist (the dropdowns only offer valid options, but
+    // the server verifies anyway so a stale/forged id can't create a bad row).
+    if (userIds.length) {
+      const rows = await query(`SELECT id FROM users WHERE id IN (${userIds.map(() => "?").join(",")})`, userIds);
+      if (rows.length !== userIds.length) return bad("One or more selected assignees are invalid.");
+    }
+    if (teamId) {
+      const tr = await query("SELECT id FROM teams WHERE id = ?", [teamId]);
+      if (!tr.length) return bad("The selected team is invalid.");
+    }
+
+    // Checklist: keep only non-empty titles (blank rows are ignored; a task with
+    // no subtasks is valid). Same list applies to every fanned-out task.
+    const titles = (Array.isArray(d.subtasks) ? d.subtasks : [])
+      .map((s) => (typeof s === "string" ? s : s?.title) || "").map((t) => t.trim()).filter(Boolean);
     const subsTable = titles.length ? await hasSubtasksTable() : false;
-    console.log(`[TASK] BEFORE INSERT (${Date.now() - t0}ms) targets=${targets.length} subsTable=${subsTable}`);
 
-    const createdIds = [];
-    for (const uid of targets) {
-      const res = await query(
-        `INSERT INTO tasks (title, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id${hasContactCol ? ", contact_id" : ""}, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
-         VALUES (?, ?, 'pending', ?, ?, ?, ?${hasContactCol ? ", ?" : ""}, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
-        [d.title, d.priority || "medium", deadline,
-         uid || null, d.assigned_to_team_id || null, d.district_id || null,
-         ...(hasContactCol ? [d.contact_id || null] : []),
-         session.user.id,
-         ...(hasDuration ? [d.start_date || null, d.duration_preset || null, d.duration_days || null] : [])]
-      );
-      createdIds.push(res.insertId);
-      console.log(`[TASK] AFTER INSERT (${Date.now() - t0}ms) id=${res.insertId} uid=${uid || "none"}`);
-      // Everything past the task INSERT is best-effort: the task row already
-      // exists, so a checklist or notification hiccup must NOT fail (or hang)
-      // the response. Each is isolated in its own try/catch.
-      // Persist the checklist (unlimited items) for this task.
-      if (subsTable) {
-        try {
+    // Multi-assign fan-out: one task row per selected user (or a single
+    // unassigned/team row when none). Each gets the same checklist.
+    const targets = userIds.length ? userIds : [null];
+    console.log(`[TASK] VALIDATION OK (${Date.now() - t0}ms) targets=${targets.length} subs=${titles.length} subsTable=${subsTable}`);
+
+    // --- single atomic transaction: all task rows + their subtasks commit
+    // together, or nothing does. The connection is always released. ---
+    conn = await getPool().getConnection();
+    const created = [];
+    try {
+      await conn.beginTransaction();
+      for (const uid of targets) {
+        const [res] = await conn.execute(
+          `INSERT INTO tasks (title, priority, status, deadline, assigned_to_user_id, assigned_to_team_id, district_id${hasContactCol ? ", contact_id" : ""}, created_by_user_id${stampAssigned ? ", assigned_at" : ""}${hasDuration ? ", start_date, duration_preset, duration_days" : ""})
+           VALUES (?, ?, 'pending', ?, ?, ?, ?${hasContactCol ? ", ?" : ""}, ?${stampAssigned ? ", NOW()" : ""}${hasDuration ? ", ?, ?, ?" : ""})`,
+          [title, priority, deadline,
+           uid || null, teamId, d.district_id || null,
+           ...(hasContactCol ? [d.contact_id || null] : []),
+           session.user.id,
+           ...(hasDuration ? [startDate, d.duration_preset || null, durationDays] : [])]
+        );
+        const taskId = res.insertId;
+        created.push({ taskId, uid });
+        // Subtasks in the SAME transaction — start incomplete (is_completed=0).
+        if (subsTable) {
           const values = titles.map(() => "(?, ?, ?)").join(", ");
           const params = [];
-          titles.forEach((t, i) => params.push(res.insertId, t, i));
-          await query(`INSERT INTO task_subtasks (task_id, title, sort_order) VALUES ${values}`, params);
-        } catch (e) { console.error("task subtasks insert failed:", e); }
+          titles.forEach((t, i) => params.push(taskId, t, i));
+          await conn.execute(`INSERT INTO task_subtasks (task_id, title, sort_order) VALUES ${values}`, params);
+        }
       }
-      // Alert the assigned caller / team. Don't notify the person who created
-      // it. notifyTaskAssigned already swallows its own errors, but guard here
-      // too so it can never bubble up and fail the create response.
-      if (uid || d.assigned_to_team_id) {
+      await conn.commit();
+      console.log(`[TASK] COMMIT (${Date.now() - t0}ms) ids=${created.map((c) => c.taskId).join(",")}`);
+    } catch (txErr) {
+      try { await conn.rollback(); } catch { /* connection may be dead */ }
+      throw txErr;
+    }
+
+    // --- post-commit side effects: notifications are NOT part of task
+    // integrity, so they run after commit and never block or roll back the
+    // create. notifyTaskAssigned already swallows its own errors. ---
+    for (const { taskId, uid } of created) {
+      if (uid || teamId) {
         try {
-          await notifyTaskAssigned({
-            taskId: res.insertId,
-            title: d.title,
-            assignedToUserId: uid || null,
-            assignedToTeamId: d.assigned_to_team_id || null,
-            excludeUserId: session.user.id,
-          });
+          await notifyTaskAssigned({ taskId, title, assignedToUserId: uid || null, assignedToTeamId: teamId, excludeUserId: session.user.id });
         } catch (e) { console.error("task notify failed:", e); }
       }
     }
-    console.log(`[TASK] RESPONSE 201 (${Date.now() - t0}ms) ids=${createdIds.join(",")}`);
-    return NextResponse.json({ id: createdIds[0], ids: createdIds }, { status: 201, headers: { "X-Tasks-Build": BUILD } });
+
+    const ids = created.map((c) => c.taskId);
+    console.log(`[TASK] RESPONSE 201 (${Date.now() - t0}ms) ids=${ids.join(",")}`);
+    return NextResponse.json({ id: ids[0], ids }, { status: 201, headers: H() });
   } catch (err) {
     console.error(`[TASK] ERROR (${Date.now() - t0}ms):`, err?.code || "", err?.message || err);
-    return NextResponse.json({ message: err?.sqlMessage || "Internal server error" }, { status: 500, headers: { "X-Tasks-Build": BUILD } });
+    return NextResponse.json({ message: err?.sqlMessage || "Could not create the task. Please try again." }, { status: 500, headers: H() });
+  } finally {
+    if (conn) { try { conn.release(); } catch { /* already released */ } }
   }
 }
