@@ -294,7 +294,7 @@ export default function AnalyticsPanel() {
           </Panel>
 
           {/* Row 5: Heatmap (custom CSS grid) */}
-          <Panel title="Activity Heatmap (hour × day of week)" icon={Grid3x3}>
+          <Panel title="Activity Heatmap (10 AM–7 PM × day of week)" icon={Grid3x3}>
             {heatmapMax === 0 ? <Empty /> : (
               <Heatmap data={heatmap} max={heatmapMax} />
             )}
@@ -320,15 +320,27 @@ export default function AnalyticsPanel() {
   );
 }
 
+// Office working hours only (10 AM–7 PM). The heatmap displays just these
+// buckets; the underlying data (per-hour call counts keyed by HOUR(called_at)
+// in the app timezone) is unchanged — hours outside this range are simply not
+// shown. row[h] is the count for hour h, so slicing to these indexes preserves
+// the exact bucketing.
+const OFFICE_HOURS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+function fmtHour12(h) {
+  const ampm = h < 12 ? "AM" : "PM";
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12} ${ampm}`;
+}
+
 function Heatmap({ data, max }) {
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   return (
     <div className="overflow-x-auto">
       <div className="inline-block min-w-full">
-        <div className="grid" style={{ gridTemplateColumns: `48px repeat(24, minmax(22px, 1fr))`, gap: 2 }}>
+        <div className="grid" style={{ gridTemplateColumns: `48px repeat(${OFFICE_HOURS.length}, minmax(34px, 1fr))`, gap: 2 }}>
           <div />
-          {Array.from({ length: 24 }, (_, h) => (
-            <div key={h} className="text-[10px] text-gray-400 text-center font-mono">{h}</div>
+          {OFFICE_HOURS.map((h) => (
+            <div key={h} className="text-[10px] text-gray-400 text-center font-mono whitespace-nowrap">{fmtHour12(h)}</div>
           ))}
           {data.map((row, d) => (
             <DayRow key={d} day={days[d]} row={row} max={max} />
@@ -349,14 +361,17 @@ function DayRow({ day, row, max }) {
   return (
     <>
       <div className="text-xs text-gray-500 font-medium pr-2 self-center">{day}</div>
-      {row.map((v, h) => (
-        <div
-          key={h}
-          title={`${day} ${h}:00 — ${v} call${v === 1 ? "" : "s"}`}
-          className="aspect-square rounded"
-          style={{ background: heatColor(v, max) }}
-        />
-      ))}
+      {OFFICE_HOURS.map((h) => {
+        const v = row[h] || 0;
+        return (
+          <div
+            key={h}
+            title={`${day} ${h}:00 — ${v} call${v === 1 ? "" : "s"}`}
+            className="aspect-square rounded"
+            style={{ background: heatColor(v, max) }}
+          />
+        );
+      })}
     </>
   );
 }
