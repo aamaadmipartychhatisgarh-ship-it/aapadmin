@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { workersByDistrict } from "@/lib/workerCounts";
+import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // Fixed Required-Workers targets for the 33 Chhattisgarh districts. These are
 // planning targets (NOT actual counts) and never change here. Each entry lists
@@ -66,18 +66,16 @@ function requiredWorkersFor(dbName) {
   return REQUIRED_BY_NORM[normDistrict(dbName)] ?? 0;
 }
 
-// Raw `users.role` values that count as actual field workers/callers for the
-// Workers column — the same people Administration → Users manages. Oversight
-// roles (super_admin/state/zone/district/assembly admin, supervisor) and the
-// media roles are intentionally excluded; contacts live in a separate table and
-// are never counted here. The active-worker → district resolution now lives in
-// @/lib/workerCounts (shared with the Leader Assessment assembly list) so both
-// views agree on the same real counts.
+// The Workers column now reflects the actual people data in Contacts: for each
+// district it is the live count of contacts keyed by that district_id, using
+// the SAME definition the District Map uses (wrong-number-flagged contacts
+// excluded). Because it is a live COUNT it automatically tracks contacts being
+// added, removed or reassigned, each contact is counted once (no duplicates),
+// and no district total is ever hardcoded.
 
 // Organization strength score per district, combining the actual workforce
-// (real active users/callers assigned to the district) and calling performance
-// (attempt volume + connect rate). Teams and per-worker "activity score" are no
-// longer part of this view.
+// (contacts assigned to the district) and calling performance (attempt volume +
+// connect rate). Teams and per-worker "activity score" are not part of this view.
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
@@ -102,25 +100,26 @@ export async function GET() {
       dParams.push(u.scope_assembly_id);
     }
 
-    const [rows, workerCounts] = await Promise.all([
-      query(
-        `SELECT ld.id, ld.name,
-                (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
-                (SELECT COUNT(*) FROM calls c JOIN call_statuses cs ON cs.id=c.status_id
-                   WHERE c.district_id = ld.id AND cs.name='Phone Picked') AS connected_count
-           FROM locations ld
-          WHERE ld.type = 'district' ${districtFilter}
-          ORDER BY ld.name`,
-        dParams
-      ),
-      workersByDistrict(),
-    ]);
+    // `notWrong` matches the app's existing "valid contact" definition (skips
+    // numbers flagged wrong). Worker count = live contacts-per-district COUNT.
+    const notWrong = await notWrongNumberClause("ct");
+    const rows = await query(
+      `SELECT ld.id, ld.name,
+              (SELECT COUNT(*) FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS worker_count,
+              (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
+              (SELECT COUNT(*) FROM calls c JOIN call_statuses cs ON cs.id=c.status_id
+                 WHERE c.district_id = ld.id AND cs.name='Phone Picked') AS connected_count
+         FROM locations ld
+        WHERE ld.type = 'district' ${districtFilter}
+        ORDER BY ld.name`,
+      dParams
+    );
 
     // Normalize the workforce + calling factors 0-100 across districts, then a
     // weighted composite. Weights (sum 1.0): workforce 45, calling volume 30,
     // connect rate 25 — the Teams/activity weights were removed with those
     // columns and redistributed onto the metrics this table now shows.
-    const withWorkers = rows.map((r) => ({ ...r, worker_count: workerCounts.get(r.id) || 0 }));
+    const withWorkers = rows.map((r) => ({ ...r, worker_count: Number(r.worker_count) || 0 }));
     const max = {
       worker: Math.max(1, ...withWorkers.map((r) => r.worker_count)),
       call: Math.max(1, ...withWorkers.map((r) => r.call_count)),
