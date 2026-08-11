@@ -5,7 +5,7 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessMedia } from "@/lib/permissions";
 import {
   LayoutDashboard, Newspaper, Tv, Mic, UserCheck, BarChart3, Upload, Plus, Loader2, X,
-  Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil,
+  Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil, ChevronDown, Check,
 } from "lucide-react";
 import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 
@@ -60,7 +60,7 @@ function Body() {
 
       {tab === "dashboard" && <MediaDashboardTab />}
       {tab === "newspapers" && <NewspapersTab data={data} onChange={load} flash={setToast} />}
-      {tab === "channels" && <ChannelsTab data={data} onChange={load} />}
+      {tab === "channels" && <ChannelsTab data={data} onChange={load} flash={setToast} />}
       {tab === "conferences" && <ConferencesTab data={data} onChange={load} />}
       {tab === "spokespersons" && <SpokespersonsTab data={data} onChange={load} />}
       {tab === "analytics" && <AnalyticsTab data={data} />}
@@ -164,7 +164,7 @@ function SentimentBadge({ s }) {
 }
 
 // ============================================================ CHANNELS
-function ChannelsTab({ data, onChange }) {
+function ChannelsTab({ data, onChange, flash }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const TONE = { supportive: "bg-emerald-100 text-emerald-700", neutral: "bg-gray-100 text-gray-600", opposing: "bg-red-100 text-red-700", unknown: "bg-amber-100 text-amber-700" };
@@ -198,7 +198,7 @@ function ChannelsTab({ data, onChange }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">When</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Channel</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Topic</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Assigned</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Spokespersons</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Brief</th>
                 <th className="px-4 py-3"></th>
@@ -212,7 +212,7 @@ function ChannelsTab({ data, onChange }) {
                   </td>
                   <td className="px-4 py-3 text-gray-700">{d.channel_name || "—"}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{d.topic}</td>
-                  <td className="px-4 py-3 text-gray-600">{d.assignee_count} spokesperson{d.assignee_count === 1 ? "" : "s"}</td>
+                  <td className="px-4 py-3 text-gray-600">{(d.spokespersons && d.spokespersons.length) ? d.spokespersons.map((s) => s.name).join(", ") : <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${d.status === "aired" ? "bg-blue-100 text-blue-700" : d.status === "live" ? "bg-red-100 text-red-700" : d.status === "cancelled" ? "bg-gray-100 text-gray-400" : "bg-amber-100 text-amber-700"}`}>{d.status}</span></td>
                   <td className="px-4 py-3">
                     {d.brief_pdf_url ? <a href={d.brief_pdf_url} target="_blank" rel="noreferrer" className="text-[#164FA3] hover:underline text-xs flex items-center gap-1"><FileText size={13} /> PDF</a> : <span className="text-gray-300">—</span>}
@@ -228,8 +228,8 @@ function ChannelsTab({ data, onChange }) {
         )}
       </div>
 
-      {showAdd && <DebateModal channels={data.channels} spokespersons={data.spokespersons} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); onChange(); }} />}
-      {editing && <DebateModal editing={editing} channels={data.channels} spokespersons={data.spokespersons} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChange(); }} />}
+      {showAdd && <DebateModal channels={data.channels} spokespersons={data.spokespersons} onClose={() => setShowAdd(false)} onSaved={(msg) => { setShowAdd(false); onChange(); flash?.(msg); }} />}
+      {editing && <DebateModal editing={editing} channels={data.channels} spokespersons={data.spokespersons} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); onChange(); flash?.(msg); }} />}
     </div>
   );
 }
@@ -519,6 +519,63 @@ function PressNoteModal({ newspapers, onClose, onSaved, editing }) {
   );
 }
 
+// Searchable multi-select for spokespersons. Options come from the live
+// Spokespersons module (data.spokespersons); nothing is hardcoded. Value is an
+// array of spokesperson IDs. Selected people show as removable chips.
+function SpokespersonMultiSelect({ options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef(null);
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+  const selected = options.filter((o) => value.includes(o.id));
+  const filtered = options.filter((o) => o.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left flex items-center justify-between hover:bg-gray-50">
+        <span className={selected.length ? "text-gray-800" : "text-gray-400"}>{selected.length ? `${selected.length} spokesperson${selected.length === 1 ? "" : "s"} selected` : "Select spokesperson(s)"}</span>
+        <ChevronDown size={16} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg">
+          <div className="p-2 border-b border-gray-100">
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search spokesperson…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+          </div>
+          <div className="max-h-48 overflow-auto">
+            {options.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-400">No spokespersons exist yet. Add them on the Spokespersons tab.</div>
+            ) : filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-400">No match for “{q}”.</div>
+            ) : filtered.map((o) => {
+              const on = value.includes(o.id);
+              return (
+                <button key={o.id} type="button" onClick={() => toggle(o.id)} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50">
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? "bg-[#164FA3] border-[#164FA3]" : "border-gray-300"}`}>{on && <Check size={12} className="text-white" />}</span>
+                  <span className="truncate">{o.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {selected.map((o) => (
+            <span key={o.id} className="inline-flex items-center gap-1 text-xs bg-[#164FA3]/10 text-[#164FA3] px-2 py-1 rounded-full">
+              {o.name}
+              <button type="button" onClick={() => toggle(o.id)} className="hover:text-red-600"><X size={12} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
   const [form, setForm] = useState(editing ? {
     channel_id: editing.channel_id || "", topic: editing.topic || "",
@@ -529,19 +586,26 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
     opposition_counter: editing.opposition_counter || "",
     status: editing.status || "scheduled",
     viral_score: editing.viral_score || 0,
-    spokesperson_ids: [],
+    spokesperson_ids: (editing.spokespersons || []).map((s) => s.id),
   } : { channel_id: "", topic: "", debate_date: "", debate_time: "20:00", brief_pdf_url: "", talking_points: "", opposition_counter: "", spokesperson_ids: [] });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   async function save() {
+    setError("");
+    if (!form.topic.trim()) { setError("Topic is required."); return; }
+    if (!form.debate_date) { setError("Debate date is required."); return; }
     setSaving(true);
-    const url = editing ? `/api/media/debates/${editing.id}` : "/api/media/debates";
-    const method = editing ? "PUT" : "POST";
-    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    if (r.ok) onSaved(); else setSaving(false);
-  }
-  function toggleSp(id) {
-    const next = form.spokesperson_ids.includes(id) ? form.spokesperson_ids.filter((x) => x !== id) : [...form.spokesperson_ids, id];
-    setForm({ ...form, spokesperson_ids: next });
+    try {
+      const url = editing ? `/api/media/debates/${editing.id}` : "/api/media/debates";
+      const method = editing ? "PUT" : "POST";
+      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.message || "Unable to save the debate. Please try again.");
+      onSaved(editing ? "Debate updated successfully." : "Debate scheduled successfully.");
+    } catch (e) {
+      setError(e.message || "Unable to save the debate. Please try again.");
+      setSaving(false); // keep modal open, preserve entered data
+    }
   }
   return (
     <Modal title={editing ? "Edit Debate" : "Schedule Debate"} onClose={onClose}>
@@ -557,6 +621,10 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
       </div>
       <textarea className={inp} rows={2} placeholder="Talking points" value={form.talking_points} onChange={(e) => setForm({ ...form, talking_points: e.target.value })} />
       <textarea className={inp} rows={2} placeholder="Opposition counter points" value={form.opposition_counter} onChange={(e) => setForm({ ...form, opposition_counter: e.target.value })} />
+      <div>
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Select Spokesperson</label>
+        <SpokespersonMultiSelect options={spokespersons} value={form.spokesperson_ids} onChange={(ids) => setForm({ ...form, spokesperson_ids: ids })} />
+      </div>
       {editing && (
         <div className="grid grid-cols-2 gap-3">
           <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -568,18 +636,8 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
           <input type="number" min="0" max="100" placeholder="Viral score 0-100" className={inp} value={form.viral_score} onChange={(e) => setForm({ ...form, viral_score: e.target.value })} />
         </div>
       )}
-      {!editing && (
-        <div>
-          <label className="text-xs text-gray-500 mb-1 block">Assign spokespersons</label>
-          <div className="flex flex-wrap gap-1.5 max-h-32 overflow-auto">
-            {spokespersons.map((s) => {
-              const on = form.spokesperson_ids.includes(s.id);
-              return <button key={s.id} type="button" onClick={() => toggleSp(s.id)} className={`text-xs px-2.5 py-1 rounded-full border ${on ? "bg-[#164FA3] text-white border-[#164FA3]" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>{s.name}</button>;
-            })}
-          </div>
-        </div>
-      )}
-      <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.topic || !form.debate_date} />
+      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.topic.trim() || !form.debate_date} />
     </Modal>
   );
 }

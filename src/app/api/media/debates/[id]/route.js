@@ -13,9 +13,31 @@ export async function PUT(req, { params }) {
     const fields = ["channel_id", "topic", "debate_date", "debate_time", "brief_pdf_url", "talking_points", "opposition_counter", "status", "viral_score"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
-    if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
-    vals.push(id);
-    await query(`UPDATE debates SET ${sets.join(", ")} WHERE id = ?`, vals);
+    const hasSpokes = Array.isArray(d.spokesperson_ids);
+    if (!sets.length && !hasSpokes) return NextResponse.json({ message: "No changes to save." }, { status: 400 });
+
+    if (sets.length) {
+      vals.push(id);
+      await query(`UPDATE debates SET ${sets.join(", ")} WHERE id = ?`, vals);
+    }
+
+    // Sync the spokesperson relationships to exactly the provided set: drop the
+    // ones removed, add the new ones (INSERT IGNORE + the UNIQUE key prevent any
+    // duplicate assignment). Existing rows are kept so their alert flags survive.
+    if (hasSpokes) {
+      const ids = [...new Set(d.spokesperson_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+      if (ids.length) {
+        await query(
+          `DELETE FROM debate_assignments WHERE debate_id = ? AND spokesperson_id NOT IN (${ids.map(() => "?").join(",")})`,
+          [id, ...ids]
+        );
+        for (const sid of ids) {
+          await query(`INSERT IGNORE INTO debate_assignments (debate_id, spokesperson_id) VALUES (?, ?)`, [id, sid]);
+        }
+      } else {
+        await query(`DELETE FROM debate_assignments WHERE debate_id = ?`, [id]);
+      }
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("debate PUT error:", err);

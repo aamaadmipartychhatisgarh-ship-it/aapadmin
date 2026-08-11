@@ -32,6 +32,22 @@ export async function GET() {
         WHERE d.debate_date >= CURDATE() - INTERVAL 7 DAY
         ORDER BY d.debate_date ASC, d.debate_time ASC LIMIT 30`
     );
+    // Attach the assigned spokespersons (id + name) to each debate so the edit
+    // form can pre-select them and the list can show the names. One grouped
+    // query, not an N+1 loop.
+    const debateIds = upcomingDebates.map((d) => d.id);
+    const byDebate = {};
+    if (debateIds.length) {
+      const daRows = await query(
+        `SELECT da.debate_id, s.id, s.name
+           FROM debate_assignments da JOIN spokespersons s ON s.id = da.spokesperson_id
+          WHERE da.debate_id IN (${debateIds.map(() => "?").join(",")})
+          ORDER BY s.name`,
+        debateIds
+      );
+      for (const r of daRows) (byDebate[r.debate_id] ||= []).push({ id: r.id, name: r.name });
+    }
+    for (const d of upcomingDebates) d.spokespersons = byDebate[d.id] || [];
 
     const conferences = await query(
       `SELECT pc.*,
