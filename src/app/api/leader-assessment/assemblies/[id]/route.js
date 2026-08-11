@@ -5,9 +5,6 @@ import { ASSESSMENT_PARAMS, assessmentTotal, ageFromDob, rankCandidates, parseLi
 
 export const dynamic = "force-dynamic";
 
-const numOrNull = (v) => (v === "" || v == null || isNaN(Number(v)) ? null : Number(v));
-const strOrNull = (v) => { const s = String(v ?? "").trim(); return s ? s : null; };
-
 // GET /api/leader-assessment/assemblies/[id] — the COMPLETE assembly bundle:
 // assembly + MLA (with auto age) + elections + political analysis + social
 // structure + AAP candidates (with assessments, auto totals, auto ranking) +
@@ -80,40 +77,7 @@ export async function GET(_req, { params }) {
   }
 }
 
-// PUT — update assembly fields.
-export async function PUT(req, { params }) {
-  const { error } = await guard();
-  if (error) return error;
-  try {
-    const { id } = await params;
-    const d = await req.json().catch(() => ({}));
-    const name = strOrNull(d.name);
-    if (!name) return NextResponse.json({ message: "Assembly name is required." }, { status: 400 });
-    const res = await query(
-      `UPDATE la_assemblies SET name=?, number=?, district=?, lok_sabha=?, total_voters=?, total_polling_stations=?, total_booths=?, election_year=?, population=?, notes=? WHERE id=?`,
-      [name, strOrNull(d.number), strOrNull(d.district), strOrNull(d.lok_sabha),
-       numOrNull(d.total_voters), numOrNull(d.total_polling_stations), numOrNull(d.total_booths),
-       numOrNull(d.election_year), numOrNull(d.population), strOrNull(d.notes), id]
-    );
-    if (!res.affectedRows) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
-    return NextResponse.json({ ok: true }, { headers: noStore });
-  } catch (e) {
-    console.error("[LA] assembly PUT:", e);
-    return NextResponse.json({ message: "Failed to update the assembly." }, { status: 500 });
-  }
-}
-
-// DELETE — Super Admin only. FK ON DELETE CASCADE removes all child records.
-export async function DELETE(_req, { params }) {
-  const { error } = await guard({ superAdminOnly: true });
-  if (error) return error;
-  try {
-    const { id } = await params;
-    const res = await query("DELETE FROM la_assemblies WHERE id = ?", [id]);
-    if (!res.affectedRows) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
-    return NextResponse.json({ ok: true }, { headers: noStore });
-  } catch (e) {
-    console.error("[LA] assembly DELETE:", e);
-    return NextResponse.json({ message: "Failed to delete the assembly." }, { status: 500 });
-  }
-}
+// This route is read-only: the in-module Assemblies CRUD section was removed, so
+// assemblies are no longer edited/deleted here (they come from the Administration
+// master + the module seed). The detail tabs still write through the /mla,
+// /elections, /candidates, /analysis, /social and /strategy sub-routes.

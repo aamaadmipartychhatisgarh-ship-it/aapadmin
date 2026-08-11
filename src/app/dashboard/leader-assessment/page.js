@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
-import { useSession } from "next-auth/react";
-import { isSuperAdmin } from "@/lib/permissions";
 import {
   LayoutDashboard, Building2, UserSquare2, History, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
-  Search, CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet, Scale,
+  CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet, Scale,
   TrendingUp, Target, ShieldAlert, Star, Vote,
 } from "lucide-react";
 
@@ -28,7 +26,6 @@ const PARAMS = [
 
 const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, scoped: false },
-  { key: "assemblies", label: "Assemblies", icon: Building2, scoped: false },
   { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: true },
   { key: "elections", label: "Election History", icon: History, scoped: true },
   { key: "candidates", label: "AAP Candidates", icon: Users, scoped: true },
@@ -61,8 +58,6 @@ export default function Page() {
 }
 
 function Body() {
-  const { data: session } = useSession();
-  const canDelete = isSuperAdmin(session);
   const [tab, setTab] = useState(() => {
     if (typeof window !== "undefined") {
       const t = new URLSearchParams(window.location.search).get("tab");
@@ -148,7 +143,6 @@ function Body() {
       )}
 
       {tab === "overview" && <Overview onOpen={openAssembly} />}
-      {tab === "assemblies" && <Assemblies assemblies={assemblies} loading={asmLoading} canDelete={canDelete} onChange={() => { loadAssemblies(); loadBundle(selectedId); }} flash={flash} fail={fail} onOpen={openAssembly} />}
 
       {currentTab?.scoped && !selectedId && <Empty msg="Select an assembly above to begin." />}
       {currentTab?.scoped && selectedId && loadingBundle && !bundle && <LoadingBlock />}
@@ -317,104 +311,6 @@ function Overview({ onOpen }) {
         )}
       </Card>
     </div>
-  );
-}
-
-// ------------------------------ ASSEMBLIES --------------------------------
-const EMPTY_ASM = { name: "", number: "", district: "", lok_sabha: "", total_voters: "", total_polling_stations: "", total_booths: "", election_year: "", population: "", notes: "" };
-function Assemblies({ assemblies, loading, canDelete, onChange, flash, fail, onOpen }) {
-  const [q, setQ] = useState("");
-  const [districtFilter, setDistrictFilter] = useState("");
-  const [editing, setEditing] = useState(null);
-  const districtOptions = useMemo(
-    () => [...new Set(assemblies.map((a) => a.district).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
-    [assemblies]
-  );
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    return assemblies.filter((a) => {
-      if (districtFilter && a.district !== districtFilter) return false;
-      if (!s) return true;
-      return [a.name, a.number, a.district, a.lok_sabha].some((v) => String(v || "").toLowerCase().includes(s));
-    });
-  }, [q, districtFilter, assemblies]);
-  async function del(a) {
-    if (!confirm(`Delete assembly "${a.name}" and ALL its assessment data? This cannot be undone.`)) return;
-    try { await api(`/api/leader-assessment/assemblies/${a.id}`, { method: "DELETE" }); flash("Assembly deleted."); onChange(); } catch (e) { fail(e.message); }
-  }
-  return (
-    <Card title="Assemblies" icon={Building2} right={
-      <div className="flex items-center gap-2">
-        <div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name / district…" className={`${inp} pl-8 w-48 h-9`} /></div>
-        <select value={districtFilter} onChange={(e) => setDistrictFilter(e.target.value)} className={`${inp} w-44 h-9`} aria-label="Filter by district">
-          <option value="">All districts</option>
-          {districtOptions.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-        <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Assembly</button>
-      </div>
-    }>
-      {loading ? <LoadingBlock /> : filtered.length === 0 ? <Empty msg={(q || districtFilter) ? "No assemblies match your filters." : "No assemblies yet."} action={!q && !districtFilter && <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Assembly</button>} /> : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Assembly", "District", "Workers", "Required", "MLA", "Candidates", "Updated", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.map((a) => {
-                const req = a.required_workers ?? 0;
-                const wk = a.worker_count ?? 0;
-                const shortfall = req > 0 && wk < req;
-                return (
-                <tr key={a.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2.5 font-semibold text-gray-900">{a.name}</td>
-                  <td className="px-3 py-2.5 text-gray-600">{a.district || "—"}</td>
-                  <td className="px-3 py-2.5"><span className={`font-semibold ${shortfall ? "text-amber-600" : "text-gray-800"}`}>{nfmt(wk) ?? 0}</span></td>
-                  <td className="px-3 py-2.5 text-gray-600">{req ? nfmt(req) : "—"}</td>
-                  <td className="px-3 py-2.5">{a.mla_name
-                    ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Added</span>
-                    : <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not added</span>}</td>
-                  <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{a.candidate_count}/3</span></td>
-                  <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{fmtDate(a.updated_at)}</td>
-                  <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                    <button onClick={() => onOpen(a.id)} className="text-[#164FA3] text-xs font-semibold hover:underline mr-3">Open →</button>
-                    <button onClick={() => setEditing(a)} className="text-gray-500 hover:text-[#164FA3] p-1"><Pencil size={14} /></button>
-                    {canDelete && <button onClick={() => del(a)} className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>}
-                  </td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {editing && <AssemblyModal initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("Assembly saved."); onChange(); }} fail={fail} />}
-    </Card>
-  );
-}
-function AssemblyModal({ initial, onClose, onSaved, fail }) {
-  const [form, setForm] = useState(() => ({ ...EMPTY_ASM, ...(initial || {}) }));
-  const [saving, setSaving] = useState(false);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  async function save() {
-    if (!form.name.trim()) { fail("Assembly name is required."); return; }
-    setSaving(true);
-    try {
-      const url = initial ? `/api/leader-assessment/assemblies/${initial.id}` : "/api/leader-assessment/assemblies";
-      await api(url, { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-      onSaved();
-    } catch (e) { fail(e.message); setSaving(false); }
-  }
-  const F = ({ k, label, type = "text", full }) => (<div className={full ? "col-span-2" : ""}><span className={lbl}>{label}</span><input type={type} className={inp} value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} /></div>);
-  return (
-    <Modal title={initial ? "Edit Assembly" : "Add Assembly"} onClose={onClose}>
-      <div className="grid grid-cols-2 gap-3">
-        <F k="name" label="Assembly Name *" full />
-        <F k="number" label="Assembly Number" /><F k="district" label="District" />
-        <F k="lok_sabha" label="Lok Sabha" /><F k="election_year" label="Last Election Year" type="number" />
-        <F k="total_voters" label="Total Voters" type="number" /><F k="total_polling_stations" label="Polling Stations" type="number" />
-        <F k="total_booths" label="Total Booths" type="number" /><F k="population" label="Population" type="number" />
-        <div className="col-span-2"><span className={lbl}>Notes</span><textarea rows={2} className={inp} value={form.notes ?? ""} onChange={(e) => set("notes", e.target.value)} /></div>
-      </div>
-      <ModalActions onClose={onClose} onSave={save} saving={saving} />
-    </Modal>
   );
 }
 
@@ -823,6 +719,39 @@ function Recommendation({ b, ranked, onChange, flash, fail }) {
 }
 
 // ----------------------------- ANALYSIS -----------------------------------
+// Current MLA for the selected assembly — auto-identified from that assembly's
+// MLA record (b.mla, part of the assembly bundle). It is always scoped to the
+// selected assembly, so switching assemblies immediately updates it and it can
+// never show another assembly's MLA. No manual typing: the name is read from
+// the stored MLA. When the assembly has no MLA record yet, a clean
+// "Current MLA not available" state is shown.
+function CurrentMlaBanner({ b }) {
+  const mla = b.mla;
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+      {mla?.name ? (
+        <>
+          <ProfilePhoto name={mla.name} src={mla.photo_url} size={44} editable={false} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Current MLA · {b.assembly.name}</div>
+            <div className="font-bold text-gray-900 truncate flex items-center gap-2">
+              {mla.name}
+              {mla.party && <span className="text-xs font-semibold text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full">{mla.party}</span>}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 shrink-0"><UserSquare2 size={20} /></div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Current MLA · {b.assembly.name}</div>
+            <div className="text-sm font-medium text-gray-400">Current MLA not available — add it on the MLA Profile tab.</div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 function AnalysisTab({ b, onChange, flash, fail }) {
   const [reasons, setReasons] = useState(() => padTo(b.analysis?.reasons_won, 3));
   const [weaknesses, setWeaknesses] = useState(() => padTo(b.analysis?.weaknesses, 10));
@@ -856,6 +785,7 @@ function AnalysisTab({ b, onChange, flash, fail }) {
   );
   return (
     <div className="space-y-4">
+      <CurrentMlaBanner b={b} />
       <Card title="Political Analysis" icon={Brain} right={<SaveBtn onClick={saveAnalysis} saving={saving} />}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {numbered("Top 3 Reasons for Winning", reasons, setReasons, "bg-emerald-100 text-emerald-700")}

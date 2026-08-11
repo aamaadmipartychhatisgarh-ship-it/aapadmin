@@ -6,9 +6,6 @@ import { workersByDistrict } from "@/lib/workerCounts";
 
 export const dynamic = "force-dynamic";
 
-const numOrNull = (v) => (v === "" || v == null || isNaN(Number(v)) ? null : Number(v));
-const strOrNull = (v) => { const s = String(v ?? "").trim(); return s ? s : null; };
-
 // GET /api/leader-assessment/assemblies?search=&district=
 // Assembly list enriched with MLA name, candidate count and a top candidate.
 export async function GET(req) {
@@ -69,24 +66,7 @@ export async function GET(req) {
   }
 }
 
-// POST /api/leader-assessment/assemblies — create an assembly.
-export async function POST(req) {
-  const { session, error } = await guard();
-  if (error) return error;
-  try {
-    const d = await req.json().catch(() => ({}));
-    const name = strOrNull(d.name);
-    if (!name) return NextResponse.json({ message: "Assembly name is required." }, { status: 400 });
-    const res = await query(
-      `INSERT INTO la_assemblies (name, number, district, lok_sabha, total_voters, total_polling_stations, total_booths, election_year, population, notes, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, strOrNull(d.number), strOrNull(d.district), strOrNull(d.lok_sabha),
-       numOrNull(d.total_voters), numOrNull(d.total_polling_stations), numOrNull(d.total_booths),
-       numOrNull(d.election_year), numOrNull(d.population), strOrNull(d.notes), session.user.id]
-    );
-    return NextResponse.json({ id: res.insertId }, { status: 201, headers: noStore });
-  } catch (e) {
-    console.error("[LA] assemblies POST:", e);
-    return NextResponse.json({ message: "Failed to create the assembly." }, { status: 500 });
-  }
-}
+// Assemblies are managed by the Administration master + the module's seed, not
+// created/edited here — the in-module Assemblies CRUD section was removed, so
+// this route is read-only (no POST). PUT/DELETE were likewise removed from the
+// [id] route; the detail tabs still write via the /mla, /elections, etc. sub-routes.
