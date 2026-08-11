@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
+import { contactsByDistrict } from "@/lib/workerCounts";
 
 // District-level map data: strength score + drill-down details per district,
 // grouped by zone. Scoped per role: zone-admins see their zone, etc.
@@ -28,10 +29,10 @@ export async function GET() {
     }
 
     const notWrong = await notWrongNumberClause("ct");
-    const rows = await query(
+    const [rows, contactCounts] = await Promise.all([
+      query(
       `SELECT ld.id, ld.name,
               lz.name AS zone_name,
-              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id) AS worker_count,
               (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='active') AS active_workers,
               (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='pending') AS pending_workers,
               (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='inactive') AS inactive_workers,
@@ -49,8 +50,16 @@ export async function GET() {
          LEFT JOIN locations lz ON lz.id = lls.parent_id
         WHERE ld.type = 'district' ${districtFilter}
         ORDER BY lz.name, ld.name`,
-      dParams
-    );
+        dParams
+      ),
+      contactsByDistrict(),
+    ]);
+
+    // Worker count per district = ACTUAL Contacts (shared helper) — the SAME
+    // number Contacts / Strength / Area Ranking use, so every module agrees.
+    // Drives the tile value, target completion % and the hover/detail count;
+    // districts with no contacts correctly show 0.
+    for (const r of rows) r.worker_count = contactCounts.get(r.id) || 0;
 
     const maxWorker = Math.max(1, ...rows.map((r) => r.worker_count));
     const maxCall = Math.max(1, ...rows.map((r) => r.call_count));

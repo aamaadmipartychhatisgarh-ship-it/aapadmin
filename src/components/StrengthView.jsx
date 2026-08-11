@@ -60,8 +60,8 @@ export default function StrengthView() {
                   <td className="px-4 py-3 text-gray-600">{Number(a.attemptCalls ?? a.call_count ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${meta.color}`} style={{ width: `${a.score}%` }} /></div>
-                      <span className="font-bold text-gray-700 w-8">{a.score}</span>
+                      <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${meta.color}`} style={{ width: `${Math.max(0, Math.min(100, Number(a.score) || 0))}%` }} /></div>
+                      <span className="font-bold text-gray-700 w-10">{Math.max(0, Math.min(100, Number(a.score) || 0))}%</span>
                       <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${meta.bg} ${meta.text}`}>{meta.label}</span>
                     </div>
                   </td>

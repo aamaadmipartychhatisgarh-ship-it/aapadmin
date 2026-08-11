@@ -116,20 +116,18 @@ export async function GET() {
       contactsByDistrict(),
     ]);
 
-    // Normalize the workforce + calling factors 0-100 across districts, then a
-    // weighted composite. Weights (sum 1.0): workforce 45, calling volume 30,
-    // connect rate 25 — the Teams/activity weights were removed with those
-    // columns and redistributed onto the metrics this table now shows.
+    // Strength % = (actual workers / required workers) x 100, as a whole number.
+    // Actual workers come from Contacts (contactCounts); required workers are the
+    // fixed district targets. Guards: required=0 -> 0% (never NaN/Infinity), and
+    // the value is clamped to 0..100 so a district that meets or exceeds its
+    // target reads 100% and fills the bar without overflowing the UI. Because
+    // the worker count is live, the percentage updates as Contacts change.
     const withWorkers = rows.map((r) => ({ ...r, worker_count: contactCounts.get(r.id) || 0 }));
-    const max = {
-      worker: Math.max(1, ...withWorkers.map((r) => r.worker_count)),
-      call: Math.max(1, ...withWorkers.map((r) => r.call_count)),
-    };
     const scored = withWorkers.map((r) => {
-      const workerScore = (r.worker_count / max.worker) * 100;
-      const callScore = (r.call_count / max.call) * 100;
-      const connectRate = r.call_count > 0 ? (r.connected_count / r.call_count) * 100 : 0;
-      const score = Math.round(workerScore * 0.45 + callScore * 0.30 + connectRate * 0.25);
+      const requiredWorkers = requiredWorkersFor(r.name);
+      const workers = r.worker_count;
+      const rawPct = requiredWorkers > 0 ? Math.round((workers / requiredWorkers) * 100) : 0;
+      const score = Math.min(100, Math.max(0, rawPct));
       const band = score >= 60 ? "strong" : score >= 35 ? "medium" : "weak";
       return {
         id: r.id,
@@ -137,16 +135,16 @@ export async function GET() {
         score,
         band,
         district: r.name,
-        requiredWorkers: requiredWorkersFor(r.name),
-        workers: r.worker_count,
+        requiredWorkers,
+        workers,
         attemptCalls: r.call_count,
         strength: score,
         // Back-compat aliases still read by any older UI build.
         worker_count: r.worker_count,
         call_count: r.call_count,
       };
-      // Sort by strength desc, then attempt calls desc as the tie-breaker.
-    }).sort((a, b) => b.score - a.score || b.attemptCalls - a.attemptCalls);
+      // Rank by strength % desc, then by actual worker count, then name (stable).
+    }).sort((a, b) => b.score - a.score || b.workers - a.workers || a.name.localeCompare(b.name));
 
     const summary = {
       strong: scored.filter((s) => s.band === "strong").length,
