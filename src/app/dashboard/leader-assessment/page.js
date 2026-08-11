@@ -270,11 +270,9 @@ function Overview({ onOpen }) {
   if (loading) return <LoadingBlock />;
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Stat label="Total Assemblies" value={s?.total_assemblies} />
         <Stat label="With MLA Data" value={s?.assemblies_with_mla} />
-        <Stat label="Total Workers" value={s?.total_workers != null ? nfmt(s.total_workers) : null} hint="live from user/worker records" />
-        <Stat label="Required Workers" value={s?.total_required_workers != null ? nfmt(s.total_required_workers) : null} hint="fixed target" />
         <Stat label="With AAP Candidates" value={s?.assemblies_with_candidates} />
         <Stat label="Total Candidates" value={s?.total_candidates} />
         <Stat label="Assessments Done" value={s?.assessments_completed} />
