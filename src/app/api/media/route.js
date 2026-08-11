@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessMedia } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensurePressNotesSchema } from "@/lib/pressNotesSchema";
 
 // Aggregated GET for the Media hub page.
 export async function GET() {
@@ -10,6 +11,9 @@ export async function GET() {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
+    // Widen the press-note `kind` column (once) and seed the master newspaper
+    // list so the dropdown is populated on first load.
+    await ensurePressNotesSchema();
     const newspapers = await query(`SELECT * FROM newspapers ORDER BY sort_order, name`);
     const channels = await query(`SELECT * FROM news_channels ORDER BY sort_order, name`);
     const spokespersons = await query(`SELECT * FROM spokespersons ORDER BY name`);

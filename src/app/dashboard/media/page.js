@@ -26,7 +26,9 @@ function Body() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
+  const [toast, setToast] = useState("");
 
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 3500); return () => clearTimeout(t); }, [toast]);
   useEffect(() => { load(); }, []);
   async function load() {
     setLoading(true);
@@ -39,6 +41,7 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {toast && <div className="fixed top-4 right-4 z-[80] flex items-center gap-2 bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg"><CheckCircle2 size={16} /> {toast}</div>}
       <div>
         <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Media Center</h1>
         <p className="text-gray-500 mt-2 font-medium">Newspaper coverage, debates, press conferences and spokespersons in one place.</p>
@@ -56,7 +59,7 @@ function Body() {
       </div>
 
       {tab === "dashboard" && <MediaDashboardTab />}
-      {tab === "newspapers" && <NewspapersTab data={data} onChange={load} />}
+      {tab === "newspapers" && <NewspapersTab data={data} onChange={load} flash={setToast} />}
       {tab === "channels" && <ChannelsTab data={data} onChange={load} />}
       {tab === "conferences" && <ConferencesTab data={data} onChange={load} />}
       {tab === "spokespersons" && <SpokespersonsTab data={data} onChange={load} />}
@@ -66,7 +69,28 @@ function Body() {
 }
 
 // ============================================================ NEWSPAPERS
-function NewspapersTab({ data, onChange }) {
+// Content-Type options (value stored in press_notes.kind, label shown in UI).
+const CONTENT_TYPES = [
+  { v: "press_note", l: "Press Note" },
+  { v: "news_article", l: "News Article" },
+  { v: "newspaper_coverage", l: "Newspaper Coverage" },
+  { v: "tv_news_channel", l: "TV / News Channel" },
+  { v: "online_news", l: "Online News" },
+  { v: "interview", l: "Interview" },
+  { v: "press_conference", l: "Press Conference" },
+  { v: "other", l: "Other" },
+];
+// Human label for a stored kind — falls back to a de-slugged title for any
+// legacy value (e.g. the old "newspaper_scan").
+function contentLabel(kind) {
+  if (!kind) return "—";
+  const hit = CONTENT_TYPES.find((c) => c.v === kind);
+  if (hit) return hit.l;
+  return String(kind).replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+const NEWSPAPER_OTHER = "__other__";
+
+function NewspapersTab({ data, onChange, flash }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   return (
@@ -111,7 +135,7 @@ function NewspapersTab({ data, onChange }) {
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{n.coverage_date?.slice(0, 10) || "—"}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">{n.title}</td>
                   <td className="px-4 py-3 text-gray-600">{n.newspaper_name || "—"}</td>
-                  <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{n.kind.replace("_", " ")}</span></td>
+                  <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{contentLabel(n.kind)}</span></td>
                   <td className="px-4 py-3"><SentimentBadge s={n.sentiment} /></td>
                   <td className="px-4 py-3">
                     {n.file_url ? <a href={n.file_url} target="_blank" rel="noreferrer" className="text-[#164FA3] hover:underline text-xs flex items-center gap-1"><FileText size={13} /> Open</a> : <span className="text-gray-300">—</span>}
@@ -127,8 +151,8 @@ function NewspapersTab({ data, onChange }) {
         )}
       </div>
 
-      {showAdd && <PressNoteModal newspapers={data.newspapers} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); onChange(); }} />}
-      {editing && <PressNoteModal editing={editing} newspapers={data.newspapers} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChange(); }} />}
+      {showAdd && <PressNoteModal newspapers={data.newspapers} onClose={() => setShowAdd(false)} onSaved={(msg) => { setShowAdd(false); onChange(); flash?.(msg); }} />}
+      {editing && <PressNoteModal editing={editing} newspapers={data.newspapers} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); onChange(); flash?.(msg); }} />}
     </div>
   );
 }
@@ -367,25 +391,39 @@ function SumCard({ label, value, accent }) {
 
 // ============================================================ MODALS
 
-function FileUpload({ value, onChange, accept = ".pdf,image/*" }) {
+function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api/uploads", maxMB = 25 }) {
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const ref = useRef(null);
   async function pick(e) {
     const f = e.target.files?.[0];
+    if (e.target) e.target.value = ""; // allow re-selecting the same file
     if (!f) return;
+    setErr("");
+    if (f.size > maxMB * 1024 * 1024) { setErr(`File too large (max ${maxMB} MB).`); return; }
     setBusy(true);
-    const fd = new FormData(); fd.append("file", f);
-    const r = await fetch("/api/uploads", { method: "POST", body: fd });
-    setBusy(false);
-    if (r.ok) onChange((await r.json()).url);
+    try {
+      const fd = new FormData(); fd.append("file", f);
+      const r = await fetch(endpoint, { method: "POST", body: fd });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.message || "File upload failed. Please check the file and try again.");
+      onChange(body.url);
+    } catch (e2) {
+      setErr(e2.message || "File upload failed. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
   return (
-    <div className="flex items-center gap-2">
-      <input ref={ref} type="file" accept={accept} className="hidden" onChange={pick} />
-      <button type="button" onClick={() => ref.current?.click()} disabled={busy} className="inline-flex items-center gap-1.5 text-xs border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50">
-        {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {value ? "Replace" : "Upload"}
-      </button>
-      {value && <a href={value} target="_blank" rel="noreferrer" className="text-xs text-[#164FA3] hover:underline">View file</a>}
+    <div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <input ref={ref} type="file" accept={accept} className="hidden" onChange={pick} />
+        <button type="button" onClick={() => ref.current?.click()} disabled={busy} className="inline-flex items-center gap-1.5 text-xs border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50">
+          {busy ? <><Loader2 size={13} className="animate-spin" /> Uploading…</> : <><Upload size={13} /> {value ? "Replace" : "Upload"}</>}
+        </button>
+        {value && <a href={value} target="_blank" rel="noreferrer" className="text-xs text-[#164FA3] hover:underline">View file</a>}
+      </div>
+      {err && <div className="text-xs text-red-600 mt-1">{err}</div>}
     </div>
   );
 }
@@ -395,42 +433,88 @@ const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-
 function PressNoteModal({ newspapers, onClose, onSaved, editing }) {
   const [form, setForm] = useState(editing ? {
     title: editing.title || "", summary: editing.summary || "", kind: editing.kind || "press_note",
-    newspaper_id: editing.newspaper_id || "",
-    coverage_date: editing.coverage_date ? editing.coverage_date.slice(0, 10) : "",
+    newspaper_id: editing.newspaper_id ? String(editing.newspaper_id) : "",
+    newspaper_name: "",
+    coverage_date: editing.coverage_date ? String(editing.coverage_date).slice(0, 10) : "",
     sentiment: editing.sentiment || "", file_url: editing.file_url || "",
-  } : { title: "", summary: "", kind: "press_note", newspaper_id: "", coverage_date: new Date().toISOString().slice(0, 10), sentiment: "", file_url: "" });
+  } : { title: "", summary: "", kind: "press_note", newspaper_id: "", newspaper_name: "", coverage_date: new Date().toISOString().slice(0, 10), sentiment: "", file_url: "" });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const isOther = form.newspaper_id === NEWSPAPER_OTHER;
+
   async function save() {
+    setError("");
+    if (!form.title.trim()) { setError("Title is required."); return; }
+    if (isOther && !form.newspaper_name.trim()) { setError("Enter the newspaper name for “Other”."); return; }
     setSaving(true);
-    const url = editing ? `/api/media/press-notes/${editing.id}` : "/api/media/press-notes";
-    const method = editing ? "PUT" : "POST";
-    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    if (r.ok) onSaved(); else setSaving(false);
+    try {
+      const payload = {
+        title: form.title.trim(),
+        summary: form.summary,
+        kind: form.kind,
+        coverage_date: form.coverage_date || "",
+        sentiment: form.sentiment || "",
+        file_url: form.file_url || "",
+      };
+      if (isOther) { payload.newspaper_name = form.newspaper_name.trim(); payload.newspaper_id = ""; }
+      else { payload.newspaper_id = form.newspaper_id || ""; }
+      const url = editing ? `/api/media/press-notes/${editing.id}` : "/api/media/press-notes";
+      const method = editing ? "PUT" : "POST";
+      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.message || "Unable to save changes. Please try again.");
+      onSaved(editing ? "Press coverage updated successfully." : "Press coverage added successfully.");
+    } catch (e) {
+      setError(e.message || "Unable to save changes. Please try again.");
+      setSaving(false); // keep the modal open, preserve entered data
+    }
   }
   return (
     <Modal title={editing ? "Edit Press Note / Coverage" : "Upload Press Note / Coverage"} onClose={onClose}>
-      <input className={inp} placeholder="Title *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-      <textarea className={inp} rows={2} placeholder="Summary" value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} />
+      <input className={inp} placeholder="Title *" value={form.title} onChange={(e) => set("title", e.target.value)} />
+      <textarea className={inp} rows={2} placeholder="Description / Content" value={form.summary} onChange={(e) => set("summary", e.target.value)} />
       <div className="grid grid-cols-2 gap-3">
-        <select className={inp} value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
-          <option value="press_note">Press Note</option>
-          <option value="newspaper_scan">Newspaper Scan</option>
-          <option value="article_pdf">Article PDF</option>
-        </select>
-        <select className={inp} value={form.newspaper_id} onChange={(e) => setForm({ ...form, newspaper_id: e.target.value })}>
-          <option value="">Newspaper</option>
-          {newspapers.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-        </select>
-        <input type="date" className={inp} value={form.coverage_date} onChange={(e) => setForm({ ...form, coverage_date: e.target.value })} />
-        <select className={inp} value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })}>
-          <option value="">Sentiment</option>
-          <option value="positive">Positive</option>
-          <option value="neutral">Neutral</option>
-          <option value="negative">Negative</option>
-        </select>
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Content Type</label>
+          <select className={inp} value={form.kind} onChange={(e) => set("kind", e.target.value)}>
+            {CONTENT_TYPES.map((c) => <option key={c.v} value={c.v}>{c.l}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Newspaper</label>
+          <select className={inp} value={form.newspaper_id} onChange={(e) => set("newspaper_id", e.target.value)}>
+            <option value="">— Select newspaper —</option>
+            {newspapers.map((n) => <option key={n.id} value={String(n.id)}>{n.name}</option>)}
+            <option value={NEWSPAPER_OTHER}>Other…</option>
+          </select>
+        </div>
+        {isOther && (
+          <div className="col-span-2">
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Other Newspaper Name *</label>
+            <input className={inp} placeholder="Type the newspaper name" value={form.newspaper_name} onChange={(e) => set("newspaper_name", e.target.value)} />
+          </div>
+        )}
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Date</label>
+          <input type="date" className={inp} value={form.coverage_date} onChange={(e) => set("coverage_date", e.target.value)} />
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Sentiment</label>
+          <select className={inp} value={form.sentiment} onChange={(e) => set("sentiment", e.target.value)}>
+            <option value="">— Select —</option>
+            <option value="positive">Positive</option>
+            <option value="neutral">Neutral</option>
+            <option value="negative">Negative</option>
+          </select>
+        </div>
       </div>
-      <div><label className="text-xs text-gray-500 mb-1 block">File</label><FileUpload value={form.file_url} onChange={(url) => setForm({ ...form, file_url: url })} /></div>
-      <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.title} />
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">File (PDF, JPG, PNG, WEBP, DOC, DOCX)</label>
+        <FileUpload value={form.file_url} onChange={(url) => set("file_url", url)} endpoint="/api/media/uploads" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" />
+      </div>
+      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+      <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.title.trim()} />
     </Modal>
   );
 }
