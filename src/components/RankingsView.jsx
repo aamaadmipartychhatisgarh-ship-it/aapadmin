@@ -61,7 +61,7 @@ export default function RankingsView() {
                   <span className={`font-bold w-5 ${i < 3 ? MEDAL[i] : "text-gray-400"}`}>{i + 1}</span>
                   <span className="font-medium text-gray-800">{a.district_name}</span>
                 </span>
-                <span className="text-gray-500 text-xs">{a.workers} workers · <strong className="text-gray-700">{a.avg_activity}</strong> avg</span>
+                <span className="text-gray-500 text-xs"><strong className="text-gray-700">{Number(a.workers).toLocaleString("en-IN")}</strong> workers</span>
               </li>
             ))}
           </ul>

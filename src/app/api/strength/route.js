@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { contactsByDistrict } from "@/lib/workerCounts";
 
 // Fixed Required-Workers targets for the 33 Chhattisgarh districts. These are
 // planning targets (NOT actual counts) and never change here. Each entry lists
@@ -100,26 +100,27 @@ export async function GET() {
       dParams.push(u.scope_assembly_id);
     }
 
-    // `notWrong` matches the app's existing "valid contact" definition (skips
-    // numbers flagged wrong). Worker count = live contacts-per-district COUNT.
-    const notWrong = await notWrongNumberClause("ct");
-    const rows = await query(
-      `SELECT ld.id, ld.name,
-              (SELECT COUNT(*) FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS worker_count,
-              (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
-              (SELECT COUNT(*) FROM calls c JOIN call_statuses cs ON cs.id=c.status_id
-                 WHERE c.district_id = ld.id AND cs.name='Phone Picked') AS connected_count
-         FROM locations ld
-        WHERE ld.type = 'district' ${districtFilter}
-        ORDER BY ld.name`,
-      dParams
-    );
+    // Worker count = live contacts-per-district COUNT via the shared helper, so
+    // this page and Area Ranking always agree for a given district.
+    const [rows, contactCounts] = await Promise.all([
+      query(
+        `SELECT ld.id, ld.name,
+                (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
+                (SELECT COUNT(*) FROM calls c JOIN call_statuses cs ON cs.id=c.status_id
+                   WHERE c.district_id = ld.id AND cs.name='Phone Picked') AS connected_count
+           FROM locations ld
+          WHERE ld.type = 'district' ${districtFilter}
+          ORDER BY ld.name`,
+        dParams
+      ),
+      contactsByDistrict(),
+    ]);
 
     // Normalize the workforce + calling factors 0-100 across districts, then a
     // weighted composite. Weights (sum 1.0): workforce 45, calling volume 30,
     // connect rate 25 — the Teams/activity weights were removed with those
     // columns and redistributed onto the metrics this table now shows.
-    const withWorkers = rows.map((r) => ({ ...r, worker_count: Number(r.worker_count) || 0 }));
+    const withWorkers = rows.map((r) => ({ ...r, worker_count: contactCounts.get(r.id) || 0 }));
     const max = {
       worker: Math.max(1, ...withWorkers.map((r) => r.worker_count)),
       call: Math.max(1, ...withWorkers.map((r) => r.call_count)),

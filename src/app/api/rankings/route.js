@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, scopeFilterSync, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { contactsByDistrict } from "@/lib/workerCounts";
 
 export async function GET() {
   try {
@@ -69,19 +70,24 @@ export async function GET() {
       districtFilter = "AND ld.id = (SELECT parent_id FROM locations WHERE id = ?)";
       dParams.push(u.scope_assembly_id);
     }
-    const areaRankings = await query(
-      `SELECT ld.id, ld.name AS district_name,
-              COUNT(w.id) AS workers,
-              ROUND(AVG(w.activity_score)) AS avg_activity
-         FROM locations ld
-         LEFT JOIN workers w ON w.district_id = ld.id
-        WHERE ld.type = 'district' ${districtFilter}
-        GROUP BY ld.id, ld.name
-        HAVING workers > 0
-        ORDER BY avg_activity DESC
-        LIMIT 12`,
-      dParams
-    );
+    // Area Ranking: districts ranked by their ACTUAL worker count, sourced from
+    // Contacts via the SAME shared helper the Strength page uses — so the two
+    // can never disagree for a district. District names come straight from the
+    // master `locations` rows (exact). Districts with zero workers aren't
+    // rankable and are omitted; every district that has workers is shown.
+    const [districtRows, contactCounts] = await Promise.all([
+      query(
+        `SELECT ld.id, ld.name AS district_name
+           FROM locations ld
+          WHERE ld.type = 'district' ${districtFilter}`,
+        dParams
+      ),
+      contactsByDistrict(),
+    ]);
+    const areaRankings = districtRows
+      .map((d) => ({ id: d.id, district_name: d.district_name, workers: contactCounts.get(d.id) || 0 }))
+      .filter((d) => d.workers > 0)
+      .sort((a, b) => b.workers - a.workers || a.district_name.localeCompare(b.district_name));
 
     const badges = await query(
       `SELECT b.name, b.color, b.icon, COUNT(wb.id) AS awarded

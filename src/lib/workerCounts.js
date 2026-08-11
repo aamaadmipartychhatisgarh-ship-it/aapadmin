@@ -1,4 +1,25 @@
 import { query } from "@/lib/db";
+import { notWrongNumberClause } from "@/lib/contactExtras";
+
+// District-wise ACTUAL people/worker count sourced from Contacts — the SINGLE
+// source of truth shared by the Strength page and Area Ranking so the two can
+// never show different totals for the same district. It is a live COUNT of
+// contacts keyed by district_id, excluding wrong-number-flagged rows (the app's
+// existing active-record rule, same as the District Map). Each contact is
+// counted once (no duplicates); no total is hardcoded and it auto-updates as
+// contacts change. Returns Map<district_id, count>.
+export async function contactsByDistrict() {
+  const notWrong = await notWrongNumberClause("ct");
+  const rows = await query(
+    `SELECT ct.district_id AS district_id, COUNT(*) AS n
+       FROM contacts ct
+      WHERE ct.district_id IS NOT NULL${notWrong}
+      GROUP BY ct.district_id`
+  );
+  const m = new Map();
+  for (const r of rows) m.set(r.district_id, Number(r.n) || 0);
+  return m;
+}
 
 // Raw `users.role` values that count as actual field workers/callers — the same
 // people Administration → Users manages. Oversight roles (super_admin / state /
