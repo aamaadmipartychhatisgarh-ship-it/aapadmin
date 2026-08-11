@@ -12,17 +12,21 @@ import {
 
 // 10 assessment parameters (keys match the DB columns / API).
 const PARAMS = [
-  { key: "s_nature", label: "Nature" },
-  { key: "s_hardworker", label: "Hard Work" },
+  { key: "s_nature", label: "Candidate ka Nature" },
+  { key: "s_hardworker", label: "Hard Worker" },
   { key: "s_financial", label: "Financial Condition" },
   { key: "s_political", label: "Political Knowledge" },
-  { key: "s_public_reach", label: "Public Reach" },
-  { key: "s_social_reach", label: "Social / Samajik Reach" },
+  { key: "s_public_reach", label: "Public Pakad" },
+  { key: "s_social_reach", label: "Social / Samajik Pakad" },
   { key: "s_personality", label: "Personality" },
-  { key: "s_organization", label: "Organization Strength" },
-  { key: "s_winning", label: "Winning Ability" },
-  { key: "s_acceptability", label: "Public Acceptability" },
+  { key: "s_organization", label: "Sangathan Mein Pakad" },
+  { key: "s_winning", label: "Chunav Jeetne Ki Kshamta" },
+  { key: "s_acceptability", label: "Janta Mein Acceptability" },
 ];
+// Scores are whole numbers 1–10 (10 params → max 100). 0/blank means "not yet
+// scored" and is allowed; a real score is clamped into 1..10.
+const SCORE_MIN = 1;
+const SCORE_MAX = 10;
 
 const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, scoped: false },
@@ -405,11 +409,12 @@ function ElectionsTab({ b, onChange, flash, fail }) {
       {b.elections.length === 0 ? <Empty msg="No election records yet." action={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Election</button>} /> : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Year", "Party", "Candidate", "Votes", "Vote %", "Margin", "Result", "Runner-up", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Year", "Category", "Party", "Person", "Votes", "Vote %", "Margin", "Result", "Runner-up", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody className="divide-y divide-gray-100">
               {last10.map((e) => (
                 <tr key={e.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2.5 font-semibold">{e.election_year}</td>
+                  <td className="px-3 py-2.5">{e.person_category ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">{e.person_category}</span> : "—"}</td>
                   <td className="px-3 py-2.5">{e.party || "—"}</td>
                   <td className="px-3 py-2.5">{e.candidate || "—"}</td>
                   <td className="px-3 py-2.5">{nfmt(e.votes) || "—"}</td>
@@ -427,34 +432,87 @@ function ElectionsTab({ b, onChange, flash, fail }) {
           </table>
         </div>
       )}
-      {editing && <ElectionModal assemblyId={b.assembly.id} initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("Election saved."); onChange(); }} fail={fail} />}
+      {editing && <ElectionModal assemblyId={b.assembly.id} assembly={b.assembly} mla={b.mla} candidates={b.candidates} initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("Election saved."); onChange(); }} fail={fail} />}
     </Card>
   );
 }
-function ElectionModal({ assemblyId, initial, onClose, onSaved, fail }) {
+const ELEC_CATEGORIES = ["AAP", "MLA", "Candidate"];
+// People available for a category come from the SELECTED assembly's live data —
+// AAP candidates (la_aap_candidates) and the current MLA (la_mla_profiles) — so
+// the Name dropdown can never list someone from another district/assembly.
+function peopleForCategory(cat, mla, candidates) {
+  if (cat === "MLA") return mla?.name ? [mla.name] : [];
+  if (cat === "AAP" || cat === "Candidate") return (candidates || []).map((c) => c.name).filter(Boolean);
+  return [];
+}
+function ElectionModal({ assemblyId, assembly, mla, candidates, initial, onClose, onSaved, fail }) {
+  const initCat = initial?.person_category || "";
+  const initNames = peopleForCategory(initCat, mla, candidates);
+  const initOther = !!(initial?.candidate && !initNames.includes(initial.candidate));
   const [form, setForm] = useState(() => ({ ...EMPTY_ELEC, ...(initial || {}) }));
+  const [category, setCategory] = useState(initCat);
+  const [nameChoice, setNameChoice] = useState(initial?.candidate ? (initOther ? "__other__" : initial.candidate) : "");
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const options = peopleForCategory(category, mla, candidates);
+
+  function pickCategory(cat) { setCategory(cat); setNameChoice(""); set("candidate", ""); }
+  function pickName(v) { setNameChoice(v); set("candidate", v === "__other__" ? "" : v); }
+
   async function save() {
+    if (!category) { fail("Select a category (AAP / MLA / Candidate)."); return; }
+    if (!String(form.candidate || "").trim()) { fail("Select or enter the person this election record is for."); return; }
     if (!String(form.election_year).trim()) { fail("Election year is required."); return; }
     const yr = Number(form.election_year);
     if (!Number.isInteger(yr) || yr < 1900 || yr > 2100) { fail("Enter a valid election year."); return; }
     setSaving(true);
     try {
+      const payload = { ...form, person_category: category };
       const url = initial ? `/api/leader-assessment/elections/${initial.id}` : `/api/leader-assessment/assemblies/${assemblyId}/elections`;
-      await api(url, { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      await api(url, { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       onSaved();
     } catch (e) { fail(e.message); setSaving(false); }
   }
   const F = ({ k, label, type = "text" }) => (<div><span className={lbl}>{label}</span><input type={type} className={inp} value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} /></div>);
   return (
     <Modal title={initial ? "Edit Election" : "Add Election"} onClose={onClose}>
+      {/* Step 1-3: District (context) → Category → Name */}
+      <div className="grid grid-cols-3 gap-3 mb-1">
+        <div>
+          <span className={lbl}>1 · District</span>
+          <div className={`${inp} bg-gray-50 text-gray-700 font-medium truncate`}>{assembly?.district || assembly?.name || "—"}</div>
+        </div>
+        <div>
+          <span className={lbl}>2 · Category</span>
+          <select className={inp} value={category} onChange={(e) => pickCategory(e.target.value)}>
+            <option value="">— choose —</option>
+            {ELEC_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <span className={lbl}>3 · Name</span>
+          {category ? (
+            <select className={inp} value={nameChoice} onChange={(e) => pickName(e.target.value)}>
+              <option value="">— choose —</option>
+              {options.map((n) => <option key={n} value={n}>{n}</option>)}
+              <option value="__other__">Other (type manually)</option>
+            </select>
+          ) : <div className={`${inp} bg-gray-50 text-gray-400`}>Select a category first</div>}
+        </div>
+      </div>
+      {category && options.length === 0 && nameChoice !== "__other__" && (
+        <div className="text-[11px] text-amber-600 mb-2">No {category} {category === "MLA" ? "profile" : "candidates"} added for this district yet — choose “Other” to type a name, or add them on their tab first.</div>
+      )}
+      {nameChoice === "__other__" && (
+        <div className="mb-3"><span className={lbl}>Person Name *</span><input className={inp} value={form.candidate ?? ""} onChange={(e) => set("candidate", e.target.value)} placeholder="Type the person's name" /></div>
+      )}
+      <div className="border-t border-gray-100 my-3" />
       <div className="grid grid-cols-2 gap-3">
         <F k="election_year" label="Election Year *" type="number" /><F k="election_type" label="Election Type" />
-        <F k="party" label="Winning Party" /><F k="candidate" label="Winner / Candidate" />
+        <F k="party" label="Party" />
         <div><span className={lbl}>Result</span><select className={inp} value={form.result || ""} onChange={(e) => set("result", e.target.value)}><option value="">—</option><option value="Won">Won</option><option value="Lost">Lost</option></select></div>
-        <F k="votes" label="Votes" type="number" />
-        <F k="vote_percentage" label="Vote %" type="number" /><F k="margin" label="Margin" type="number" />
+        <F k="votes" label="Votes" type="number" /><F k="vote_percentage" label="Vote %" type="number" />
+        <F k="margin" label="Margin" type="number" />
         <F k="runner_up" label="Runner-up" /><F k="runner_up_votes" label="Runner-up Votes" type="number" />
       </div>
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
@@ -466,6 +524,10 @@ function ElectionModal({ assemblyId, initial, onClose, onSaved, fail }) {
 const EMPTY_CAND = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", net_worth: "", business: "", monthly_income: "", education: "", political_experience: "", organization_experience: "", previous_elections: "", current_position: "" };
 function CandidatesTab({ b, onChange, flash, fail }) {
   const [editing, setEditing] = useState(null);
+  const [assessing, setAssessing] = useState(null);
+  // Keep the open assessment modal bound to the freshest candidate record so the
+  // total/scores stay in sync after a save re-fetches the bundle.
+  const assessingLive = assessing ? (b.candidates.find((c) => c.id === assessing.id) || assessing) : null;
   async function del(c) {
     if (!confirm(`Remove candidate "${c.name}"?`)) return;
     try { await api(`/api/leader-assessment/candidates/${c.id}`, { method: "DELETE" }); flash("Candidate removed."); onChange(); } catch (e) { fail(e.message); }
@@ -486,24 +548,36 @@ function CandidatesTab({ b, onChange, flash, fail }) {
               {c.rank && c.total > 0 && <span className={`absolute top-3 right-3 text-[11px] font-bold px-2 py-0.5 rounded-full ${c.rank === 1 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"}`}>Rank {c.rank}{c.tied ? " (tie)" : ""}</span>}
               <div className="flex items-center gap-3">
                 <ProfilePhoto name={c.name} src={c.photo_url} size={56} editable={false} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
-                <div className="min-w-0"><div className="font-bold text-gray-900 truncate">{c.name}</div><div className="text-xs text-gray-500">{c.age != null ? `${c.age} yrs` : "Age N/A"}{c.caste ? ` · ${c.caste}` : ""}</div></div>
+                <div className="min-w-0">
+                  <div className="font-bold text-gray-900 truncate">{c.name}</div>
+                  <div className="text-xs text-gray-500">{c.age != null ? `${c.age} yrs` : "Age N/A"}{c.caste ? ` · ${c.caste}` : ""}</div>
+                  <div className="text-[11px] text-gray-400 truncate flex items-center gap-1"><MapPin size={10} /> {b.assembly.district || b.assembly.name}</div>
+                </div>
               </div>
-              <div className="mt-3 flex items-center gap-2"><ScoreBar value={c.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3]">{c.total}/100</span></div>
+              <div className="mt-3 flex items-center gap-2">
+                <ScoreBar value={c.total} max={100} showValue={false} />
+                <span className="text-sm font-bold text-[#164FA3]">{c.total}/100</span>
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full shrink-0 ${c.total > 0 ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.total > 0 ? "Assessed" : "Pending"}</span>
+              </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-3 text-xs">
                 <Kv icon={Phone} k="Phone" v={c.phone} /><Kv icon={Wallet} k="Net Worth" v={c.net_worth} />
                 <Kv k="Business" v={c.business} /><Kv k="Income" v={c.monthly_income} />
                 {c.education && <Kv k="Education" v={c.education} />}
                 {c.current_position && <Kv k="Position" v={c.current_position} />}
               </div>
-              <div className="flex justify-end gap-1 mt-3 pt-3 border-t border-gray-100">
-                <button onClick={() => setEditing(c)} className="text-xs font-semibold text-gray-500 hover:text-[#164FA3] px-2 py-1 rounded-lg inline-flex items-center gap-1"><Pencil size={13} /> Edit</button>
-                <button onClick={() => del(c)} className="text-xs font-semibold text-gray-400 hover:text-red-600 px-2 py-1 rounded-lg inline-flex items-center gap-1"><Trash2 size={13} /> Remove</button>
+              <div className="flex justify-between items-center gap-1 mt-3 pt-3 border-t border-gray-100">
+                <button onClick={() => setAssessing(c)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Assessment</button>
+                <div className="flex gap-1">
+                  <button onClick={() => setEditing(c)} className="text-xs font-semibold text-gray-500 hover:text-[#164FA3] px-2 py-1 rounded-lg inline-flex items-center gap-1"><Pencil size={13} /> Edit</button>
+                  <button onClick={() => del(c)} className="text-xs font-semibold text-gray-400 hover:text-red-600 px-2 py-1 rounded-lg inline-flex items-center gap-1"><Trash2 size={13} /> Remove</button>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
       {editing && <CandidateModal assemblyId={b.assembly.id} initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("Candidate saved."); onChange(); }} fail={fail} />}
+      {assessingLive && <AssessmentModal c={assessingLive} onClose={() => setAssessing(null)} onChange={onChange} flash={flash} fail={fail} />}
     </Card>
   );
 }
@@ -556,14 +630,19 @@ function AssessmentsTab({ b, onChange, flash, fail }) {
   if (b.candidates.length === 0) return <Empty msg="No AAP candidates yet. Add candidates on the AAP Candidates tab first." />;
   return <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{b.candidates.map((c) => <AssessCard key={c.id} c={c} onChange={onChange} flash={flash} fail={fail} />)}</div>;
 }
-function AssessCard({ c, onChange, flash, fail }) {
+// The 10-parameter score editor for ONE candidate. Reused by the Assessments
+// tab (AssessCard) and the per-candidate Assessment modal (AssessmentModal), so
+// scoring behaves identically everywhere. Scores load from the DB, the total is
+// ALWAYS computed (never typed), each entry is clamped to 1..10, and a refresh
+// re-seeds from c.assessment so nothing is lost.
+function AssessmentEditor({ c, onChange, flash, fail }) {
   const [scores, setScores] = useState(() => Object.fromEntries(PARAMS.map((p) => [p.key, c.assessment?.[p.key] ?? ""])));
   const [saving, setSaving] = useState(false);
   useEffect(() => { setScores(Object.fromEntries(PARAMS.map((p) => [p.key, c.assessment?.[p.key] ?? ""]))); }, [c.id, c.assessment]);
   const total = PARAMS.reduce((s, p) => s + (Number(scores[p.key]) || 0), 0);
   function setScore(k, v) {
     if (v === "") return setScores((s) => ({ ...s, [k]: "" }));
-    let n = Math.floor(Number(v)); if (isNaN(n)) return; n = Math.max(0, Math.min(10, n));
+    let n = Math.floor(Number(v)); if (isNaN(n)) return; n = Math.max(SCORE_MIN, Math.min(SCORE_MAX, n));
     setScores((s) => ({ ...s, [k]: n }));
   }
   async function save() {
@@ -572,21 +651,38 @@ function AssessCard({ c, onChange, flash, fail }) {
     catch (e) { fail(e.message); } finally { setSaving(false); }
   }
   return (
-    <Card title={c.name} icon={ClipboardCheck} right={<div className="flex items-center gap-3"><span className={`text-lg font-bold ${total >= 70 ? "text-emerald-600" : "text-[#164FA3]"}`}>{total}/100</span><SaveBtn onClick={save} saving={saving} /></div>}>
+    <div>
       <div className="space-y-2">
-        {PARAMS.map((p) => (
+        {PARAMS.map((p, i) => (
           <div key={p.key} className="flex items-center gap-3">
-            <span className="text-sm text-gray-700 w-40 shrink-0">{p.label}</span>
+            <span className="text-sm text-gray-700 w-48 shrink-0"><span className="text-gray-400 mr-1">{i + 1}.</span>{p.label}</span>
             <ScoreBar value={scores[p.key]} />
-            <input type="number" min={0} max={10} value={scores[p.key]} onChange={(e) => setScore(p.key, e.target.value)} className="w-14 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center outline-none focus:ring-2 focus:ring-[#164FA3]/40 shrink-0" />
+            <input type="number" min={SCORE_MIN} max={SCORE_MAX} step={1} value={scores[p.key]} onChange={(e) => setScore(p.key, e.target.value)} className="w-14 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center outline-none focus:ring-2 focus:ring-[#164FA3]/40 shrink-0" />
           </div>
         ))}
       </div>
       <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-700">TOTAL</span>
-        <span className="text-xl font-bold text-[#164FA3]">{total} / 100</span>
+        <span className="text-sm font-semibold text-gray-700">TOTAL (auto)</span>
+        <div className="flex items-center gap-3">
+          <span className={`text-xl font-bold ${total >= 70 ? "text-emerald-600" : "text-[#164FA3]"}`}>{total} / 100</span>
+          <SaveBtn onClick={save} saving={saving} />
+        </div>
       </div>
+    </div>
+  );
+}
+function AssessCard({ c, onChange, flash, fail }) {
+  return (
+    <Card title={c.name} icon={ClipboardCheck}>
+      <AssessmentEditor c={c} onChange={onChange} flash={flash} fail={fail} />
     </Card>
+  );
+}
+function AssessmentModal({ c, onClose, onChange, flash, fail }) {
+  return (
+    <Modal title={`Assessment · ${c.name}`} onClose={onClose}>
+      <AssessmentEditor c={c} onChange={() => { onChange(); }} flash={flash} fail={fail} />
+    </Modal>
   );
 }
 

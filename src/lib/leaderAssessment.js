@@ -146,6 +146,9 @@ export async function ensureLeaderAssessmentTables() {
   await ensureColumn("la_aap_candidates", "current_position", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_elections", "runner_up", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_elections", "runner_up_votes", "INT NULL");
+  // Election History is entered against a person picked via District → Category
+  // (AAP / MLA / Candidate) → Name; the category is stored so editing reloads it.
+  await ensureColumn("la_mla_elections", "person_category", "VARCHAR(50) NULL");
   // Required-worker target (fixed reference value) and a FK to the real
   // locations district (used to compute the LIVE worker count).
   await ensureColumn("la_assemblies", "required_workers", "INT NULL");
