@@ -345,19 +345,19 @@ function Heatmap({ data, max }) {
   return (
     <div className="overflow-x-auto">
       <div className="inline-block min-w-full">
-        <div className="grid" style={{ gridTemplateColumns: `48px repeat(${OFFICE_HOURS.length}, minmax(34px, 1fr))`, gap: 2 }}>
+        <div className="grid" style={{ gridTemplateColumns: `34px repeat(${OFFICE_HOURS.length}, 24px)`, gap: 2 }}>
           <div />
           {OFFICE_HOURS.map((h) => (
-            <div key={h} className="text-[10px] text-gray-400 text-center font-mono whitespace-nowrap">{fmtHour12(h)}</div>
+            <div key={h} className="text-[9px] text-gray-400 text-center font-mono whitespace-nowrap">{fmtHour12(h)}</div>
           ))}
           {data.map((row, d) => (
             <DayRow key={d} day={days[d]} row={row} max={max} />
           ))}
         </div>
-        <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+        <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-gray-500">
           <span>Less</span>
           {[0, 0.2, 0.4, 0.6, 0.8, 1].map((t) => (
-            <div key={t} className="w-4 h-4 rounded" style={{ background: heatColor(t * max, max) }} />
+            <div key={t} className="w-3 h-3 rounded-sm" style={{ background: heatColor(t * max, max) }} />
           ))}
           <span>More</span>
         </div>
@@ -368,14 +368,14 @@ function Heatmap({ data, max }) {
 function DayRow({ day, row, max }) {
   return (
     <>
-      <div className="text-xs text-gray-500 font-medium pr-2 self-center">{day}</div>
+      <div className="text-[11px] text-gray-500 font-medium pr-1.5 self-center">{day}</div>
       {OFFICE_HOURS.map((h) => {
         const v = row[h] || 0;
         return (
           <div
             key={h}
             title={`${day} ${h}:00 — ${v} call${v === 1 ? "" : "s"}`}
-            className="aspect-square rounded"
+            className="aspect-square rounded-sm"
             style={{ background: heatColor(v, max) }}
           />
         );
