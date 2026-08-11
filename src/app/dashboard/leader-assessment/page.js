@@ -33,8 +33,6 @@ const TABS = [
   { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: true },
   { key: "elections", label: "Election History", icon: History, scoped: true },
   { key: "candidates", label: "AAP Candidates", icon: Users, scoped: true },
-  { key: "assessments", label: "Candidate Assessments", icon: ClipboardCheck, scoped: true },
-  { key: "comparison", label: "Comparison", icon: BarChart3, scoped: true },
   { key: "analysis", label: "Political Analysis", icon: Brain, scoped: true },
 ];
 
@@ -157,8 +155,6 @@ function Body() {
           {tab === "mla" && <MlaTab b={bundle} onSaved={() => { flash("MLA profile saved."); loadBundle(selectedId); }} fail={fail} />}
           {tab === "elections" && <ElectionsTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
           {tab === "candidates" && <CandidatesTab b={bundle} onChange={() => { loadBundle(selectedId); loadAssemblies(); }} flash={flash} fail={fail} />}
-          {tab === "assessments" && <AssessmentsTab b={bundle} onChange={() => { loadBundle(selectedId); loadAssemblies(); }} flash={flash} fail={fail} />}
-          {tab === "comparison" && <ComparisonTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
           {tab === "analysis" && <AnalysisTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
         </>
       )}
@@ -534,7 +530,8 @@ function CandidatesTab({ b, onChange, flash, fail }) {
   }
   const slots = [0, 1, 2];
   return (
-    <Card title="AAP Candidate Comparison" icon={Users} sub="Up to 3 candidates per assembly.">
+    <div className="space-y-4">
+      <Card title="AAP Candidates" icon={Users} sub="Up to 3 candidates per assembly. Use each candidate's Assessment button; the comparison below updates live.">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {slots.map((i) => {
           const c = b.candidates[i];
@@ -576,9 +573,11 @@ function CandidatesTab({ b, onChange, flash, fail }) {
           );
         })}
       </div>
+      </Card>
+      {b.candidates.length > 0 && <ComparisonTab b={b} onChange={onChange} flash={flash} fail={fail} />}
       {editing && <CandidateModal assemblyId={b.assembly.id} initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("Candidate saved."); onChange(); }} fail={fail} />}
       {assessingLive && <AssessmentModal c={assessingLive} onClose={() => setAssessing(null)} onChange={onChange} flash={flash} fail={fail} />}
-    </Card>
+    </div>
   );
 }
 function Kv({ icon: Icon, k, v }) { return <div className="flex items-center gap-1 min-w-0"><span className="text-gray-400 shrink-0">{Icon && <Icon size={11} className="inline mr-0.5" />}{k}:</span> <span className="text-gray-700 font-medium truncate">{v || "—"}</span></div>; }
@@ -625,16 +624,12 @@ function CandidateModal({ assemblyId, initial, onClose, onSaved, fail }) {
   );
 }
 
-// ---------------------------- ASSESSMENTS ---------------------------------
-function AssessmentsTab({ b, onChange, flash, fail }) {
-  if (b.candidates.length === 0) return <Empty msg="No AAP candidates yet. Add candidates on the AAP Candidates tab first." />;
-  return <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{b.candidates.map((c) => <AssessCard key={c.id} c={c} onChange={onChange} flash={flash} fail={fail} />)}</div>;
-}
-// The 10-parameter score editor for ONE candidate. Reused by the Assessments
-// tab (AssessCard) and the per-candidate Assessment modal (AssessmentModal), so
-// scoring behaves identically everywhere. Scores load from the DB, the total is
-// ALWAYS computed (never typed), each entry is clamped to 1..10, and a refresh
-// re-seeds from c.assessment so nothing is lost.
+// ---------------------------- ASSESSMENT ----------------------------------
+// The 10-parameter score editor for ONE candidate, opened from each AAP
+// candidate's Assessment button (AssessmentModal) inside the AAP Candidates
+// section. Scores load from the DB, the total is ALWAYS computed (never typed),
+// each entry is clamped to 1..10, and a refresh re-seeds from c.assessment so
+// nothing is lost.
 function AssessmentEditor({ c, onChange, flash, fail }) {
   const [scores, setScores] = useState(() => Object.fromEntries(PARAMS.map((p) => [p.key, c.assessment?.[p.key] ?? ""])));
   const [saving, setSaving] = useState(false);
@@ -669,13 +664,6 @@ function AssessmentEditor({ c, onChange, flash, fail }) {
         </div>
       </div>
     </div>
-  );
-}
-function AssessCard({ c, onChange, flash, fail }) {
-  return (
-    <Card title={c.name} icon={ClipboardCheck}>
-      <AssessmentEditor c={c} onChange={onChange} flash={flash} fail={fail} />
-    </Card>
   );
 }
 function AssessmentModal({ c, onClose, onChange, flash, fail }) {
