@@ -203,12 +203,17 @@ function ReportsCenter() {
   };
 
   // ---- export: CSV / Excel / PDF, always the FULL filtered result set ----
-  const downloadExport = async (format) => {
+  const downloadExport = async (format, bodyOverride) => {
     if (!moduleKey) return;
-    setExporting(format); setErr("");
+    // `exporting` tags the in-flight button; use a distinct tag for the "today"
+    // variant so its spinner shows on the right button.
+    const tag = bodyOverride?.__tag || format;
+    setExporting(tag); setErr("");
     try {
+      const payload = { ...body, ...bodyOverride };
+      delete payload.__tag;
       const r = await fetch(`/api/reports/export?format=${format}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || "Export failed");
       const blob = await r.blob();
@@ -392,6 +397,16 @@ function ReportsCenter() {
             </button>
             <button onClick={() => downloadExport("pdf")} disabled={!result || !!exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40">
               {exporting === "pdf" ? <Loader2 size={15} className="animate-spin" /> : <FileOutput size={15} />} PDF
+            </button>
+            {/* Full analytical PDF — KPIs + per-day chart + breakdowns (by status,
+                assembly, caller, designation…) for the current filters. */}
+            <button onClick={() => downloadExport("analytical")} disabled={!result || !!exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-[#164FA3] text-white hover:bg-blue-800 disabled:opacity-40">
+              {exporting === "analytical" ? <Loader2 size={15} className="animate-spin" /> : <BarChart3 size={15} />} Analytical PDF
+            </button>
+            {/* One-click: today's data as an analytical PDF, regardless of the
+                currently selected time range. */}
+            <button onClick={() => downloadExport("analytical", { time: "today", date_from: undefined, date_to: undefined, __tag: "today" })} disabled={!moduleKey || !!exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-[#164FA3] text-[#164FA3] hover:bg-blue-50 disabled:opacity-40">
+              {exporting === "today" ? <Loader2 size={15} className="animate-spin" /> : <CalendarIcon size={15} />} Today's Report
             </button>
             <button onClick={openPrint} disabled={!result} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"><Printer size={15} /> Print</button>
           </div>

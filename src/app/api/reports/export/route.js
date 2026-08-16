@@ -7,6 +7,8 @@ import { moduleMeta, runReport } from "@/lib/reports/engine";
 import { describeFilters } from "@/lib/reports/describeFilters";
 import { reportsGuard as guard } from "@/lib/reports/guard";
 import ReportPdfDocument from "@/lib/reports/ReportPdfDocument";
+import AnalyticalPdfDocument from "@/lib/reports/AnalyticalPdfDocument";
+import { buildAnalytics } from "@/lib/reports/analytical";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +23,8 @@ export async function POST(req) {
 
   const { searchParams } = new URL(req.url);
   const format = searchParams.get("format");
-  if (!["csv", "xlsx", "pdf", "json"].includes(format)) {
-    return Response.json({ message: "format must be csv, xlsx, pdf, or json" }, { status: 400 });
+  if (!["csv", "xlsx", "pdf", "json", "analytical"].includes(format)) {
+    return Response.json({ message: "format must be csv, xlsx, pdf, json, or analytical" }, { status: 400 });
   }
 
   let body;
@@ -31,6 +33,32 @@ export async function POST(req) {
 
   const module = getModule(body.module);
   if (!module) return Response.json({ message: "Unknown module" }, { status: 404 });
+
+  // Analytical PDF — KPIs + per-day chart + breakdown tables (its own engine
+  // calls run several GROUP BY queries), rendered by AnalyticalPdfDocument.
+  if (format === "analytical") {
+    const data = await buildAnalytics({ moduleKey: body.module, session, body });
+    if (data.error) return Response.json({ message: data.error }, { status: data.status || 400 });
+    const meta = await moduleMeta(module);
+    const filterLines = await describeFilters({ module, meta, body });
+    const stamp = new Date().toISOString().slice(0, 10);
+    const buffer = await renderToBuffer(
+      React.createElement(AnalyticalPdfDocument, {
+        title: module.label,
+        subtitle: filterLines.find((l) => l.startsWith("Time:")) || "All time",
+        filterLines,
+        generatedBy: session.user.username || session.user.name || "—",
+        data,
+      })
+    );
+    return new Response(buffer, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${module.key}-analytical-${stamp}.pdf"`,
+      },
+    });
+  }
 
   const result = await runReport({ moduleKey: body.module, session, body, opts: { exportAll: true } });
   if (result.error) return Response.json({ message: result.error }, { status: result.status || 400 });

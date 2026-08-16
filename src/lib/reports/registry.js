@@ -112,7 +112,7 @@ export const MODULES = [
       { key: "assembly", label: "Assembly", sql: "asm.name" },
       ...timeGroupBys("c.called_at"),
     ],
-    defaultColumns: ["person_name", "phone_number", "status", "sentiment", "caller", "district", "called_at"],
+    defaultColumns: ["person_name", "phone_number", "status", "sentiment", "caller", "district", "assembly", "called_at"],
   },
 
   // ------------------------------------------------------------- CONTACTS ---
@@ -167,7 +167,7 @@ export const MODULES = [
       { key: "is_completed", label: "Completed", sql: "c.is_completed" },
       ...timeGroupBys("c.created_at"),
     ],
-    defaultColumns: ["person_name", "phone_number", "assigned_to", "district", "is_completed", "created_at"],
+    defaultColumns: ["person_name", "phone_number", "assigned_to", "district", "assembly", "is_completed", "created_at"],
   },
 
   // -------------------------------------------------------- WRONG NUMBERS ---
@@ -290,7 +290,7 @@ export const MODULES = [
       { key: "worker_type", label: "Worker Type", sql: "w.worker_type" },
       ...timeGroupBys("w.created_at"),
     ],
-    defaultColumns: ["name", "mobile", "position", "membership_status", "status", "district"],
+    defaultColumns: ["name", "mobile", "position", "membership_status", "status", "district", "assembly"],
   },
 
   // ---------------------------------------------------------------- TASKS ---
