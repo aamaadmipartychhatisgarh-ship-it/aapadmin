@@ -10,6 +10,10 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
   },
+  // @react-pdf/renderer (Reports → Download PDF) ships fontkit/yoga internals
+  // that break when Next's server compiler tries to bundle them — renderToBuffer
+  // then hangs / 500s. Keep it external so it loads as a normal Node module.
+  serverExternalPackages: ["@react-pdf/renderer"],
   // Serve runtime-uploaded images (profile photos) through a dynamic route that
   // reads them off disk. `afterFiles` runs only when no static file matched, so
   // build-time assets are still served directly and post-deploy uploads fall
