@@ -166,15 +166,18 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
 
   // Deep-link support: arriving from My Calls' "Edit in Workspace" carries a
   // ?contact_id=, so the console opens straight onto that exact contact. Fires
-  // once; claim() surfaces its own message if the contact can't be opened (e.g.
-  // it belongs to another caller). Browser Back returns to the My Calls list.
+  // once. Browser Back returns to the My Calls list.
   const didAutoOpen = useRef(false);
+  // When a contact is opened for edit-only (not a live call), the active-change
+  // effect below reads this to land straight on the edit form instead of the
+  // default call view.
+  const wantEditOnOpen = useRef(false);
   useEffect(() => {
     if (didAutoOpen.current) return;
     const cid = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("contact_id") : null;
     if (!cid) return;
     didAutoOpen.current = true;
-    claim(Number(cid));
+    openContactForEdit(Number(cid));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -249,7 +252,10 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       assembly_id: active.assembly_id || "",
       ward_name: active.ward_name || "",
     });
-    setEditing(false);
+    // Normally a freshly-opened contact starts in the call view; an edit-only
+    // deep link opens straight on the edit form.
+    setEditing(wantEditOnOpen.current);
+    wantEditOnOpen.current = false;
   }, [active?.id]);
 
   // `silent` skips the loading spinner — used by the background auto-refresh so
@@ -350,6 +356,29 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     return true;
   }
 
+  // Open a specific contact for EDITING from the "Edit in Workspace" deep link.
+  // First try the normal live-call claim (opens + locks it for calling). If it
+  // isn't claimable for a live call — already completed, or held by someone else
+  // — fall back to fetching the record by its unique id and opening it straight
+  // in the edit form, so the caller can still fix its details. This is why the
+  // edit no longer shows "missing details/error": the record is always loaded
+  // from the database by id, not gated behind claimability.
+  async function openContactForEdit(cid) {
+    const claimed = await claim(cid);
+    if (claimed) return;
+    try {
+      const r = await fetch(`/api/contacts/${cid}`);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(data.message || "Could not open that contact."); return; }
+      wantEditOnOpen.current = true; // land on the edit form (the active effect honors this)
+      startActive(data.contact);
+      setError("");
+      setMessage("Opened for editing.");
+    } catch {
+      setError("Could not open that contact.");
+    }
+  }
+
   async function release() {
     await fetch("/api/workspace/release", { method: "POST" });
     setActive(null);
@@ -422,6 +451,10 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   }
 
   async function saveEdit() {
+    if (editSaving) return; // guard against duplicate submissions
+    // Validate before sending the update.
+    if (!String(edit.person_name || "").trim()) { setError("Name is required."); return; }
+    if (!String(edit.phone_number || "").trim()) { setError("Phone number is required."); return; }
     setEditSaving(true);
     setError("");
     try {
@@ -430,12 +463,14 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(edit),
       });
+      const data = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const data = await r.json();
+        // Keep the form open with the entered data so nothing is lost.
         setError(data.message || "Failed to update contact");
         return;
       }
-      // Patch the active contact in place so the card reflects the new details.
+      // Patch the active contact in place so the card reflects the new details
+      // (the DB is already updated; this just avoids a refetch for the names).
       const districtName = districts.find((d) => String(d.id) === String(edit.district_id))?.name || (edit.district_id ? active.district_name : null);
       setActive({
         ...active,
@@ -447,6 +482,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       setForm({ ...form, person_name: edit.person_name, phone_number: edit.phone_number });
       setEditing(false);
       setMessage("Contact updated.");
+      // Refresh the queue so the list reflects the saved changes without a reload.
+      loadQueue({ silent: true });
     } finally {
       setEditSaving(false);
     }

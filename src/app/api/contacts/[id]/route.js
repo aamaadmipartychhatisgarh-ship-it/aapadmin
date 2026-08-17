@@ -2,10 +2,55 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { resolveActingUserId } from "@/lib/actAs";
 import { query, getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
+
+// GET /api/contacts/[id] — fetch ONE contact by its unique database id, with the
+// same resolved fields the workspace edit form needs (ward/district names +
+// linked worker photo). This is the record-by-id path the "Edit in Workspace"
+// flow relies on: unlike claim (which only opens a contact that's still
+// claimable for a live call, and locks it), this loads the record for editing
+// even when it's already completed or not currently locked — so the edit screen
+// can show every existing detail instead of failing. Authorization mirrors the
+// PUT: admins may read any contact; a caller may read a contact they hold the
+// lock on OR that is assigned to them (the correct caller/workspace relationship).
+export async function GET(_req, { params }) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    const { id } = await params;
+
+    if (!isAdmin(session)) {
+      const { userId } = await resolveActingUserId(session);
+      const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
+      const mine = row && (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId));
+      if (!mine) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
+    const [contact] = await query("SELECT * FROM contacts WHERE id = ?", [id]);
+    if (!contact) return NextResponse.json({ message: "Contact not found." }, { status: 404 });
+    const [names] = await query(
+      `SELECT (SELECT name FROM locations WHERE id = ?) AS ward_name,
+              (SELECT name FROM locations WHERE id = ?) AS district_name,
+              (SELECT photo_url FROM workers WHERE id = ?) AS photo_url`,
+      [contact.ward_id ?? null, contact.district_id ?? null, contact.worker_id ?? null]
+    );
+    return NextResponse.json({
+      contact: {
+        ...contact,
+        ward_name: names?.ward_name ?? null,
+        district_name: names?.district_name ?? null,
+        photo_url: names?.photo_url ?? null,
+      },
+    });
+  } catch (err) {
+    console.error("contact GET error:", err);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}
 
 // The contacts table has been extended over several migrations, and a given
 // deployment may not have every column yet (e.g. assembly_id/booth_id). Naming
@@ -38,12 +83,17 @@ export async function PUT(req, { params }) {
     const { id } = await params;
     const admin = isAdmin(session);
     if (!admin) {
-      // Callers may edit the contact they currently hold (locked mid-call).
-      // They can change every detail of the contact — name, phone, address,
-      // designation and the full geography (zone/district/assembly/ward/booth) —
-      // but never its queue assignment or completion state, and never delete it.
-      const [row] = await query("SELECT locked_by_user_id FROM contacts WHERE id = ?", [id]);
-      if (!row || String(row.locked_by_user_id) !== String(session.user.id)) {
+      // Callers may edit a contact they currently hold (locked mid-call) OR one
+      // that is assigned to them — so editing from My Calls works even after the
+      // contact was completed / the lock expired, matching the caller/workspace
+      // relationship. They can change every detail (name, phone, address,
+      // designation and the full geography) but never its queue assignment or
+      // completion state, and never delete it. resolveActingUserId keeps
+      // Super-Admin "view as caller" working.
+      const { userId } = await resolveActingUserId(session);
+      const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
+      const mine = row && (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId));
+      if (!mine) {
         return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
       }
     }
