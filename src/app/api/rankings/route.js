@@ -89,13 +89,20 @@ export async function GET() {
       .filter((d) => d.workers > 0)
       .sort((a, b) => b.workers - a.workers || a.district_name.localeCompare(b.district_name));
 
+    // Total Workers = the ACTUAL worker count from the same Contacts source the
+    // Strength page and Area Ranking use, summed over the districts this viewer
+    // can see (role-scoped by districtFilter above). It is computed live, so it
+    // updates automatically as contacts change and always matches the per-
+    // district numbers on this page — no stale or hardcoded value.
+    const totalWorkers = districtRows.reduce((sum, d) => sum + (contactCounts.get(d.id) || 0), 0);
+
     const badges = await query(
       `SELECT b.name, b.color, b.icon, COUNT(wb.id) AS awarded
          FROM badges b LEFT JOIN worker_badges wb ON wb.badge_id = b.id
         GROUP BY b.id, b.name, b.color, b.icon`
     );
 
-    return NextResponse.json({ topWorkers, areaRankings, badges });
+    return NextResponse.json({ topWorkers, areaRankings, badges, totalWorkers });
   } catch (err) {
     console.error("rankings error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

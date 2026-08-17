@@ -50,9 +50,12 @@ export default function RankingsView() {
       {/* Area rankings + badges */}
       <div className="space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center gap-2">
-            <MapPin size={18} className="text-[#164FA3]" />
-            <h2 className="font-bold text-gray-900">Area Rankings</h2>
+          <div className="p-5 border-b border-gray-100 flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <MapPin size={18} className="text-[#164FA3]" />
+              <h2 className="font-bold text-gray-900">Area Rankings</h2>
+            </span>
+            <span className="text-xs text-gray-500">Total Workers: <strong className="text-gray-800 tabular-nums">{Number(data.totalWorkers ?? data.areaRankings.reduce((s, a) => s + Number(a.workers || 0), 0)).toLocaleString("en-IN")}</strong></span>
           </div>
           <ul className="divide-y divide-gray-100">
             {data.areaRankings.map((a, i) => (
