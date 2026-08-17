@@ -74,6 +74,8 @@ export const MODULES = [
       LEFT JOIN call_statuses cs ON cs.id = c.status_id
       LEFT JOIN users u ON u.id = c.user_id
       LEFT JOIN designations dg ON dg.id = c.designation_id
+      LEFT JOIN locations zn ON zn.id = c.zone_id
+      LEFT JOIN locations ls ON ls.id = c.lok_sabha_id
       LEFT JOIN locations dist ON dist.id = c.district_id
       LEFT JOIN locations asm ON asm.id = c.assembly_id`,
     columns: [
@@ -84,11 +86,14 @@ export const MODULES = [
       { key: "sentiment", label: "Sentiment", sql: "c.sentiment", type: "string" },
       { key: "caller", label: "Caller", sql: "u.username", type: "string" },
       { key: "designation", label: "Designation", sql: "dg.name", type: "string" },
+      { key: "zone", label: "Zone", sql: "zn.name", type: "string" },
+      { key: "lok_sabha", label: "Lok Sabha", sql: "ls.name", type: "string" },
       { key: "district", label: "District", sql: "dist.name", type: "string" },
       { key: "assembly", label: "Assembly", sql: "asm.name", type: "string" },
       { key: "duration_seconds", label: "Duration (s)", sql: "c.duration_seconds", type: "number" },
       { key: "follow_up", label: "Follow-up?", sql: "c.is_follow_up_required", type: "bool" },
       { key: "follow_up_date", label: "Follow-up date", sql: "c.follow_up_date", type: "date" },
+      { key: "remarks", label: "Remarks", sql: "c.remarks", type: "string" },
       { key: "called_at", label: "Called at", sql: "c.called_at", type: "datetime" },
     ],
     filters: [
@@ -135,16 +140,23 @@ export const MODULES = [
     joins: `
       LEFT JOIN users u ON u.id = c.assigned_to_user_id
       LEFT JOIN designations dg ON dg.id = c.designation_id
+      LEFT JOIN locations zn ON zn.id = c.zone_id
+      LEFT JOIN locations ls ON ls.id = c.lok_sabha_id
       LEFT JOIN locations dist ON dist.id = c.district_id
-      LEFT JOIN locations asm ON asm.id = c.assembly_id`,
+      LEFT JOIN locations asm ON asm.id = c.assembly_id
+      LEFT JOIN locations wd ON wd.id = c.ward_id`,
     columns: [
       { key: "id", label: "ID", sql: "c.id", type: "number" },
       { key: "person_name", label: "Person", sql: "c.person_name", type: "string" },
       { key: "phone_number", label: "Phone", sql: "c.phone_number", type: "string" },
       { key: "designation", label: "Designation", sql: "dg.name", type: "string" },
-      { key: "assigned_to", label: "Assigned to", sql: "u.username", type: "string" },
+      { key: "assigned_to", label: "Assigned Caller", sql: "u.username", type: "string" },
+      { key: "zone", label: "Zone", sql: "zn.name", type: "string" },
+      { key: "lok_sabha", label: "Lok Sabha", sql: "ls.name", type: "string" },
       { key: "district", label: "District", sql: "dist.name", type: "string" },
       { key: "assembly", label: "Assembly", sql: "asm.name", type: "string" },
+      { key: "block", label: "Block", sql: "wd.name", type: "string" },
+      { key: "address", label: "Address", sql: "c.address", type: "string" },
       { key: "is_completed", label: "Completed?", sql: "c.is_completed", type: "bool" },
       { key: "is_wrong_number", label: "Wrong #?", sql: "c.is_wrong_number", type: "bool" },
       { key: "is_vip", label: "VIP?", sql: "c.is_vip", type: "bool" },
