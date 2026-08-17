@@ -67,8 +67,8 @@ export default function RankingsView() {
                       <span className="font-medium text-gray-800 truncate">{a.district_name}</span>
                     </span>
                     <span className="flex items-center gap-2 shrink-0">
-                      <span className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden hidden sm:block"><span className="block h-full bg-[#164FA3] rounded-full" style={{ width: `${pct}%` }} /></span>
-                      <strong className="text-gray-700 tabular-nums w-10 text-right">{pct}%</strong>
+                      <span className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden hidden sm:block"><span className="block h-full bg-[#164FA3] rounded-full" style={{ width: `${Math.min(100, pct)}%` }} /></span>
+                      <strong className="text-gray-700 tabular-nums w-14 text-right">{pct}%</strong>
                     </span>
                   </li>
                 );

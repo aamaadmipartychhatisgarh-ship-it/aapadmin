@@ -39,7 +39,6 @@ export async function GET() {
               lz.name AS zone_name,
               (SELECT COUNT(*) FROM teams t WHERE t.location_id = ld.id) AS team_count,
               (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
-              (SELECT COUNT(*) FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS contact_count,
               (SELECT COUNT(*) FROM users u WHERE u.role='caller' AND u.home_district_id = ld.id) AS caller_count,
               (SELECT ROUND(COALESCE(SUM(ct.is_completed) / NULLIF(COUNT(*), 0) * 100, 0))
                  FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS call_completion_pct
@@ -61,9 +60,13 @@ export async function GET() {
     const statById = new Map(stats.map((s) => [s.id, s]));
     const districts = rows.map((r) => {
       const s = statById.get(r.id);
+      const workers = s ? s.actualWorkers : 0;
       return {
         ...r,
-        worker_count: s ? s.actualWorkers : 0,
+        worker_count: workers,
+        // Contacts ARE the workers in this app; surface the SAME single-source
+        // count so the map's "Workers" and "Contacts" figures never disagree.
+        contact_count: workers,
         required_workers: s ? s.requiredWorkers : 0,
         strength_pct: s ? s.strengthPercentage : 0,
         zone_name: r.zone_name || "Unzoned",

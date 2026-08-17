@@ -2,19 +2,40 @@ import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 
 // District-wise ACTUAL people/worker count sourced from Contacts — the SINGLE
-// source of truth shared by the Strength page and Area Ranking so the two can
-// never show different totals for the same district. It is a live COUNT of
-// contacts keyed by district_id, excluding wrong-number-flagged rows (the app's
-// existing active-record rule, same as the District Map). Each contact is
-// counted once (no duplicates); no total is hardcoded and it auto-updates as
-// contacts change. Returns Map<district_id, count>.
+// source of truth shared by the Strength page, Area Ranking, Organization Map
+// and the Workers-by-District tree map so they can never show different totals
+// for the same district.
+//
+// CRITICAL: a contact's district is resolved EXACTLY the way the Contacts page
+// resolves it (see buildContactPersonFilter in @/lib/contactFilter) — a person's
+// geography lives on their linked WORKER row, so we key off the worker's
+// district when the contact is linked to a worker, and fall back to the
+// contact's own district_id only when it has no worker link:
+//     effective_district = worker_id IS NOT NULL ? workers.district_id
+//                                                : contacts.district_id
+// Keying purely on contacts.district_id (the previous behaviour) under-counted
+// any contact whose linked worker sits in a district its own column doesn't
+// name — which is exactly why the Contacts page showed 1,342 for a district
+// while Strength/Map/Ranking showed 1,336. Now every module matches Contacts.
+//
+// Wrong-number-flagged rows are excluded (same active-record rule as Contacts).
+// Each contact is counted once (worker_id → workers.id is many-to-one, so the
+// LEFT JOIN never fans a contact into multiple rows — no duplicate counting).
+// No total is hardcoded and it auto-updates live as contacts change.
+// Returns Map<district_id, count>.
 export async function contactsByDistrict() {
   const notWrong = await notWrongNumberClause("ct");
+  // The contact's effective (person-aware) district, identical to the Contacts
+  // list filter. GROUP BY this so a worker-linked contact lands in its worker's
+  // district and a link-less contact in its own.
+  const effDistrict =
+    "CASE WHEN ct.worker_id IS NOT NULL THEN w.district_id ELSE ct.district_id END";
   const rows = await query(
-    `SELECT ct.district_id AS district_id, COUNT(*) AS n
+    `SELECT ${effDistrict} AS district_id, COUNT(*) AS n
        FROM contacts ct
-      WHERE ct.district_id IS NOT NULL${notWrong}
-      GROUP BY ct.district_id`
+       LEFT JOIN workers w ON w.id = ct.worker_id
+      WHERE (${effDistrict}) IS NOT NULL${notWrong}
+      GROUP BY district_id`
   );
   const m = new Map();
   for (const r of rows) m.set(r.district_id, Number(r.n) || 0);

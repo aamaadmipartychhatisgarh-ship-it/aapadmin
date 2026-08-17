@@ -36,8 +36,11 @@ function districtScope(session) {
 //                     districts still map — IDs drive the count, names only the
 //                     target lookup).
 //  • attemptCalls   = live COUNT of calls logged into the district.
-//  • strengthPercentage = clamp(round(actualWorkers / requiredWorkers * 100),
-//                     0..100); 0 when required is 0 (never NaN / Infinity).
+//  • strengthPercentage = clamp(actualWorkers / requiredWorkers * 100, 0..100),
+//                     kept to 2 decimals (e.g. 1342/6000 → 22.37, NOT rounded to
+//                     22) so districts with genuinely different strength never
+//                     collapse to the same integer and the ranking sort is
+//                     precise; 0 when required is 0 (never NaN / Infinity).
 //
 // Districts are joined to Contacts by district_id (Master Data relationship),
 // never by comparing raw district-name strings, so minor name differences can't
@@ -67,7 +70,7 @@ export async function districtWorkerStats(session, { districtId } = {}) {
     const actualWorkers = contactCounts.get(d.id) || 0;
     const requiredWorkers = requiredWorkersFor(d.district);
     const strengthPercentage = requiredWorkers > 0
-      ? Math.min(100, Math.max(0, Math.round((actualWorkers / requiredWorkers) * 100)))
+      ? Math.min(100, Math.max(0, Math.round((actualWorkers / requiredWorkers) * 10000) / 100))
       : 0;
     return {
       id: d.id,
