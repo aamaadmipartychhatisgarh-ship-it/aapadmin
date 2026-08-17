@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
-  Treemap,
   CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { Loader2, Filter, BarChart3, PieChart as PieIcon, TrendingUp, Layers, Activity, Grid3x3, Radio } from "lucide-react";
@@ -121,17 +120,9 @@ export default function AnalyticsPanel() {
     (taData?.topAgents || []).map((r) => ({ agent: r.agent, calls: Number(r.calls), connected: Number(r.connected) })),
   [taData]);
 
-  const treemapData = useMemo(() => {
-    const rows = data?.treemap || [];
-    // Group districts under zones; block size = worker count for that district.
-    const zoneMap = {};
-    rows.forEach((r) => {
-      const z = r.zone || "Unzoned";
-      if (!zoneMap[z]) zoneMap[z] = { name: z, children: [] };
-      zoneMap[z].children.push({ name: r.district, size: Number(r.count) });
-    });
-    return Object.values(zoneMap);
-  }, [data]);
+  // Workers by District — EVERY district from the shared district-stats service
+  // (backend already includes zero-worker districts and sorts by worker count).
+  const districtStats = useMemo(() => data?.treemap || [], [data]);
 
   const heatmap = data?.heatmap || [];
   // Scale colours (and the empty-state check) to the hours actually shown — the
@@ -309,20 +300,30 @@ export default function AnalyticsPanel() {
             )}
           </Panel>
 
-          {/* Row 6: Treemap — workers assigned per district */}
-          <Panel title="Workers by District (treemap)" icon={Layers}>
-            {treemapData.length === 0 ? (
-              <div className="h-[300px] flex items-center justify-center text-gray-400 text-sm">No district data available.</div>
+          {/* Row 6: Workers by District — every district (incl. zero) with actual /
+              required workers and Strength %, from the shared district-stats source. */}
+          <Panel title="Workers by District" icon={Layers}>
+            {districtStats.length === 0 ? (
+              <div className="h-[120px] flex items-center justify-center text-gray-400 text-sm">No district data available.</div>
             ) : (
-              <ResponsiveContainer width="100%" height={400}>
-                <Treemap
-                  data={treemapData}
-                  dataKey="size"
-                  nameKey="name"
-                  stroke="#fff"
-                  content={<TreemapNode />}
-                />
-              </ResponsiveContainer>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {districtStats.map((d) => {
+                  const pct = Number(d.strengthPercentage) || 0;
+                  const color = pct >= 60 ? "bg-emerald-500" : pct >= 35 ? "bg-[#164FA3]" : "bg-amber-500";
+                  return (
+                    <div key={d.id ?? d.district} className="border border-gray-100 rounded-xl p-3">
+                      <div className="font-semibold text-gray-900 text-sm truncate" title={d.district}>{d.district}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {Number(d.count || 0).toLocaleString("en-IN")} / {Number(d.requiredWorkers || 0).toLocaleString("en-IN")} workers
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>
+                        <span className="text-xs font-bold text-gray-700 w-11 text-right shrink-0">{pct}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </Panel>
         </>
@@ -396,28 +397,6 @@ function heatColor(v, max) {
   const g = Math.round(234 - (234 - 79)  * t);
   const b = Math.round(254 - (254 - 163) * t);
   return `rgb(${r}, ${g}, ${b})`;
-}
-
-function TreemapNode(props) {
-  const { x, y, width, height, name, depth, root } = props;
-  if (depth === 0) return null;
-  // Top-level: zones (parents). Color by zone name. Children inherit a tint.
-  const zoneName = depth === 1 ? name : root?.children?.find((z) => z.children?.some((c) => c.name === name))?.name;
-  const color = ZONE_COLORS[zoneName] || "#9CA3AF";
-  const opacity = depth === 1 ? 0.85 : 0.65;
-  return (
-    <g>
-      <rect x={x} y={y} width={width} height={height} fill={color} fillOpacity={opacity} stroke="#fff" />
-      {width > 60 && height > 30 && (
-        <text x={x + 6} y={y + 16} fill="#fff" fontSize="11" fontWeight="600">{name}</text>
-      )}
-      {depth === 2 && width > 60 && height > 50 && (
-        <text x={x + 6} y={y + 32} fill="#fff" fontSize="10" opacity={0.85}>
-          {props.size} Worker{props.size === 1 ? "" : "s"}
-        </text>
-      )}
-    </g>
-  );
 }
 
 function Panel({ title, icon: Icon, className = "", children }) {

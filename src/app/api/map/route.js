@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
-import { contactsByDistrict } from "@/lib/workerCounts";
+import { districtWorkerStats } from "@/lib/districtStats";
 
 // District-level map data: strength score + drill-down details per district,
 // grouped by zone. Scoped per role: zone-admins see their zone, etc.
@@ -33,7 +33,7 @@ export async function GET() {
     // removed) is intentionally NOT used here, so the Map, the Workers-by-
     // District treemap, Strength and Area Ranking all agree.
     const notWrong = await notWrongNumberClause("ct");
-    const [rows, contactCounts] = await Promise.all([
+    const [rows, stats] = await Promise.all([
       query(
       `SELECT ld.id, ld.name,
               lz.name AS zone_name,
@@ -50,19 +50,25 @@ export async function GET() {
         ORDER BY lz.name, ld.name`,
         dParams
       ),
-      contactsByDistrict(),
+      districtWorkerStats(session),
     ]);
 
-    // Worker count per district = ACTUAL Contacts (shared helper) — the SAME
-    // number the Workers-by-District treemap, Strength and Area Ranking use, so
-    // every module agrees. Drives the tile value, target completion % and the
-    // hover/detail count; districts with no contacts correctly show 0, and a
-    // NULL/invalid district on a contact simply isn't mapped here (no crash).
-    const districts = rows.map((r) => ({
-      ...r,
-      worker_count: contactCounts.get(r.id) || 0,
-      zone_name: r.zone_name || "Unzoned",
-    }));
+    // Worker count, required target and Strength % per district all come from the
+    // ONE shared district-stats service — the SAME numbers the Workers-by-
+    // District tree map, Strength and Area Ranking use, so every module agrees.
+    // Districts with no contacts correctly show 0 (and every district appears);
+    // a NULL/invalid district on a contact simply isn't mapped here (no crash).
+    const statById = new Map(stats.map((s) => [s.id, s]));
+    const districts = rows.map((r) => {
+      const s = statById.get(r.id);
+      return {
+        ...r,
+        worker_count: s ? s.actualWorkers : 0,
+        required_workers: s ? s.requiredWorkers : 0,
+        strength_pct: s ? s.strengthPercentage : 0,
+        zone_name: r.zone_name || "Unzoned",
+      };
+    });
 
     return NextResponse.json({ districts });
   } catch (err) {

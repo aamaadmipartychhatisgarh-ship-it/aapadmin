@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight, scopeFilterSync, normalizeRole, ROLES } from "@/lib/permissions";
+import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { contactsByDistrict } from "@/lib/workerCounts";
-import { requiredWorkersFor } from "@/lib/chhattisgarhAssemblies";
+import { districtWorkerStats } from "@/lib/districtStats";
 
 export async function GET() {
   try {
@@ -56,47 +55,16 @@ export async function GET() {
       return { user_id: r.user_id, name: r.name, members, rank: lastRank };
     });
 
-    // Area rankings — limit to districts within the admin's territory.
-    const role = normalizeRole(session.user.role);
-    const u = session.user;
-    let districtFilter = "";
-    const dParams = [];
-    if (role === ROLES.ZONE_ADMIN && u.scope_zone_id) {
-      districtFilter = "AND ld.parent_id IN (SELECT id FROM locations WHERE type='lok_sabha' AND parent_id = ?)";
-      dParams.push(u.scope_zone_id);
-    } else if (role === ROLES.DISTRICT_ADMIN && u.home_district_id) {
-      districtFilter = "AND ld.id = ?";
-      dParams.push(u.home_district_id);
-    } else if (role === ROLES.ASSEMBLY_ADMIN && u.scope_assembly_id) {
-      districtFilter = "AND ld.id = (SELECT parent_id FROM locations WHERE id = ?)";
-      dParams.push(u.scope_assembly_id);
-    }
-    // Area Ranking: districts ranked by STRENGTH % = actual workers / required
-    // workers x 100. Actual workers come from Contacts (the same shared helper
-    // the Strength page uses); required is the fixed per-district target (same
-    // source). The raw worker count is intentionally NOT surfaced here — only
-    // the percentage. Guards: required=0 -> 0% (never NaN/Infinity), clamped to
-    // 0..100. District names come from the master `locations` rows (exact).
-    const [districtRows, contactCounts] = await Promise.all([
-      query(
-        `SELECT ld.id, ld.name AS district_name
-           FROM locations ld
-          WHERE ld.type = 'district' ${districtFilter}`,
-        dParams
-      ),
-      contactsByDistrict(),
-    ]);
-    const areaRankings = districtRows
-      .map((d) => {
-        const workers = contactCounts.get(d.id) || 0;
-        const required = requiredWorkersFor(d.district_name);
-        const strength_pct = required > 0 ? Math.min(100, Math.max(0, Math.round((workers / required) * 100))) : 0;
-        return { id: d.id, district_name: d.district_name, strength_pct, _workers: workers };
-      })
-      // Only rank districts that actually have workers; sort by the percentage.
-      .filter((d) => d._workers > 0)
-      .sort((a, b) => b.strength_pct - a.strength_pct || a.district_name.localeCompare(b.district_name))
-      .map(({ id, district_name, strength_pct }) => ({ id, district_name, strength_pct }));
+    // Area Ranking — PERCENTAGE ONLY. From the ONE shared district-stats service
+    // (same numbers as Strength / tree map / Organization Map). Strength % =
+    // actual Contacts workers / required workers × 100 (guarded 0..100). The raw
+    // worker/required counts are intentionally NOT surfaced here. Only districts
+    // that actually have workers are ranked; sorted highest → lowest %, then by
+    // district name as a stable tie-breaker.
+    const areaRankings = (await districtWorkerStats(session))
+      .filter((d) => d.actualWorkers > 0)
+      .sort((a, b) => b.strengthPercentage - a.strengthPercentage || a.district.localeCompare(b.district))
+      .map((d) => ({ id: d.id, district_name: d.district, strength_pct: d.strengthPercentage }));
 
     const badges = await query(
       `SELECT b.name, b.color, b.icon, COUNT(wb.id) AS awarded

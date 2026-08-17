@@ -16,78 +16,19 @@ const BAND_COLOR = {
   weak: "bg-red-500 hover:bg-red-600",
 };
 
-// Per-district Worker Target. Target Completion % = actual workers ÷ this
-// district's target × 100 (NO common/fixed target — each district measured
-// against its own goal). Keyed by the district names as stored in the DB, with
-// the plainer display names added as aliases so a lookup succeeds regardless of
-// which form the map data uses. The worker count is always the live API value.
-const DISTRICT_TARGETS = {
-  "Balod": 6000,
-  "Balodabazar-Bhatapara": 6000, "Baloda Bazar": 6000,
-  "Balrampur-Ramanujganj": 4000, "Balrampur": 4000,
-  "Bastar": 6000,
-  "Bemetara": 6000,
-  "Bijapur": 2000,
-  "Bilaspur": 12000,
-  "Dakshin Bastar Dantewada": 2000, "South Bastar Dantewada": 2000, "Dantewada": 2000,
-  "Dhamtari": 6000,
-  "Durg": 12000,
-  "Gariyaband": 4000,
-  "Gaurela-Pendra-Marwahi": 2000,
-  "Janjgir-Champa": 6000,
-  "Jashpur": 6000,
-  "Kabeerdham": 4000, "Kabirdham": 4000,
-  "Uttar Bastar Kanker": 6000, "Kanker": 6000,
-  "Khairagarh-Chhuikhadan-Gandai": 2000,
-  "Kondagaon": 4000,
-  "Korba": 8000,
-  "Korea": 4000, "Koriya": 4000,
-  "Manendragarh-Chirmiri-Bharatpur(M C B)": 2000, "MCB": 2000,
-  "Mahasamund": 8000,
-  "Mohla-Manpur-Ambagarh Chouki": 2000, "Mohla-Manpur-Ambagarh Chowki": 2000,
-  "Mungeli": 4000,
-  "Narayanpur": 2000,
-  "Raigarh": 8000,
-  "Raipur": 14000,
-  "Rajnandgaon": 8000,
-  "Sakti": 6000,
-  "Sarangarh-Bilaigarh": 4000,
-  "Sukma": 2000,
-  "Surajpur": 6000,
-  "Surguja": 6000,
-};
-
-// Normalized index of the target map (lowercase, collapsed whitespace) so a
-// district still resolves when its stored name differs only by case or spacing
-// from the keys above. Exact-match keys still win first, so every already
-// correct district keeps its exact value — this only rescues near-miss names.
-const NORMALIZED_TARGETS = Object.fromEntries(
-  Object.entries(DISTRICT_TARGETS).map(([k, v]) => [k.trim().toLowerCase().replace(/\s+/g, " "), v])
-);
-function resolveTarget(name) {
-  if (!name) return undefined;
-  const exact = DISTRICT_TARGETS[name];
-  if (exact != null) return exact;
-  const norm = String(name).trim().toLowerCase().replace(/\s+/g, " ");
-  const byNorm = NORMALIZED_TARGETS[norm];
-  if (byNorm != null) return byNorm;
-  // Any Dantewada variant (e.g. "Dakshin/South Bastar Dantewada") is 2,000.
-  if (norm.includes("dantewada")) return 2000;
-  return undefined;
-}
-
-// district: a map row (has .name + .worker_count). Uses the district's OWN
-// target — never a fallback of 5,500. A district missing from the mapping is
-// handled explicitly (hasTarget=false → "No target set", neutral band).
+// Worker count, required target and Strength % all come from the SAME shared
+// backend service (/api/map → districtWorkerStats) that powers Strength, Area
+// Ranking and the Workers-by-District tree map — so the Organization Map always
+// agrees with them. No hardcoded targets or client-side strength maths here.
+// A district with no configured target is shown explicitly (hasTarget=false).
 function targetInfo(district) {
   const workers = Number(district?.worker_count) || 0;
-  const target = resolveTarget(district?.name);
+  const target = Number(district?.required_workers) || 0;
   if (!target) {
     return { workers, target: null, pct: null, band: "weak", label: null, hasTarget: false };
   }
-  const pct = (workers / target) * 100;
+  const pct = district?.strength_pct != null ? Number(district.strength_pct) : (workers / target) * 100;
   const band = pct >= 60 ? "strong" : pct >= 35 ? "medium" : "weak";
-  // Trim trailing zeros (0.28% not 0.28, 50% not 50.00).
   const label = Number(pct.toFixed(2));
   return { workers, target, pct, band, label, hasTarget: true };
 }
