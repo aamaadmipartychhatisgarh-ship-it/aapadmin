@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import {
   LayoutDashboard, Building2, UserSquare2, History, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet, Scale,
-  TrendingUp, Target, ShieldAlert, Star, Vote, Search,
+  TrendingUp, Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
 } from "lucide-react";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
@@ -625,8 +625,11 @@ function MlaManager({ flash, fail }) {
   const [mlas, setMlas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState(null);   // null | "new" | mla
-  const [assessing, setAssessing] = useState(null);
+  const [editing, setEditing] = useState(null);          // null | "new" | mla  (profile create/edit)
+  const [assessing, setAssessing] = useState(null);      // mla (quick 10-param editor)
+  const [expandedId, setExpandedId] = useState(null);    // inline-expanded MLA row
+  const [editingAssessment, setEditingAssessment] = useState(null); // mla (full assessment edit)
+  const [version, setVersion] = useState(0);             // bumped after an edit to refresh the inline view
 
   const loadAssemblies = useCallback(async () => {
     try { const d = await api("/api/leader-assessment/assemblies"); setAssemblies(d.assemblies || []); } catch { /* surfaced by MLA load */ }
@@ -638,12 +641,15 @@ function MlaManager({ flash, fail }) {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { loadAssemblies(); loadMlas(); }, [loadAssemblies, loadMlas]);
+  // After any assessment/analysis edit, refresh both the list and the inline view.
+  const afterEdit = () => { loadMlas(); setVersion((v) => v + 1); };
 
   // Assemblies that already have an MLA — excluded from the Create dropdown so a
   // second profile can't be created for the same assembly (edit the existing one).
   const takenAsm = new Set(mlas.map((m) => Number(m.assembly_id)));
   // Keep an open assessment modal bound to the freshest record after a refresh.
   const assessingLive = assessing ? (mlas.find((m) => m.id === assessing.id) || assessing) : null;
+  const editingAssessmentLive = editingAssessment ? (mlas.find((m) => m.id === editingAssessment.id) || editingAssessment) : null;
 
   return (
     <div className="space-y-5">
@@ -660,25 +666,42 @@ function MlaManager({ flash, fail }) {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-gray-500"><tr>{["MLA", "Assembly", "District", "Party", "Assessment Score", "Status", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
-                {mlas.map((m) => (
-                  <tr key={m.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <ProfilePhoto name={m.name} src={m.photo_url} size={34} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
-                        <div className="min-w-0"><div className="font-semibold text-gray-900 truncate">{m.name}</div>{m.phone && <div className="text-[11px] text-gray-400 truncate">{m.phone}</div>}</div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{m.assembly_name || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{m.district || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-700">{m.party || "—"}</td>
-                    <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={m.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{m.total}/100</span></div></td>
-                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${m.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{m.assessment_done ? "Assessed" : "Pending"}</span></td>
-                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                      <button onClick={() => setEditing(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><UserSquare2 size={13} /> Open</button>
-                      <button onClick={() => setAssessing(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Add Assessment</button>
-                    </td>
-                  </tr>
-                ))}
+                {mlas.map((m) => {
+                  const open = expandedId === m.id;
+                  return (
+                    <Fragment key={m.id}>
+                      <tr className={open ? "bg-[#164FA3]/5" : "hover:bg-gray-50"}>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <ProfilePhoto name={m.name} src={m.photo_url} size={34} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
+                            <div className="min-w-0"><div className="font-semibold text-gray-900 truncate">{m.name}</div>{m.phone && <div className="text-[11px] text-gray-400 truncate">{m.phone}</div>}</div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{m.assembly_name || "—"}</td>
+                        <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{m.district || "—"}</td>
+                        <td className="px-3 py-2.5 text-gray-700">{m.party || "—"}</td>
+                        <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={m.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{m.total}/100</span></div></td>
+                        <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${m.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{m.assessment_done ? "Assessed" : "Pending"}</span></td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                          <button onClick={() => setExpandedId(open ? null : m.id)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {open ? "Close" : "Open"}</button>
+                          <button onClick={() => setAssessing(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Add Assessment</button>
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr>
+                          <td colSpan={7} className="px-3 pb-4 pt-0 bg-[#164FA3]/5">
+                            <MlaInlineAssessment
+                              mla={m}
+                              version={version}
+                              onEditAssessment={() => setEditingAssessment(m)}
+                              onEditProfile={() => setEditing(m)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -695,8 +718,134 @@ function MlaManager({ flash, fail }) {
           fail={fail}
         />
       )}
-      {assessingLive && <MlaAssessmentModal m={assessingLive} onClose={() => setAssessing(null)} onChange={loadMlas} flash={flash} fail={fail} />}
+      {assessingLive && <MlaAssessmentModal m={assessingLive} onClose={() => setAssessing(null)} onChange={afterEdit} flash={flash} fail={fail} />}
+      {editingAssessmentLive && <MlaAssessmentEditModal mla={editingAssessmentLive} onClose={() => setEditingAssessment(null)} onChange={afterEdit} flash={flash} fail={fail} />}
     </div>
+  );
+}
+// Inline (expanded-row) read view of an MLA's complete assessment: the
+// 10-parameter scores + total, the assembly's Top 3 Reasons / Top 5 Strengths /
+// Top 10 Weaknesses, and the Assembly Social Profile (Top 3 caste/community with
+// percentages). "Edit Assessment" opens the editable form; "Edit Profile" opens
+// the MLA profile form. `version` forces a re-fetch after an edit.
+function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) {
+  const [ctx, setCtx] = useState(null);   // { analysis, social } for the assembly
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const b = await api(`/api/leader-assessment/assemblies/${mla.assembly_id}`);
+      setCtx({ analysis: b.analysis || {}, social: b.social || [] });
+    } catch (e) { setError(e.message || "Failed to load."); setCtx(null); }
+    finally { setLoading(false); }
+  }, [mla.assembly_id, version]);
+  useEffect(() => { load(); }, [load]);
+
+  const reasons = (ctx?.analysis?.reasons_won || []).filter((x) => String(x || "").trim()).slice(0, 3);
+  const strengths = (ctx?.analysis?.strengths || []).filter((x) => String(x || "").trim()).slice(0, 5);
+  const weaknesses = (ctx?.analysis?.weaknesses || []).filter((x) => String(x || "").trim()).slice(0, 10);
+  const social = (ctx?.social || []).slice(0, 3);
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h4 className="font-bold text-gray-900 flex items-center gap-2"><ClipboardCheck size={16} className="text-[#164FA3]" /> MLA Assessment · {mla.name}</h4>
+        <div className="flex items-center gap-2">
+          <button onClick={onEditProfile} className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-600 hover:text-[#164FA3] px-2 py-1.5 rounded-lg"><UserSquare2 size={14} /> Edit Profile</button>
+          <button onClick={onEditAssessment} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-1.5 rounded-lg text-sm font-semibold"><Pencil size={14} /> Edit Assessment</button>
+        </div>
+      </div>
+
+      {/* 10-parameter assessment */}
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">10-Parameter Assessment</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+          {PARAMS.map((p, i) => {
+            const v = mla.assessment?.[p.key];
+            return (
+              <div key={p.key} className="flex items-center gap-2 text-sm">
+                <span className="text-gray-400 w-5 shrink-0">{i + 1}.</span>
+                <span className="text-gray-700 flex-1 truncate">{p.label}</span>
+                <span className="font-semibold text-gray-900 shrink-0">{v != null ? v : "—"}<span className="text-gray-400 font-normal">/10</span></span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-700">Total Score</span>
+          <span className="text-lg font-bold text-[#164FA3]">{mla.total} / 100</span>
+        </div>
+      </div>
+
+      {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <ReadList title="Top 3 Reasons for Winning" items={reasons} accent="text-emerald-700" empty="No reasons recorded." />
+            <ReadList title="Top 5 Strengths" items={strengths} accent="text-[#164FA3]" empty="No strengths recorded." />
+            <ReadList title="Top 10 Weaknesses" items={weaknesses} accent="text-red-600" empty="No weaknesses recorded." />
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Assembly Social Profile · Top 3 Caste / Community</div>
+            {social.length === 0 ? <div className="text-sm text-gray-400">No social profile recorded.</div> : (
+              <div className="space-y-1.5">
+                {social.map((row, i) => {
+                  const pct = Number(row.percentage) || 0;
+                  return (
+                    <div key={i} className="flex items-center gap-3 text-sm">
+                      <span className="text-xs font-bold text-gray-400 w-14 shrink-0">Rank {i + 1}</span>
+                      <span className="text-gray-800 font-medium w-40 truncate">{row.name || "—"}</span>
+                      <div className="flex-1 hidden sm:block"><div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3] rounded-full" style={{ width: `${Math.min(100, pct)}%` }} /></div></div>
+                      <span className="font-semibold text-gray-900 w-12 text-right shrink-0">{pct}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+function ReadList({ title, items, accent, empty }) {
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">{title}</div>
+      {items.length === 0 ? <div className="text-sm text-gray-400">{empty}</div> : (
+        <ol className="space-y-1">
+          {items.map((it, i) => <li key={i} className="text-sm text-gray-700 flex gap-2"><span className={`font-bold shrink-0 ${accent}`}>{i + 1}.</span><span className="min-w-0">{it}</span></li>)}
+        </ol>
+      )}
+    </div>
+  );
+}
+// Editable form for the displayed MLA assessment: the MLA 10-parameter editor
+// (auto-total, never manually set) + the assembly's Reasons / Strengths /
+// Weaknesses + Social Profile — keeping the MLA↔Assembly relationship intact.
+function MlaAssessmentEditModal({ mla, onClose, onChange, flash, fail }) {
+  const [bundle, setBundle] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try { setBundle(await api(`/api/leader-assessment/assemblies/${mla.assembly_id}`)); }
+    catch (e) { setError(e.message || "Failed to load."); setBundle(null); }
+    finally { setLoading(false); }
+  }, [mla.assembly_id]);
+  useEffect(() => { load(); }, [load]);
+  const reload = () => { load(); onChange(); };
+  return (
+    <Modal title={`Edit Assessment · ${mla.name}`} onClose={onClose} size="full">
+      {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : bundle ? (
+        <div className="space-y-5">
+          <Card title="MLA 10-Parameter Assessment" icon={ClipboardCheck} sub="Each parameter is scored 1–10; the total is calculated automatically out of 100.">
+            <AssessmentEditor c={mla} endpoint={`/api/leader-assessment/mlas/${mla.id}/assessment`} onChange={reload} flash={flash} fail={fail} />
+          </Card>
+          <AnalysisTab b={bundle} onChange={reload} flash={flash} fail={fail} />
+        </div>
+      ) : null}
+    </Modal>
   );
 }
 // Create / edit an MLA profile. The form carries every existing MLA field from
