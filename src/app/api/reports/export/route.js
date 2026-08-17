@@ -69,6 +69,22 @@ export async function POST(req) {
     if (format === "analytical") {
       const data = await buildAnalytics({ moduleKey: body.module, session, body });
       if (data.error) return Response.json({ message: data.error }, { status: data.status || 400 });
+      // Debug: confirm the analytical PDF sees the same data as the on-screen
+      // report. If total is 0 while the list has rows, the filters differ
+      // (usually a time window on a module whose event date ≠ logged date).
+      console.log(
+        "[reports] analytical export",
+        JSON.stringify({
+          module: body.module,
+          time: body.time || "all",
+          date_from: body.date_from || null,
+          date_to: body.date_to || null,
+          filters: body.filters || {},
+          search: body.search || "",
+          total: data.total,
+          dimensions: (data.sections || []).length,
+        })
+      );
       const meta = await moduleMeta(module);
       const filterLines = await describeFilters({ module, meta, body });
       const stamp = new Date().toISOString().slice(0, 10);
@@ -90,6 +106,19 @@ export async function POST(req) {
     if (format === "pdf") opts.maxRows = PDF_MAX_ROWS;
     const result = await runReport({ moduleKey: body.module, session, body, opts });
     if (result.error) return Response.json({ message: result.error }, { status: result.status || 400 });
+    console.log(
+      "[reports] detail export",
+      JSON.stringify({
+        module: body.module,
+        format,
+        time: body.time || "all",
+        filters: body.filters || {},
+        search: body.search || "",
+        total: result.total,
+        rowsInFile: result.rows?.length || 0,
+        truncated: !!result.truncated,
+      })
+    );
 
     const meta = await moduleMeta(module);
     const filterLines = await describeFilters({ module, meta, body });

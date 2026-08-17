@@ -14,9 +14,13 @@ import { getModule } from "./registry";
 
 // Preferred order + friendly section titles. Keys must match module.groupBy keys.
 const BREAKDOWN_ORDER = [
-  ["status", "By Call Status"],
+  ["status", "By Status"],
   ["sentiment", "By Sentiment"],
+  ["kind", "By Type"],
   ["is_completed", "By Completion"],
+  ["newspaper", "By Newspaper"],
+  ["channel", "By Channel"],
+  ["venue", "By Venue"],
   ["assembly", "By Assembly"],
   ["district", "By District"],
   ["caller", "By Caller"],

@@ -94,17 +94,25 @@ function buildWhere(module, session, body) {
     if (!overridden) where += ` AND ${module.baseWhere}`;
   }
 
-  // 2. Time range on the module's date field (IST calendar days).
+  // 2. Time range on the module's TIME field (IST calendar days).
+  // timeField is the column a "when did this happen for reporting purposes"
+  // window should match. It defaults to dateField (used for sort/display), but
+  // a module can point it elsewhere: e.g. the media modules log entries whose
+  // event date (coverage_date / debate_date) is often in the past or NULL, so
+  // a "Today" / "Last 7 days" report must filter on created_at (when it was
+  // LOGGED) — otherwise a note logged today about an old article is invisible
+  // to every recent-time report even though it's in the all-time list.
   // SARGABLE form: keep the date column BARE so its index is used, and convert
   // the IST day bounds to the equivalent UTC datetime range — i.e.
   //   [from 00:00 IST, (to+1) 00:00 IST)  →  compared against the raw column.
   // The previous DATE(CONVERT_TZ(col,…)) wrapper made the column non-indexable
   // and forced a full table scan of calls/contacts on every request (the 504s).
   // CONVERT_TZ(const,…) is a constant expression, evaluated once.
+  const timeField = module.timeField || module.dateField;
   const range = resolveRange(body.time, body.date_from, body.date_to);
   if (range) {
-    where += ` AND ${module.dateField} >= CONVERT_TZ(CONCAT(?,' 00:00:00'),'+05:30','+00:00')`
-           + ` AND ${module.dateField} <  CONVERT_TZ(CONCAT(?,' 00:00:00'),'+05:30','+00:00') + INTERVAL 1 DAY`;
+    where += ` AND ${timeField} >= CONVERT_TZ(CONCAT(?,' 00:00:00'),'+05:30','+00:00')`
+           + ` AND ${timeField} <  CONVERT_TZ(CONCAT(?,' 00:00:00'),'+05:30','+00:00') + INTERVAL 1 DAY`;
     params.push(range.from, range.to);
   }
 

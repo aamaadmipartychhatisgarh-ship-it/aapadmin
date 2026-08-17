@@ -19,7 +19,11 @@ import { WORKER_TYPES } from "@/lib/workerTypes";
 //   icon         lucide icon name (resolved in the UI)
 //   table,alias  FROM `table` alias
 //   joins        static JOIN clauses (string)
-//   dateField    the primary timestamp column (for time filters + time grouping)
+//   dateField    the primary timestamp column (for default sort + time grouping)
+//   timeField    OPTIONAL column the time-range window filters on; defaults to
+//                dateField. Set it when a module should be filtered by a
+//                different timestamp than it sorts/groups by (e.g. media
+//                modules window by created_at but sort by the event date).
 //   scopeCols    which geo columns the base table has, for role scoping
 //                (subset of ['zone_id','district_id','assembly_id']); omit = no geo scope
 //   geo          true if the base table carries zone/lok_sabha/district/assembly ids
@@ -584,6 +588,9 @@ export const MODULES = [
     table: "press_notes",
     alias: "pn",
     dateField: "pn.coverage_date",
+    // Time windows ("Today", "Last 7 days", …) filter on when the entry was
+    // LOGGED, not the (often past/NULL) coverage date — see engine.js.
+    timeField: "pn.created_at",
     joins: `
       LEFT JOIN newspapers np ON np.id = pn.newspaper_id
       LEFT JOIN users cb ON cb.id = pn.created_by_user_id`,
@@ -625,6 +632,7 @@ export const MODULES = [
     table: "debates",
     alias: "de",
     dateField: "de.debate_date",
+    timeField: "de.created_at",
     joins: `LEFT JOIN news_channels ch ON ch.id = de.channel_id`,
     columns: [
       { key: "id", label: "ID", sql: "de.id", type: "number" },
@@ -658,6 +666,7 @@ export const MODULES = [
     table: "press_conferences",
     alias: "pc",
     dateField: "pc.conference_date",
+    timeField: "pc.created_at",
     joins: "",
     columns: [
       { key: "id", label: "ID", sql: "pc.id", type: "number" },
