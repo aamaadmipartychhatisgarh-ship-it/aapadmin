@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Building2, UserSquare2, History, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet, Scale,
-  TrendingUp, Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
+  Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
 } from "lucide-react";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
@@ -559,68 +559,8 @@ function mlaMetrics(b) {
   const lastMargin = mla.previous_winning_margin != null ? Number(mla.previous_winning_margin) : (latest?.margin ?? null);
   return { wins, contested, winRate, best, lastMargin, latestVotes: latest?.votes ?? null, latestShare: latest?.vote_percentage ?? null };
 }
-function MlaTab({ b, onSaved, fail }) {
-  const seed = () => ({ ...EMPTY_MLA, ...(b.mla || {}), date_of_birth: b.mla?.date_of_birth ? String(b.mla.date_of_birth).slice(0, 10) : "" });
-  const [form, setForm] = useState(seed);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { setForm(seed()); /* eslint-disable-next-line */ }, [b.assembly.id, b.mla]);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const age = ageOf(form.date_of_birth);
-  const m = mlaMetrics(b);
-  async function persistPhoto(blob) {
-    if (!blob) return null;
-    const fd = new FormData(); fd.append("file", new File([blob], "photo.jpg", { type: "image/jpeg" }));
-    const up = await fetch("/api/uploads", { method: "POST", body: fd }); const d = await up.json().catch(() => ({}));
-    if (!up.ok) throw new Error(d.message || "Upload failed"); return d.url;
-  }
-  async function save() {
-    setSaving(true);
-    try { await api(`/api/leader-assessment/assemblies/${b.assembly.id}/mla`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }); onSaved(); }
-    catch (e) { fail(e.message); } finally { setSaving(false); }
-  }
-  const F = ({ k, label, type = "text", full }) => (<div className={full ? "col-span-2" : ""}><span className={lbl}>{label}</span><input type={type} className={inp} value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} /></div>);
-  return (
-    <div className="space-y-4">
-      <Card title="Current MLA Profile" icon={UserSquare2} right={<SaveBtn onClick={save} saving={saving} label="Save MLA" />}>
-        <div className="grid grid-cols-1 lg:grid-cols-[auto_1fr] gap-6">
-          <div className="flex flex-col items-center gap-1.5">
-            <ProfilePhoto name={form.name} src={form.photo_url} size={120} square editable persist={persistPhoto} onChange={(url) => set("photo_url", url || "")} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
-            <span className="text-[11px] text-gray-400">JPG, PNG, WEBP</span>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <F k="name" label="Full Name" full />
-            <F k="phone" label="Phone" /><F k="party" label="Party" />
-            <F k="date_of_birth" label="Date of Birth" type="date" />
-            <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600 font-semibold`}>{age != null ? `${age} years` : "Age not available"}</div></div>
-            <F k="caste" label="Caste" /><F k="net_worth" label="Net Worth" />
-            <F k="criminal_cases" label="Criminal Cases" type="number" />
-            <F k="address" label="Address" full />
-          </div>
-        </div>
-      </Card>
-
-      <Card title="Election Performance" icon={TrendingUp}>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          <Stat label="Wins" value={m.wins} />
-          <Stat label="Contested" value={m.contested} />
-          <Stat label="Win Rate" value={m.winRate != null ? `${m.winRate}%` : null} />
-          <Stat label="Best Margin" value={nfmt(m.best)} />
-          <Stat label="Last Margin" value={nfmt(m.lastMargin)} />
-          <Stat label="Latest Votes" value={nfmt(m.latestVotes)} hint={m.latestShare != null ? `${m.latestShare}% share` : null} />
-        </div>
-        <div className="mt-4 pt-4 border-t border-gray-100">
-          <div className={lbl}>Edit performance details</div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <F k="times_won" label="Times Won" type="number" /><F k="times_contested" label="Times Contested" type="number" />
-            <F k="largest_winning_margin" label="Largest Margin" type="number" /><F k="previous_winning_margin" label="Previous Margin" type="number" />
-            <F k="party_won_from" label="Party Won From" /><F k="party_defeated" label="Party Defeated" />
-          </div>
-          <div className="mt-3 flex justify-end"><SaveBtn onClick={save} saving={saving} label="Save Performance" /></div>
-        </div>
-      </Card>
-    </div>
-  );
-}
+// (The old per-assembly MlaTab was replaced by the global MlaManager below.
+// mlaMetrics() above is still used by the MLA-vs-AAP comparison.)
 
 // --------------------------- MLA MANAGER ----------------------------------
 // The MLA Profile tab: a global manager with a "+ Create MLA Profile" action and
