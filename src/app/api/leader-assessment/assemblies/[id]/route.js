@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, assessmentTotal, ageFromDob, rankCandidates, parseList } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, assessmentTotal, ageFromDob, rankCandidates, parseList, assemblyElectorate } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +15,24 @@ export async function GET(_req, { params }) {
   if (error) return error;
   try {
     const { id } = await params;
-    const [assembly] = await query("SELECT * FROM la_assemblies WHERE id = ?", [id]);
+    // Pull the assembly and its authoritative district name straight from the
+    // Master Data (`locations`) via district_id, so the district/assembly
+    // relationship shown on every tab (incl. Election History) always reflects
+    // Master Data — the stored text is only a fallback.
+    const [assembly] = await query(
+      `SELECT a.*, dl.name AS master_district_name
+         FROM la_assemblies a
+         LEFT JOIN locations dl ON dl.id = a.district_id AND dl.type = 'district'
+        WHERE a.id = ?`,
+      [id]
+    );
     if (!assembly) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
+    if (assembly.master_district_name) assembly.district = assembly.master_district_name;
+    delete assembly.master_district_name;
+    // Overwrite the electorate figures with authoritative, live-computed values
+    // (voters / polling stations / booths) so the header never shows stale or
+    // empty stored columns.
+    Object.assign(assembly, await assemblyElectorate(assembly));
 
     const [mlaRow] = await query("SELECT * FROM la_mla_profiles WHERE assembly_id = ?", [id]);
     const mla = mlaRow ? { ...mlaRow, age: ageFromDob(mlaRow.date_of_birth) } : null;

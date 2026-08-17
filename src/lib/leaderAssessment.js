@@ -362,3 +362,64 @@ export function parseList(txt) {
   if (!txt) return [];
   try { const v = JSON.parse(txt); return Array.isArray(v) ? v : []; } catch { return []; }
 }
+
+// Authoritative electorate figures for one assembly — Total Voters, Total
+// Polling Stations, Total Booths. NOTHING here is dummy or hardcoded:
+//   • Polling Stations / Booths are counted live from the geographic master
+//     (`locations`) as the assembly's descendants of that type, at any depth
+//     (assembly → ward → polling_station → booth). Every node has a unique id
+//     in the tree, so COUNT(DISTINCT id) can never double-count.
+//   • Voters come from the admin-entered `la_assemblies.total_voters`; this
+//     system has no booth-level voter roll, so that stored figure is the
+//     authoritative source for the metric.
+// Everything is returned as a real number — 0 (never null) when the assembly is
+// not linked to Master Data or the master holds no booths/stations yet. `asm`
+// must carry at least { location_id, total_voters }.
+export async function assemblyElectorate(asm) {
+  const locId = asm?.location_id != null && !isNaN(Number(asm.location_id)) ? Number(asm.location_id) : null;
+  const voters = asm?.total_voters != null && !isNaN(Number(asm.total_voters)) ? Number(asm.total_voters) : 0;
+  let booths = 0;
+  let stations = 0;
+  if (locId) {
+    try {
+      // Recursive descent through the whole subtree under this assembly.
+      const rows = await query(
+        `WITH RECURSIVE subtree AS (
+           SELECT id, type, parent_id FROM locations WHERE id = ?
+           UNION ALL
+           SELECT l.id, l.type, l.parent_id
+             FROM locations l JOIN subtree s ON l.parent_id = s.id
+         )
+         SELECT
+           COUNT(DISTINCT CASE WHEN type = 'booth' THEN id END) AS booths,
+           COUNT(DISTINCT CASE WHEN type = 'polling_station' THEN id END) AS stations
+         FROM subtree`,
+        [locId]
+      );
+      booths = Number(rows[0]?.booths || 0);
+      stations = Number(rows[0]?.stations || 0);
+    } catch {
+      // Fallback for engines without recursive-CTE support: walk up to three
+      // parent levels from each booth/station and check this assembly is an
+      // ancestor (covers assembly → ward → polling_station → booth).
+      try {
+        const rows = await query(
+          `SELECT
+             COUNT(DISTINCT CASE WHEN x.type = 'booth' THEN x.id END) AS booths,
+             COUNT(DISTINCT CASE WHEN x.type = 'polling_station' THEN x.id END) AS stations
+           FROM locations x
+           LEFT JOIN locations p1 ON p1.id = x.parent_id
+           LEFT JOIN locations p2 ON p2.id = p1.parent_id
+           WHERE x.type IN ('booth', 'polling_station')
+             AND (x.parent_id = ? OR p1.parent_id = ? OR p2.parent_id = ?)`,
+          [locId, locId, locId]
+        );
+        booths = Number(rows[0]?.booths || 0);
+        stations = Number(rows[0]?.stations || 0);
+      } catch (e) {
+        console.error("[LA] assemblyElectorate:", e?.message || e);
+      }
+    }
+  }
+  return { total_voters: voters, total_polling_stations: stations, total_booths: booths };
+}
