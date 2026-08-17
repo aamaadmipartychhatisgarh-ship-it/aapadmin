@@ -28,23 +28,21 @@ export async function GET() {
       dParams.push(u.scope_assembly_id);
     }
 
+    // Every worker/contact figure comes from live, correctly-mapped sources
+    // keyed by district_id — the legacy `workers` table (Worker Management was
+    // removed) is intentionally NOT used here, so the Map, the Workers-by-
+    // District treemap, Strength and Area Ranking all agree.
     const notWrong = await notWrongNumberClause("ct");
     const [rows, contactCounts] = await Promise.all([
       query(
       `SELECT ld.id, ld.name,
               lz.name AS zone_name,
-              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='active') AS active_workers,
-              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='pending') AS pending_workers,
-              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.status='inactive') AS inactive_workers,
-              (SELECT COALESCE(ROUND(AVG(w.activity_score)),0) FROM workers w WHERE w.district_id = ld.id) AS avg_activity,
               (SELECT COUNT(*) FROM teams t WHERE t.location_id = ld.id) AS team_count,
               (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
               (SELECT COUNT(*) FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS contact_count,
               (SELECT COUNT(*) FROM users u WHERE u.role='caller' AND u.home_district_id = ld.id) AS caller_count,
               (SELECT ROUND(COALESCE(SUM(ct.is_completed) / NULLIF(COUNT(*), 0) * 100, 0))
-                 FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS call_completion_pct,
-              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS new_workers_30d,
-              (SELECT COUNT(*) FROM workers w WHERE w.district_id = ld.id AND w.created_at >= DATE_SUB(NOW(), INTERVAL 60 DAY) AND w.created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)) AS new_workers_prev_30d
+                 FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS call_completion_pct
          FROM locations ld
          LEFT JOIN locations lls ON lls.id = ld.parent_id
          LEFT JOIN locations lz ON lz.id = lls.parent_id
@@ -56,32 +54,15 @@ export async function GET() {
     ]);
 
     // Worker count per district = ACTUAL Contacts (shared helper) — the SAME
-    // number Contacts / Strength / Area Ranking use, so every module agrees.
-    // Drives the tile value, target completion % and the hover/detail count;
-    // districts with no contacts correctly show 0.
-    for (const r of rows) r.worker_count = contactCounts.get(r.id) || 0;
-
-    const maxWorker = Math.max(1, ...rows.map((r) => r.worker_count));
-    const maxCall = Math.max(1, ...rows.map((r) => r.call_count));
-    const districts = rows.map((r) => {
-      const score = Math.round(
-        (r.worker_count / maxWorker) * 100 * 0.4 +
-        r.avg_activity * 0.4 +
-        (r.call_count / maxCall) * 100 * 0.2
-      );
-      // Membership growth — workers added in the last 30 days vs the 30
-      // days before that. No new column: derived from workers.created_at.
-      const prev = Number(r.new_workers_prev_30d) || 0;
-      const curr = Number(r.new_workers_30d) || 0;
-      const membership_growth_pct = prev === 0 ? (curr > 0 ? 100 : 0) : Math.round(((curr - prev) / prev) * 100);
-      return {
-        ...r,
-        zone_name: r.zone_name || "Unzoned",
-        score,
-        band: score >= 60 ? "strong" : score >= 35 ? "medium" : "weak",
-        membership_growth_pct,
-      };
-    });
+    // number the Workers-by-District treemap, Strength and Area Ranking use, so
+    // every module agrees. Drives the tile value, target completion % and the
+    // hover/detail count; districts with no contacts correctly show 0, and a
+    // NULL/invalid district on a contact simply isn't mapped here (no crash).
+    const districts = rows.map((r) => ({
+      ...r,
+      worker_count: contactCounts.get(r.id) || 0,
+      zone_name: r.zone_name || "Unzoned",
+    }));
 
     return NextResponse.json({ districts });
   } catch (err) {

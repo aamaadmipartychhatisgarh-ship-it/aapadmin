@@ -204,16 +204,11 @@ export default function TerritoryMap() {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4 mt-6">
-                    <Detail icon={Users} label="Total Members" value={selected.worker_count} />
-                    <Detail icon={Activity} label="Active" value={selected.active_workers} />
-                    <Detail icon={Activity} label="Pending" value={selected.pending_workers} />
-                    <Detail icon={Activity} label="Inactive" value={selected.inactive_workers} />
+                    <Detail icon={Users} label="Workers" value={selected.worker_count} />
                     <Detail icon={Network} label="Teams" value={selected.team_count} />
                     <Detail icon={UserCog} label="Callers" value={selected.caller_count} />
                     <Detail icon={Contact} label="Contacts" value={selected.contact_count} />
                     <Detail icon={PhoneCall} label="Call Completion" value={`${selected.call_completion_pct}%`} />
-                    <Detail icon={Activity} label="Avg Activity" value={selected.avg_activity} />
-                    <GrowthDetail value={selected.membership_growth_pct} />
                   </div>
                   {ti.hasTarget && ti.band === "weak" && (
                     <div className="mt-5 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
@@ -246,7 +241,6 @@ export default function TerritoryMap() {
             <div className="text-xs text-gray-400 mb-1.5">{hovered.zone_name} Division{ht.hasTarget ? ` · ${ht.label}% of target` : ""}</div>
             <div className="flex justify-between"><span className="text-gray-500">Workers</span><strong className="text-gray-800">{ht.workers.toLocaleString("en-IN")} / {ht.hasTarget ? ht.target.toLocaleString("en-IN") : "—"}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Target Completion</span><strong className="text-gray-800">{ht.hasTarget ? `${ht.label}%` : "—"}</strong></div>
-            <div className="flex justify-between"><span className="text-gray-500">Active / Pending</span><strong className="text-gray-800">{hovered.active_workers} / {hovered.pending_workers}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Contacts</span><strong className="text-gray-800">{hovered.contact_count}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Callers</span><strong className="text-gray-800">{hovered.caller_count}</strong></div>
             <div className="flex justify-between"><span className="text-gray-500">Call completion</span><strong className="text-gray-800">{hovered.call_completion_pct}%</strong></div>
