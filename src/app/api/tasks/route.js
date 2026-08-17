@@ -6,7 +6,7 @@ import { resolveActingUserId } from "@/lib/actAs";
 import { query, getPool } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 import { ensureTaskContactColumn } from "@/lib/taskSchema";
-import { notifyTaskAssigned } from "@/lib/notify";
+import { notifyTaskCreated } from "@/lib/notify";
 import { subtasksByTask, hasSubtasksTable, hasTaskAssignedAt, hasTaskDurationColumns, hasTaskContactColumn } from "@/lib/tasks";
 import { addDays } from "@/lib/taskDuration";
 
@@ -237,7 +237,16 @@ export async function POST(req) {
     for (const { taskId, uid } of created) {
       if (uid || teamId) {
         try {
-          await notifyTaskAssigned({ taskId, title, assignedToUserId: uid || null, assignedToTeamId: teamId, excludeUserId: session.user.id });
+          await notifyTaskCreated({
+            taskId,
+            title,
+            assignedToUserId: uid || null,
+            assignedToTeamId: teamId,
+            districtId: d.district_id || null,
+            contactId: hasContactCol ? (d.contact_id || null) : null,
+            createdByUserId: session.user.id,
+            createdByName: session.user.name || session.user.username || null,
+          });
         } catch (e) { console.error("task notify failed:", e); }
       }
     }

@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { notifyTaskAssigned } from "@/lib/notify";
+import { notifyTaskCreated } from "@/lib/notify";
 import { recomputeTaskStatus, hasSubtasksTable, hasTaskAssignedAt, hasTaskDurationColumns } from "@/lib/tasks";
 import { addDays } from "@/lib/taskDuration";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
@@ -89,12 +89,15 @@ export async function PUT(req, { params }) {
         const [t] = await query("SELECT title FROM tasks WHERE id = ?", [id]);
         title = title ?? t?.title;
       }
-      await notifyTaskAssigned({
+      await notifyTaskCreated({
         taskId: id,
         title,
         assignedToUserId: d.assigned_to_user_id || null,
         assignedToTeamId: d.assigned_to_team_id || null,
-        excludeUserId: session.user.id,
+        districtId: d.district_id || null,
+        contactId: d.contact_id || null,
+        createdByUserId: session.user.id,
+        createdByName: session.user.name || session.user.username || null,
       });
     }
     return NextResponse.json({ ok: true });
