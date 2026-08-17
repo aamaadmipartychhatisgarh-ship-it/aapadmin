@@ -1,37 +1,44 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { assessmentTotal } from "@/lib/leaderAssessment";
+import { assessmentTotal, syncAssemblies } from "@/lib/leaderAssessment";
 import { workersByDistrict } from "@/lib/workerCounts";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/leader-assessment/assemblies?search=&district=
 // Assembly list enriched with MLA name, candidate count and a top candidate.
+// Master Data (locations type='assembly') is the single source of truth: only
+// assemblies that CURRENTLY exist in master are listed (via the INNER JOIN), the
+// name/district come from master, and the mirror is refreshed on each request so
+// additions/edits/removals in master show up immediately.
 export async function GET(req) {
   const { session, error } = await guard();
   if (error) return error;
   try {
+    await syncAssemblies();
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search")?.trim();
     const district = searchParams.get("district")?.trim();
     const where = [];
     const params = [];
-    // Once assemblies are mirrored from Master Data (locations type='assembly'),
-    // list ONLY those authoritative rows — legacy district-seeded rows are hidden
-    // (not deleted). Falls back to all rows on deployments without master data.
-    const linked = await query("SELECT COUNT(*) AS n FROM la_assemblies WHERE location_id IS NOT NULL");
-    if (Number(linked[0]?.n || 0) > 0) where.push("a.location_id IS NOT NULL");
-    if (search) { where.push("(a.name LIKE ? OR a.number LIKE ? OR a.district LIKE ? OR a.lok_sabha LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
-    if (district) { where.push("a.district = ?"); params.push(district); }
+    if (search) { where.push("(ml.name LIKE ? OR a.number LIKE ? OR dl.name LIKE ? OR a.lok_sabha LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
+    if (district) { where.push("dl.name = ?"); params.push(district); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    // INNER JOIN to the master assembly row: an la_assemblies row whose master
+    // assembly no longer exists (or was never linked) is excluded automatically,
+    // so the list can never show a stale/duplicate/non-master assembly. The
+    // authoritative name + parent district are read straight from master.
     const rows = await query(
-      `SELECT a.*, m.name AS mla_name,
+      `SELECT a.*, ml.name AS master_name, dl.name AS master_district, dl.id AS master_district_id,
+              m.name AS mla_name,
               (SELECT COUNT(*) FROM la_aap_candidates c WHERE c.assembly_id = a.id) AS candidate_count
          FROM la_assemblies a
+         JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
+         LEFT JOIN locations dl ON dl.id = ml.parent_id AND dl.type = 'district'
          LEFT JOIN la_mla_profiles m ON m.assembly_id = a.id
          ${whereSql}
-         ORDER BY a.name ASC`,
+         ORDER BY ml.name ASC`,
       params
     );
     // Compute each assembly's top candidate + score without an N+1 storm.
@@ -56,14 +63,24 @@ export async function GET(req) {
     // the assembly's district_id (never stored, so it auto-updates as workers
     // are added / removed / reassigned).
     const workerMap = await workersByDistrict();
-    const assemblies = rows.map((r) => ({
-      ...r,
-      candidate_count: Number(r.candidate_count) || 0,
-      required_workers: r.required_workers != null ? Number(r.required_workers) : null,
-      worker_count: r.district_id != null ? (workerMap.get(r.district_id) || 0) : 0,
-      top_candidate: topByAsm[r.id]?.name || null,
-      top_score: topByAsm[r.id]?.total ?? null,
-    }));
+    const assemblies = rows.map((r) => {
+      const { master_name, master_district, master_district_id, ...rest } = r;
+      // Live worker count keyed by the authoritative master district id (FK),
+      // falling back to the mirrored district_id.
+      const districtId = master_district_id != null ? master_district_id : r.district_id;
+      return {
+        ...rest,
+        // Authoritative name + district straight from Master Data.
+        name: master_name || r.name,
+        district: master_district || r.district,
+        district_id: districtId,
+        candidate_count: Number(r.candidate_count) || 0,
+        required_workers: r.required_workers != null ? Number(r.required_workers) : null,
+        worker_count: districtId != null ? (workerMap.get(districtId) || 0) : 0,
+        top_candidate: topByAsm[r.id]?.name || null,
+        top_score: topByAsm[r.id]?.total ?? null,
+      };
+    });
     return NextResponse.json({ assemblies }, { headers: noStore });
   } catch (e) {
     console.error("[LA] assemblies GET:", e);

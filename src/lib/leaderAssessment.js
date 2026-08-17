@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { CG_ASSEMBLIES, normDistrict, requiredWorkersFor } from "@/lib/chhattisgarhAssemblies";
+import { normDistrict, requiredWorkersFor } from "@/lib/chhattisgarhAssemblies";
 
 // ---------------------------------------------------------------------------
 // Leader / Assembly Assessment module — schema (lazy, idempotent) + shared
@@ -162,16 +162,16 @@ export async function ensureLeaderAssessmentTables() {
   ensured = true;
 }
 
-// Sync la_assemblies to the authoritative Master Data assemblies — the
-// `locations` rows of type 'assembly'. Each master assembly gets exactly one
-// mirrored la_assemblies row (matched by location_id, so repeat runs never
-// duplicate), carrying the correct name, its parent district and that district's
-// required-worker target. This keeps the module's assembly list/count in sync
-// with Master Data automatically and never hardcodes names. Non-destructive:
-// existing rows are updated in place, none are deleted (so any data attached to
-// legacy rows is preserved). If no master assemblies are configured yet, fall
-// back to the district-based seed so the module is still usable.
-async function syncAssemblies() {
+// Mirror the authoritative Master Data assemblies — the `locations` rows of
+// type 'assembly' — into la_assemblies, keyed by location_id. Master Data is the
+// SINGLE SOURCE OF TRUTH: this only ever adds/updates mirror rows to match
+// master (and adopts a legacy row into master where the names line up). It never
+// hardcodes names, never seeds a fallback list, and never deletes — so existing
+// MLA / candidate / election / assessment data is always preserved. Cheap in
+// steady state (two SELECTs, no writes when nothing changed), so it's safe to
+// run on every Overview / assemblies request to keep the module in step with
+// master. Exported so those routes can refresh the mirror per request.
+export async function syncAssemblies() {
   try {
     const masters = await query(
       `SELECT a.id AS location_id, a.name AS name,
@@ -180,97 +180,56 @@ async function syncAssemblies() {
          LEFT JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
         WHERE a.type = 'assembly'`
     );
-    // Only adopt Master Data when it's actually populated with the real
-    // constituency set (Chhattisgarh has 90). A handful of stray assembly rows
-    // means the master isn't ready — keep the district-based seed so the module
-    // never regresses to a near-empty list.
-    const MIN_MASTER_ASSEMBLIES = 30;
-    if (masters.length < MIN_MASTER_ASSEMBLIES) {
-      await seedLeaderAssemblies();
-      return;
+    // No master assemblies configured → nothing to mirror. The module then shows
+    // a proper empty state instead of any seeded / hardcoded fallback.
+    if (!masters.length) return;
+
+    const existing = await query("SELECT id, location_id, name, district, district_id FROM la_assemblies");
+    const linked = new Map();          // location_id -> existing mirror row
+    const unlinkedByNorm = new Map();  // normalized name -> legacy row (location_id NULL)
+    for (const r of existing) {
+      if (r.location_id != null) linked.set(Number(r.location_id), r);
+      else if (!unlinkedByNorm.has(normDistrict(r.name))) unlinkedByNorm.set(normDistrict(r.name), r);
     }
-    const existing = await query("SELECT id, location_id FROM la_assemblies WHERE location_id IS NOT NULL");
-    const byLoc = new Map(existing.map((r) => [Number(r.location_id), r.id]));
+
     for (const m of masters) {
       const req = m.district_name ? requiredWorkersFor(m.district_name) : null;
-      const known = byLoc.get(Number(m.location_id));
-      if (known) {
+      const cur = linked.get(Number(m.location_id));
+      if (cur) {
+        // Keep the mirror's authoritative fields in step with master, but only
+        // write when something actually changed (keeps steady-state cost at 0).
+        const changed = cur.name !== m.name
+          || (cur.district || null) !== (m.district_name || null)
+          || Number(cur.district_id || 0) !== Number(m.district_id || 0);
+        if (changed) {
+          await query(
+            `UPDATE la_assemblies SET name = ?, district = ?, district_id = ?, required_workers = COALESCE(required_workers, ?) WHERE id = ?`,
+            [m.name, m.district_name || null, m.district_id || null, req, cur.id]
+          );
+        }
+        continue;
+      }
+      // Not yet linked to this master assembly. Adopt a same-named legacy row
+      // (location_id NULL) so its existing assessment data attaches to the
+      // correct master id without loss — otherwise insert a fresh mirror row.
+      const legacy = unlinkedByNorm.get(normDistrict(m.name));
+      if (legacy) {
+        unlinkedByNorm.delete(normDistrict(m.name));
+        linked.set(Number(m.location_id), { ...legacy, location_id: m.location_id });
         await query(
-          `UPDATE la_assemblies
-              SET name = ?, district = ?, district_id = ?,
-                  required_workers = COALESCE(required_workers, ?)
-            WHERE id = ?`,
-          [m.name, m.district_name || null, m.district_id || null, req, known]
+          `UPDATE la_assemblies SET location_id = ?, name = ?, district = ?, district_id = ?, required_workers = COALESCE(required_workers, ?) WHERE id = ?`,
+          [m.location_id, m.name, m.district_name || null, m.district_id || null, req, legacy.id]
         );
       } else {
-        await query(
-          `INSERT INTO la_assemblies (name, district, district_id, required_workers, location_id)
-           VALUES (?, ?, ?, ?, ?)`,
+        const res = await query(
+          `INSERT INTO la_assemblies (name, district, district_id, required_workers, location_id) VALUES (?, ?, ?, ?, ?)`,
           [m.name, m.district_name || null, m.district_id || null, req, m.location_id]
         );
+        linked.set(Number(m.location_id), { id: res.insertId, location_id: m.location_id });
       }
     }
   } catch (e) {
     console.error("[LA] syncAssemblies:", e?.message || e);
-  }
-}
-
-// Idempotent master seed for the 33 Chhattisgarh assemblies (names + fixed
-// Required-Worker targets from src/lib/chhattisgarhAssemblies.js). This is
-// deterministic — it does NOT depend on the contents of `locations` for the
-// insert, so it populates reliably on any deployment. For each assembly it also
-// resolves the matching `locations` district id (via the alias table) and
-// stores it as district_id, which powers the live worker count. NO MLA,
-// candidate, election, vote or caste data is created — those remain empty and
-// render as "Not Available"/"Not Added" until entered through the UI.
-//
-// Idempotency: an assembly is matched to any existing row by normalized name
-// (canonical name OR any alias), so running repeatedly — or after the earlier
-// district-named seed — never creates duplicates. Existing rows are only
-// BACK-FILLED (required_workers / district_id set when NULL); an admin-edited
-// name is never overwritten. New assemblies are inserted with the canonical
-// name. End state: exactly one row per assembly.
-async function seedLeaderAssemblies() {
-  try {
-    const districts = await query("SELECT id, name FROM locations WHERE type = 'district'");
-    const districtByNorm = new Map();
-    for (const d of districts) districtByNorm.set(normDistrict(d.name), d.id);
-
-    const existing = await query("SELECT id, name FROM la_assemblies");
-    const existingByNorm = new Map();
-    for (const r of existing) existingByNorm.set(normDistrict(r.name), r);
-
-    for (const a of CG_ASSEMBLIES) {
-      let districtId = null;
-      for (const al of a.aliases) {
-        const id = districtByNorm.get(normDistrict(al));
-        if (id) { districtId = id; break; }
-      }
-      let row = null;
-      for (const al of [a.name, ...a.aliases]) {
-        const r = existingByNorm.get(normDistrict(al));
-        if (r) { row = r; break; }
-      }
-      if (row) {
-        // Back-fill reference fields only; never clobber an admin-edited name.
-        await query(
-          `UPDATE la_assemblies
-              SET required_workers = COALESCE(required_workers, ?),
-                  district_id = COALESCE(district_id, ?)
-            WHERE id = ?`,
-          [a.requiredWorkers, districtId, row.id]
-        );
-      } else {
-        const res = await query(
-          `INSERT INTO la_assemblies (name, district, required_workers, district_id)
-           VALUES (?, ?, ?, ?)`,
-          [a.name, a.name, a.requiredWorkers, districtId]
-        );
-        existingByNorm.set(normDistrict(a.name), { id: res.insertId, name: a.name });
-      }
-    }
-  } catch (e) {
-    console.error("[LA] seedLeaderAssemblies:", e?.message || e);
   }
 }
 

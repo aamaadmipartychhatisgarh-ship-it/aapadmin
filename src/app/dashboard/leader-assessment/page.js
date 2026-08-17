@@ -255,14 +255,27 @@ function Overview({ onOpen }) {
   const [data, setData] = useState(null);
   const [assemblies, setAssemblies] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    Promise.all([
-      api("/api/leader-assessment/overview").then(setData).catch(() => {}),
-      api("/api/leader-assessment/assemblies").then((d) => setAssemblies(d.assemblies || [])).catch(() => {}),
-    ]).finally(() => setLoading(false));
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      // Both come straight from Master Data on the backend. On failure we surface
+      // an error rather than showing stale/fake/cached assembly data.
+      const [ov, asm] = await Promise.all([
+        api("/api/leader-assessment/overview"),
+        api("/api/leader-assessment/assemblies"),
+      ]);
+      setData(ov);
+      setAssemblies(asm.assemblies || []);
+    } catch (e) {
+      setError(e.message || "Failed to load the overview.");
+      setData(null); setAssemblies([]);
+    } finally { setLoading(false); }
   }, []);
+  useEffect(() => { load(); }, [load]);
   const s = data?.stats;
   if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock msg={error} onRetry={load} />;
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

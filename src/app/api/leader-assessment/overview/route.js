@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, assessmentTotal } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, assessmentTotal, syncAssemblies } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -11,15 +11,15 @@ export async function GET() {
   const { error } = await guard();
   if (error) return error;
   try {
-    // Total Assembly = exactly the set of assemblies the module lists, which is
-    // mirrored from the Master Data (locations type='assembly'): the count of
-    // master-linked la_assemblies rows when the master is populated, else the
-    // legacy rows. Matching the list's own rule guarantees the card and the list
-    // never disagree, and it tracks Master Data automatically.
-    const linkedCnt = await query("SELECT COUNT(*) AS n FROM la_assemblies WHERE location_id IS NOT NULL");
-    const a = Number(linkedCnt[0]?.n || 0) > 0
-      ? { total: Number(linkedCnt[0].n) }
-      : (await query("SELECT COUNT(*) AS total FROM la_assemblies"))[0] || { total: 0 };
+    // Refresh the mirror so a just-added/edited/removed master assembly is
+    // reflected on this request (survives browser refresh, no stale cache).
+    await syncAssemblies();
+    // Total Assembly = the live count of authoritative Master Data assemblies
+    // (locations type='assembly'). Computed dynamically from the master table —
+    // never hardcoded — so it always equals the real number (90 today, whatever
+    // it becomes tomorrow) and tracks Master Data automatically.
+    const totRows = await query("SELECT COUNT(*) AS n FROM locations WHERE type = 'assembly'");
+    const a = { total: Number(totRows[0]?.n || 0) };
     const [[wm]] = await query("SELECT COUNT(*) AS n FROM la_mla_profiles WHERE name IS NOT NULL AND name <> ''").then((r) => [r]);
     const [[wc]] = await query("SELECT COUNT(DISTINCT assembly_id) AS n FROM la_aap_candidates").then((r) => [r]);
     const [[tc]] = await query("SELECT COUNT(*) AS n FROM la_aap_candidates").then((r) => [r]);
