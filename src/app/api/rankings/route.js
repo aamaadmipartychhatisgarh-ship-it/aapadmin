@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, scopeFilterSync, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { contactsByDistrict } from "@/lib/workerCounts";
+import { requiredWorkersFor } from "@/lib/chhattisgarhAssemblies";
 
 export async function GET() {
   try {
@@ -70,11 +71,12 @@ export async function GET() {
       districtFilter = "AND ld.id = (SELECT parent_id FROM locations WHERE id = ?)";
       dParams.push(u.scope_assembly_id);
     }
-    // Area Ranking: districts ranked by their ACTUAL worker count, sourced from
-    // Contacts via the SAME shared helper the Strength page uses — so the two
-    // can never disagree for a district. District names come straight from the
-    // master `locations` rows (exact). Districts with zero workers aren't
-    // rankable and are omitted; every district that has workers is shown.
+    // Area Ranking: districts ranked by STRENGTH % = actual workers / required
+    // workers x 100. Actual workers come from Contacts (the same shared helper
+    // the Strength page uses); required is the fixed per-district target (same
+    // source). The raw worker count is intentionally NOT surfaced here — only
+    // the percentage. Guards: required=0 -> 0% (never NaN/Infinity), clamped to
+    // 0..100. District names come from the master `locations` rows (exact).
     const [districtRows, contactCounts] = await Promise.all([
       query(
         `SELECT ld.id, ld.name AS district_name
@@ -85,16 +87,16 @@ export async function GET() {
       contactsByDistrict(),
     ]);
     const areaRankings = districtRows
-      .map((d) => ({ id: d.id, district_name: d.district_name, workers: contactCounts.get(d.id) || 0 }))
-      .filter((d) => d.workers > 0)
-      .sort((a, b) => b.workers - a.workers || a.district_name.localeCompare(b.district_name));
-
-    // Total Workers = the ACTUAL worker count from the same Contacts source the
-    // Strength page and Area Ranking use, summed over the districts this viewer
-    // can see (role-scoped by districtFilter above). It is computed live, so it
-    // updates automatically as contacts change and always matches the per-
-    // district numbers on this page — no stale or hardcoded value.
-    const totalWorkers = districtRows.reduce((sum, d) => sum + (contactCounts.get(d.id) || 0), 0);
+      .map((d) => {
+        const workers = contactCounts.get(d.id) || 0;
+        const required = requiredWorkersFor(d.district_name);
+        const strength_pct = required > 0 ? Math.min(100, Math.max(0, Math.round((workers / required) * 100))) : 0;
+        return { id: d.id, district_name: d.district_name, strength_pct, _workers: workers };
+      })
+      // Only rank districts that actually have workers; sort by the percentage.
+      .filter((d) => d._workers > 0)
+      .sort((a, b) => b.strength_pct - a.strength_pct || a.district_name.localeCompare(b.district_name))
+      .map(({ id, district_name, strength_pct }) => ({ id, district_name, strength_pct }));
 
     const badges = await query(
       `SELECT b.name, b.color, b.icon, COUNT(wb.id) AS awarded
@@ -102,7 +104,7 @@ export async function GET() {
         GROUP BY b.id, b.name, b.color, b.icon`
     );
 
-    return NextResponse.json({ topWorkers, areaRankings, badges, totalWorkers });
+    return NextResponse.json({ topWorkers, areaRankings, badges });
   } catch (err) {
     console.error("rankings error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

@@ -50,24 +50,31 @@ export default function RankingsView() {
       {/* Area rankings + badges */}
       <div className="space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2">
-              <MapPin size={18} className="text-[#164FA3]" />
-              <h2 className="font-bold text-gray-900">Area Rankings</h2>
-            </span>
-            <span className="text-xs text-gray-500">Total Workers: <strong className="text-gray-800 tabular-nums">{Number(data.totalWorkers ?? data.areaRankings.reduce((s, a) => s + Number(a.workers || 0), 0)).toLocaleString("en-IN")}</strong></span>
+          <div className="p-5 border-b border-gray-100 flex items-center gap-2">
+            <MapPin size={18} className="text-[#164FA3]" />
+            <h2 className="font-bold text-gray-900">Area Rankings</h2>
           </div>
-          <ul className="divide-y divide-gray-100">
-            {data.areaRankings.map((a, i) => (
-              <li key={a.id} className="flex items-center justify-between px-5 py-2.5 text-sm">
-                <span className="flex items-center gap-2">
-                  <span className={`font-bold w-5 ${i < 3 ? MEDAL[i] : "text-gray-400"}`}>{i + 1}</span>
-                  <span className="font-medium text-gray-800">{a.district_name}</span>
-                </span>
-                <span className="text-gray-500 text-xs"><strong className="text-gray-700">{Number(a.workers).toLocaleString("en-IN")}</strong> workers</span>
-              </li>
-            ))}
-          </ul>
+          {data.areaRankings.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-gray-400">No area data yet.</div>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {data.areaRankings.map((a, i) => {
+                const pct = Number(a.strength_pct) || 0;
+                return (
+                  <li key={a.id} className="flex items-center justify-between px-5 py-2.5 text-sm">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className={`font-bold w-5 ${i < 3 ? MEDAL[i] : "text-gray-400"}`}>{i + 1}</span>
+                      <span className="font-medium text-gray-800 truncate">{a.district_name}</span>
+                    </span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden hidden sm:block"><span className="block h-full bg-[#164FA3] rounded-full" style={{ width: `${pct}%` }} /></span>
+                      <strong className="text-gray-700 tabular-nums w-10 text-right">{pct}%</strong>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">

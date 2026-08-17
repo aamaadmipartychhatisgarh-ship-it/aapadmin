@@ -4,67 +4,11 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { contactsByDistrict } from "@/lib/workerCounts";
+import { requiredWorkersFor } from "@/lib/chhattisgarhAssemblies";
 
-// Fixed Required-Workers targets for the 33 Chhattisgarh districts. These are
-// planning targets (NOT actual counts) and never change here. Each entry lists
-// the accepted spellings/aliases so the value binds to the district regardless
-// of how the master `locations` row is named (e.g. "Kanker" vs the official
-// "Uttar Bastar Kanker", "Dantewada" vs "Dakshin Bastar Dantewada", the MCB
-// district's long form, and the Chowki/Chouki spelling variant).
-const REQUIRED_WORKERS_TARGETS = [
-  [6000,  ["Balod"]],
-  [6000,  ["Baloda Bazar", "Balodabazar-Bhatapara", "Baloda Bazar-Bhatapara"]],
-  [4000,  ["Balrampur", "Balrampur-Ramanujganj"]],
-  [6000,  ["Bastar"]],
-  [6000,  ["Bemetara"]],
-  [2000,  ["Bijapur"]],
-  [12000, ["Bilaspur"]],
-  [2000,  ["Dantewada", "Dakshin Bastar Dantewada"]],
-  [6000,  ["Dhamtari"]],
-  [12000, ["Durg"]],
-  [4000,  ["Gariyaband", "Gariaband"]],
-  [2000,  ["Gaurela-Pendra-Marwahi", "Gaurella-Pendra-Marwahi"]],
-  [6000,  ["Janjgir-Champa", "Janjgir Champa"]],
-  [6000,  ["Jashpur"]],
-  [4000,  ["Kabirdham", "Kabeerdham", "Kawardha"]],
-  [6000,  ["Kanker", "Uttar Bastar Kanker"]],
-  [2000,  ["Khairagarh-Chhuikhadan-Gandai", "Khairagarh Chhuikhadan Gandai"]],
-  [4000,  ["Kondagaon"]],
-  [8000,  ["Korba"]],
-  [4000,  ["Koriya", "Korea", "Koria"]],
-  [2000,  ["Manendragarh-Chirmiri-Bharatpur", "MCB", "Manendragarh-Chirmiri-Bharatpur(M C B)", "Manendragarh Chirmiri Bharatpur"]],
-  [8000,  ["Mahasamund"]],
-  [2000,  ["Mohla-Manpur-Ambagarh Chowki", "Mohla-Manpur-Ambagarh Chouki", "Mohla Manpur Ambagarh Chowki"]],
-  [4000,  ["Mungeli"]],
-  [2000,  ["Narayanpur"]],
-  [8000,  ["Raigarh"]],
-  [14000, ["Raipur"]],
-  [8000,  ["Rajnandgaon"]],
-  [6000,  ["Sakti"]],
-  [4000,  ["Sarangarh-Bilaigarh", "Sarangarh Bilaigarh"]],
-  [2000,  ["Sukma"]],
-  [6000,  ["Surajpur"]],
-  [6000,  ["Surguja"]],
-];
-
-// Canonicalize a district name for matching: lowercase, drop any parenthetical
-// suffix (e.g. "(M C B)"), then strip everything that isn't a letter/digit so
-// spaces, hyphens and punctuation differences never split one district in two.
-// Reused for both the Required-Workers alias table and any future name joins.
-export function normDistrict(s) {
-  return String(s || "")
-    .toLowerCase()
-    .replace(/\(.*?\)/g, " ")
-    .replace(/[^a-z0-9]/g, "");
-}
-
-const REQUIRED_BY_NORM = {};
-for (const [value, names] of REQUIRED_WORKERS_TARGETS) {
-  for (const n of names) REQUIRED_BY_NORM[normDistrict(n)] = value;
-}
-function requiredWorkersFor(dbName) {
-  return REQUIRED_BY_NORM[normDistrict(dbName)] ?? 0;
-}
+// Required-Workers targets (fixed per-district planning values) and the
+// name-normalizing lookup now live in @/lib/chhattisgarhAssemblies so the
+// Strength page and Area Ranking compute the SAME percentage from one source.
 
 // The Workers column now reflects the actual people data in Contacts: for each
 // district it is the live count of contacts keyed by that district_id, using

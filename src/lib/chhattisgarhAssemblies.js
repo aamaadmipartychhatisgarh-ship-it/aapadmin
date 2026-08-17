@@ -59,3 +59,16 @@ export const CG_ASSEMBLIES = [
 
 // Total of the fixed targets (used for validation / the Overview card).
 export const CG_TOTAL_REQUIRED_WORKERS = CG_ASSEMBLIES.reduce((s, a) => s + a.requiredWorkers, 0);
+
+// Fixed Required-Workers target for a district, resolved by normalized name (or
+// any alias) so it binds regardless of the master spelling. Single source of
+// truth shared by the Strength page and Area Ranking (their percentages must
+// agree). Returns 0 when the name doesn't match a Chhattisgarh district.
+const REQUIRED_BY_NORM = {};
+for (const a of CG_ASSEMBLIES) {
+  REQUIRED_BY_NORM[normDistrict(a.name)] = a.requiredWorkers;
+  for (const al of a.aliases) REQUIRED_BY_NORM[normDistrict(al)] = a.requiredWorkers;
+}
+export function requiredWorkersFor(name) {
+  return REQUIRED_BY_NORM[normDistrict(name)] ?? 0;
+}
