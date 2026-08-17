@@ -27,15 +27,35 @@ const PRINT_PAYLOAD_KEY = "reports_print_payload";
 const emptyGeo = () => ({ zone_id: [], lok_sabha_id: [], district_id: [], assembly_id: [], ward_id: [], booth_id: [] });
 
 // Fetch a level's location options, narrowed to children of `parentIds` when
+// Parse a fetch Response as JSON only when it actually succeeded AND is JSON.
+// A 504/500 gateway page is HTML, and blindly calling r.json() on it throws
+// "Unexpected character at line 1 column 1" — masking the real status. This
+// surfaces the HTTP error (with the server's message when the body is JSON)
+// instead, so callers can show a real error + Retry rather than a parse crash.
+async function jsonOrThrow(r) {
+  const ct = r.headers.get("content-type") || "";
+  const isJson = ct.includes("application/json");
+  const data = isJson ? await r.json().catch(() => null) : null;
+  if (!r.ok) {
+    const msg = data?.message
+      || (r.status === 504 || r.status === 502 ? "The server took too long to respond. Please retry."
+        : r.status === 401 ? "Your session has expired. Please sign in again."
+        : r.status === 403 ? "You do not have access to this report."
+        : `Request failed (${r.status}).`);
+    throw new Error(msg);
+  }
+  return data ?? {};
+}
+
 // any are selected — otherwise the full list. Multi-select-aware version of
 // the single-parent cascades used elsewhere (Contacts).
 async function fetchLocations(type, parentIds) {
   if (!parentIds || parentIds.length === 0) {
-    const d = await fetch(`/api/locations?type=${type}`).then((r) => r.json()).catch(() => ({}));
+    const d = await fetch(`/api/locations?type=${type}`).then(jsonOrThrow).catch(() => ({}));
     return d.locations || [];
   }
   const lists = await Promise.all(
-    parentIds.map((id) => fetch(`/api/locations?parent_id=${id}`).then((r) => r.json()).then((d) => d.locations || []).catch(() => []))
+    parentIds.map((id) => fetch(`/api/locations?parent_id=${id}`).then(jsonOrThrow).then((d) => d.locations || []).catch(() => []))
   );
   const merged = new Map();
   for (const list of lists) for (const loc of list) if (loc.type === type) merged.set(loc.id, loc);
@@ -73,6 +93,8 @@ function ReportsCenter() {
 
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [booting, setBooting] = useState(true);   // initial /api/reports load
+  const [bootErr, setBootErr] = useState("");      // initial-load failure (retryable)
   const [exporting, setExporting] = useState("");
   const [err, setErr] = useState("");
   const [saved, setSaved] = useState([]);
@@ -84,18 +106,22 @@ function ReportsCenter() {
   const [filtersExpanded, setFiltersExpanded] = useState(true);
   const autoCollapsedRef = useRef(false);
 
-  // ---- bootstrap ---------------------------------------------------------
-  useEffect(() => {
-    fetch("/api/reports").then((r) => r.json()).then((d) => {
+  // ---- bootstrap (retryable) --------------------------------------------
+  const loadBoot = useCallback(() => {
+    setBooting(true); setBootErr("");
+    fetch("/api/reports").then(jsonOrThrow).then((d) => {
       setBoot(d);
       // Deep-link support: /dashboard/reports?module=tasks opens straight to
       // that module (used by the Dashboard's Reports Summary tiles).
       const requested = new URLSearchParams(window.location.search).get("module");
       const initial = (requested && d.modules?.some((m) => m.key === requested)) ? requested : d.modules?.[0]?.key;
       if (initial) setModuleKey(initial);
-    }).catch(() => setErr("Failed to load reports"));
-    fetchLocations("zone", []).then(setZones);
+    }).catch((e) => setBootErr(e.message || "Failed to load reports"))
+      .finally(() => setBooting(false));
+    // Zones load independently — a location hiccup must not block the report UI.
+    fetchLocations("zone", []).then(setZones).catch(() => {});
   }, []);
+  useEffect(() => { loadBoot(); }, [loadBoot]);
 
   // ---- module meta (resets filters) --------------------------------------
   useEffect(() => {
@@ -104,8 +130,8 @@ function ReportsCenter() {
     setFilters({}); setGeo(emptyGeo()); setSearch("");
     setGroupBy(""); setSort(null); setPage(1); setView("table");
     setFiltersExpanded(true); autoCollapsedRef.current = false;
-    fetch(`/api/reports?module=${moduleKey}`).then((r) => r.json()).then((d) => setMeta(d.meta)).catch(() => setErr("Failed to load module"));
-    fetch(`/api/reports/saved-filters?module=${moduleKey}`).then((r) => r.json()).then((d) => setSaved(d.saved || [])).catch(() => setSaved([]));
+    fetch(`/api/reports?module=${moduleKey}`).then(jsonOrThrow).then((d) => setMeta(d.meta)).catch((e) => setErr(e.message || "Failed to load module"));
+    fetch(`/api/reports/saved-filters?module=${moduleKey}`).then(jsonOrThrow).then((d) => setSaved(d.saved || [])).catch(() => setSaved([]));
   }, [moduleKey]);
 
   // ---- geo cascade (multi-select: narrows to children of selected parents,
@@ -172,7 +198,7 @@ function ReportsCenter() {
     if ((view === "summary" || view === "chart") && !groupBy) { setResult(null); return; }
     setLoading(true); setErr("");
     fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      .then(async (r) => { if (!r.ok) throw new Error((await r.json()).message || "Failed"); return r.json(); })
+      .then(jsonOrThrow)
       .then((r) => {
         setResult(r);
         // Auto-hide the filter panel the first time this module's results
@@ -266,6 +292,31 @@ function ReportsCenter() {
   const totalPages = result?.mode === "detail" ? Math.max(1, Math.ceil(result.total / pageSize)) : 1;
 
   const asItems = (options) => (options || []).map((o) => ({ id: o.value, name: o.label }));
+
+  // Initial load: show a skeleton while /api/reports is in flight, and a
+  // friendly error + Retry if it fails — never a blank screen or a premature
+  // "Failed" before the request has actually finished.
+  if (booting) {
+    return (
+      <div className="space-y-5 animate-in fade-in duration-500">
+        <PageHeader icon={FileText} title="Reports Center" description="Loading reports…" breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Analytics" }, { label: "Reports" }]} />
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 flex items-center justify-center text-gray-400">
+          <Loader2 className="animate-spin mr-2" size={18} /> Loading reports…
+        </div>
+      </div>
+    );
+  }
+  if (bootErr) {
+    return (
+      <div className="space-y-5 animate-in fade-in duration-500">
+        <PageHeader icon={FileText} title="Reports Center" description="One engine for every module — filter, group, chart and export." breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Analytics" }, { label: "Reports" }]} />
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-8 text-center">
+          <div className="text-red-700 font-semibold">{bootErr}</div>
+          <button onClick={loadBoot} className="mt-3 inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold">Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500">
@@ -427,7 +478,12 @@ function ReportsCenter() {
 
       {/* Results */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden min-h-[200px]">
-        {err && <div className="p-6 text-sm text-red-600">{err}</div>}
+        {err && !loading && (
+          <div className="p-6 flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-sm text-red-600">{err}</span>
+            <button onClick={run} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">Retry</button>
+          </div>
+        )}
         {loading && <div className="p-10 flex items-center justify-center text-gray-400"><Loader2 className="animate-spin mr-2" size={18} /> Loading…</div>}
 
         {!loading && (view === "summary" || view === "chart") && !groupBy && (

@@ -95,9 +95,16 @@ function buildWhere(module, session, body) {
   }
 
   // 2. Time range on the module's date field (IST calendar days).
+  // SARGABLE form: keep the date column BARE so its index is used, and convert
+  // the IST day bounds to the equivalent UTC datetime range — i.e.
+  //   [from 00:00 IST, (to+1) 00:00 IST)  →  compared against the raw column.
+  // The previous DATE(CONVERT_TZ(col,…)) wrapper made the column non-indexable
+  // and forced a full table scan of calls/contacts on every request (the 504s).
+  // CONVERT_TZ(const,…) is a constant expression, evaluated once.
   const range = resolveRange(body.time, body.date_from, body.date_to);
   if (range) {
-    where += ` AND DATE(CONVERT_TZ(${module.dateField},'+00:00','+05:30')) BETWEEN ? AND ?`;
+    where += ` AND ${module.dateField} >= CONVERT_TZ(CONCAT(?,' 00:00:00'),'+05:30','+00:00')`
+           + ` AND ${module.dateField} <  CONVERT_TZ(CONCAT(?,' 00:00:00'),'+05:30','+00:00') + INTERVAL 1 DAY`;
     params.push(range.from, range.to);
   }
 
