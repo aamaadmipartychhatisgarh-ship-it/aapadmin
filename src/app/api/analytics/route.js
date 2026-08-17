@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
-import { scopeFilterSync } from "@/lib/permissions";
+import { scopeFilterSync, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { contactsByDistrict } from "@/lib/workerCounts";
 
 // Powers /dashboard/analytics. Returns datasets for all charts in one round-trip.
 export async function GET(req) {
@@ -153,38 +154,45 @@ export async function GET(req) {
       if (d >= 0 && d < 7 && h >= 0 && h < 24) heatmap[d][h] = Number(r.n) || 0;
     });
 
-    // 7. Treemap: number of WORKERS assigned to each district (the actual
-    // workers.district_id count — NOT calls/contacts). Permission-scoped to the
-    // viewer's territory. Workers with no district (NULL district_id) are NOT
-    // dropped — they're bucketed under "Unassigned" (via a LEFT JOIN +
-    // COALESCE) so the sum of all blocks equals the total number of workers
-    // analyzed. Districts with zero workers are omitted (HAVING) since an empty
-    // block can't render. The date filter does not apply (workers aren't
-    // date-based). Wrapped so a missing/legacy `workers` table degrades to an
-    // empty treemap instead of failing the whole analytics response.
+    // 7. Treemap: workers per district. Built FROM the authoritative district
+    // master (locations of type 'district') so every in-scope district is
+    // considered, then the worker value comes from the SAME contacts-based count
+    // (contactsByDistrict) the Strength page, Area Ranking and Organization Map
+    // use — so all four agree and the block totals reconcile with the underlying
+    // dataset. Role-scoped with the same rules as those views. A treemap can't
+    // render a zero-area block, so districts with no workers are dropped from the
+    // drawing (their value is 0 and adds nothing to the total). The date filter
+    // doesn't apply (workforce isn't date-based).
     let treemap = [];
     try {
-      const wParams = [];
-      let wWhere = "WHERE 1=1";
-      // A single-district filter naturally excludes NULL-district workers — the
-      // viewer asked for one district, so "Unassigned" doesn't apply.
-      if (districtId) { wWhere += " AND w.district_id = ?"; wParams.push(districtId); }
-      const wScope = scopeFilterSync(session.user, "w");
-      wWhere += " " + wScope.where;
-      wParams.push(...wScope.params);
-      treemap = await query(
-        `SELECT COALESCE(ld.name, 'Unassigned') AS district,
-                lz.name AS zone, COUNT(w.id) AS count
-           FROM workers w
-           LEFT JOIN locations ld ON ld.id = w.district_id
-           LEFT JOIN locations lls ON lls.id = ld.parent_id
-           LEFT JOIN locations lz ON lz.id = lls.parent_id
-           ${wWhere}
-           GROUP BY ld.id, ld.name, lz.name
-           HAVING count > 0
-           ORDER BY count DESC`,
-        wParams
-      );
+      const tParams = [];
+      let tWhere = "WHERE ld.type = 'district'";
+      if (districtId) { tWhere += " AND ld.id = ?"; tParams.push(districtId); }
+      // Territory scope on the district itself (matches Strength / Area Ranking /
+      // Map): zone-admin → districts in their zone, district-admin → their
+      // district, assembly-admin → the district owning their assembly.
+      const role = normalizeRole(session.user.role);
+      const su = session.user;
+      if (role === ROLES.ZONE_ADMIN && su.scope_zone_id) { tWhere += " AND lz.id = ?"; tParams.push(su.scope_zone_id); }
+      else if (role === ROLES.DISTRICT_ADMIN && su.home_district_id) { tWhere += " AND ld.id = ?"; tParams.push(su.home_district_id); }
+      else if (role === ROLES.ASSEMBLY_ADMIN && su.scope_assembly_id) { tWhere += " AND ld.id = (SELECT parent_id FROM locations WHERE id = ?)"; tParams.push(su.scope_assembly_id); }
+
+      const [districtRows, contactCounts] = await Promise.all([
+        query(
+          `SELECT ld.id, ld.name AS district, lz.name AS zone
+             FROM locations ld
+             LEFT JOIN locations lls ON lls.id = ld.parent_id
+             LEFT JOIN locations lz  ON lz.id  = lls.parent_id
+             ${tWhere}
+             ORDER BY ld.name ASC`,
+          tParams
+        ),
+        contactsByDistrict(),
+      ]);
+      treemap = districtRows
+        .map((d) => ({ district: d.district, zone: d.zone, count: contactCounts.get(d.id) || 0 }))
+        .filter((d) => d.count > 0) // a treemap block needs a non-zero area
+        .sort((a, b) => b.count - a.count);
     } catch (e) {
       console.error("analytics treemap (workers by district) failed:", e?.code || e?.message);
       treemap = [];
