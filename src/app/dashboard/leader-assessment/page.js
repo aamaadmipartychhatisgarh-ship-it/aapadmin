@@ -145,7 +145,7 @@ function Body() {
         </div>
       )}
 
-      {tab === "overview" && <Overview onOpen={openAssembly} />}
+      {tab === "overview" && <Overview onOpen={openAssembly} flash={flash} fail={fail} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
 
       {currentTab?.scoped && !selectedId && <Empty msg="Select an assembly above to begin." />}
@@ -251,7 +251,7 @@ function AssemblyHeader({ a, status }) {
 }
 
 // ------------------------------- OVERVIEW ---------------------------------
-function Overview({ onOpen }) {
+function Overview({ onOpen, flash, fail }) {
   const [data, setData] = useState(null);
   const [assemblies, setAssemblies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -284,7 +284,7 @@ function Overview({ onOpen }) {
       <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
         <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
       </Card>
-      {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={onOpen} />}
+      {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={onOpen} flash={flash} fail={fail} />}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Stat label="Total Assemblies" value={s?.total_assemblies} />
@@ -414,10 +414,98 @@ function AssemblyCombobox({ assemblies, value, onPick }) {
   );
 }
 
-// Inline assessment summary for the assembly picked in the search box. Fetches
-// the full bundle by the assembly's DB id, with proper loading / error / empty
-// states, and links out to the full assessment tabs.
-function AssemblyAssessmentPanel({ assemblyId, onOpen }) {
+// Assembly Overview panel for the assembly picked in the search box. Fetches the
+// full bundle by the assembly's DB id (loading / error / empty states) and lays
+// it out as: LEFT = Top 3 AAP candidates by Total Assessment Score (highest
+// first); RIGHT = the sitting MLA. A prominent "Full View" button opens the
+// complete assessment.
+function AssemblyAssessmentPanel({ assemblyId, onOpen, flash, fail }) {
+  const [bundle, setBundle] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [full, setFull] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try { setBundle(await api(`/api/leader-assessment/assemblies/${assemblyId}`)); }
+    catch (e) { setError(e.message || "Failed to load the assessment."); setBundle(null); }
+    finally { setLoading(false); }
+  }, [assemblyId]);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <Card title="Assembly Overview" icon={ClipboardCheck}><LoadingBlock /></Card>;
+  if (error) return <Card title="Assembly Overview" icon={ClipboardCheck}><ErrorBlock msg={error} onRetry={load} /></Card>;
+  if (!bundle?.assembly) return null;
+  const { assembly, mla, candidates = [], status } = bundle;
+  // Sorted by Total Assessment Score, highest first; take the top 3.
+  const top3 = [...candidates].sort((a, b) => b.total - a.total).slice(0, 3);
+  const hasAnything = candidates.length > 0 || (mla && mla.name);
+
+  return (
+    <>
+      <Card
+        title={`Assembly Overview · ${assembly.name}`}
+        icon={ClipboardCheck}
+        sub={[assembly.district, assembly.number ? `Seat #${assembly.number}` : null].filter(Boolean).join(" · ")}
+        right={
+          <button onClick={() => setFull(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
+            <BarChart3 size={16} /> Full View
+          </button>
+        }
+      >
+        {!hasAnything ? (
+          <Empty
+            msg="No assessment recorded for this assembly yet."
+            action={<button onClick={() => onOpen(assembly.id)} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold">Start assessing →</button>}
+          />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            {/* LEFT: Top 3 AAP candidates by score */}
+            <div className="lg:col-span-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Top 3 AAP Candidates</div>
+              {top3.length === 0 ? (
+                <div className="text-sm text-gray-400">No AAP candidates added yet.</div>
+              ) : (
+                <div className="space-y-2.5">
+                  {top3.map((c, i) => (
+                    <div key={c.id} className="flex items-center gap-3 border border-gray-100 rounded-xl p-2.5">
+                      <span className={`w-6 text-center font-bold ${i < 3 ? RANK_COLOR[i] : "text-gray-400"}`}>{i + 1}</span>
+                      <ProfilePhoto name={c.name} src={c.photo_url} size={36} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
+                      <div className="w-32 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div></div>
+                      <div className="flex-1"><ScoreBar value={c.total} max={100} showValue={false} /></div>
+                      <span className="font-bold text-[#164FA3] w-16 text-right">{c.total}/100</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* RIGHT: Sitting MLA */}
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Sitting MLA</div>
+              <div className="border border-gray-100 rounded-xl p-4 text-center">
+                <ProfilePhoto name={mla?.name || "MLA"} src={mla?.photo_url} size={72} square editable={false} className="mx-auto bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
+                <div className="font-bold text-gray-900 mt-2 truncate">{mla?.name || <span className="text-gray-300">No MLA on record</span>}</div>
+                <div className="text-xs text-gray-500 mt-0.5 truncate">{[assembly.name, assembly.district].filter(Boolean).join(" · ")}</div>
+                <div className="grid grid-cols-1 gap-1.5 mt-3 text-left">
+                  <div className="flex justify-between text-sm"><span className="text-gray-400">MLA Score</span><span className="font-semibold text-gray-400">N/A</span></div>
+                  {mla?.party && <div className="flex justify-between text-sm"><span className="text-gray-400">Party</span><span className="font-medium text-gray-700 truncate ml-2">{mla.party}</span></div>}
+                  <div className="flex justify-between text-sm"><span className="text-gray-400">Status</span><span className={`font-semibold ${status?.ready ? "text-emerald-600" : "text-gray-500"}`}>{status?.ready ? "Assessment Ready" : "Incomplete"}</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+      {full && <AssemblyFullView assemblyId={assemblyId} onClose={() => setFull(false)} flash={flash} fail={fail} />}
+    </>
+  );
+}
+
+// Full View — the COMPLETE assessment of one assembly in a single modal: the
+// gradient header, the 10-parameter per-candidate assessment + ranking +
+// MLA-vs-AAP + recommendation (ComparisonTab), and the editable Top 3 Reasons /
+// Top 5 Strengths / Top 10 Weaknesses + Assembly Social Profile (AnalysisTab).
+// Everything is fetched live by the assembly id and re-fetched after any edit.
+function AssemblyFullView({ assemblyId, onClose, flash, fail }) {
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -428,51 +516,18 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen }) {
     finally { setLoading(false); }
   }, [assemblyId]);
   useEffect(() => { load(); }, [load]);
-
-  if (loading) return <Card title="Assembly Assessment" icon={ClipboardCheck}><LoadingBlock /></Card>;
-  if (error) return <Card title="Assembly Assessment" icon={ClipboardCheck}><ErrorBlock msg={error} onRetry={load} /></Card>;
-  if (!bundle?.assembly) return null;
-  const { assembly, mla, candidates = [] } = bundle;
-  const assessed = candidates.filter((c) => c.total > 0);
-  const hasAnything = candidates.length > 0 || (mla && mla.name);
-  const topScore = assessed.length ? Math.max(...assessed.map((c) => c.total)) : null;
   return (
-    <Card
-      title={`Assessment · ${assembly.name}`}
-      icon={ClipboardCheck}
-      sub={[assembly.district, mla?.name ? `MLA: ${mla.name}` : "No MLA on record"].filter(Boolean).join(" · ")}
-      right={<button onClick={() => onOpen(assembly.id)} className="text-sm font-semibold text-[#164FA3] hover:underline">Open full assessment →</button>}
-    >
-      {!hasAnything ? (
-        <Empty
-          msg="No assessment recorded for this assembly yet."
-          action={<button onClick={() => onOpen(assembly.id)} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold">Start assessing →</button>}
-        />
-      ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Stat label="Assembly Score" value={topScore != null ? `${topScore}/100` : null} hint="Top candidate" />
-            <Stat label="AAP Candidates" value={candidates.length} />
-            <Stat label="Assessed" value={`${assessed.length}/${candidates.length || 0}`} />
-            <Stat label="Sitting MLA" value={mla?.name || null} />
-          </div>
-          {candidates.length === 0 ? (
-            <div className="text-sm text-gray-400">No AAP candidates added yet.</div>
-          ) : (
-            <div className="space-y-2.5">
-              {candidates.map((c) => (
-                <div key={c.id} className="flex items-center gap-3">
-                  <span className={`w-6 text-center font-bold ${c.rank && c.rank <= 3 && c.total > 0 ? RANK_COLOR[c.rank - 1] : "text-gray-400"}`}>{c.rank || "—"}</span>
-                  <div className="w-40 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div></div>
-                  <div className="flex-1"><ScoreBar value={c.total} max={100} showValue={false} /></div>
-                  <span className="font-bold text-[#164FA3] w-16 text-right">{c.total}/100</span>
-                </div>
-              ))}
-            </div>
-          )}
+    <Modal title="Full Assessment" onClose={onClose} size="full">
+      {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : bundle?.assembly ? (
+        <div className="space-y-5">
+          <AssemblyHeader a={bundle.assembly} status={bundle.status} />
+          {bundle.candidates?.length > 0
+            ? <ComparisonTab b={bundle} onChange={load} flash={flash} fail={fail} />
+            : <Empty msg="No AAP candidates yet — add candidates and score them to see the 10-parameter assessment." />}
+          <AnalysisTab b={bundle} onChange={load} flash={flash} fail={fail} />
         </div>
-      )}
-    </Card>
+      ) : null}
+    </Modal>
   );
 }
 
@@ -979,7 +1034,7 @@ function ComparisonTab({ b, onChange, flash, fail }) {
             <tbody className="divide-y divide-gray-100">
               {PARAMS.map((p) => { const mx = maxOf(p.key); return (
                 <tr key={p.key}>
-                  <td className="px-3 py-2 text-gray-600">{p.label}</td>
+                  <td className="px-3 py-2 text-gray-600">{p.label} <span className="text-gray-400">/10</span></td>
                   {ranked.map((c) => { const v = c.assessment?.[p.key]; const hi = v != null && Number(v) === mx && mx > 0; return <td key={c.id} className={`px-3 py-2 text-center ${hi ? "bg-emerald-50 font-bold text-emerald-700" : ""}`}>{v ?? "—"}</td>; })}
                 </tr>
               ); })}
@@ -1189,10 +1244,11 @@ function AnalysisTab({ b, onChange, flash, fail }) {
 }
 
 // ------------------------------- helpers ----------------------------------
-function Modal({ title, onClose, children, wide }) {
+function Modal({ title, onClose, children, wide, size }) {
+  const width = size === "full" ? "max-w-5xl" : wide ? "max-w-2xl" : "max-w-lg";
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`bg-white rounded-2xl shadow-xl w-full ${wide ? "max-w-2xl" : "max-w-lg"} p-6 max-h-[90vh] overflow-auto`}>
+      <div className={`bg-white rounded-2xl shadow-xl w-full ${width} p-6 max-h-[90vh] overflow-auto`}>
         <div className="flex items-center justify-between mb-4"><h2 className="text-xl font-bold text-gray-900">{title}</h2><button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button></div>
         {children}
       </div>
