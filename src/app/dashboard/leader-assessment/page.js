@@ -32,7 +32,7 @@ const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, scoped: false },
   { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: true },
   { key: "elections", label: "Election History", icon: History, scoped: true },
-  { key: "candidates", label: "AAP Candidates", icon: Users, scoped: true },
+  { key: "candidates", label: "AAP Candidates", icon: Users, scoped: false },
   { key: "analysis", label: "Political Analysis", icon: Brain, scoped: true },
 ];
 
@@ -145,6 +145,7 @@ function Body() {
       )}
 
       {tab === "overview" && <Overview onOpen={openAssembly} />}
+      {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
 
       {currentTab?.scoped && !selectedId && <Empty msg="Select an assembly above to begin." />}
       {currentTab?.scoped && selectedId && loadingBundle && !bundle && <LoadingBlock />}
@@ -154,7 +155,6 @@ function Body() {
           <AssemblyHeader a={bundle.assembly} status={bundle.status} />
           {tab === "mla" && <MlaTab b={bundle} onSaved={() => { flash("MLA profile saved."); loadBundle(selectedId); }} fail={fail} />}
           {tab === "elections" && <ElectionsTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
-          {tab === "candidates" && <CandidatesTab b={bundle} onChange={() => { loadBundle(selectedId); loadAssemblies(); }} flash={flash} fail={fail} />}
           {tab === "analysis" && <AnalysisTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
         </>
       )}
@@ -517,72 +517,130 @@ function ElectionModal({ assemblyId, assembly, mla, candidates, initial, onClose
 }
 
 // ----------------------------- CANDIDATES ---------------------------------
-const EMPTY_CAND = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", net_worth: "", business: "", monthly_income: "", education: "", political_experience: "", organization_experience: "", previous_elections: "", current_position: "" };
-function CandidatesTab({ b, onChange, flash, fail }) {
-  const [editing, setEditing] = useState(null);
+// Standalone, Master-Data-driven Candidates workspace: a "+ Create Candidate"
+// action on top and the COMPLETE candidate list (every assembly) below — no
+// pre-selection needed. The assembly a candidate belongs to is chosen in the
+// form from the same master-linked assembly list used across the module, and the
+// list refreshes from the database immediately after every create/edit/remove.
+const EMPTY_CAND = { assembly_id: "", photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", net_worth: "", business: "", monthly_income: "", education: "", political_experience: "", organization_experience: "", previous_elections: "", current_position: "" };
+function CandidatesTab({ flash, fail }) {
+  const [assemblies, setAssemblies] = useState([]);
+  const [candidates, setCandidates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [filterAsm, setFilterAsm] = useState("");   // "" = all assemblies
+  const [editing, setEditing] = useState(null);      // null | "new" | candidate
   const [assessing, setAssessing] = useState(null);
-  // Keep the open assessment modal bound to the freshest candidate record so the
-  // total/scores stay in sync after a save re-fetches the bundle.
-  const assessingLive = assessing ? (b.candidates.find((c) => c.id === assessing.id) || assessing) : null;
+  const [bundle, setBundle] = useState(null);        // per-assembly comparison (when a single assembly is selected)
+
+  const loadAssemblies = useCallback(async () => {
+    try { const d = await api("/api/leader-assessment/assemblies"); setAssemblies(d.assemblies || []); } catch { /* surfaced by the candidate load */ }
+  }, []);
+  const loadCandidates = useCallback(async (asmId) => {
+    setLoading(true); setError("");
+    try {
+      const d = await api(`/api/leader-assessment/candidates${asmId ? `?assembly_id=${asmId}` : ""}`);
+      setCandidates(d.candidates || []);
+    } catch (e) { setError(e.message); setCandidates([]); }
+    finally { setLoading(false); }
+  }, []);
+  const loadBundle = useCallback(async (asmId) => {
+    if (!asmId) { setBundle(null); return; }
+    try { setBundle(await api(`/api/leader-assessment/assemblies/${asmId}`)); } catch { setBundle(null); }
+  }, []);
+
+  useEffect(() => { loadAssemblies(); }, [loadAssemblies]);
+  useEffect(() => { loadCandidates(filterAsm); loadBundle(filterAsm); }, [filterAsm, loadCandidates, loadBundle]);
+  const refresh = useCallback(() => { loadCandidates(filterAsm); loadBundle(filterAsm); }, [filterAsm, loadCandidates, loadBundle]);
+
+  // Keep an open assessment modal bound to the freshest record after a refresh.
+  const assessingLive = assessing ? (candidates.find((c) => c.id === assessing.id) || assessing) : null;
+
   async function del(c) {
     if (!confirm(`Remove candidate "${c.name}"?`)) return;
-    try { await api(`/api/leader-assessment/candidates/${c.id}`, { method: "DELETE" }); flash("Candidate removed."); onChange(); } catch (e) { fail(e.message); }
+    try { await api(`/api/leader-assessment/candidates/${c.id}`, { method: "DELETE" }); flash("Candidate removed."); refresh(); }
+    catch (e) { fail(e.message); }
   }
-  const slots = [0, 1, 2];
+
   return (
-    <div className="space-y-4">
-      <Card title="AAP Candidates" icon={Users} sub="Up to 3 candidates per assembly. Use each candidate's Assessment button; the comparison below updates live.">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {slots.map((i) => {
-          const c = b.candidates[i];
-          if (!c) return (
-            <button key={i} onClick={() => setEditing("new")} disabled={b.candidates.length >= 3} className="border-2 border-dashed border-gray-200 rounded-2xl p-8 flex flex-col items-center justify-center text-gray-400 hover:border-[#164FA3] hover:text-[#164FA3] disabled:opacity-40 disabled:cursor-not-allowed">
-              <Plus size={22} /><span className="text-sm font-semibold mt-1">Add Candidate</span><span className="text-[11px]">Slot {i + 1}</span>
-            </button>
-          );
-          return (
-            <div key={c.id} className="border border-gray-100 rounded-2xl p-4 relative">
-              {c.rank && c.total > 0 && <span className={`absolute top-3 right-3 text-[11px] font-bold px-2 py-0.5 rounded-full ${c.rank === 1 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"}`}>Rank {c.rank}{c.tied ? " (tie)" : ""}</span>}
-              <div className="flex items-center gap-3">
-                <ProfilePhoto name={c.name} src={c.photo_url} size={56} editable={false} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
-                <div className="min-w-0">
-                  <div className="font-bold text-gray-900 truncate">{c.name}</div>
-                  <div className="text-xs text-gray-500">{c.age != null ? `${c.age} yrs` : "Age N/A"}{c.caste ? ` · ${c.caste}` : ""}</div>
-                  <div className="text-[11px] text-gray-400 truncate flex items-center gap-1"><MapPin size={10} /> {b.assembly.district || b.assembly.name}</div>
-                </div>
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <ScoreBar value={c.total} max={100} showValue={false} />
-                <span className="text-sm font-bold text-[#164FA3]">{c.total}/100</span>
-                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full shrink-0 ${c.total > 0 ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.total > 0 ? "Assessed" : "Pending"}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-3 text-xs">
-                <Kv icon={Phone} k="Phone" v={c.phone} /><Kv icon={Wallet} k="Net Worth" v={c.net_worth} />
-                <Kv k="Business" v={c.business} /><Kv k="Income" v={c.monthly_income} />
-                {c.education && <Kv k="Education" v={c.education} />}
-                {c.current_position && <Kv k="Position" v={c.current_position} />}
-              </div>
-              <div className="flex justify-between items-center gap-1 mt-3 pt-3 border-t border-gray-100">
-                <button onClick={() => setAssessing(c)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Assessment</button>
-                <div className="flex gap-1">
-                  <button onClick={() => setEditing(c)} className="text-xs font-semibold text-gray-500 hover:text-[#164FA3] px-2 py-1 rounded-lg inline-flex items-center gap-1"><Pencil size={13} /> Edit</button>
-                  <button onClick={() => del(c)} className="text-xs font-semibold text-gray-400 hover:text-red-600 px-2 py-1 rounded-lg inline-flex items-center gap-1"><Trash2 size={13} /> Remove</button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div className="space-y-5">
+      <Card
+        title="AAP Candidates"
+        icon={Users}
+        sub="Every AAP candidate across all assemblies. Create a candidate, then score them with the Assessment action."
+        right={
+          <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
+            <Plus size={16} /> Create Candidate
+          </button>
+        }
+      >
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-sm font-semibold text-gray-600 flex items-center gap-1.5"><MapPin size={15} className="text-[#164FA3]" /> Assembly</span>
+          <select value={filterAsm} onChange={(e) => setFilterAsm(e.target.value)} className={`${inp} max-w-xs`}>
+            <option value="">All assemblies</option>
+            {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}{a.district ? ` · ${a.district}` : ""}</option>)}
+          </select>
+        </div>
+
+        {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={refresh} /> : candidates.length === 0 ? (
+          <Empty msg={filterAsm ? "No candidates for this assembly yet." : "No candidates yet."} action={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Create Candidate</button>} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Candidate", "Assembly", "District", "Type / Category", "Status", "Assessment Score", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {candidates.map((c) => (
+                  <tr key={c.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <ProfilePhoto name={c.name} src={c.photo_url} size={34} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
+                        <div className="min-w-0"><div className="font-semibold text-gray-900 truncate">{c.name}</div>{c.phone && <div className="text-[11px] text-gray-400 truncate">{c.phone}</div>}</div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{c.assembly_name || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{c.district || "—"}</td>
+                    <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3] whitespace-nowrap">{c.current_position || "AAP Candidate"}</span></td>
+                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Assessed" : "Pending"}</span></td>
+                    <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={c.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{c.total}/100</span></div></td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                      <button onClick={() => setAssessing(c)} className="text-[#164FA3] hover:bg-[#164FA3]/10 p-1 rounded-lg" title="Assessment"><ClipboardCheck size={15} /></button>
+                      <button onClick={() => setEditing(c)} className="text-gray-500 hover:text-[#164FA3] p-1" title="Edit"><Pencil size={14} /></button>
+                      <button onClick={() => del(c)} className="text-gray-400 hover:text-red-600 p-1" title="Remove"><Trash2 size={14} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
-      {b.candidates.length > 0 && <ComparisonTab b={b} onChange={onChange} flash={flash} fail={fail} />}
-      {editing && <CandidateModal assemblyId={b.assembly.id} initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("Candidate saved."); onChange(); }} fail={fail} />}
-      {assessingLive && <AssessmentModal c={assessingLive} onClose={() => setAssessing(null)} onChange={onChange} flash={flash} fail={fail} />}
+
+      {/* When a single assembly is selected, keep the rich per-assembly comparison. */}
+      {filterAsm && bundle?.candidates?.length > 0 && (
+        <ComparisonTab b={bundle} onChange={refresh} flash={flash} fail={fail} />
+      )}
+
+      {editing && (
+        <CandidateModal
+          assemblies={assemblies}
+          defaultAssemblyId={filterAsm || ""}
+          initial={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); flash("Candidate saved."); refresh(); }}
+          fail={fail}
+        />
+      )}
+      {assessingLive && <AssessmentModal c={assessingLive} onClose={() => setAssessing(null)} onChange={refresh} flash={flash} fail={fail} />}
     </div>
   );
 }
-function Kv({ icon: Icon, k, v }) { return <div className="flex items-center gap-1 min-w-0"><span className="text-gray-400 shrink-0">{Icon && <Icon size={11} className="inline mr-0.5" />}{k}:</span> <span className="text-gray-700 font-medium truncate">{v || "—"}</span></div>; }
-function CandidateModal({ assemblyId, initial, onClose, onSaved, fail }) {
-  const [form, setForm] = useState(() => ({ ...EMPTY_CAND, ...(initial || {}), date_of_birth: initial?.date_of_birth ? String(initial.date_of_birth).slice(0, 10) : "" }));
+function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSaved, fail }) {
+  const [form, setForm] = useState(() => ({
+    ...EMPTY_CAND,
+    ...(initial || {}),
+    assembly_id: initial?.assembly_id != null ? String(initial.assembly_id) : (defaultAssemblyId ? String(defaultAssemblyId) : ""),
+    date_of_birth: initial?.date_of_birth ? String(initial.date_of_birth).slice(0, 10) : "",
+  }));
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const age = ageOf(form.date_of_birth);
@@ -593,29 +651,37 @@ function CandidateModal({ assemblyId, initial, onClose, onSaved, fail }) {
     if (!up.ok) throw new Error(d.message || "Upload failed"); return d.url;
   }
   async function save() {
+    if (!String(form.assembly_id).trim()) { fail("Select the assembly this candidate belongs to."); return; }
     if (!form.name.trim()) { fail("Candidate name is required."); return; }
     setSaving(true);
     try {
-      const url = initial ? `/api/leader-assessment/candidates/${initial.id}` : `/api/leader-assessment/assemblies/${assemblyId}/candidates`;
+      const url = initial ? `/api/leader-assessment/candidates/${initial.id}` : `/api/leader-assessment/assemblies/${form.assembly_id}/candidates`;
       await api(url, { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
       onSaved();
     } catch (e) { fail(e.message); setSaving(false); }
   }
   const F = ({ k, label, type = "text", full }) => (<div className={full ? "col-span-2" : ""}><span className={lbl}>{label}</span><input type={type} className={inp} value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} /></div>);
   return (
-    <Modal title={initial ? "Edit Candidate" : "Add AAP Candidate"} onClose={onClose}>
+    <Modal title={initial ? "Edit Candidate" : "Create AAP Candidate"} onClose={onClose}>
       <div className="flex flex-col items-center gap-1.5 pb-2">
         <ProfilePhoto name={form.name} src={form.photo_url} size={88} square editable persist={persistPhoto} onChange={(url) => set("photo_url", url || "")} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
         <span className="text-[11px] text-gray-400">JPG, PNG, WEBP</span>
       </div>
       <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2">
+          <span className={lbl}>Assembly *</span>
+          <select className={inp} value={form.assembly_id ?? ""} onChange={(e) => set("assembly_id", e.target.value)}>
+            <option value="">— select assembly —</option>
+            {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}{a.district ? ` · ${a.district}` : ""}</option>)}
+          </select>
+        </div>
         <F k="name" label="Full Name *" full />
         <F k="phone" label="Phone" /><F k="date_of_birth" label="Date of Birth" type="date" />
         <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
         <F k="caste" label="Caste" />
         <F k="net_worth" label="Net Worth" /><F k="business" label="Business" />
         <F k="monthly_income" label="Monthly Income" /><F k="education" label="Education" />
-        <F k="current_position" label="Current Position" /><F k="political_experience" label="Political Experience" />
+        <F k="current_position" label="Type / Current Position" /><F k="political_experience" label="Political Experience" />
         <F k="organization_experience" label="Organization Experience" /><F k="previous_elections" label="Previous Elections" />
         <F k="address" label="Address" full />
       </div>
