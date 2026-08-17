@@ -626,7 +626,6 @@ function MlaManager({ flash, fail }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(null);          // null | "new" | mla  (profile create/edit)
-  const [assessing, setAssessing] = useState(null);      // mla (quick 10-param editor)
   const [expandedId, setExpandedId] = useState(null);    // inline-expanded MLA row
   const [editingAssessment, setEditingAssessment] = useState(null); // mla (full assessment edit)
   const [version, setVersion] = useState(0);             // bumped after an edit to refresh the inline view
@@ -648,7 +647,6 @@ function MlaManager({ flash, fail }) {
   // second profile can't be created for the same assembly (edit the existing one).
   const takenAsm = new Set(mlas.map((m) => Number(m.assembly_id)));
   // Keep an open assessment modal bound to the freshest record after a refresh.
-  const assessingLive = assessing ? (mlas.find((m) => m.id === assessing.id) || assessing) : null;
   const editingAssessmentLive = editingAssessment ? (mlas.find((m) => m.id === editingAssessment.id) || editingAssessment) : null;
 
   return (
@@ -684,7 +682,7 @@ function MlaManager({ flash, fail }) {
                         <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${m.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{m.assessment_done ? "Assessed" : "Pending"}</span></td>
                         <td className="px-3 py-2.5 text-right whitespace-nowrap">
                           <button onClick={() => setExpandedId(open ? null : m.id)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {open ? "Close" : "Open"}</button>
-                          <button onClick={() => setAssessing(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Add Assessment</button>
+                          <button onClick={() => setEditingAssessment(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Add Assessment</button>
                         </td>
                       </tr>
                       {open && (
@@ -718,7 +716,6 @@ function MlaManager({ flash, fail }) {
           fail={fail}
         />
       )}
-      {assessingLive && <MlaAssessmentModal m={assessingLive} onClose={() => setAssessing(null)} onChange={afterEdit} flash={flash} fail={fail} />}
       {editingAssessmentLive && <MlaAssessmentEditModal mla={editingAssessmentLive} onClose={() => setEditingAssessment(null)} onChange={afterEdit} flash={flash} fail={fail} />}
     </div>
   );
@@ -820,9 +817,10 @@ function ReadList({ title, items, accent, empty }) {
     </div>
   );
 }
-// Editable form for the displayed MLA assessment: the MLA 10-parameter editor
-// (auto-total, never manually set) + the assembly's Reasons / Strengths /
-// Weaknesses + Social Profile — keeping the MLA↔Assembly relationship intact.
+// The COMPLETE MLA assessment form (opened by both "Add Assessment" and the
+// inline "Edit Assessment"): the MLA 10-parameter editor (auto-total, never
+// manually set) + the assembly's Top 3 Reasons / Top 5 Strengths / Top 10
+// Weaknesses and Social Profile — keeping the MLA↔Assembly relationship intact.
 function MlaAssessmentEditModal({ mla, onClose, onChange, flash, fail }) {
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -836,7 +834,7 @@ function MlaAssessmentEditModal({ mla, onClose, onChange, flash, fail }) {
   useEffect(() => { load(); }, [load]);
   const reload = () => { load(); onChange(); };
   return (
-    <Modal title={`Edit Assessment · ${mla.name}`} onClose={onClose} size="full">
+    <Modal title={`Assessment · ${mla.name}`} onClose={onClose} size="full">
       {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : bundle ? (
         <div className="space-y-5">
           <Card title="MLA 10-Parameter Assessment" icon={ClipboardCheck} sub="Each parameter is scored 1–10; the total is calculated automatically out of 100.">
@@ -910,16 +908,6 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
         <F k="party_won_from" label="Party Won From" /><F k="party_defeated" label="Party Defeated" />
       </div>
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
-    </Modal>
-  );
-}
-// The sitting MLA's 10-parameter assessment — same editor as candidates, pointed
-// at the MLA assessment endpoint. Total is auto-computed; never entered manually.
-function MlaAssessmentModal({ m, onClose, onChange, flash, fail }) {
-  return (
-    <Modal title={`Assessment · ${m.name}`} onClose={onClose} wide>
-      <p className="text-xs text-gray-400 mb-3">Each parameter is scored 1–10. The total is calculated automatically out of 100.</p>
-      <AssessmentEditor c={m} endpoint={`/api/leader-assessment/mlas/${m.id}/assessment`} onChange={onChange} flash={flash} fail={fail} />
     </Modal>
   );
 }
@@ -1513,7 +1501,25 @@ function AnalysisTab({ b, onChange, flash, fail }) {
     try { await api(`/api/leader-assessment/assemblies/${b.assembly.id}/analysis`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reasons_won: reasons, weaknesses, strengths }) }); flash("Political analysis saved."); onChange(); }
     catch (e) { fail(e.message); } finally { setSaving(false); }
   }
+  // Percentage is validated to a number in [0, 100] (numeric only). Out-of-range
+  // input is clamped to the bound; non-numeric input is ignored. We never
+  // auto-normalise the set to sum to 100 — user-entered values are kept as-is.
+  const setPct = (i, val) => {
+    if (String(val).trim() === "") return setSocial((a) => a.map((x, j) => (j === i ? { ...x, percentage: "" } : x)));
+    let n = Number(val);
+    if (!Number.isFinite(n)) return;
+    n = Math.max(0, Math.min(100, n));
+    setSocial((a) => a.map((x, j) => (j === i ? { ...x, percentage: n } : x)));
+  };
+  const combinedPct = social.reduce((s, r) => s + (Number(r.percentage) || 0), 0);
   async function saveSocial() {
+    for (const r of social) {
+      const raw = String(r.percentage ?? "").trim();
+      if (raw !== "") {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0 || n > 100) { fail("Each community percentage must be a number between 0 and 100."); return; }
+      }
+    }
     try { await api(`/api/leader-assessment/assemblies/${b.assembly.id}/social`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: social }) }); flash("Social profile saved."); onChange(); }
     catch (e) { fail(e.message); }
   }
@@ -1540,7 +1546,7 @@ function AnalysisTab({ b, onChange, flash, fail }) {
           {numbered("Top 10 Weaknesses", weaknesses, setWeaknesses, "bg-red-100 text-red-600")}
         </div>
       </Card>
-      <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities — admin-entered. Percentages are not invented." right={<SaveBtn onClick={saveSocial} />}>
+      <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities (Rank · Name · %). Admin-entered; percentages are validated 0–100 and never auto-adjusted." right={<SaveBtn onClick={saveSocial} />}>
         <div className="space-y-3">
           {social.map((row, i) => {
             const pct = Number(row.percentage) || 0;
@@ -1549,13 +1555,20 @@ function AnalysisTab({ b, onChange, flash, fail }) {
                 <span className="text-xs font-bold text-gray-400 w-14 shrink-0">Rank {i + 1}</span>
                 <input className={`${inp} max-w-xs`} placeholder="Community / Caste" value={row.name} onChange={(e) => setSocial((a) => a.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
                 <div className="flex-1 hidden sm:block"><div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3] rounded-full" style={{ width: `${Math.min(100, pct)}%` }} /></div></div>
-                <div className="relative shrink-0"><input type="number" className={`${inp} w-24 pr-6`} placeholder="%" value={row.percentage} onChange={(e) => setSocial((a) => a.map((x, j) => (j === i ? { ...x, percentage: e.target.value } : x)))} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span></div>
-                <button onClick={() => setSocial((a) => a.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600 p-1.5 shrink-0"><X size={14} /></button>
+                <div className="relative shrink-0"><input type="number" min={0} max={100} step="0.1" className={`${inp} w-24 pr-6`} placeholder="%" value={row.percentage} onChange={(e) => setPct(i, e.target.value)} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span></div>
+                <button onClick={() => setSocial((a) => a.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600 p-1.5 shrink-0" title="Remove"><X size={14} /></button>
               </div>
             );
           })}
         </div>
-        <button onClick={() => setSocial((a) => [...a, { name: "", percentage: "" }])} className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline"><Plus size={14} /> Add community</button>
+        <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-3">
+          <button onClick={() => setSocial((a) => [...a, { name: "", percentage: "" }])} className="inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline"><Plus size={14} /> Add Community</button>
+          <div className="text-sm">
+            <span className="text-gray-500 mr-2">Combined</span>
+            <span className={`font-bold ${combinedPct > 100 ? "text-red-600" : "text-gray-800"}`}>{Math.round(combinedPct * 10) / 10}%</span>
+          </div>
+        </div>
+        {combinedPct > 100 && <div className="text-[11px] text-red-500 mt-1 text-right">The listed percentages add up to over 100%. Values are kept exactly as entered — adjust them if needed.</div>}
       </Card>
     </div>
   );
