@@ -22,8 +22,10 @@ export async function GET(req) {
     if (assemblyId) { where.push("c.assembly_id = ?"); params.push(assemblyId); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const rows = await query(
-      `SELECT c.id, c.assembly_id, c.name, c.photo_url, c.phone, c.caste,
-              c.current_position, c.date_of_birth, c.created_at,
+      `SELECT c.id, c.assembly_id, c.name, c.photo_url, c.phone, c.address, c.date_of_birth,
+              c.caste, c.net_worth, c.business, c.monthly_income, c.education,
+              c.political_experience, c.organization_experience, c.previous_elections,
+              c.current_position, c.created_at,
               a.name AS assembly_name,
               COALESCE(dl.name, a.district) AS district,
               s.id AS assessment_id, ${ASSESSMENT_PARAMS.map((p) => `s.${p.key}`).join(", ")}
@@ -36,6 +38,9 @@ export async function GET(req) {
       params
     );
     const candidates = rows.map((r) => {
+      // Preserve every individual parameter score (Candidate -> Assessment
+      // Records -> 10 Scores); the total is always recomputed from them, never
+      // stored on its own.
       const assessment = {};
       let anyScore = false;
       for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = r[p.key]; if (r[p.key] != null) anyScore = true; }
@@ -47,9 +52,17 @@ export async function GET(req) {
         name: r.name,
         photo_url: r.photo_url,
         phone: r.phone,
-        caste: r.caste,
-        current_position: r.current_position,
+        address: r.address,
         date_of_birth: r.date_of_birth,
+        caste: r.caste,
+        net_worth: r.net_worth,
+        business: r.business,
+        monthly_income: r.monthly_income,
+        education: r.education,
+        political_experience: r.political_experience,
+        organization_experience: r.organization_experience,
+        previous_elections: r.previous_elections,
+        current_position: r.current_position,
         assessment,
         total: assessmentTotal(assessment),
         assessment_done: anyScore,

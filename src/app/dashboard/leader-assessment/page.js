@@ -10,18 +10,19 @@ import {
   TrendingUp, Target, ShieldAlert, Star, Vote,
 } from "lucide-react";
 
-// 10 assessment parameters (keys match the DB columns / API).
+// 10 assessment parameters (keys match the DB columns / API). Each is scored /10
+// → a 100-point total.
 const PARAMS = [
-  { key: "s_nature", label: "Candidate ka Nature" },
+  { key: "s_nature", label: "Candidate Nature" },
   { key: "s_hardworker", label: "Hard Worker" },
   { key: "s_financial", label: "Financial Condition" },
   { key: "s_political", label: "Political Knowledge" },
-  { key: "s_public_reach", label: "Public Pakad" },
-  { key: "s_social_reach", label: "Social / Samajik Pakad" },
+  { key: "s_public_reach", label: "Public Reach / Pakad" },
+  { key: "s_social_reach", label: "Social / Samajik Reach" },
   { key: "s_personality", label: "Personality" },
-  { key: "s_organization", label: "Sangathan Mein Pakad" },
-  { key: "s_winning", label: "Chunav Jeetne Ki Kshamta" },
-  { key: "s_acceptability", label: "Janta Mein Acceptability" },
+  { key: "s_organization", label: "Organizational Strength / Sangathan Mein Pakad" },
+  { key: "s_winning", label: "Election Winning Ability" },
+  { key: "s_acceptability", label: "Public Acceptability" },
 ];
 // Scores are whole numbers 1–10 (10 params → max 100). 0/blank means "not yet
 // scored" and is allowed; a real score is clamped into 1..10.
@@ -529,8 +530,9 @@ function CandidatesTab({ flash, fail }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filterAsm, setFilterAsm] = useState("");   // "" = all assemblies
+  const [sortBy, setSortBy] = useState("assembly"); // "assembly" | "score"
   const [editing, setEditing] = useState(null);      // null | "new" | candidate
-  const [assessing, setAssessing] = useState(null);
+  const [opening, setOpening] = useState(null);      // candidate whose profile + assessment is open
   const [bundle, setBundle] = useState(null);        // per-assembly comparison (when a single assembly is selected)
 
   const loadAssemblies = useCallback(async () => {
@@ -553,8 +555,13 @@ function CandidatesTab({ flash, fail }) {
   useEffect(() => { loadCandidates(filterAsm); loadBundle(filterAsm); }, [filterAsm, loadCandidates, loadBundle]);
   const refresh = useCallback(() => { loadCandidates(filterAsm); loadBundle(filterAsm); }, [filterAsm, loadCandidates, loadBundle]);
 
-  // Keep an open assessment modal bound to the freshest record after a refresh.
-  const assessingLive = assessing ? (candidates.find((c) => c.id === assessing.id) || assessing) : null;
+  // Keep the open profile/assessment modal bound to the freshest record after a
+  // refresh (so the total/status reflect a just-saved assessment).
+  const openingLive = opening ? (candidates.find((c) => c.id === opening.id) || opening) : null;
+  // Ranked view when sorting by Total Score (desc), else the DB order (assembly).
+  const view = sortBy === "score"
+    ? [...candidates].sort((a, b) => (b.total - a.total) || String(a.name || "").localeCompare(String(b.name || "")))
+    : candidates;
 
   async function del(c) {
     if (!confirm(`Remove candidate "${c.name}"?`)) return;
@@ -567,7 +574,7 @@ function CandidatesTab({ flash, fail }) {
       <Card
         title="AAP Candidates"
         icon={Users}
-        sub="Every AAP candidate across all assemblies. Create a candidate, then score them with the Assessment action."
+        sub="Every AAP candidate across all assemblies. Click Open on a candidate to view their profile and score the 10-parameter assessment."
         right={
           <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
             <Plus size={16} /> Create Candidate
@@ -580,6 +587,11 @@ function CandidatesTab({ flash, fail }) {
             <option value="">All assemblies</option>
             {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}{a.district ? ` · ${a.district}` : ""}</option>)}
           </select>
+          <span className="text-sm font-semibold text-gray-600 flex items-center gap-1.5 ml-1">Sort</span>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={`${inp} max-w-[200px]`}>
+            <option value="assembly">Assembly (A–Z)</option>
+            <option value="score">Total Score (high → low)</option>
+          </select>
         </div>
 
         {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={refresh} /> : candidates.length === 0 ? (
@@ -587,10 +599,11 @@ function CandidatesTab({ flash, fail }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Candidate", "Assembly", "District", "Type / Category", "Status", "Assessment Score", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+              <thead className="bg-gray-50 text-left text-gray-500"><tr>{[sortBy === "score" ? "#" : "", "Candidate", "Assembly", "District", "Type / Category", "Status", "Assessment Score", ""].map((h, i) => <th key={i} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
-                {candidates.map((c) => (
+                {view.map((c, idx) => (
                   <tr key={c.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2.5 text-gray-400 font-bold w-8">{sortBy === "score" ? idx + 1 : ""}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2.5 min-w-0">
                         <ProfilePhoto name={c.name} src={c.photo_url} size={34} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
@@ -603,7 +616,7 @@ function CandidatesTab({ flash, fail }) {
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Assessed" : "Pending"}</span></td>
                     <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={c.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{c.total}/100</span></div></td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                      <button onClick={() => setAssessing(c)} className="text-[#164FA3] hover:bg-[#164FA3]/10 p-1 rounded-lg" title="Assessment"><ClipboardCheck size={15} /></button>
+                      <button onClick={() => setOpening(c)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={14} /> Open</button>
                       <button onClick={() => setEditing(c)} className="text-gray-500 hover:text-[#164FA3] p-1" title="Edit"><Pencil size={14} /></button>
                       <button onClick={() => del(c)} className="text-gray-400 hover:text-red-600 p-1" title="Remove"><Trash2 size={14} /></button>
                     </td>
@@ -630,7 +643,16 @@ function CandidatesTab({ flash, fail }) {
           fail={fail}
         />
       )}
-      {assessingLive && <AssessmentModal c={assessingLive} onClose={() => setAssessing(null)} onChange={refresh} flash={flash} fail={fail} />}
+      {openingLive && (
+        <CandidateOpenModal
+          c={openingLive}
+          onClose={() => setOpening(null)}
+          onEdit={() => { setEditing(openingLive); setOpening(null); }}
+          onChange={refresh}
+          flash={flash}
+          fail={fail}
+        />
+      )}
     </div>
   );
 }
@@ -691,11 +713,11 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
 }
 
 // ---------------------------- ASSESSMENT ----------------------------------
-// The 10-parameter score editor for ONE candidate, opened from each AAP
-// candidate's Assessment button (AssessmentModal) inside the AAP Candidates
-// section. Scores load from the DB, the total is ALWAYS computed (never typed),
-// each entry is clamped to 1..10, and a refresh re-seeds from c.assessment so
-// nothing is lost.
+// The 10-parameter score editor for ONE candidate, embedded in that candidate's
+// Open view (CandidateOpenModal). Scores load from the DB, the total is ALWAYS
+// computed (never typed), each entry is clamped to 1..10, and a refresh re-seeds
+// from c.assessment so nothing is lost. Saving upserts only this candidate's
+// assessment row (no duplicate rows, other candidates untouched).
 function AssessmentEditor({ c, onChange, flash, fail }) {
   const [scores, setScores] = useState(() => Object.fromEntries(PARAMS.map((p) => [p.key, c.assessment?.[p.key] ?? ""])));
   const [saving, setSaving] = useState(false);
@@ -716,9 +738,12 @@ function AssessmentEditor({ c, onChange, flash, fail }) {
       <div className="space-y-2">
         {PARAMS.map((p, i) => (
           <div key={p.key} className="flex items-center gap-3">
-            <span className="text-sm text-gray-700 w-48 shrink-0"><span className="text-gray-400 mr-1">{i + 1}.</span>{p.label}</span>
+            <span className="text-sm text-gray-700 w-56 shrink-0"><span className="text-gray-400 mr-1">{i + 1}.</span>{p.label}</span>
             <ScoreBar value={scores[p.key]} />
-            <input type="number" min={SCORE_MIN} max={SCORE_MAX} step={1} value={scores[p.key]} onChange={(e) => setScore(p.key, e.target.value)} className="w-14 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center outline-none focus:ring-2 focus:ring-[#164FA3]/40 shrink-0" />
+            <div className="flex items-center gap-1 shrink-0">
+              <input type="number" min={SCORE_MIN} max={SCORE_MAX} step={1} value={scores[p.key]} onChange={(e) => setScore(p.key, e.target.value)} className="w-14 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center outline-none focus:ring-2 focus:ring-[#164FA3]/40" />
+              <span className="text-xs text-gray-400 font-semibold w-6">/10</span>
+            </div>
           </div>
         ))}
       </div>
@@ -732,10 +757,48 @@ function AssessmentEditor({ c, onChange, flash, fail }) {
     </div>
   );
 }
-function AssessmentModal({ c, onClose, onChange, flash, fail }) {
+// The candidate's "Open" view: complete profile + the 10-parameter assessment
+// interface together on the same page (a modal, NOT a separate route). Profile
+// fields are read-only here (Edit opens the full form); the assessment saves,
+// reloads and re-totals through AssessmentEditor.
+function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
+  const age = ageOf(c.date_of_birth);
+  const rows = [
+    ["Assembly", c.assembly_name], ["District", c.district],
+    ["Phone", c.phone], ["Age", age != null ? `${age} years` : null],
+    ["Caste", c.caste], ["Type / Position", c.current_position],
+    ["Net Worth", c.net_worth], ["Business", c.business],
+    ["Monthly Income", c.monthly_income], ["Education", c.education],
+    ["Political Experience", c.political_experience], ["Organization Experience", c.organization_experience],
+    ["Previous Elections", c.previous_elections], ["Address", c.address],
+  ];
   return (
-    <Modal title={`Assessment · ${c.name}`} onClose={onClose}>
-      <AssessmentEditor c={c} onChange={() => { onChange(); }} flash={flash} fail={fail} />
+    <Modal title={`Candidate · ${c.name}`} onClose={onClose} wide>
+      <div className="space-y-5">
+        {/* Complete profile */}
+        <div className="flex items-start gap-4">
+          <ProfilePhoto name={c.name} src={c.photo_url} size={72} square editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-lg font-bold text-gray-900 truncate">{c.name}</h3>
+              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Assessed" : "Pending"}</span>
+              <span className="text-sm font-bold text-[#164FA3]">{c.total}/100</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 mt-3 text-xs">
+              {rows.map(([k, v]) => (
+                <div key={k} className="min-w-0"><span className="text-gray-400">{k}</span><div className="text-gray-800 font-medium truncate" title={v || ""}>{v || "—"}</div></div>
+              ))}
+            </div>
+            <button onClick={onEdit} className="mt-3 text-xs font-semibold text-[#164FA3] hover:underline inline-flex items-center gap-1"><Pencil size={13} /> Edit profile</button>
+          </div>
+        </div>
+        {/* 10-parameter assessment interface */}
+        <div className="border-t border-gray-100 pt-4">
+          <h4 className="font-bold text-gray-900 flex items-center gap-2 mb-1"><ClipboardCheck size={16} className="text-[#164FA3]" /> 10-Parameter Assessment</h4>
+          <p className="text-xs text-gray-400 mb-3">Each parameter is scored 1–10. The total is calculated automatically out of 100.</p>
+          <AssessmentEditor c={c} onChange={onChange} flash={flash} fail={fail} />
+        </div>
+      </div>
     </Modal>
   );
 }
@@ -965,10 +1028,10 @@ function AnalysisTab({ b, onChange, flash, fail }) {
 }
 
 // ------------------------------- helpers ----------------------------------
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, wide }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-auto">
+      <div className={`bg-white rounded-2xl shadow-xl w-full ${wide ? "max-w-2xl" : "max-w-lg"} p-6 max-h-[90vh] overflow-auto`}>
         <div className="flex items-center justify-between mb-4"><h2 className="text-xl font-bold text-gray-900">{title}</h2><button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button></div>
         {children}
       </div>
