@@ -1,0 +1,39 @@
+import { NextResponse } from "next/server";
+import { query } from "@/lib/db";
+import { guard, noStore } from "@/lib/leaderAssessmentGuard";
+import { ASSESSMENT_PARAMS, normalizeScore, assessmentTotal } from "@/lib/leaderAssessment";
+
+export const dynamic = "force-dynamic";
+
+// PUT /api/leader-assessment/mlas/[id]/assessment — upsert the sitting MLA's
+// 10-parameter assessment (id = la_mla_profiles.id). Each of the 10 scores is
+// validated 0–10 (integers only). The TOTAL is never accepted from the client —
+// it is always recomputed. Updates the existing row in place (no duplicates),
+// and touches only this MLA's assessment.
+export async function PUT(req, { params }) {
+  const { error } = await guard();
+  if (error) return error;
+  try {
+    const { id } = await params;
+    const [mla] = await query("SELECT id FROM la_mla_profiles WHERE id = ?", [id]);
+    if (!mla) return NextResponse.json({ message: "MLA not found." }, { status: 404 });
+    const d = await req.json().catch(() => ({}));
+    const scores = {};
+    try {
+      for (const p of ASSESSMENT_PARAMS) scores[p.key] = normalizeScore(d[p.key]);
+    } catch (msg) {
+      return NextResponse.json({ message: String(msg) }, { status: 400 });
+    }
+    const keys = ASSESSMENT_PARAMS.map((p) => p.key);
+    const [existing] = await query("SELECT id FROM la_mla_assessments WHERE mla_id = ?", [id]);
+    if (existing) {
+      await query(`UPDATE la_mla_assessments SET ${keys.map((k) => `${k}=?`).join(", ")} WHERE mla_id=?`, [...keys.map((k) => scores[k]), id]);
+    } else {
+      await query(`INSERT INTO la_mla_assessments (mla_id, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [id, ...keys.map((k) => scores[k])]);
+    }
+    return NextResponse.json({ ok: true, total: assessmentTotal(scores) }, { headers: noStore });
+  } catch (e) {
+    console.error("[LA] mla assessment PUT:", e);
+    return NextResponse.json({ message: "Failed to save the assessment." }, { status: 500 });
+  }
+}

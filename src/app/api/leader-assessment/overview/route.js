@@ -47,6 +47,15 @@ export async function GET() {
       const prev = topCandByAsm.get(c.assembly_id);
       if (prev == null || c.total > prev) topCandByAsm.set(c.assembly_id, c.total);
     }
+    // Sitting-MLA assessment total per assembly (0–100), when the MLA has been
+    // scored on the same 10 parameters.
+    const mlaScoreRows = await query(
+      `SELECT mp.assembly_id, ${ASSESSMENT_PARAMS.map((p) => `s.${p.key}`).join(", ")}
+         FROM la_mla_profiles mp
+         JOIN la_mla_assessments s ON s.mla_id = mp.id`
+    );
+    const mlaScoreByAsm = new Map();
+    for (const r of mlaScoreRows) mlaScoreByAsm.set(r.assembly_id, assessmentTotal(r));
     // Authoritative assembly meta (Master Data name + parent district) + sitting MLA.
     const asmMeta = await query(
       `SELECT a.id AS assembly_id, ml.name AS assembly_name,
@@ -64,9 +73,9 @@ export async function GET() {
           assembly_name: m.assembly_name,
           district: m.district || null,
           mla_name: m.mla_name || null,
-          mla_score: null,                 // MLA is not assessed on the 10 parameters in this system
+          mla_score: mlaScoreByAsm.has(m.assembly_id) ? mlaScoreByAsm.get(m.assembly_id) : null,
           top_candidate_score: assemblyScore,
-          assembly_score: assemblyScore,   // the ranking score
+          assembly_score: assemblyScore,   // the ranking score (approved overall assembly score)
         };
       })
       // Only rank assemblies that actually have an assessment score.

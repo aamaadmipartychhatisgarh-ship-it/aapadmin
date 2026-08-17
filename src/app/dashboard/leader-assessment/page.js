@@ -31,7 +31,7 @@ const SCORE_MAX = 10;
 
 const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, scoped: false },
-  { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: true },
+  { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: false },
   { key: "elections", label: "Election History", icon: History, scoped: true },
   { key: "candidates", label: "AAP Candidates", icon: Users, scoped: false },
   { key: "analysis", label: "Political Analysis", icon: Brain, scoped: true },
@@ -101,7 +101,10 @@ function Body() {
   useEffect(() => { loadBundle(selectedId); }, [selectedId, loadBundle]);
 
   const currentTab = TABS.find((t) => t.key === tab);
-  const openAssembly = (id) => { setSelectedId(id); setTab("mla"); };
+  // "Open assembly" now opens the complete assessment (Full View) modal — the
+  // MLA tab is a global manager, so it no longer targets a scoped tab.
+  const [fullViewId, setFullViewId] = useState(null);
+  const openAssembly = (id) => setFullViewId(id);
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500">
@@ -146,6 +149,7 @@ function Body() {
       )}
 
       {tab === "overview" && <Overview onOpen={openAssembly} flash={flash} fail={fail} />}
+      {tab === "mla" && <MlaManager flash={flash} fail={fail} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
 
       {currentTab?.scoped && !selectedId && <Empty msg="Select an assembly above to begin." />}
@@ -154,11 +158,12 @@ function Body() {
       {currentTab?.scoped && selectedId && bundle && (
         <>
           <AssemblyHeader a={bundle.assembly} status={bundle.status} />
-          {tab === "mla" && <MlaTab b={bundle} onSaved={() => { flash("MLA profile saved."); loadBundle(selectedId); }} fail={fail} />}
           {tab === "elections" && <ElectionsTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
           {tab === "analysis" && <AnalysisTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
         </>
       )}
+
+      {fullViewId && <AssemblyFullView assemblyId={fullViewId} onClose={() => setFullViewId(null)} flash={flash} fail={fail} />}
     </div>
   );
 }
@@ -486,7 +491,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, flash, fail }) {
                 <div className="font-bold text-gray-900 mt-2 truncate">{mla?.name || <span className="text-gray-300">No MLA on record</span>}</div>
                 <div className="text-xs text-gray-500 mt-0.5 truncate">{[assembly.name, assembly.district].filter(Boolean).join(" · ")}</div>
                 <div className="grid grid-cols-1 gap-1.5 mt-3 text-left">
-                  <div className="flex justify-between text-sm"><span className="text-gray-400">MLA Score</span><span className="font-semibold text-gray-400">N/A</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-gray-400">MLA Score</span><span className={`font-semibold ${mla?.assessment_done ? "text-[#164FA3]" : "text-gray-400"}`}>{mla?.assessment_done ? `${mla.total}/100` : "Not assessed"}</span></div>
                   {mla?.party && <div className="flex justify-between text-sm"><span className="text-gray-400">Party</span><span className="font-medium text-gray-700 truncate ml-2">{mla.party}</span></div>}
                   <div className="flex justify-between text-sm"><span className="text-gray-400">Status</span><span className={`font-semibold ${status?.ready ? "text-emerald-600" : "text-gray-500"}`}>{status?.ready ? "Assessment Ready" : "Incomplete"}</span></div>
                 </div>
@@ -605,6 +610,168 @@ function MlaTab({ b, onSaved, fail }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+// --------------------------- MLA MANAGER ----------------------------------
+// The MLA Profile tab: a global manager with a "+ Create MLA Profile" action and
+// the complete, DB-driven MLA Data List (one row per MLA). Each row shows MLA
+// name, assembly, district, party, assessment score and status, with Open (view/
+// edit the full profile) and Add Assessment (score the 10 parameters). MLAs are
+// one-per-assembly (unique), so no duplicates are created; the list refreshes
+// immediately after any save with no browser refresh.
+function MlaManager({ flash, fail }) {
+  const [assemblies, setAssemblies] = useState([]);
+  const [mlas, setMlas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(null);   // null | "new" | mla
+  const [assessing, setAssessing] = useState(null);
+
+  const loadAssemblies = useCallback(async () => {
+    try { const d = await api("/api/leader-assessment/assemblies"); setAssemblies(d.assemblies || []); } catch { /* surfaced by MLA load */ }
+  }, []);
+  const loadMlas = useCallback(async () => {
+    setLoading(true); setError("");
+    try { const d = await api("/api/leader-assessment/mlas"); setMlas(d.mlas || []); }
+    catch (e) { setError(e.message); setMlas([]); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadAssemblies(); loadMlas(); }, [loadAssemblies, loadMlas]);
+
+  // Assemblies that already have an MLA — excluded from the Create dropdown so a
+  // second profile can't be created for the same assembly (edit the existing one).
+  const takenAsm = new Set(mlas.map((m) => Number(m.assembly_id)));
+  // Keep an open assessment modal bound to the freshest record after a refresh.
+  const assessingLive = assessing ? (mlas.find((m) => m.id === assessing.id) || assessing) : null;
+
+  return (
+    <div className="space-y-5">
+      <Card
+        title="MLA Profiles"
+        icon={UserSquare2}
+        sub="Every sitting MLA. Create a profile, then score them with Add Assessment."
+        right={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={16} /> Create MLA Profile</button>}
+      >
+        {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={loadMlas} /> : mlas.length === 0 ? (
+          <Empty msg="No MLA profiles yet." action={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Create MLA Profile</button>} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-gray-500"><tr>{["MLA", "Assembly", "District", "Party", "Assessment Score", "Status", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {mlas.map((m) => (
+                  <tr key={m.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <ProfilePhoto name={m.name} src={m.photo_url} size={34} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
+                        <div className="min-w-0"><div className="font-semibold text-gray-900 truncate">{m.name}</div>{m.phone && <div className="text-[11px] text-gray-400 truncate">{m.phone}</div>}</div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{m.assembly_name || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{m.district || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-700">{m.party || "—"}</td>
+                    <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={m.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{m.total}/100</span></div></td>
+                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${m.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{m.assessment_done ? "Assessed" : "Pending"}</span></td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                      <button onClick={() => setEditing(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><UserSquare2 size={13} /> Open</button>
+                      <button onClick={() => setAssessing(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Add Assessment</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {editing && (
+        <MlaProfileModal
+          assemblies={assemblies}
+          taken={takenAsm}
+          initial={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); flash("MLA profile saved."); loadMlas(); }}
+          fail={fail}
+        />
+      )}
+      {assessingLive && <MlaAssessmentModal m={assessingLive} onClose={() => setAssessing(null)} onChange={loadMlas} flash={flash} fail={fail} />}
+    </div>
+  );
+}
+// Create / edit an MLA profile. The form carries every existing MLA field from
+// the schema (no invented duplicates); the assembly comes from the Master-Data
+// list and its DB id is the stored relationship. Saving upserts the single MLA
+// row for that assembly (one per assembly → no duplicates).
+function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail }) {
+  const [form, setForm] = useState(() => ({
+    ...EMPTY_MLA,
+    ...(initial || {}),
+    assembly_id: initial?.assembly_id != null ? String(initial.assembly_id) : "",
+    date_of_birth: initial?.date_of_birth ? String(initial.date_of_birth).slice(0, 10) : "",
+  }));
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const age = ageOf(form.date_of_birth);
+  // On create, hide assemblies that already have an MLA (prevents accidental
+  // duplicate profiles); on edit, the assembly is fixed.
+  const options = initial ? assemblies : assemblies.filter((a) => !(taken && taken.has(Number(a.id))));
+  async function persistPhoto(blob) {
+    if (!blob) return null;
+    const fd = new FormData(); fd.append("file", new File([blob], "photo.jpg", { type: "image/jpeg" }));
+    const up = await fetch("/api/uploads", { method: "POST", body: fd }); const d = await up.json().catch(() => ({}));
+    if (!up.ok) throw new Error(d.message || "Upload failed"); return d.url;
+  }
+  async function save() {
+    if (saving) return; // prevent duplicate submissions
+    if (!String(form.assembly_id).trim()) { fail("Select the assembly this MLA represents."); return; }
+    if (!String(form.name).trim()) { fail("MLA name is required."); return; }
+    setSaving(true);
+    try {
+      await api(`/api/leader-assessment/assemblies/${form.assembly_id}/mla`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      onSaved();
+    } catch (e) { fail(e.message); setSaving(false); }
+  }
+  const F = ({ k, label, type = "text", full }) => (<div className={full ? "col-span-2" : ""}><span className={lbl}>{label}</span><input type={type} className={inp} value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} /></div>);
+  return (
+    <Modal title={initial ? "Edit MLA Profile" : "Create MLA Profile"} onClose={onClose} wide>
+      <div className="flex flex-col items-center gap-1.5 pb-2">
+        <ProfilePhoto name={form.name} src={form.photo_url} size={88} square editable persist={persistPhoto} onChange={(url) => set("photo_url", url || "")} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
+        <span className="text-[11px] text-gray-400">JPG, PNG, WEBP</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2">
+          <span className={lbl}>Assembly *</span>
+          <select className={inp} value={form.assembly_id ?? ""} disabled={!!initial} onChange={(e) => set("assembly_id", e.target.value)}>
+            <option value="">— select assembly —</option>
+            {options.map((a) => <option key={a.id} value={a.id}>{a.name}{a.district ? ` · ${a.district}` : ""}</option>)}
+          </select>
+          {initial && <span className="text-[11px] text-gray-400">One MLA per assembly — the assembly can't be changed here.</span>}
+        </div>
+        <F k="name" label="Full Name *" full />
+        <F k="phone" label="Phone" /><F k="party" label="Party" />
+        <F k="date_of_birth" label="Date of Birth" type="date" />
+        <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
+        <F k="caste" label="Caste" /><F k="net_worth" label="Net Worth" />
+        <F k="criminal_cases" label="Criminal Cases" type="number" />
+        <F k="address" label="Address" full />
+        <div className="col-span-2 border-t border-gray-100 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Political / Election details</div>
+        <F k="times_won" label="Times Won" type="number" /><F k="times_contested" label="Times Contested" type="number" />
+        <F k="largest_winning_margin" label="Largest Winning Margin" type="number" /><F k="previous_winning_margin" label="Previous Winning Margin" type="number" />
+        <F k="party_won_from" label="Party Won From" /><F k="party_defeated" label="Party Defeated" />
+      </div>
+      <ModalActions onClose={onClose} onSave={save} saving={saving} />
+    </Modal>
+  );
+}
+// The sitting MLA's 10-parameter assessment — same editor as candidates, pointed
+// at the MLA assessment endpoint. Total is auto-computed; never entered manually.
+function MlaAssessmentModal({ m, onClose, onChange, flash, fail }) {
+  return (
+    <Modal title={`Assessment · ${m.name}`} onClose={onClose} wide>
+      <p className="text-xs text-gray-400 mb-3">Each parameter is scored 1–10. The total is calculated automatically out of 100.</p>
+      <AssessmentEditor c={m} endpoint={`/api/leader-assessment/mlas/${m.id}/assessment`} onChange={onChange} flash={flash} fail={fail} />
+    </Modal>
   );
 }
 
@@ -934,7 +1101,8 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
 // computed (never typed), each entry is clamped to 1..10, and a refresh re-seeds
 // from c.assessment so nothing is lost. Saving upserts only this candidate's
 // assessment row (no duplicate rows, other candidates untouched).
-function AssessmentEditor({ c, onChange, flash, fail }) {
+function AssessmentEditor({ c, endpoint, onChange, flash, fail }) {
+  const url = endpoint || `/api/leader-assessment/candidates/${c.id}/assessment`;
   const [scores, setScores] = useState(() => Object.fromEntries(PARAMS.map((p) => [p.key, c.assessment?.[p.key] ?? ""])));
   const [saving, setSaving] = useState(false);
   useEffect(() => { setScores(Object.fromEntries(PARAMS.map((p) => [p.key, c.assessment?.[p.key] ?? ""]))); }, [c.id, c.assessment]);
@@ -945,8 +1113,9 @@ function AssessmentEditor({ c, onChange, flash, fail }) {
     setScores((s) => ({ ...s, [k]: n }));
   }
   async function save() {
+    if (saving) return; // prevent duplicate submissions
     setSaving(true);
-    try { await api(`/api/leader-assessment/candidates/${c.id}/assessment`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(scores) }); flash(`Assessment saved for ${c.name}.`); onChange(); }
+    try { await api(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(scores) }); flash(`Assessment saved for ${c.name}.`); onChange(); }
     catch (e) { fail(e.message); } finally { setSaving(false); }
   }
   return (

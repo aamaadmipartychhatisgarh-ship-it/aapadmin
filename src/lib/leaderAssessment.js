@@ -122,6 +122,21 @@ export async function ensureLeaderAssessmentTables() {
        UNIQUE KEY uq_la_assess_cand (candidate_id),
        CONSTRAINT fk_la_assess_cand FOREIGN KEY (candidate_id) REFERENCES la_aap_candidates(id) ON DELETE CASCADE
      )`,
+    // Sitting-MLA assessment — the SAME 10 parameters as the candidate
+    // assessment, one row per MLA profile. Kept separate from the candidate
+    // scores so neither can affect the other.
+    `CREATE TABLE IF NOT EXISTS la_mla_assessments (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       mla_id INT NOT NULL,
+       s_nature TINYINT NULL, s_hardworker TINYINT NULL, s_financial TINYINT NULL,
+       s_political TINYINT NULL, s_public_reach TINYINT NULL, s_social_reach TINYINT NULL,
+       s_personality TINYINT NULL, s_organization TINYINT NULL, s_winning TINYINT NULL,
+       s_acceptability TINYINT NULL,
+       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       UNIQUE KEY uq_la_assess_mla (mla_id),
+       CONSTRAINT fk_la_assess_mla FOREIGN KEY (mla_id) REFERENCES la_mla_profiles(id) ON DELETE CASCADE
+     )`,
     `CREATE TABLE IF NOT EXISTS la_candidate_strategy (
        id INT AUTO_INCREMENT PRIMARY KEY,
        assembly_id INT NOT NULL,

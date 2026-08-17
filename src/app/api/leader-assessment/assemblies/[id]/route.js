@@ -35,7 +35,17 @@ export async function GET(_req, { params }) {
     Object.assign(assembly, await assemblyElectorate(assembly));
 
     const [mlaRow] = await query("SELECT * FROM la_mla_profiles WHERE assembly_id = ?", [id]);
-    const mla = mlaRow ? { ...mlaRow, age: ageFromDob(mlaRow.date_of_birth) } : null;
+    let mla = null;
+    if (mlaRow) {
+      const [asmt] = await query(
+        `SELECT ${ASSESSMENT_PARAMS.map((p) => `s.${p.key}`).join(", ")} FROM la_mla_assessments s WHERE s.mla_id = ?`,
+        [mlaRow.id]
+      );
+      const assessment = {};
+      let assessmentDone = false;
+      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = asmt?.[p.key] ?? null; if (asmt?.[p.key] != null) assessmentDone = true; }
+      mla = { ...mlaRow, age: ageFromDob(mlaRow.date_of_birth), assessment, total: assessmentTotal(assessment), assessment_done: assessmentDone };
+    }
 
     const elections = await query(
       "SELECT * FROM la_mla_elections WHERE assembly_id = ? ORDER BY election_year DESC, id DESC", [id]
