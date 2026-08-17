@@ -124,6 +124,15 @@ function renderSummary(result) {
 }
 
 function renderDetail(result) {
+  // Zero matching rows → a valid PDF that still shows the header/filters (above)
+  // plus a clear "no records" message, instead of an empty/blank page.
+  if (!result.rows || result.rows.length === 0) {
+    return React.createElement(
+      View,
+      { style: { padding: 16, alignItems: "center" } },
+      React.createElement(Text, { style: { fontSize: 10, color: "#666" } }, "No records found for the selected filters.")
+    );
+  }
   const flex = result.columns.map(() => 1);
   return React.createElement(
     View,
@@ -143,7 +152,14 @@ function renderDetail(result) {
     React.createElement(
       View,
       { style: styles.totalsRow },
-      React.createElement(Text, { style: styles.totalsText }, `Total records: ${result.total}${result.truncated ? ` (showing first ${result.rows.length} — refine filters to narrow further)` : ""}`)
+      React.createElement(
+        Text,
+        { style: styles.totalsText },
+        `Total records: ${result.total}` +
+          (result.truncated
+            ? ` — this PDF shows the first ${result.rows.length}. Use the Excel or CSV export for the complete dataset.`
+            : "")
+      )
     )
   );
 }

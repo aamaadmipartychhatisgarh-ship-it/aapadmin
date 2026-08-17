@@ -97,6 +97,7 @@ function ReportsCenter() {
   const [bootErr, setBootErr] = useState("");      // initial-load failure (retryable)
   const [exporting, setExporting] = useState("");
   const [err, setErr] = useState("");
+  const [notice, setNotice] = useState("");        // transient success message (exports)
   const [saved, setSaved] = useState([]);
 
   // Filter panel: expanded by default so it's visible on arrival, then
@@ -122,6 +123,8 @@ function ReportsCenter() {
     fetchLocations("zone", []).then(setZones).catch(() => {});
   }, []);
   useEffect(() => { loadBoot(); }, [loadBoot]);
+  // Auto-dismiss the transient export success message.
+  useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(""), 4000); return () => clearTimeout(t); }, [notice]);
 
   // ---- module meta (resets filters) --------------------------------------
   useEffect(() => {
@@ -234,23 +237,36 @@ function ReportsCenter() {
     // `exporting` tags the in-flight button; use a distinct tag for the "today"
     // variant so its spinner shows on the right button.
     const tag = bodyOverride?.__tag || format;
-    setExporting(tag); setErr("");
+    setExporting(tag); setErr(""); setNotice("");
+    // Client-side abort so the button can NEVER stay stuck if the server hangs.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
     try {
       const payload = { ...body, ...bodyOverride };
       delete payload.__tag;
       const r = await fetch(`/api/reports/export?format=${format}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: controller.signal,
       });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || "Export failed");
+      if (!r.ok) {
+        // Errors are always JSON now; fall back to a status message if not.
+        const ct = r.headers.get("content-type") || "";
+        const msg = ct.includes("application/json")
+          ? ((await r.json().catch(() => ({}))).message || "Export failed.")
+          : `Export failed (${r.status}).`;
+        throw new Error(msg);
+      }
       const blob = await r.blob();
+      if (!blob || blob.size === 0) throw new Error("The export came back empty. Please try again.");
       const cd = r.headers.get("Content-Disposition") || "";
       const filename = cd.match(/filename="([^"]+)"/)?.[1] || `${moduleKey}-report.${format}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
       URL.revokeObjectURL(url);
+      setNotice(`${format === "analytical" ? "Analytical PDF" : format.toUpperCase()} downloaded.`);
     } catch (e) {
-      setErr(e.message);
+      setErr(e.name === "AbortError" ? "Export timed out. Please narrow the filters and try again." : (e.message || "Export failed."));
     } finally {
+      clearTimeout(timer);
       setExporting("");
     }
   };
@@ -326,6 +342,10 @@ function ReportsCenter() {
         description="One engine for every module — filter, group, chart and export. New modules appear here automatically."
         breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Analytics" }, { label: "Reports" }]}
       />
+
+      {notice && (
+        <div className="fixed top-4 right-4 z-[80] bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg">{notice}</div>
+      )}
 
       {/* Module picker */}
       <div className="flex items-center gap-2">

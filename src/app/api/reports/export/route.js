@@ -12,6 +12,29 @@ import { buildAnalytics } from "@/lib/reports/analytical";
 
 export const dynamic = "force-dynamic";
 
+// The PDF renderer is much slower per row than CSV/Excel, so the detail PDF is
+// capped to a count it can always render within the gateway window; the full set
+// stays available via CSV/Excel (which is noted inside the PDF when it truncates).
+const PDF_MAX_ROWS = Number(process.env.REPORTS_PDF_MAX_ROWS) || 6000;
+const PDF_RENDER_TIMEOUT_MS = Number(process.env.REPORTS_PDF_TIMEOUT_MS) || 50000;
+
+// Render a PDF with a hard timeout so the request can never hang forever (which
+// left the export button stuck). On timeout we throw a clean, user-facing error.
+async function renderPdf(element) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("PDF generation timed out — narrow the filters or use the Excel/CSV export for very large reports.")),
+      PDF_RENDER_TIMEOUT_MS
+    );
+  });
+  try {
+    return await Promise.race([renderToBuffer(element), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // POST /api/reports/export?format=csv|xlsx|pdf
 // Same body shape as POST /api/reports (module, time, filters, geo, search,
 // group_by, columns, sort) — page/pageSize are ignored; this always fetches
@@ -34,98 +57,109 @@ export async function POST(req) {
   const module = getModule(body.module);
   if (!module) return Response.json({ message: "Unknown module" }, { status: 404 });
 
-  // Analytical PDF — KPIs + per-day chart + breakdown tables (its own engine
-  // calls run several GROUP BY queries), rendered by AnalyticalPdfDocument.
-  if (format === "analytical") {
-    const data = await buildAnalytics({ moduleKey: body.module, session, body });
-    if (data.error) return Response.json({ message: data.error }, { status: data.status || 400 });
+  // Everything below is wrapped so ANY failure (query, analytics, PDF render,
+  // timeout) returns a clean JSON error with the real reason logged — never an
+  // HTML 500 page (which breaks the client's JSON parse) and never a hung request.
+  try {
+    // Analytical PDF — KPIs + per-day chart + breakdown tables, rendered by
+    // AnalyticalPdfDocument. Summary-sized, so it's cheap to render.
+    if (format === "analytical") {
+      const data = await buildAnalytics({ moduleKey: body.module, session, body });
+      if (data.error) return Response.json({ message: data.error }, { status: data.status || 400 });
+      const meta = await moduleMeta(module);
+      const filterLines = await describeFilters({ module, meta, body });
+      const stamp = new Date().toISOString().slice(0, 10);
+      const buffer = await renderPdf(
+        React.createElement(AnalyticalPdfDocument, {
+          title: module.label,
+          subtitle: filterLines.find((l) => l.startsWith("Time:")) || "All time",
+          filterLines,
+          generatedBy: session.user.username || session.user.name || "—",
+          data,
+        })
+      );
+      return pdfResponse(buffer, `${module.key}-analytical-${stamp}.pdf`);
+    }
+
+    // The detail PDF caps rows so the renderer always finishes; CSV/Excel fetch
+    // the full set.
+    const opts = { exportAll: true };
+    if (format === "pdf") opts.maxRows = PDF_MAX_ROWS;
+    const result = await runReport({ moduleKey: body.module, session, body, opts });
+    if (result.error) return Response.json({ message: result.error }, { status: result.status || 400 });
+
     const meta = await moduleMeta(module);
     const filterLines = await describeFilters({ module, meta, body });
     const stamp = new Date().toISOString().slice(0, 10);
-    const buffer = await renderToBuffer(
-      React.createElement(AnalyticalPdfDocument, {
+    const filenameBase = `${module.key}-report-${stamp}`;
+
+    if (format === "json") {
+      // Backs the dedicated Print view — same full-result-set + filters-used data.
+      return Response.json({
         title: module.label,
-        subtitle: filterLines.find((l) => l.startsWith("Time:")) || "All time",
         filterLines,
         generatedBy: session.user.username || session.user.name || "—",
-        data,
+        generatedAt: new Date().toISOString(),
+        result,
+      });
+    }
+
+    if (format === "csv") {
+      const csv = toCsv(result);
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv;charset=utf-8;",
+          "Content-Disposition": `attachment; filename="${filenameBase}.csv"`,
+        },
+      });
+    }
+
+    if (format === "xlsx") {
+      const data = result.mode === "summary"
+        ? result.rows.map((r) => ({ [result.group_label]: r.group_key, Count: r.count }))
+        : result.rows.map((row) => Object.fromEntries(result.columns.map((c) => [c.label, formatCell(c, row[c.key])])));
+      const ws = XLSX.utils.json_to_sheet(data.length ? data : [{ "": "No records found for the selected filters." }]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, module.label.slice(0, 31));
+      const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+      return new Response(buf, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${filenameBase}.xlsx"`,
+        },
+      });
+    }
+
+    // PDF
+    const orientation = body.orientation === "portrait" ? "portrait" : "landscape";
+    const buffer = await renderPdf(
+      React.createElement(ReportPdfDocument, {
+        title: module.label,
+        filterLines,
+        generatedBy: session.user.username || session.user.name || "—",
+        result,
+        orientation,
       })
     );
-    return new Response(buffer, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${module.key}-analytical-${stamp}.pdf"`,
-      },
-    });
+    return pdfResponse(buffer, `${filenameBase}.pdf`);
+  } catch (e) {
+    console.error("[reports] export failed:", format, body?.module, e);
+    return Response.json(
+      { message: e?.message || "Unable to generate the export. Please try again." },
+      { status: 500 }
+    );
   }
+}
 
-  const result = await runReport({ moduleKey: body.module, session, body, opts: { exportAll: true } });
-  if (result.error) return Response.json({ message: result.error }, { status: result.status || 400 });
-
-  const meta = await moduleMeta(module);
-  const filterLines = await describeFilters({ module, meta, body });
-  const stamp = new Date().toISOString().slice(0, 10);
-  const filenameBase = `${module.key}-report-${stamp}`;
-
-  if (format === "json") {
-    // Backs the dedicated Print view (src/app/dashboard/reports/print) — same
-    // full-result-set + filters-used data the PDF export uses, as JSON so the
-    // print page can render it as clean, printer-friendly HTML instead of a
-    // downloaded file.
-    return Response.json({
-      title: module.label,
-      filterLines,
-      generatedBy: session.user.username || session.user.name || "—",
-      generatedAt: new Date().toISOString(),
-      result,
-    });
-  }
-
-  if (format === "csv") {
-    const csv = toCsv(result);
-    return new Response(csv, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/csv;charset=utf-8;",
-        "Content-Disposition": `attachment; filename="${filenameBase}.csv"`,
-      },
-    });
-  }
-
-  if (format === "xlsx") {
-    const data = result.mode === "summary"
-      ? result.rows.map((r) => ({ [result.group_label]: r.group_key, Count: r.count }))
-      : result.rows.map((row) => Object.fromEntries(result.columns.map((c) => [c.label, formatCell(c, row[c.key])])));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, module.label.slice(0, 31));
-    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-    return new Response(buf, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${filenameBase}.xlsx"`,
-      },
-    });
-  }
-
-  // PDF
-  const orientation = body.orientation === "portrait" ? "portrait" : "landscape";
-  const buffer = await renderToBuffer(
-    React.createElement(ReportPdfDocument, {
-      title: module.label,
-      filterLines,
-      generatedBy: session.user.username || session.user.name || "—",
-      result,
-      orientation,
-    })
-  );
+function pdfResponse(buffer, filename) {
   return new Response(buffer, {
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filenameBase}.pdf"`,
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": String(buffer.length),
     },
   });
 }

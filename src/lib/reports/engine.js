@@ -206,8 +206,12 @@ export async function runReport({ moduleKey, session, body, opts = {} }) {
   const [{ total }] = await query(`SELECT COUNT(*) AS total ${from} ${where}`, params);
 
   if (opts.exportAll) {
+    // Row cap for this export. CSV/Excel handle the full MAX_EXPORT_ROWS easily;
+    // the PDF renderer is far slower per row, so the PDF path passes a smaller
+    // opts.maxRows so it always finishes (the rest is reachable via CSV/Excel).
+    const cap = Math.max(1, Math.min(MAX_EXPORT_ROWS, opts.maxRows || MAX_EXPORT_ROWS));
     const rows = await query(
-      `SELECT ${selectList} ${from} ${where} ORDER BY ${sortCol} ${dir} LIMIT ${MAX_EXPORT_ROWS}`,
+      `SELECT ${selectList} ${from} ${where} ORDER BY ${sortCol} ${dir} LIMIT ${cap}`,
       params
     );
     return {
