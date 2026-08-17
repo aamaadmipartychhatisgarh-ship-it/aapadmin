@@ -101,10 +101,6 @@ function Body() {
   useEffect(() => { loadBundle(selectedId); }, [selectedId, loadBundle]);
 
   const currentTab = TABS.find((t) => t.key === tab);
-  // "Open assembly" now opens the complete assessment (Full View) modal — the
-  // MLA tab is a global manager, so it no longer targets a scoped tab.
-  const [fullViewId, setFullViewId] = useState(null);
-  const openAssembly = (id) => setFullViewId(id);
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500">
@@ -148,7 +144,7 @@ function Body() {
         </div>
       )}
 
-      {tab === "overview" && <Overview onOpen={openAssembly} flash={flash} fail={fail} />}
+      {tab === "overview" && <Overview flash={flash} fail={fail} />}
       {tab === "mla" && <MlaManager flash={flash} fail={fail} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
 
@@ -162,8 +158,6 @@ function Body() {
           {tab === "analysis" && <AnalysisTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
         </>
       )}
-
-      {fullViewId && <AssemblyFullView assemblyId={fullViewId} onClose={() => setFullViewId(null)} flash={flash} fail={fail} />}
     </div>
   );
 }
@@ -256,13 +250,17 @@ function AssemblyHeader({ a, status }) {
 }
 
 // ------------------------------- OVERVIEW ---------------------------------
-function Overview({ onOpen, flash, fail }) {
+function Overview({ flash, fail }) {
   const [data, setData] = useState(null);
   const [assemblies, setAssemblies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const load = useCallback(async () => {
-    setLoading(true); setError("");
+  const [pickedId, setPickedId] = useState(null);
+  const [openId, setOpenId] = useState(null);       // assembly whose Full View modal is open
+  const [dataVersion, setDataVersion] = useState(0); // bumped on any edit so child panels reload
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
+    setError("");
     try {
       // Both come straight from Master Data on the backend. On failure we surface
       // an error rather than showing stale/fake/cached assembly data.
@@ -273,15 +271,18 @@ function Overview({ onOpen, flash, fail }) {
       setData(ov);
       setAssemblies(asm.assemblies || []);
     } catch (e) {
-      setError(e.message || "Failed to load the overview.");
-      setData(null); setAssemblies([]);
-    } finally { setLoading(false); }
+      // On a silent refresh keep the last good data rather than blanking the page.
+      if (!silent) { setError(e.message || "Failed to load the overview."); setData(null); setAssemblies([]); }
+    } finally { if (!silent) setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
-  const [pickedId, setPickedId] = useState(null);
+  // After any assessment edit: re-pull the overview stats/rankings AND bump the
+  // version so the open panel/full-view reload their own bundles — everything
+  // updates with no manual refresh.
+  const refresh = useCallback(() => { load({ silent: true }); setDataVersion((v) => v + 1); }, [load]);
   const s = data?.stats;
   if (loading) return <LoadingBlock />;
-  if (error) return <ErrorBlock msg={error} onRetry={load} />;
+  if (error) return <ErrorBlock msg={error} onRetry={() => load()} />;
   return (
     <div className="space-y-5">
       {/* Assembly search — options come only from the master-backed list; the
@@ -289,7 +290,7 @@ function Overview({ onOpen, flash, fail }) {
       <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
         <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
       </Card>
-      {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={onOpen} flash={flash} fail={fail} />}
+      {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={setOpenId} version={dataVersion} />}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Stat label="Total Assemblies" value={s?.total_assemblies} />
@@ -354,7 +355,7 @@ function Overview({ onOpen, flash, fail }) {
                     <td className="px-3 py-2.5 text-gray-700">{a.top_candidate || <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2.5 font-semibold">{a.top_score != null ? `${a.top_score}/100` : <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2.5">{a.mla_name && a.candidate_count > 0 ? <span className="text-xs font-semibold text-emerald-700">In progress</span> : <span className="text-xs text-gray-400">Incomplete</span>}</td>
-                    <td className="px-3 py-2.5 text-right"><button onClick={() => onOpen(a.id)} className="text-[#164FA3] font-semibold hover:underline text-xs">Open →</button></td>
+                    <td className="px-3 py-2.5 text-right"><button onClick={() => setOpenId(a.id)} className="text-[#164FA3] font-semibold hover:underline text-xs">Open →</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -362,6 +363,11 @@ function Overview({ onOpen, flash, fail }) {
           </div>
         )}
       </Card>
+
+      {/* One Full View modal for the whole Overview. Editing inside it triggers a
+          silent refresh of the stats/rankings + the open panel, so every surface
+          updates without a manual page refresh. */}
+      {openId && <AssemblyFullView assemblyId={openId} onClose={() => setOpenId(null)} onChange={refresh} flash={flash} fail={fail} />}
     </div>
   );
 }
@@ -424,17 +430,18 @@ function AssemblyCombobox({ assemblies, value, onPick }) {
 // it out as: LEFT = Top 3 AAP candidates by Total Assessment Score (highest
 // first); RIGHT = the sitting MLA. A prominent "Full View" button opens the
 // complete assessment.
-function AssemblyAssessmentPanel({ assemblyId, onOpen, flash, fail }) {
+function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [full, setFull] = useState(false);
+  // `version` is bumped by the parent after any edit, so the panel re-fetches and
+  // its Top 3 candidates + MLA score reflect the latest assessment automatically.
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try { setBundle(await api(`/api/leader-assessment/assemblies/${assemblyId}`)); }
     catch (e) { setError(e.message || "Failed to load the assessment."); setBundle(null); }
     finally { setLoading(false); }
-  }, [assemblyId]);
+  }, [assemblyId, version]);
   useEffect(() => { load(); }, [load]);
 
   if (loading) return <Card title="Assembly Overview" icon={ClipboardCheck}><LoadingBlock /></Card>;
@@ -452,7 +459,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, flash, fail }) {
         icon={ClipboardCheck}
         sub={[assembly.district, assembly.number ? `Seat #${assembly.number}` : null].filter(Boolean).join(" · ")}
         right={
-          <button onClick={() => setFull(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
+          <button onClick={() => onOpen(assembly.id)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
             <BarChart3 size={16} /> Full View
           </button>
         }
@@ -500,7 +507,6 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, flash, fail }) {
           </div>
         )}
       </Card>
-      {full && <AssemblyFullView assemblyId={assemblyId} onClose={() => setFull(false)} flash={flash} fail={fail} />}
     </>
   );
 }
@@ -510,7 +516,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, flash, fail }) {
 // MLA-vs-AAP + recommendation (ComparisonTab), and the editable Top 3 Reasons /
 // Top 5 Strengths / Top 10 Weaknesses + Assembly Social Profile (AnalysisTab).
 // Everything is fetched live by the assembly id and re-fetched after any edit.
-function AssemblyFullView({ assemblyId, onClose, flash, fail }) {
+function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -521,15 +527,18 @@ function AssemblyFullView({ assemblyId, onClose, flash, fail }) {
     finally { setLoading(false); }
   }, [assemblyId]);
   useEffect(() => { load(); }, [load]);
+  // Any edit inside reloads this modal AND notifies the parent (Overview) so its
+  // stats, rankings and open panel refresh too — no manual page refresh.
+  const reload = () => { load(); onChange?.(); };
   return (
     <Modal title="Full Assessment" onClose={onClose} size="full">
       {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : bundle?.assembly ? (
         <div className="space-y-5">
           <AssemblyHeader a={bundle.assembly} status={bundle.status} />
           {bundle.candidates?.length > 0
-            ? <ComparisonTab b={bundle} onChange={load} flash={flash} fail={fail} />
+            ? <ComparisonTab b={bundle} onChange={reload} flash={flash} fail={fail} />
             : <Empty msg="No AAP candidates yet — add candidates and score them to see the 10-parameter assessment." />}
-          <AnalysisTab b={bundle} onChange={load} flash={flash} fail={fail} />
+          <AnalysisTab b={bundle} onChange={reload} flash={flash} fail={fail} />
         </div>
       ) : null}
     </Modal>
