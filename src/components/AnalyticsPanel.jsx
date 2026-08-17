@@ -134,9 +134,12 @@ export default function AnalyticsPanel() {
   }, [data]);
 
   const heatmap = data?.heatmap || [];
+  // Scale colours (and the empty-state check) to the hours actually shown — the
+  // office-hour window — so intensity reflects the busiest displayed cell and
+  // "empty" means no activity within office hours, not across all 24h.
   const heatmapMax = useMemo(() => {
     let m = 0;
-    heatmap.forEach((row) => row.forEach((v) => { if (v > m) m = v; }));
+    heatmap.forEach((row) => OFFICE_HOURS.forEach((h) => { const v = row[h] || 0; if (v > m) m = v; }));
     return m;
   }, [heatmap]);
 
@@ -376,7 +379,7 @@ function DayRow({ day, row, max }) {
         return (
           <div
             key={h}
-            title={`${day} ${h}:00 — ${v} call${v === 1 ? "" : "s"}`}
+            title={`${day} · ${fmtHour12(h)} — ${v} call${v === 1 ? "" : "s"}`}
             className="h-8 rounded"
             style={{ background: heatColor(v, max) }}
           />
