@@ -578,6 +578,7 @@ function MlaManager({ flash, fail }) {
   const [expandedId, setExpandedId] = useState(null);    // inline-expanded MLA row
   const [editingAssessment, setEditingAssessment] = useState(null); // mla (full assessment edit)
   const [version, setVersion] = useState(0);             // bumped after an edit to refresh the inline view
+  const [q, setQ] = useState("");                        // MLA-list search
 
   const loadAssemblies = useCallback(async () => {
     try { const d = await api("/api/leader-assessment/assemblies"); setAssemblies(d.assemblies || []); } catch { /* surfaced by MLA load */ }
@@ -597,6 +598,12 @@ function MlaManager({ flash, fail }) {
   const takenAsm = new Set(mlas.map((m) => Number(m.assembly_id)));
   // Keep an open assessment modal bound to the freshest record after a refresh.
   const editingAssessmentLive = editingAssessment ? (mlas.find((m) => m.id === editingAssessment.id) || editingAssessment) : null;
+  // Client-side filter over the already-loaded list (bounded to one MLA per
+  // assembly), matching name / assembly / district / party — instant, no refetch.
+  const needle = q.trim().toLowerCase();
+  const shown = needle
+    ? mlas.filter((m) => `${m.name || ""} ${m.assembly_name || ""} ${m.district || ""} ${m.party || ""}`.toLowerCase().includes(needle))
+    : mlas;
 
   return (
     <div className="space-y-5">
@@ -609,11 +616,20 @@ function MlaManager({ flash, fail }) {
         {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={loadMlas} /> : mlas.length === 0 ? (
           <Empty msg="No MLA profiles yet." action={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Create MLA Profile</button>} />
         ) : (
+          <>
+            <div className="flex items-center gap-2 mb-4 max-w-md">
+              <div className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2 bg-white w-full focus-within:ring-2 focus-within:ring-[#164FA3]/40">
+                <Search size={15} className="text-gray-400 shrink-0" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search MLA, assembly, district or party…" className="flex-1 outline-none text-sm bg-transparent" />
+                {q && <button onClick={() => setQ("")} className="text-gray-400 hover:text-gray-600"><X size={15} /></button>}
+              </div>
+            </div>
+            {shown.length === 0 ? <div className="text-sm text-gray-400 py-6 text-center">No MLAs match “{q}”.</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-gray-500"><tr>{["MLA", "Assembly", "District", "Party", "Assessment Score", "Status", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
-                {mlas.map((m) => {
+                {shown.map((m) => {
                   const open = expandedId === m.id;
                   return (
                     <Fragment key={m.id}>
@@ -652,6 +668,8 @@ function MlaManager({ flash, fail }) {
               </tbody>
             </table>
           </div>
+            )}
+          </>
         )}
       </Card>
 
