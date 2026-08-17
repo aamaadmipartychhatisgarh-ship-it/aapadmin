@@ -15,7 +15,13 @@ export async function PUT(req, { params }) {
   if (error) return error;
   try {
     const { id } = await params;
-    const [mla] = await query("SELECT id FROM la_mla_profiles WHERE id = ?", [id]);
+    if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid MLA id." }, { status: 400 });
+    // A valid MLA id implies a valid assembly (FK); confirm both here so an
+    // assessment can never attach to a missing MLA/assembly.
+    const [mla] = await query(
+      `SELECT mp.id FROM la_mla_profiles mp JOIN la_assemblies a ON a.id = mp.assembly_id WHERE mp.id = ?`,
+      [id]
+    );
     if (!mla) return NextResponse.json({ message: "MLA not found." }, { status: 404 });
     const d = await req.json().catch(() => ({}));
     const scores = {};
@@ -31,7 +37,9 @@ export async function PUT(req, { params }) {
     } else {
       await query(`INSERT INTO la_mla_assessments (mla_id, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [id, ...keys.map((k) => scores[k])]);
     }
-    return NextResponse.json({ ok: true, total: assessmentTotal(scores) }, { headers: noStore });
+    // Return the database-persisted scores + the server-computed total.
+    const [saved] = await query(`SELECT ${keys.join(", ")} FROM la_mla_assessments WHERE mla_id = ?`, [id]);
+    return NextResponse.json({ ok: true, assessment: saved || {}, total: assessmentTotal(saved || {}) }, { headers: noStore });
   } catch (e) {
     console.error("[LA] mla assessment PUT:", e);
     return NextResponse.json({ message: "Failed to save the assessment." }, { status: 500 });

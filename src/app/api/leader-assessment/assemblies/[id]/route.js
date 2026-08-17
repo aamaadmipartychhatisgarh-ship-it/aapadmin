@@ -50,10 +50,26 @@ export async function GET(_req, { params }) {
     const elections = await query(
       "SELECT * FROM la_mla_elections WHERE assembly_id = ? ORDER BY election_year DESC, id DESC", [id]
     );
+    // Reasons / Strengths / Weaknesses come from the normalized la_political_points
+    // table (one row per point, ordered). Fall back to the legacy JSON mirror when
+    // there are no normalized rows yet (pre-migration data), so nothing is lost.
+    const pointRows = await query(
+      "SELECT kind, content FROM la_political_points WHERE assembly_id = ? ORDER BY kind ASC, sort_order ASC, id ASC", [id]
+    );
     const [analysisRow] = await query("SELECT * FROM la_political_analysis WHERE assembly_id = ?", [id]);
-    const analysis = analysisRow
-      ? { reasons_won: parseList(analysisRow.reasons_won), weaknesses: parseList(analysisRow.weaknesses), strengths: parseList(analysisRow.strengths), updated_at: analysisRow.updated_at }
-      : { reasons_won: [], weaknesses: [], strengths: [] };
+    let analysis;
+    if (pointRows.length) {
+      analysis = { reasons_won: [], strengths: [], weaknesses: [], updated_at: analysisRow?.updated_at };
+      for (const p of pointRows) {
+        if (p.kind === "reason") analysis.reasons_won.push(p.content);
+        else if (p.kind === "strength") analysis.strengths.push(p.content);
+        else if (p.kind === "weakness") analysis.weaknesses.push(p.content);
+      }
+    } else {
+      analysis = analysisRow
+        ? { reasons_won: parseList(analysisRow.reasons_won), weaknesses: parseList(analysisRow.weaknesses), strengths: parseList(analysisRow.strengths), updated_at: analysisRow.updated_at }
+        : { reasons_won: [], weaknesses: [], strengths: [] };
+    }
     const social = await query(
       "SELECT * FROM la_social_structure WHERE assembly_id = ? ORDER BY rank_no ASC, id ASC", [id]
     );

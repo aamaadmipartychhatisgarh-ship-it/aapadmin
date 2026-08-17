@@ -16,9 +16,11 @@ export async function PUT(req, { params }) {
   if (error) return error;
   try {
     const { id } = await params;
+    if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid assembly id." }, { status: 400 });
     const [asm] = await query("SELECT id FROM la_assemblies WHERE id = ?", [id]);
     if (!asm) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
     const d = await req.json().catch(() => ({}));
+    if (!strOrNull(d.name)) return NextResponse.json({ message: "MLA name is required." }, { status: 400 });
     const cols = {
       photo_url: strOrNull(d.photo_url),
       name: strOrNull(d.name),
@@ -43,7 +45,9 @@ export async function PUT(req, { params }) {
     } else {
       await query(`INSERT INTO la_mla_profiles (assembly_id, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [id, ...keys.map((k) => cols[k])]);
     }
-    return NextResponse.json({ ok: true }, { headers: noStore });
+    // Return the database-persisted MLA row (one per assembly — no duplicates).
+    const [mla] = await query("SELECT * FROM la_mla_profiles WHERE assembly_id = ?", [id]);
+    return NextResponse.json({ ok: true, mla }, { headers: noStore });
   } catch (e) {
     console.error("[LA] mla PUT:", e);
     return NextResponse.json({ message: "Failed to save the MLA profile." }, { status: 500 });

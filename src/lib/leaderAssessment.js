@@ -82,6 +82,21 @@ export async function ensureLeaderAssessmentTables() {
        UNIQUE KEY uq_la_analysis_asm (assembly_id),
        CONSTRAINT fk_la_analysis_asm FOREIGN KEY (assembly_id) REFERENCES la_assemblies(id) ON DELETE CASCADE
      )`,
+    // Normalized store for the political-analysis lists (Winning Reasons /
+    // Strengths / Weaknesses): one row per point, ordered, keyed to the assembly
+    // by FK — instead of an unstructured JSON blob. la_political_analysis is kept
+    // in sync as a compatibility mirror.
+    `CREATE TABLE IF NOT EXISTS la_political_points (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       assembly_id INT NOT NULL,
+       kind ENUM('reason','strength','weakness') NOT NULL,
+       sort_order INT NOT NULL DEFAULT 0,
+       content VARCHAR(1000) NOT NULL,
+       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       INDEX idx_la_points_asm_kind (assembly_id, kind, sort_order),
+       CONSTRAINT fk_la_points_asm FOREIGN KEY (assembly_id) REFERENCES la_assemblies(id) ON DELETE CASCADE
+     )`,
     `CREATE TABLE IF NOT EXISTS la_social_structure (
        id INT AUTO_INCREMENT PRIMARY KEY,
        assembly_id INT NOT NULL,
@@ -320,15 +335,28 @@ export function rankCandidates(candidates) {
   });
 }
 
-// Validate a single 0–10 score. Returns a number, or null for empty; throws a
-// string message for invalid input.
+// Validate a single assessment score. Blank/empty → null ("not yet scored").
+// Any provided value must be a whole number from 1 to 10 — non-numeric input,
+// NaN, decimals, and out-of-range values (incl. 0) are rejected with a message.
 export function normalizeScore(v) {
   if (v === "" || v === null || v === undefined) return null;
   const n = Number(v);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 10) {
-    throw "Each score must be a whole number between 0 and 10.";
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 10) {
+    throw "Each score must be a whole number between 1 and 10.";
   }
   return n;
+}
+
+// Validate a community percentage. Blank/empty → null. Any provided value must
+// be a number in [0, 100] (decimals allowed); non-numeric or out-of-range input
+// is rejected with a message.
+export function normalizePercentage(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    throw "Each community percentage must be a number between 0 and 100.";
+  }
+  return Math.round(n * 100) / 100; // keep up to 2 decimals
 }
 
 // Parse a stored JSON-array text field (reasons/weaknesses/strengths) safely.

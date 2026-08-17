@@ -14,7 +14,13 @@ export async function PUT(req, { params }) {
   if (error) return error;
   try {
     const { cid } = await params;
-    const [cand] = await query("SELECT id FROM la_aap_candidates WHERE id = ?", [cid]);
+    if (!/^\d+$/.test(String(cid))) return NextResponse.json({ message: "Invalid candidate id." }, { status: 400 });
+    // A valid candidate id implies a valid assembly (FK); confirm both so an
+    // assessment can never attach to a missing candidate/assembly.
+    const [cand] = await query(
+      `SELECT c.id FROM la_aap_candidates c JOIN la_assemblies a ON a.id = c.assembly_id WHERE c.id = ?`,
+      [cid]
+    );
     if (!cand) return NextResponse.json({ message: "Candidate not found." }, { status: 404 });
     const d = await req.json().catch(() => ({}));
     const scores = {};
@@ -30,7 +36,9 @@ export async function PUT(req, { params }) {
     } else {
       await query(`INSERT INTO la_candidate_assessments (candidate_id, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [cid, ...keys.map((k) => scores[k])]);
     }
-    return NextResponse.json({ ok: true, total: assessmentTotal(scores) }, { headers: noStore });
+    // Return the database-persisted scores + the server-computed total.
+    const [saved] = await query(`SELECT ${keys.join(", ")} FROM la_candidate_assessments WHERE candidate_id = ?`, [cid]);
+    return NextResponse.json({ ok: true, assessment: saved || {}, total: assessmentTotal(saved || {}) }, { headers: noStore });
   } catch (e) {
     console.error("[LA] assessment PUT:", e);
     return NextResponse.json({ message: "Failed to save the assessment." }, { status: 500 });
