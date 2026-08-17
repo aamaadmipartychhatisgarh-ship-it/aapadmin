@@ -7,7 +7,7 @@ import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
 import { formatDate, formatDateTime } from "@/lib/dateFormat";
 import {
-  FileText, Search, Download, FileSpreadsheet, FileOutput, Printer, Table as TableIcon, BarChart3,
+  FileText, Search, Download, FileSpreadsheet, Printer, Table as TableIcon, BarChart3,
   ListFilter, Save, ChevronLeft, ChevronRight, X, ArrowUpDown, Loader2,
   PhoneCall, Contact, Users, ClipboardList, MessageSquareWarning, Clock,
   UserCog, Network, Bell, ScrollText, PhoneOff, Calendar as CalendarIcon,
@@ -465,9 +465,6 @@ function ReportsCenter() {
             </button>
             <button onClick={() => downloadExport("xlsx")} disabled={!result || !!exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40">
               {exporting === "xlsx" ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} />} Excel
-            </button>
-            <button onClick={() => downloadExport("pdf")} disabled={!result || !!exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40">
-              {exporting === "pdf" ? <Loader2 size={15} className="animate-spin" /> : <FileOutput size={15} />} PDF
             </button>
             {/* Full analytical PDF — KPIs + per-day chart + breakdowns (by status,
                 assembly, caller, designation…) for the current filters. */}
