@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Building2, UserSquare2, History, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet, Scale,
-  TrendingUp, Target, ShieldAlert, Star, Vote,
+  TrendingUp, Target, ShieldAlert, Star, Vote, Search,
 } from "lucide-react";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
@@ -273,11 +273,19 @@ function Overview({ onOpen }) {
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  const [pickedId, setPickedId] = useState(null);
   const s = data?.stats;
   if (loading) return <LoadingBlock />;
   if (error) return <ErrorBlock msg={error} onRetry={load} />;
   return (
     <div className="space-y-5">
+      {/* Assembly search — options come only from the master-backed list; the
+          selected id (a real DB id) drives the assessment load below. */}
+      <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
+        <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
+      </Card>
+      {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={onOpen} />}
+
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Stat label="Total Assemblies" value={s?.total_assemblies} />
         <Stat label="With MLA Data" value={s?.assemblies_with_mla} />
@@ -286,6 +294,31 @@ function Overview({ onOpen }) {
         <Stat label="Assessments Done" value={s?.assessments_completed} />
         <Stat label="Avg Candidate Score" value={s?.average_score != null ? `${s.average_score}/100` : null} />
       </div>
+
+      {/* Assembly-wise Top Ranking — ranked by the single Assembly Score
+          (top AAP candidate assessment total), computed on the backend. */}
+      {data?.top_assemblies?.length > 0 && (
+        <Card title="Top Ranked Assemblies" icon={Trophy} sub="Ranked by Assembly Score = the sitting assembly's top AAP candidate assessment total (highest → lowest).">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Rank", "Assembly", "District", "Sitting MLA", "MLA Score", "Top Candidate Score", "Assembly Score"].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+              <tbody className="divide-y divide-gray-100">
+                {data.top_assemblies.map((r) => (
+                  <tr key={r.assembly_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setPickedId(r.assembly_id)}>
+                    <td className="px-3 py-2.5"><span className={`font-bold ${r.rank <= 3 ? RANK_COLOR[r.rank - 1] : "text-gray-400"}`}>{r.rank}</span></td>
+                    <td className="px-3 py-2.5 font-semibold text-gray-900">{r.assembly_name}</td>
+                    <td className="px-3 py-2.5 text-gray-600">{r.district || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-700">{r.mla_name || <span className="text-gray-300">No MLA</span>}</td>
+                    <td className="px-3 py-2.5 text-gray-400">{r.mla_score != null ? `${r.mla_score}/100` : "N/A"}</td>
+                    <td className="px-3 py-2.5 font-semibold">{r.top_candidate_score != null ? `${r.top_candidate_score}/100` : "—"}</td>
+                    <td className="px-3 py-2.5"><span className="font-bold text-[#164FA3]">{r.assembly_score != null ? `${r.assembly_score}/100` : "—"}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {data?.top_candidates?.length > 0 && (
         <Card title="Top-Ranked Candidates" icon={Trophy}>
@@ -325,6 +358,121 @@ function Overview({ onOpen }) {
         )}
       </Card>
     </div>
+  );
+}
+
+// Searchable assembly picker. Options come ONLY from the master-backed list
+// passed in (each carries its real DB id); selecting one calls onPick(id). Filter
+// is client-side over the already-loaded list, so it stays instant even with the
+// full 90 assemblies, and ids are de-duped defensively.
+function AssemblyCombobox({ assemblies, value, onPick }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = assemblies.find((a) => String(a.id) === String(value));
+  const seen = new Set();
+  const list = assemblies.filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true)));
+  const needle = q.trim().toLowerCase();
+  const filtered = needle
+    ? list.filter((a) => `${a.name} ${a.district || ""}`.toLowerCase().includes(needle))
+    : list;
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2.5 bg-white focus-within:ring-2 focus-within:ring-[#164FA3]/40">
+        <Search size={16} className="text-gray-400 shrink-0" />
+        <input
+          value={open ? q : (selected ? `${selected.name}${selected.district ? ` · ${selected.district}` : ""}` : q)}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => { setOpen(true); setQ(""); }}
+          placeholder="Search any assembly by name…"
+          className="flex-1 outline-none text-sm bg-transparent text-gray-900"
+        />
+        {selected && !open && (
+          <button onClick={() => { onPick(null); setQ(""); }} className="text-gray-400 hover:text-gray-600" title="Clear"><X size={15} /></button>
+        )}
+      </div>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-72 overflow-auto">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-3 text-sm text-gray-400">No assemblies match “{q}”.</div>
+            ) : filtered.map((a) => (
+              <button
+                key={a.id}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { onPick(a.id); setOpen(false); setQ(""); }}
+                className={`w-full text-left px-3 py-2 hover:bg-gray-50 text-sm ${String(a.id) === String(value) ? "bg-[#164FA3]/5" : ""}`}
+              >
+                <span className="font-semibold text-gray-900">{a.name}</span>
+                {a.district && <span className="text-gray-400"> · {a.district}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Inline assessment summary for the assembly picked in the search box. Fetches
+// the full bundle by the assembly's DB id, with proper loading / error / empty
+// states, and links out to the full assessment tabs.
+function AssemblyAssessmentPanel({ assemblyId, onOpen }) {
+  const [bundle, setBundle] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try { setBundle(await api(`/api/leader-assessment/assemblies/${assemblyId}`)); }
+    catch (e) { setError(e.message || "Failed to load the assessment."); setBundle(null); }
+    finally { setLoading(false); }
+  }, [assemblyId]);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <Card title="Assembly Assessment" icon={ClipboardCheck}><LoadingBlock /></Card>;
+  if (error) return <Card title="Assembly Assessment" icon={ClipboardCheck}><ErrorBlock msg={error} onRetry={load} /></Card>;
+  if (!bundle?.assembly) return null;
+  const { assembly, mla, candidates = [] } = bundle;
+  const assessed = candidates.filter((c) => c.total > 0);
+  const hasAnything = candidates.length > 0 || (mla && mla.name);
+  const topScore = assessed.length ? Math.max(...assessed.map((c) => c.total)) : null;
+  return (
+    <Card
+      title={`Assessment · ${assembly.name}`}
+      icon={ClipboardCheck}
+      sub={[assembly.district, mla?.name ? `MLA: ${mla.name}` : "No MLA on record"].filter(Boolean).join(" · ")}
+      right={<button onClick={() => onOpen(assembly.id)} className="text-sm font-semibold text-[#164FA3] hover:underline">Open full assessment →</button>}
+    >
+      {!hasAnything ? (
+        <Empty
+          msg="No assessment recorded for this assembly yet."
+          action={<button onClick={() => onOpen(assembly.id)} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold">Start assessing →</button>}
+        />
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Stat label="Assembly Score" value={topScore != null ? `${topScore}/100` : null} hint="Top candidate" />
+            <Stat label="AAP Candidates" value={candidates.length} />
+            <Stat label="Assessed" value={`${assessed.length}/${candidates.length || 0}`} />
+            <Stat label="Sitting MLA" value={mla?.name || null} />
+          </div>
+          {candidates.length === 0 ? (
+            <div className="text-sm text-gray-400">No AAP candidates added yet.</div>
+          ) : (
+            <div className="space-y-2.5">
+              {candidates.map((c) => (
+                <div key={c.id} className="flex items-center gap-3">
+                  <span className={`w-6 text-center font-bold ${c.rank && c.rank <= 3 && c.total > 0 ? RANK_COLOR[c.rank - 1] : "text-gray-400"}`}>{c.rank || "—"}</span>
+                  <div className="w-40 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div></div>
+                  <div className="flex-1"><ScoreBar value={c.total} max={100} showValue={false} /></div>
+                  <span className="font-bold text-[#164FA3] w-16 text-right">{c.total}/100</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 

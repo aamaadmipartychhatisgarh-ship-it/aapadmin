@@ -32,9 +32,48 @@ export async function GET() {
          JOIN la_aap_candidates c ON c.id = s.candidate_id
          JOIN la_assemblies asm ON asm.id = c.assembly_id`
     );
-    const scored = rows.map((r) => ({ id: r.id, name: r.name, assembly_name: r.assembly_name, total: assessmentTotal(r) }));
+    const scored = rows.map((r) => ({ id: r.id, name: r.name, assembly_id: r.assembly_id, assembly_name: r.assembly_name, total: assessmentTotal(r) }));
     const avg = scored.length ? Math.round((scored.reduce((s, r) => s + r.total, 0) / scored.length) * 10) / 10 : 0;
     const top = [...scored].sort((x, y) => y.total - x.total).slice(0, 5);
+
+    // ---- Assembly-wise Top Ranking -------------------------------------------
+    // ONE consistent Assembly Ranking Score, used here and reusable everywhere:
+    //   Assembly Score = the assembly's TOP AAP candidate total assessment
+    //   (0–100) — the only approved assessment score the system computes (the
+    //   MLA is not scored on the 10 parameters, so MLA Assessment Score is N/A).
+    // Ranked highest → lowest, computed live from the assessments above.
+    const topCandByAsm = new Map();   // assembly_id -> best candidate total
+    for (const c of scored) {
+      const prev = topCandByAsm.get(c.assembly_id);
+      if (prev == null || c.total > prev) topCandByAsm.set(c.assembly_id, c.total);
+    }
+    // Authoritative assembly meta (Master Data name + parent district) + sitting MLA.
+    const asmMeta = await query(
+      `SELECT a.id AS assembly_id, ml.name AS assembly_name,
+              dl.name AS district, mp.name AS mla_name
+         FROM la_assemblies a
+         JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
+         LEFT JOIN locations dl ON dl.id = ml.parent_id AND dl.type = 'district'
+         LEFT JOIN la_mla_profiles mp ON mp.assembly_id = a.id`
+    );
+    const topAssemblies = asmMeta
+      .map((m) => {
+        const assemblyScore = topCandByAsm.has(m.assembly_id) ? topCandByAsm.get(m.assembly_id) : null;
+        return {
+          assembly_id: m.assembly_id,
+          assembly_name: m.assembly_name,
+          district: m.district || null,
+          mla_name: m.mla_name || null,
+          mla_score: null,                 // MLA is not assessed on the 10 parameters in this system
+          top_candidate_score: assemblyScore,
+          assembly_score: assemblyScore,   // the ranking score
+        };
+      })
+      // Only rank assemblies that actually have an assessment score.
+      .filter((m) => m.assembly_score != null)
+      .sort((x, y) => y.assembly_score - x.assembly_score)
+      .slice(0, 10)
+      .map((m, i) => ({ ...m, rank: i + 1 }));
 
     return NextResponse.json({
       stats: {
@@ -46,6 +85,7 @@ export async function GET() {
         average_score: avg,
       },
       top_candidates: top,
+      top_assemblies: topAssemblies,
     }, { headers: noStore });
   } catch (e) {
     console.error("[LA] overview GET:", e);
