@@ -11,12 +11,15 @@ export async function GET() {
   const { error } = await guard();
   if (error) return error;
   try {
-    // Total Assembly = the Administration assembly master (locations of type
-    // 'assembly'), which is aligned to the official Chhattisgarh list of 90.
-    // COUNT(DISTINCT name) so any duplicate rows are never counted twice, and it
-    // tracks the master automatically if Administration changes it. This is the
-    // real constituency count, independent of the la_assemblies work records.
-    const [[a]] = await query("SELECT COUNT(DISTINCT name) AS total FROM locations WHERE type = 'assembly'").then((r) => [r]);
+    // Total Assembly = exactly the set of assemblies the module lists, which is
+    // mirrored from the Master Data (locations type='assembly'): the count of
+    // master-linked la_assemblies rows when the master is populated, else the
+    // legacy rows. Matching the list's own rule guarantees the card and the list
+    // never disagree, and it tracks Master Data automatically.
+    const linkedCnt = await query("SELECT COUNT(*) AS n FROM la_assemblies WHERE location_id IS NOT NULL");
+    const a = Number(linkedCnt[0]?.n || 0) > 0
+      ? { total: Number(linkedCnt[0].n) }
+      : (await query("SELECT COUNT(*) AS total FROM la_assemblies"))[0] || { total: 0 };
     const [[wm]] = await query("SELECT COUNT(*) AS n FROM la_mla_profiles WHERE name IS NOT NULL AND name <> ''").then((r) => [r]);
     const [[wc]] = await query("SELECT COUNT(DISTINCT assembly_id) AS n FROM la_aap_candidates").then((r) => [r]);
     const [[tc]] = await query("SELECT COUNT(*) AS n FROM la_aap_candidates").then((r) => [r]);

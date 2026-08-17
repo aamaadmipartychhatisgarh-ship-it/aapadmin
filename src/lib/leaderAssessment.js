@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { CG_ASSEMBLIES, normDistrict } from "@/lib/chhattisgarhAssemblies";
+import { CG_ASSEMBLIES, normDistrict, requiredWorkersFor } from "@/lib/chhattisgarhAssemblies";
 
 // ---------------------------------------------------------------------------
 // Leader / Assembly Assessment module — schema (lazy, idempotent) + shared
@@ -153,8 +153,66 @@ export async function ensureLeaderAssessmentTables() {
   // locations district (used to compute the LIVE worker count).
   await ensureColumn("la_assemblies", "required_workers", "INT NULL");
   await ensureColumn("la_assemblies", "district_id", "INT NULL");
-  await seedLeaderAssemblies();
+  // Reference to the authoritative Master Data assembly (locations.id where
+  // type='assembly'). When set, the row mirrors a master assembly and the module
+  // lists it; legacy rows (NULL) are kept but hidden once master rows exist.
+  await ensureColumn("la_assemblies", "location_id", "INT NULL");
+  try { await query("CREATE UNIQUE INDEX uq_la_asm_location ON la_assemblies (location_id)"); } catch { /* index already exists */ }
+  await syncAssemblies();
   ensured = true;
+}
+
+// Sync la_assemblies to the authoritative Master Data assemblies — the
+// `locations` rows of type 'assembly'. Each master assembly gets exactly one
+// mirrored la_assemblies row (matched by location_id, so repeat runs never
+// duplicate), carrying the correct name, its parent district and that district's
+// required-worker target. This keeps the module's assembly list/count in sync
+// with Master Data automatically and never hardcodes names. Non-destructive:
+// existing rows are updated in place, none are deleted (so any data attached to
+// legacy rows is preserved). If no master assemblies are configured yet, fall
+// back to the district-based seed so the module is still usable.
+async function syncAssemblies() {
+  try {
+    const masters = await query(
+      `SELECT a.id AS location_id, a.name AS name,
+              d.id AS district_id, d.name AS district_name
+         FROM locations a
+         LEFT JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
+        WHERE a.type = 'assembly'`
+    );
+    // Only adopt Master Data when it's actually populated with the real
+    // constituency set (Chhattisgarh has 90). A handful of stray assembly rows
+    // means the master isn't ready — keep the district-based seed so the module
+    // never regresses to a near-empty list.
+    const MIN_MASTER_ASSEMBLIES = 30;
+    if (masters.length < MIN_MASTER_ASSEMBLIES) {
+      await seedLeaderAssemblies();
+      return;
+    }
+    const existing = await query("SELECT id, location_id FROM la_assemblies WHERE location_id IS NOT NULL");
+    const byLoc = new Map(existing.map((r) => [Number(r.location_id), r.id]));
+    for (const m of masters) {
+      const req = m.district_name ? requiredWorkersFor(m.district_name) : null;
+      const known = byLoc.get(Number(m.location_id));
+      if (known) {
+        await query(
+          `UPDATE la_assemblies
+              SET name = ?, district = ?, district_id = ?,
+                  required_workers = COALESCE(required_workers, ?)
+            WHERE id = ?`,
+          [m.name, m.district_name || null, m.district_id || null, req, known]
+        );
+      } else {
+        await query(
+          `INSERT INTO la_assemblies (name, district, district_id, required_workers, location_id)
+           VALUES (?, ?, ?, ?, ?)`,
+          [m.name, m.district_name || null, m.district_id || null, req, m.location_id]
+        );
+      }
+    }
+  } catch (e) {
+    console.error("[LA] syncAssemblies:", e?.message || e);
+  }
 }
 
 // Idempotent master seed for the 33 Chhattisgarh assemblies (names + fixed

@@ -17,6 +17,11 @@ export async function GET(req) {
     const district = searchParams.get("district")?.trim();
     const where = [];
     const params = [];
+    // Once assemblies are mirrored from Master Data (locations type='assembly'),
+    // list ONLY those authoritative rows — legacy district-seeded rows are hidden
+    // (not deleted). Falls back to all rows on deployments without master data.
+    const linked = await query("SELECT COUNT(*) AS n FROM la_assemblies WHERE location_id IS NOT NULL");
+    if (Number(linked[0]?.n || 0) > 0) where.push("a.location_id IS NOT NULL");
     if (search) { where.push("(a.name LIKE ? OR a.number LIKE ? OR a.district LIKE ? OR a.lok_sabha LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
     if (district) { where.push("a.district = ?"); params.push(district); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
