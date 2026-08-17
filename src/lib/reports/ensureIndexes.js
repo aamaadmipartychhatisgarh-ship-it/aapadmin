@@ -40,9 +40,15 @@ async function addIndexIfMissing(pool, idx) {
   }
 }
 
-// Fire ONCE per process, in the BACKGROUND — this never blocks a request. If the
-// indexes already exist (steady state) it is two cheap information_schema reads.
+// DISABLED BY DEFAULT for production safety. Running a heavy ALTER TABLE ADD
+// INDEX from inside a web request can lock a large calls/contacts table and
+// spike CPU/memory on shared hosting — a possible cause of an outage. Create the
+// indexes during a maintenance window with:
+//     node scripts/add-report-indexes.mjs
+// (idempotent, no per-statement time cap). Only opt back into the automatic
+// background create by setting REPORTS_AUTO_INDEX=1 once the host can handle it.
 export function ensureReportIndexes() {
+  if (process.env.REPORTS_AUTO_INDEX !== "1") return;
   if (started) return;
   started = true;
   const pool = getPool();

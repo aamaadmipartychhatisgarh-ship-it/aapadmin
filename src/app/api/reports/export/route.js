@@ -12,11 +12,14 @@ import { buildAnalytics } from "@/lib/reports/analytical";
 
 export const dynamic = "force-dynamic";
 
-// The PDF renderer is much slower per row than CSV/Excel, so the detail PDF is
-// capped to a count it can always render within the gateway window; the full set
-// stays available via CSV/Excel (which is noted inside the PDF when it truncates).
-const PDF_MAX_ROWS = Number(process.env.REPORTS_PDF_MAX_ROWS) || 6000;
-const PDF_RENDER_TIMEOUT_MS = Number(process.env.REPORTS_PDF_TIMEOUT_MS) || 50000;
+// The PDF renderer holds the whole document tree in memory and is CPU-heavy, so
+// the detail PDF is capped to a count it can render WITHOUT risking an OOM /
+// resource spike on the production host (the earlier uncapped render was a
+// crash risk). Conservative default for stability; raise via env only if the
+// host has headroom. The full dataset always stays available via CSV/Excel, and
+// the PDF says so when it truncates.
+const PDF_MAX_ROWS = Number(process.env.REPORTS_PDF_MAX_ROWS) || 2000;
+const PDF_RENDER_TIMEOUT_MS = Number(process.env.REPORTS_PDF_TIMEOUT_MS) || 45000;
 
 // Render a PDF with a hard timeout so the request can never hang forever (which
 // left the export button stuck). On timeout we throw a clean, user-facing error.
