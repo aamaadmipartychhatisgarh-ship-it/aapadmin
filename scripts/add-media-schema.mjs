@@ -104,6 +104,7 @@ try {
       venue VARCHAR(500) NULL,
       agenda TEXT NULL,
       status ENUM('scheduled','completed','cancelled') DEFAULT 'scheduled',
+      file_url VARCHAR(512) NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_pc_date (conference_date)
     )`);

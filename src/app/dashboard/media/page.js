@@ -259,6 +259,11 @@ function ConferencesTab({ data, onChange }) {
                 <div className="text-xs text-gray-500 uppercase tracking-wide">{new Date(c.conference_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", weekday: "short" })}</div>
                 <h4 className="font-bold text-gray-900 mt-1">{c.title}</h4>
                 {c.venue && <div className="text-xs text-gray-500 mt-1">{c.venue}</div>}
+                {c.file_url && (
+                  <a href={c.file_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-[#164FA3] hover:underline">
+                    <FileText size={13} /> Open document
+                  </a>
+                )}
               </div>
               <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.status === "completed" ? "bg-emerald-100 text-emerald-700" : c.status === "cancelled" ? "bg-gray-100 text-gray-400" : "bg-amber-100 text-amber-700"}`}>{c.status}</span>
             </div>
@@ -749,14 +754,26 @@ function ConferenceModal({ onClose, onSaved, editing }) {
     venue: editing.venue || "",
     agenda: editing.agenda || "",
     status: editing.status || "scheduled",
-  } : { title: "", conference_date: "", venue: "AAP State Office, Raipur", agenda: "" });
+    file_url: editing.file_url || "",
+  } : { title: "", conference_date: "", venue: "AAP State Office, Raipur", agenda: "", file_url: "" });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   async function save() {
+    setError("");
+    if (!form.title.trim()) { setError("Title is required."); return; }
+    if (!form.conference_date) { setError("Date & time are required."); return; }
     setSaving(true);
-    const url = editing ? `/api/media/conferences/${editing.id}` : "/api/media/conferences";
-    const method = editing ? "PUT" : "POST";
-    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    if (r.ok) onSaved(); else setSaving(false);
+    try {
+      const url = editing ? `/api/media/conferences/${editing.id}` : "/api/media/conferences";
+      const method = editing ? "PUT" : "POST";
+      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.message || "Unable to save the press conference. Please try again.");
+      onSaved();
+    } catch (e) {
+      setError(e.message || "Unable to save the press conference. Please try again.");
+      setSaving(false); // keep the modal open, preserve entered data
+    }
   }
   return (
     <Modal title={editing ? "Edit Press Conference" : "Schedule Press Conference"} onClose={onClose}>
@@ -764,6 +781,11 @@ function ConferenceModal({ onClose, onSaved, editing }) {
       <input type="datetime-local" className={inp} value={form.conference_date} onChange={(e) => setForm({ ...form, conference_date: e.target.value })} />
       <input className={inp} placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
       <textarea className={inp} rows={3} placeholder="Agenda" value={form.agenda} onChange={(e) => setForm({ ...form, agenda: e.target.value })} />
+      <div>
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Document / Media File (PDF, JPG, PNG, WEBP)</label>
+        <FileUpload value={form.file_url} onChange={(url) => setForm({ ...form, file_url: url })} endpoint="/api/media/uploads" accept=".pdf,.jpg,.jpeg,.png,.webp" />
+        <p className="text-[11px] text-gray-400 mt-1">Speech, press note, briefing document or related media material.</p>
+      </div>
       {editing && (
         <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
           <option value="scheduled">Scheduled</option>
@@ -771,6 +793,7 @@ function ConferenceModal({ onClose, onSaved, editing }) {
           <option value="cancelled">Cancelled</option>
         </select>
       )}
+      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.title || !form.conference_date} />
     </Modal>
   );

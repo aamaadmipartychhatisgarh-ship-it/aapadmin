@@ -3,14 +3,16 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessMedia } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensureConferenceSchema } from "@/lib/conferenceSchema";
 
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    await ensureConferenceSchema();
     const { id } = await params;
     const d = await req.json();
-    const fields = ["title", "conference_date", "venue", "agenda", "status"];
+    const fields = ["title", "conference_date", "venue", "agenda", "status", "file_url"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
