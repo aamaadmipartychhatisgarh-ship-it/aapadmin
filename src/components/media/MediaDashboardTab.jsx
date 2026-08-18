@@ -6,14 +6,17 @@ import { Newspaper, Mic, Tv, FileText, Clock, TrendingUp, TrendingDown, Minus, L
 // Yesterday's Performance — six KPI cards, each with Yesterday/Weekly/
 // Monthly counts and a trend arrow, sourced from GET /api/media/dashboard
 // (a dedicated endpoint, not the oversight-only Reports Engine, so
-// press_media staff can see it too — see that route's comment). Clicking a
-// card opens the matching Reports Center module for the full detail.
+// press_media staff can see it too — see that route's comment).
+//
+// Clicking a card drills into the RELEVANT Media Center tab (its own section),
+// NOT the Reports page — Reports opens only from the Reports menu. `tab` is the
+// Media Center tab key to switch to (see the parent's TABS).
 const CARDS = [
-  { key: "newspapersPublished", label: "Newspapers Published", icon: Newspaper, color: "bg-blue-50 text-[#164FA3]", module: "press_notes" },
-  { key: "pressConferences", label: "Press Conferences Held", icon: Mic, color: "bg-violet-50 text-violet-600", module: "press_conferences" },
-  { key: "tvDebates", label: "TV News Debates", icon: Tv, color: "bg-amber-50 text-amber-600", module: "debates" },
-  { key: "mediaCoverageTotal", label: "Media Coverage Total", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600", module: "press_notes" },
-  { key: "pressNotesReleased", label: "Press Notes Released", icon: FileText, color: "bg-sky-50 text-sky-600", module: "press_notes" },
+  { key: "newspapersPublished", label: "Newspapers Published", icon: Newspaper, color: "bg-blue-50 text-[#164FA3]", tab: "newspapers" },
+  { key: "pressConferences", label: "Press Conferences Held", icon: Mic, color: "bg-violet-50 text-violet-600", tab: "conferences" },
+  { key: "tvDebates", label: "TV News Debates", icon: Tv, color: "bg-amber-50 text-amber-600", tab: "channels" },
+  { key: "mediaCoverageTotal", label: "Media Coverage Total", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600", tab: "newspapers" },
+  { key: "pressNotesReleased", label: "Press Notes Released", icon: FileText, color: "bg-sky-50 text-sky-600", tab: "newspapers" },
 ];
 
 function trend(current, previous) {
@@ -34,7 +37,7 @@ function TrendBadge({ current, previous }) {
   );
 }
 
-export default function MediaDashboardTab() {
+export default function MediaDashboardTab({ onOpenTab }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -57,10 +60,12 @@ export default function MediaDashboardTab() {
           const d = data[c.key];
           const Icon = c.icon;
           return (
-            <a
+            <button
               key={c.key}
-              href={`/dashboard/reports?module=${c.module}`}
-              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 hover:shadow-md transition-shadow"
+              type="button"
+              onClick={() => onOpenTab?.(c.tab)}
+              title={`View ${c.label} in Media Center`}
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 text-left w-full hover:shadow-md hover:border-[#164FA3]/30 transition-shadow"
             >
               <div className="flex items-center gap-2 mb-3">
                 <div className={`w-9 h-9 rounded-xl ${c.color} flex items-center justify-center shrink-0`}><Icon size={18} /></div>
@@ -77,7 +82,7 @@ export default function MediaDashboardTab() {
               <div className="flex items-center gap-4 text-xs text-gray-500">
                 <span>This month: <span className="font-semibold text-gray-700">{d.this_month.toLocaleString()}</span> <TrendBadge current={d.this_month} previous={d.last_month} /></span>
               </div>
-            </a>
+            </button>
           );
         })}
 

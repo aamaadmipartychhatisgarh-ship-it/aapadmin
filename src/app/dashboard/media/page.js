@@ -91,7 +91,7 @@ function Body() {
         </div>
       )}
 
-      {tab === "dashboard" && <MediaDashboardTab />}
+      {tab === "dashboard" && <MediaDashboardTab onOpenTab={setTab} />}
       {tab === "newspapers" && <NewspapersTab data={data} onChange={load} flash={setToast} filtered={filterActive} />}
       {tab === "channels" && <ChannelsTab data={data} onChange={load} flash={setToast} filtered={filterActive} />}
       {tab === "conferences" && <ConferencesTab data={data} onChange={load} filtered={filterActive} />}
