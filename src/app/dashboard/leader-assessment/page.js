@@ -34,7 +34,9 @@ const TABS = [
   { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: false },
   { key: "elections", label: "Election History", icon: History, scoped: true },
   { key: "candidates", label: "AAP Candidates", icon: Users, scoped: false },
-  { key: "analysis", label: "Political Analysis", icon: Brain, scoped: true },
+  // The standalone "Political Analysis" tab was removed — its full functionality
+  // (Top Reasons / Strengths / Weaknesses + Assembly Social Profile) lives in the
+  // Full View modal (AssemblyFullView → AnalysisTab). Nothing was deleted.
 ];
 
 const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]/40";
@@ -171,7 +173,6 @@ function Body() {
         <>
           <AssemblyHeader a={bundle.assembly} status={bundle.status} />
           {tab === "elections" && <ElectionsTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
-          {tab === "analysis" && <AnalysisTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
         </>
       )}
     </div>
@@ -309,11 +310,11 @@ function Overview({ flash, fail }) {
       {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={setOpenId} version={dataVersion} />}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <Stat label="Total Assemblies" value={s?.total_assemblies} />
+        <Stat label="Total Completed Assemblies" value={s?.total_completed_assemblies} />
         <Stat label="With MLA Data" value={s?.assemblies_with_mla} />
-        <Stat label="With AAP Candidates" value={s?.assemblies_with_candidates} />
+        <Stat label="With Candidates Data" value={s?.assemblies_with_candidates} />
         <Stat label="Total Candidates" value={s?.total_candidates} />
-        <Stat label="Assessments Done" value={s?.assessments_completed} />
+        <Stat label="Assessment Done" value={s?.assessments_completed} />
         <Stat label="Avg Candidate Score" value={s?.average_score != null ? `${s.average_score}/100` : null} />
       </div>
 
