@@ -8,6 +8,7 @@ import {
   Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil, ChevronDown, Check,
 } from "lucide-react";
 import MediaDashboardTab from "@/components/media/MediaDashboardTab";
+import FloatingPopover from "@/components/FloatingPopover";
 
 export default function Page() {
   return <SupervisorGuard allow={canAccessMedia}><Body /></SupervisorGuard>;
@@ -554,43 +555,47 @@ function PressNoteModal({ newspapers, onClose, onSaved, editing }) {
 function SpokespersonMultiSelect({ options, value, onChange }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const ref = useRef(null);
-  useEffect(() => {
-    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-  const selected = options.filter((o) => value.includes(o.id));
+  const anchorRef = useRef(null);
+  const [width, setWidth] = useState(320);
+  // Compare loosely so ids that arrive as numbers or strings both resolve, and
+  // never store a duplicate (toggle only ever adds an id not already present).
+  const isOn = (id) => value.some((v) => String(v) === String(id));
+  const selected = options.filter((o) => isOn(o.id));
   const filtered = options.filter((o) => o.name.toLowerCase().includes(q.trim().toLowerCase()));
-  const toggle = (id) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const toggle = (id) => onChange(isOn(id) ? value.filter((x) => String(x) !== String(id)) : [...value, id]);
+  const openMenu = () => {
+    if (anchorRef.current) setWidth(anchorRef.current.getBoundingClientRect().width);
+    setOpen((v) => !v);
+  };
   return (
-    <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left flex items-center justify-between hover:bg-gray-50">
+    <div>
+      {/* Trigger. The menu itself is portaled (FloatingPopover) so the modal's
+          overflow-auto can't clip it and a long list scrolls freely / flips up
+          when there's no room below. */}
+      <button ref={anchorRef} type="button" onClick={openMenu} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left flex items-center justify-between hover:bg-gray-50">
         <span className={selected.length ? "text-gray-800" : "text-gray-400"}>{selected.length ? `${selected.length} spokesperson${selected.length === 1 ? "" : "s"} selected` : "Select spokesperson(s)"}</span>
         <ChevronDown size={16} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-      {open && (
-        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg">
-          <div className="p-2 border-b border-gray-100">
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search spokesperson…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
-          </div>
-          <div className="max-h-48 overflow-auto">
-            {options.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-gray-400">No spokespersons exist yet. Add them on the Spokespersons tab.</div>
-            ) : filtered.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-gray-400">No match for “{q}”.</div>
-            ) : filtered.map((o) => {
-              const on = value.includes(o.id);
-              return (
-                <button key={o.id} type="button" onClick={() => toggle(o.id)} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50">
-                  <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? "bg-[#164FA3] border-[#164FA3]" : "border-gray-300"}`}>{on && <Check size={12} className="text-white" />}</span>
-                  <span className="truncate">{o.name}</span>
-                </button>
-              );
-            })}
-          </div>
+      <FloatingPopover anchorRef={anchorRef} open={open} onClose={() => { setOpen(false); setQ(""); }} align="left" width={width} estimatedHeight={300}>
+        <div className="p-2 border-b border-gray-100">
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search spokesperson…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
         </div>
-      )}
+        <div className="max-h-56 overflow-auto">
+          {options.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-400">No spokespersons exist yet. Add them on the Spokespersons tab.</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-400">No match for “{q}”.</div>
+          ) : filtered.map((o) => {
+            const on = isOn(o.id);
+            return (
+              <button key={o.id} type="button" onClick={() => toggle(o.id)} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50">
+                <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? "bg-[#164FA3] border-[#164FA3]" : "border-gray-300"}`}>{on && <Check size={12} className="text-white" />}</span>
+                <span className="truncate">{o.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      </FloatingPopover>
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-2">
           {selected.map((o) => (
@@ -686,21 +691,23 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
 function ChannelSelect({ options, value, onChange }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const ref = useRef(null);
-  useEffect(() => {
-    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setQ(""); } }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+  const anchorRef = useRef(null);
+  const [width, setWidth] = useState(320);
   // Loose match so a numeric id from the DB and a string form value both resolve.
   const selected = options.find((o) => String(o.id) === String(value)) || null;
   const filtered = options.filter((o) => o.name.toLowerCase().includes(q.trim().toLowerCase()));
   const noChannels = options.length === 0;
+  const openMenu = () => {
+    if (noChannels) return;
+    if (anchorRef.current) setWidth(anchorRef.current.getBoundingClientRect().width);
+    setOpen((v) => !v);
+  };
   return (
-    <div ref={ref} className="relative">
+    <div>
       <button
+        ref={anchorRef}
         type="button"
-        onClick={() => { if (!noChannels) setOpen((v) => !v); }}
+        onClick={openMenu}
         className={`w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left flex items-center justify-between ${noChannels ? "bg-gray-50 cursor-not-allowed" : "hover:bg-gray-50"}`}
       >
         <span className={selected ? "text-gray-800 truncate" : "text-gray-400 truncate"}>
@@ -708,30 +715,29 @@ function ChannelSelect({ options, value, onChange }) {
         </span>
         {!noChannels && <ChevronDown size={16} className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />}
       </button>
-      {open && !noChannels && (
-        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg">
-          <div className="p-2 border-b border-gray-100">
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search channel…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
-          </div>
-          <div className="max-h-48 overflow-auto">
-            {/* Clear selection (channel is optional on a debate). */}
-            <button type="button" onClick={() => { onChange(""); setOpen(false); setQ(""); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-400 hover:bg-gray-50">
-              — No channel —
-            </button>
-            {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-xs text-gray-400">No match for “{q}”.</div>
-            ) : filtered.map((o) => {
-              const on = String(o.id) === String(value);
-              return (
-                <button key={o.id} type="button" onClick={() => { onChange(o.id); setOpen(false); setQ(""); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50">
-                  <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${on ? "bg-[#164FA3] border-[#164FA3]" : "border-gray-300"}`}>{on && <Check size={11} className="text-white" />}</span>
-                  <span className="truncate">{o.name}</span>
-                </button>
-              );
-            })}
-          </div>
+      {/* Portaled menu so the modal's overflow-auto can't clip it. */}
+      <FloatingPopover anchorRef={anchorRef} open={open && !noChannels} onClose={() => { setOpen(false); setQ(""); }} align="left" width={width} estimatedHeight={280}>
+        <div className="p-2 border-b border-gray-100">
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search channel…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
         </div>
-      )}
+        <div className="max-h-56 overflow-auto">
+          {/* Clear selection (channel is optional on a debate). */}
+          <button type="button" onClick={() => { onChange(""); setOpen(false); setQ(""); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-400 hover:bg-gray-50">
+            — No channel —
+          </button>
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-400">No match for “{q}”.</div>
+          ) : filtered.map((o) => {
+            const on = String(o.id) === String(value);
+            return (
+              <button key={o.id} type="button" onClick={() => { onChange(o.id); setOpen(false); setQ(""); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50">
+                <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${on ? "bg-[#164FA3] border-[#164FA3]" : "border-gray-300"}`}>{on && <Check size={11} className="text-white" />}</span>
+                <span className="truncate">{o.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      </FloatingPopover>
     </div>
   );
 }
