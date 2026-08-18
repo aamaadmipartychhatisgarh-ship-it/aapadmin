@@ -391,15 +391,30 @@ function SumCard({ label, value, accent }) {
 
 // ============================================================ MODALS
 
+// Extensions the upload accepts, kept in sync with the backend sniffer
+// (mediaFileSniff). Used for the friendly "supported formats" hint, the
+// image-vs-document preview, and a lenient frontend pre-check.
+const UPLOAD_EXT_RE = /\.(jpe?g|png|webp|pdf|docx?)$/i;
+const IMG_EXT_RE = /\.(jpe?g|png|webp)$/i;
+function extFromUrl(u = "") { return (String(u).split(".").pop() || "").toLowerCase(); }
+
 function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api/uploads", maxMB = 25 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [name, setName] = useState("");
   const ref = useRef(null);
   async function pick(e) {
     const f = e.target.files?.[0];
     if (e.target) e.target.value = ""; // allow re-selecting the same file
     if (!f) return;
     setErr("");
+    // Frontend validation (backend re-validates by magic bytes). Reject clearly
+    // BEFORE uploading so a genuinely unsupported file gives an instant, precise
+    // message — and a valid one never trips a false "upload failed".
+    if (!UPLOAD_EXT_RE.test(f.name || "")) {
+      setErr("Unsupported format. Use JPG, JPEG, PNG, WEBP or PDF.");
+      return;
+    }
     if (f.size > maxMB * 1024 * 1024) { setErr(`File too large (max ${maxMB} MB).`); return; }
     setBusy(true);
     try {
@@ -407,6 +422,7 @@ function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api
       const r = await fetch(endpoint, { method: "POST", body: fd });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.message || "File upload failed. Please check the file and try again.");
+      setName(f.name);
       onChange(body.url);
     } catch (e2) {
       setErr(e2.message || "File upload failed. Please try again.");
@@ -414,14 +430,27 @@ function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api
       setBusy(false);
     }
   }
+  const isImg = value && IMG_EXT_RE.test(value);
+  const ext = value ? extFromUrl(value) : "";
   return (
     <div>
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap">
         <input ref={ref} type="file" accept={accept} className="hidden" onChange={pick} />
         <button type="button" onClick={() => ref.current?.click()} disabled={busy} className="inline-flex items-center gap-1.5 text-xs border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50">
-          {busy ? <><Loader2 size={13} className="animate-spin" /> Uploading…</> : <><Upload size={13} /> {value ? "Replace" : "Upload"}</>}
+          {busy ? <><Loader2 size={13} className="animate-spin" /> Uploading…</> : <><Upload size={13} /> {value ? "Replace file" : "Upload file"}</>}
         </button>
-        {value && <a href={value} target="_blank" rel="noreferrer" className="text-xs text-[#164FA3] hover:underline">View file</a>}
+        {value && !busy && (
+          <span className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 pl-1.5 pr-2 py-1">
+            {isImg
+              ? <img src={value} alt="" className="w-9 h-9 rounded object-cover border border-gray-200" />
+              : <span className="w-9 h-9 rounded bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center"><FileText size={16} /></span>}
+            <span className="flex flex-col leading-tight">
+              <a href={value} target="_blank" rel="noreferrer" className="text-xs text-[#164FA3] hover:underline max-w-[10rem] truncate" title={name || value}>{name || `Uploaded ${ext.toUpperCase()}`}</a>
+              <span className="text-[10px] text-gray-400 uppercase">{ext} · uploaded</span>
+            </span>
+            <button type="button" onClick={() => { setName(""); setErr(""); onChange(""); }} title="Remove file" className="text-gray-400 hover:text-red-500 ml-0.5"><X size={13} /></button>
+          </span>
+        )}
       </div>
       {err && <div className="text-xs text-red-600 mt-1">{err}</div>}
     </div>

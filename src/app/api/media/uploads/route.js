@@ -6,6 +6,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { randomUUID } from "crypto";
 import path from "path";
 import { sniffMediaFile, MEDIA_TYPES } from "@/lib/mediaFileSniff";
+import { saveMediaFile } from "@/lib/mediaFileStore";
 
 // POST /api/media/uploads (multipart/form-data, field "file")
 // Media document/image upload — press-note scans, coverage PDFs, briefs, etc.
@@ -34,10 +35,31 @@ export async function POST(req) {
         { status: 415 }
       );
     }
-    const dir = path.join(process.cwd(), "public", "uploads");
-    await mkdir(dir, { recursive: true });
-    const filename = `${randomUUID()}.${MEDIA_TYPES[sniffed]}`;
-    await writeFile(path.join(dir, filename), buffer);
+    const id = randomUUID();
+    const ext = MEDIA_TYPES[sniffed];
+    const filename = `${id}.${ext}`;
+
+    // Durable store FIRST (survives redeploys / non-persistent disks), so the
+    // file is openable after a refresh regardless of the host's filesystem. The
+    // stored `/uploads/<id>.<ext>` URL is served back by /api/media/[file],
+    // which now reads media_files before falling back to disk.
+    const durable = await saveMediaFile({
+      id, mimeType: sniffed, ext, size: file.size, data: buffer, userId: session.user.id,
+    });
+
+    // Also write a disk copy — backward-compatible with existing `/uploads/...`
+    // URLs and a same-process fallback when the DB rejected the blob (e.g. a
+    // very large file over max_allowed_packet). Best-effort: a read-only disk
+    // must not fail the upload once the durable copy succeeded.
+    try {
+      const dir = path.join(process.cwd(), "public", "uploads");
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, filename), buffer);
+    } catch (diskErr) {
+      if (!durable) throw diskErr; // neither store worked → a genuine failure
+      console.error("[media] disk write skipped (durable copy saved):", diskErr?.code || diskErr?.message);
+    }
+
     return NextResponse.json({ url: `/uploads/${filename}`, type: sniffed, size: file.size });
   } catch (err) {
     console.error("media upload error:", err);

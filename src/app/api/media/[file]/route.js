@@ -3,6 +3,7 @@ import { authOptions } from "@/lib/auth";
 import { readFile } from "fs/promises";
 import path from "path";
 import { query } from "@/lib/db";
+import { getMediaFile } from "@/lib/mediaFileStore";
 
 // Serves every /uploads/... URL, from three possible backends:
 //  1. worker_photos (DB-stored — durable across redeploys, see
@@ -24,7 +25,17 @@ import { query } from "@/lib/db";
 // through the same route.
 export const dynamic = "force-dynamic";
 
-const TYPES = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+// Every extension the Media Center can store must be serveable — images AND the
+// document formats a newspaper cutting can arrive as. PDF was missing here, so a
+// cutting uploaded as a PDF stored fine but 404'd when opened (the extension had
+// no MIME → the guard below rejected it). That was the "upload doesn't work /
+// can't open the cutting" bug for PDFs.
+const TYPES = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif",
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+};
 
 export async function GET(_req, { params }) {
   try {
@@ -63,6 +74,15 @@ export async function GET(_req, { params }) {
         return new Response(new Uint8Array(userRow.data), { status: 200, headers: { ...headers, "Content-Type": userRow.mime_type } });
       }
     } catch { /* user_photos table absent — ignore and try the next source */ }
+
+    // Durable Media Center store (newspaper cuttings, coverage PDFs, briefs, …).
+    // Checked before disk so files keep resolving across redeploys / on hosts
+    // whose public/uploads isn't persistent. Serves with the stored MIME type,
+    // so a PDF opens as a PDF.
+    const media = await getMediaFile(id);
+    if (media) {
+      return new Response(new Uint8Array(media.data), { status: 200, headers: { ...headers, "Content-Type": media.mime_type || type } });
+    }
 
     const buf = await readFile(path.join(process.cwd(), "public", "uploads", name));
     return new Response(new Uint8Array(buf), { status: 200, headers });
