@@ -39,6 +39,21 @@ const TABS = [
 
 const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]/40";
 const lbl = "block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1";
+
+// Labeled text input for the Leader Assessment forms. Defined at MODULE level so
+// its component identity is STABLE across renders. The previous helper was
+// declared inside each form component (`const F = …`), so every keystroke made a
+// brand-new component type → React remounted the <input> → focus was lost after
+// one character. Value/onChange are passed in (controlled) so the element itself
+// is reconciled in place, preserving focus and cursor position.
+function Field({ label, type = "text", full, value, onChange }) {
+  return (
+    <div className={full ? "col-span-2" : ""}>
+      <span className={lbl}>{label}</span>
+      <input type={type} className={inp} value={value ?? ""} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
 const RANK_ICON = [Trophy, Medal, Award];
 const RANK_COLOR = ["text-[#FCB712]", "text-gray-400", "text-amber-700"];
 const nfmt = (v) => (v == null || v === "" ? null : Number(v).toLocaleString("en-IN"));
@@ -846,7 +861,6 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
       onSaved();
     } catch (e) { fail(e.message); setSaving(false); }
   }
-  const F = ({ k, label, type = "text", full }) => (<div className={full ? "col-span-2" : ""}><span className={lbl}>{label}</span><input type={type} className={inp} value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} /></div>);
   return (
     <Modal title={initial ? "Edit MLA Profile" : "Create MLA Profile"} onClose={onClose} wide>
       <div className="flex flex-col items-center gap-1.5 pb-2">
@@ -862,17 +876,17 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
           </select>
           {initial && <span className="text-[11px] text-gray-400">One MLA per assembly — the assembly can't be changed here.</span>}
         </div>
-        <F k="name" label="Full Name *" full />
-        <F k="phone" label="Phone" /><F k="party" label="Party" />
-        <F k="date_of_birth" label="Date of Birth" type="date" />
+        <Field label="Full Name *" full value={form.name} onChange={(v) => set("name", v)} />
+        <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} /><Field label="Party" value={form.party} onChange={(v) => set("party", v)} />
+        <Field label="Date of Birth" type="date" value={form.date_of_birth} onChange={(v) => set("date_of_birth", v)} />
         <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
-        <F k="caste" label="Caste" /><F k="net_worth" label="Net Worth" />
-        <F k="criminal_cases" label="Criminal Cases" type="number" />
-        <F k="address" label="Address" full />
+        <Field label="Caste" value={form.caste} onChange={(v) => set("caste", v)} /><Field label="Net Worth" value={form.net_worth} onChange={(v) => set("net_worth", v)} />
+        <Field label="Criminal Cases" type="number" value={form.criminal_cases} onChange={(v) => set("criminal_cases", v)} />
+        <Field label="Address" full value={form.address} onChange={(v) => set("address", v)} />
         <div className="col-span-2 border-t border-gray-100 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Political / Election details</div>
-        <F k="times_won" label="Times Won" type="number" /><F k="times_contested" label="Times Contested" type="number" />
-        <F k="largest_winning_margin" label="Largest Winning Margin" type="number" /><F k="previous_winning_margin" label="Previous Winning Margin" type="number" />
-        <F k="party_won_from" label="Party Won From" /><F k="party_defeated" label="Party Defeated" />
+        <Field label="Times Won" type="number" value={form.times_won} onChange={(v) => set("times_won", v)} /><Field label="Times Contested" type="number" value={form.times_contested} onChange={(v) => set("times_contested", v)} />
+        <Field label="Largest Winning Margin" type="number" value={form.largest_winning_margin} onChange={(v) => set("largest_winning_margin", v)} /><Field label="Previous Winning Margin" type="number" value={form.previous_winning_margin} onChange={(v) => set("previous_winning_margin", v)} />
+        <Field label="Party Won From" value={form.party_won_from} onChange={(v) => set("party_won_from", v)} /><Field label="Party Defeated" value={form.party_defeated} onChange={(v) => set("party_defeated", v)} />
       </div>
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
     </Modal>
@@ -957,7 +971,6 @@ function ElectionModal({ assemblyId, assembly, mla, candidates, initial, onClose
       onSaved();
     } catch (e) { fail(e.message); setSaving(false); }
   }
-  const F = ({ k, label, type = "text" }) => (<div><span className={lbl}>{label}</span><input type={type} className={inp} value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} /></div>);
   return (
     <Modal title={initial ? "Edit Election" : "Add Election"} onClose={onClose}>
       {/* Step 1-3: District (context) → Category → Name */}
@@ -992,12 +1005,12 @@ function ElectionModal({ assemblyId, assembly, mla, candidates, initial, onClose
       )}
       <div className="border-t border-gray-100 my-3" />
       <div className="grid grid-cols-2 gap-3">
-        <F k="election_year" label="Election Year *" type="number" /><F k="election_type" label="Election Type" />
-        <F k="party" label="Party" />
+        <Field label="Election Year *" type="number" value={form.election_year} onChange={(v) => set("election_year", v)} /><Field label="Election Type" value={form.election_type} onChange={(v) => set("election_type", v)} />
+        <Field label="Party" value={form.party} onChange={(v) => set("party", v)} />
         <div><span className={lbl}>Result</span><select className={inp} value={form.result || ""} onChange={(e) => set("result", e.target.value)}><option value="">—</option><option value="Won">Won</option><option value="Lost">Lost</option></select></div>
-        <F k="votes" label="Votes" type="number" /><F k="vote_percentage" label="Vote %" type="number" />
-        <F k="margin" label="Margin" type="number" />
-        <F k="runner_up" label="Runner-up" /><F k="runner_up_votes" label="Runner-up Votes" type="number" />
+        <Field label="Votes" type="number" value={form.votes} onChange={(v) => set("votes", v)} /><Field label="Vote %" type="number" value={form.vote_percentage} onChange={(v) => set("vote_percentage", v)} />
+        <Field label="Margin" type="number" value={form.margin} onChange={(v) => set("margin", v)} />
+        <Field label="Runner-up" value={form.runner_up} onChange={(v) => set("runner_up", v)} /><Field label="Runner-up Votes" type="number" value={form.runner_up_votes} onChange={(v) => set("runner_up_votes", v)} />
       </div>
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
     </Modal>
@@ -1173,7 +1186,6 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
       onSaved();
     } catch (e) { fail(e.message); setSaving(false); }
   }
-  const F = ({ k, label, type = "text", full }) => (<div className={full ? "col-span-2" : ""}><span className={lbl}>{label}</span><input type={type} className={inp} value={form[k] ?? ""} onChange={(e) => set(k, e.target.value)} /></div>);
   return (
     <Modal title={initial ? "Edit Candidate" : "Create AAP Candidate"} onClose={onClose}>
       <div className="flex flex-col items-center gap-1.5 pb-2">
@@ -1188,15 +1200,15 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
             {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}{a.district ? ` · ${a.district}` : ""}</option>)}
           </select>
         </div>
-        <F k="name" label="Full Name *" full />
-        <F k="phone" label="Phone" /><F k="date_of_birth" label="Date of Birth" type="date" />
+        <Field label="Full Name *" full value={form.name} onChange={(v) => set("name", v)} />
+        <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} /><Field label="Date of Birth" type="date" value={form.date_of_birth} onChange={(v) => set("date_of_birth", v)} />
         <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
-        <F k="caste" label="Caste" />
-        <F k="net_worth" label="Net Worth" /><F k="business" label="Business" />
-        <F k="monthly_income" label="Monthly Income" /><F k="education" label="Education" />
-        <F k="current_position" label="Type / Current Position" /><F k="political_experience" label="Political Experience" />
-        <F k="organization_experience" label="Organization Experience" /><F k="previous_elections" label="Previous Elections" />
-        <F k="address" label="Address" full />
+        <Field label="Caste" value={form.caste} onChange={(v) => set("caste", v)} />
+        <Field label="Net Worth" value={form.net_worth} onChange={(v) => set("net_worth", v)} /><Field label="Business" value={form.business} onChange={(v) => set("business", v)} />
+        <Field label="Monthly Income" value={form.monthly_income} onChange={(v) => set("monthly_income", v)} /><Field label="Education" value={form.education} onChange={(v) => set("education", v)} />
+        <Field label="Type / Current Position" value={form.current_position} onChange={(v) => set("current_position", v)} /><Field label="Political Experience" value={form.political_experience} onChange={(v) => set("political_experience", v)} />
+        <Field label="Organization Experience" value={form.organization_experience} onChange={(v) => set("organization_experience", v)} /><Field label="Previous Elections" value={form.previous_elections} onChange={(v) => set("previous_elections", v)} />
+        <Field label="Address" full value={form.address} onChange={(v) => set("address", v)} />
       </div>
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
     </Modal>
