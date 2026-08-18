@@ -123,7 +123,21 @@ export async function GET(req) {
       covFilter.params
     ).then((r) => [r]);
 
-    const channelTone = await query(`SELECT tone, COUNT(*) AS n FROM news_channels GROUP BY tone`);
+    // Channel tone list — every channel from the master (item 1), its stored
+    // tone, and the number of debates it actually hosted in the selected range
+    // (from the debates records, so the tone label is backed by real data and
+    // refreshes with the date filter). GROUP BY channel id → one row per channel
+    // (no duplicates); the date filter sits in the LEFT JOIN ON clause so every
+    // channel appears even with zero in-range debates. Consistent with the
+    // debate status cards, which classify a debate by this same channel tone.
+    const channelTone = await query(
+      `SELECT ch.id, ch.name, ch.tone, COUNT(d.id) AS debates
+         FROM news_channels ch
+         LEFT JOIN debates d ON d.channel_id = ch.id${debFilter.clause}
+        GROUP BY ch.id, ch.name, ch.tone
+        ORDER BY ch.sort_order, ch.name`,
+      debFilter.params
+    );
 
     // Top spokespersons by viral score across debates in the selected range
     // (when a filter is active); otherwise across all debates. The date filter

@@ -482,17 +482,7 @@ function AnalyticsTab({ data, filtered }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Tv size={16} className="text-[#164FA3]" /> Channel Tone</h3>
-          <div className="space-y-2">
-            {a.channelTone.map((c) => (
-              <div key={c.tone} className="flex items-center justify-between text-sm">
-                <span className="capitalize text-gray-700">{c.tone}</span>
-                <span className="font-bold text-gray-900">{c.n}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ChannelToneCard channels={a.channelTone || []} />
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><TrendingUp size={16} className="text-[#FCB712]" /> Top Spokespersons</h3>
           <ul className="space-y-2">
@@ -515,6 +505,69 @@ function SumCard({ label, value, accent }) {
     <div className={`${accent ? "bg-[#164FA3] text-white" : "bg-white border border-gray-100"} rounded-xl p-4 shadow-sm`}>
       <div className={`text-2xl font-bold ${accent ? "" : "text-gray-900"}`}>{value}</div>
       <div className={`text-xs font-medium mt-1 ${accent ? "text-blue-200" : "text-gray-500"}`}>{label}</div>
+    </div>
+  );
+}
+
+// Channel Tone — every channel from the master, grouped by its stored tone:
+// Positive (supportive) first, Negative (opposing) below, then Neutral/Unrated
+// (neutral or unknown) so a channel without a clear stance is never shown as a
+// false Positive/Negative. Each row carries a small colored tone badge and the
+// number of debates it actually hosted in the selected date range (real data
+// backing the label). Nothing hardcoded — names/tone/counts come from the DB.
+const TONE_META = {
+  positive: { label: "Positive", badge: "bg-emerald-100 text-emerald-700" },
+  negative: { label: "Negative", badge: "bg-red-100 text-red-700" },
+  neutral: { label: "Neutral", badge: "bg-gray-100 text-gray-600" },
+  unrated: { label: "Unrated", badge: "bg-amber-100 text-amber-700" },
+};
+// Map the stored master tone → display group. 'supportive'→positive,
+// 'opposing'→negative, 'neutral'→neutral, anything else/unknown→unrated.
+function toneGroup(tone) {
+  if (tone === "supportive") return "positive";
+  if (tone === "opposing") return "negative";
+  if (tone === "neutral") return "neutral";
+  return "unrated";
+}
+
+function ChannelToneRow({ c }) {
+  const meta = TONE_META[toneGroup(c.tone)];
+  return (
+    <div className="flex items-center justify-between gap-2 py-1.5">
+      <span className="text-sm text-gray-800 truncate">{c.name}</span>
+      <span className="flex items-center gap-2 shrink-0">
+        {Number(c.debates) > 0 && <span className="text-[11px] text-gray-400 tabular-nums">{Number(c.debates)} debate{Number(c.debates) === 1 ? "" : "s"}</span>}
+        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${meta.badge}`}>{meta.label}</span>
+      </span>
+    </div>
+  );
+}
+
+function ChannelToneCard({ channels }) {
+  const groups = { positive: [], negative: [], neutral: [], unrated: [] };
+  for (const c of channels) groups[toneGroup(c.tone)].push(c);
+  const Section = ({ title, items }) => (
+    items.length === 0 ? null : (
+      <div>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">{title}</div>
+        <div className="divide-y divide-gray-50">
+          {items.map((c) => <ChannelToneRow key={c.id} c={c} />)}
+        </div>
+      </div>
+    )
+  );
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Tv size={16} className="text-[#164FA3]" /> Channel Tone</h3>
+      {channels.length === 0 ? (
+        <div className="text-sm text-gray-400">No news channels available.</div>
+      ) : (
+        <div className="space-y-4">
+          <Section title="Positive Channels" items={groups.positive} />
+          <Section title="Negative Channels" items={groups.negative} />
+          <Section title="Neutral / Unrated" items={[...groups.neutral, ...groups.unrated]} />
+        </div>
+      )}
     </div>
   );
 }
