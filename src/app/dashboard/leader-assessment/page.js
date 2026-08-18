@@ -46,11 +46,12 @@ const lbl = "block text-[11px] font-semibold uppercase tracking-wide text-gray-4
 // brand-new component type → React remounted the <input> → focus was lost after
 // one character. Value/onChange are passed in (controlled) so the element itself
 // is reconciled in place, preserving focus and cursor position.
-function Field({ label, type = "text", full, value, onChange }) {
+function Field({ label, type = "text", full, value, onChange, error }) {
   return (
     <div className={full ? "col-span-2" : ""}>
       <span className={lbl}>{label}</span>
-      <input type={type} className={inp} value={value ?? ""} onChange={(e) => onChange(e.target.value)} />
+      <input type={type} className={`${inp} ${error ? "border-red-400 focus:ring-red-200" : ""}`} value={value ?? ""} onChange={(e) => onChange(e.target.value)} />
+      {error && <span className="text-[11px] text-red-500 mt-0.5 block">{error}</span>}
     </div>
   );
 }
@@ -840,7 +841,8 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
     date_of_birth: initial?.date_of_birth ? String(initial.date_of_birth).slice(0, 10) : "",
   }));
   const [saving, setSaving] = useState(false);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const [errors, setErrors] = useState({}); // { assembly_id, name, _server }
+  const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e)); };
   const age = ageOf(form.date_of_birth);
   // On create, hide assemblies that already have an MLA (prevents accidental
   // duplicate profiles); on edit, the assembly is fixed.
@@ -852,14 +854,20 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
     if (!up.ok) throw new Error(d.message || "Upload failed"); return d.url;
   }
   async function save() {
-    if (saving) return; // prevent duplicate submissions
-    if (!String(form.assembly_id).trim()) { fail("Select the assembly this MLA represents."); return; }
-    if (!String(form.name).trim()) { fail("MLA name is required."); return; }
+    if (saving) return; // ignore extra clicks while the first request is in flight
+    const errs = {};
+    if (!String(form.assembly_id).trim()) errs.assembly_id = "Select the assembly this MLA represents.";
+    if (!String(form.name).trim()) errs.name = "MLA name is required.";
+    setErrors(errs);
+    if (Object.keys(errs).length) return; // keep the form open, values intact
     setSaving(true);
     try {
       await api(`/api/leader-assessment/assemblies/${form.assembly_id}/mla`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-      onSaved();
-    } catch (e) { fail(e.message); setSaving(false); }
+      onSaved(); // parent closes the modal + refreshes + toasts
+    } catch (e) {
+      setErrors({ _server: e.message || "Could not save the MLA profile. Please try again." });
+      setSaving(false);
+    }
   }
   return (
     <Modal title={initial ? "Edit MLA Profile" : "Create MLA Profile"} onClose={onClose} wide>
@@ -870,13 +878,14 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
           <span className={lbl}>Assembly *</span>
-          <select className={inp} value={form.assembly_id ?? ""} disabled={!!initial} onChange={(e) => set("assembly_id", e.target.value)}>
+          <select className={`${inp} ${errors.assembly_id ? "border-red-400 focus:ring-red-200" : ""}`} value={form.assembly_id ?? ""} disabled={!!initial} onChange={(e) => set("assembly_id", e.target.value)}>
             <option value="">— select assembly —</option>
             {options.map((a) => <option key={a.id} value={a.id}>{a.name}{a.district ? ` · ${a.district}` : ""}</option>)}
           </select>
+          {errors.assembly_id && <span className="text-[11px] text-red-500 mt-0.5 block">{errors.assembly_id}</span>}
           {initial && <span className="text-[11px] text-gray-400">One MLA per assembly — the assembly can't be changed here.</span>}
         </div>
-        <Field label="Full Name *" full value={form.name} onChange={(v) => set("name", v)} />
+        <Field label="Full Name *" full value={form.name} onChange={(v) => set("name", v)} error={errors.name} />
         <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} /><Field label="Party" value={form.party} onChange={(v) => set("party", v)} />
         <Field label="Date of Birth" type="date" value={form.date_of_birth} onChange={(v) => set("date_of_birth", v)} />
         <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
@@ -888,6 +897,7 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
         <Field label="Largest Winning Margin" type="number" value={form.largest_winning_margin} onChange={(v) => set("largest_winning_margin", v)} /><Field label="Previous Winning Margin" type="number" value={form.previous_winning_margin} onChange={(v) => set("previous_winning_margin", v)} />
         <Field label="Party Won From" value={form.party_won_from} onChange={(v) => set("party_won_from", v)} /><Field label="Party Defeated" value={form.party_defeated} onChange={(v) => set("party_defeated", v)} />
       </div>
+      {errors._server && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-3">{errors._server}</div>}
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
     </Modal>
   );
@@ -1168,7 +1178,8 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
     date_of_birth: initial?.date_of_birth ? String(initial.date_of_birth).slice(0, 10) : "",
   }));
   const [saving, setSaving] = useState(false);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const [errors, setErrors] = useState({}); // { assembly_id, name, _server }
+  const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e)); };
   const age = ageOf(form.date_of_birth);
   async function persistPhoto(blob) {
     if (!blob) return null;
@@ -1177,14 +1188,23 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
     if (!up.ok) throw new Error(d.message || "Upload failed"); return d.url;
   }
   async function save() {
-    if (!String(form.assembly_id).trim()) { fail("Select the assembly this candidate belongs to."); return; }
-    if (!form.name.trim()) { fail("Candidate name is required."); return; }
+    if (saving) return; // ignore extra clicks while the first request is in flight
+    // Validate → field-level errors; DON'T close, keep every entered value.
+    const errs = {};
+    if (!String(form.assembly_id).trim()) errs.assembly_id = "Select the assembly this candidate belongs to.";
+    if (!form.name.trim()) errs.name = "Candidate name is required.";
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
     setSaving(true);
     try {
       const url = initial ? `/api/leader-assessment/candidates/${initial.id}` : `/api/leader-assessment/assemblies/${form.assembly_id}/candidates`;
       await api(url, { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-      onSaved();
-    } catch (e) { fail(e.message); setSaving(false); }
+      onSaved(); // parent closes the modal + refreshes the list + shows a toast
+    } catch (e) {
+      // Server error → keep the form open with all data; show a clear message.
+      setErrors({ _server: e.message || "Could not save the candidate. Please try again." });
+      setSaving(false);
+    }
   }
   return (
     <Modal title={initial ? "Edit Candidate" : "Create AAP Candidate"} onClose={onClose}>
@@ -1195,12 +1215,13 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
           <span className={lbl}>Assembly *</span>
-          <select className={inp} value={form.assembly_id ?? ""} onChange={(e) => set("assembly_id", e.target.value)}>
+          <select className={`${inp} ${errors.assembly_id ? "border-red-400 focus:ring-red-200" : ""}`} value={form.assembly_id ?? ""} onChange={(e) => set("assembly_id", e.target.value)}>
             <option value="">— select assembly —</option>
             {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}{a.district ? ` · ${a.district}` : ""}</option>)}
           </select>
+          {errors.assembly_id && <span className="text-[11px] text-red-500 mt-0.5 block">{errors.assembly_id}</span>}
         </div>
-        <Field label="Full Name *" full value={form.name} onChange={(v) => set("name", v)} />
+        <Field label="Full Name *" full value={form.name} onChange={(v) => set("name", v)} error={errors.name} />
         <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} /><Field label="Date of Birth" type="date" value={form.date_of_birth} onChange={(v) => set("date_of_birth", v)} />
         <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
         <Field label="Caste" value={form.caste} onChange={(v) => set("caste", v)} />
@@ -1210,6 +1231,7 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
         <Field label="Organization Experience" value={form.organization_experience} onChange={(v) => set("organization_experience", v)} /><Field label="Previous Elections" value={form.previous_elections} onChange={(v) => set("previous_elections", v)} />
         <Field label="Address" full value={form.address} onChange={(v) => set("address", v)} />
       </div>
+      {errors._server && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-3">{errors._server}</div>}
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
     </Modal>
   );
