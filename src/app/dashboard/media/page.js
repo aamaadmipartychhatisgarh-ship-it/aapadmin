@@ -652,7 +652,7 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
           <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Time</label>
           <input type="time" className={inp} value={form.debate_time} onChange={(e) => setForm({ ...form, debate_time: e.target.value })} />
         </div>
-        <div><label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Brief PDF</label><FileUpload value={form.brief_pdf_url} onChange={(url) => setForm({ ...form, brief_pdf_url: url })} /></div>
+        <div><label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Debate File (PDF, JPG, PNG, WEBP)</label><FileUpload value={form.brief_pdf_url} onChange={(url) => setForm({ ...form, brief_pdf_url: url })} endpoint="/api/media/uploads" accept=".pdf,.jpg,.jpeg,.png,.webp" /></div>
       </div>
       <textarea className={inp} rows={2} placeholder="Talking points" value={form.talking_points} onChange={(e) => setForm({ ...form, talking_points: e.target.value })} />
       <textarea className={inp} rows={2} placeholder="Opposition counter points" value={form.opposition_counter} onChange={(e) => setForm({ ...form, opposition_counter: e.target.value })} />
