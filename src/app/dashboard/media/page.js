@@ -442,13 +442,43 @@ function SpokespersonModal({ editing, onClose, onSaved }) {
 // ============================================================ ANALYTICS
 function AnalyticsTab({ data, filtered }) {
   const a = data.analytics;
+  const ds = a.debateStats || { total: 0, done: 0, positive: 0, neutral: 0, negative: 0 };
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <SumCard label={filtered ? "Coverage (selected range)" : "Coverage (30d)"} value={a.counts?.coverage_total || 0} accent />
-        <SumCard label="Positive" value={a.counts?.positive || 0} />
-        <SumCard label="Neutral" value={a.counts?.neutral || 0} />
-        <SumCard label="Negative" value={a.counts?.negative || 0} />
+      {/* Debate status cards — counts straight from the debates records
+          (respecting the date filter). Informational: no navigation. */}
+      <div>
+        <h3 className="text-sm font-bold text-gray-700 mb-2">Debates</h3>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <SumCard label="Total Debates Scheduled" value={ds.total} accent />
+          <SumCard label="Total Debates Done" value={ds.done} />
+          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+            <div className="text-2xl font-bold text-emerald-600 tabular-nums">{ds.positive}</div>
+            <div className="text-xs font-medium mt-1 text-gray-500">Positive Debates</div>
+          </div>
+          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+            <div className="flex items-start gap-5">
+              <div>
+                <div className="text-2xl font-bold text-gray-600 tabular-nums">{ds.neutral}</div>
+                <div className="text-xs font-medium mt-1 text-gray-500">Neutral</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-red-600 tabular-nums">{ds.negative}</div>
+                <div className="text-xs font-medium mt-1 text-gray-500">Negative</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-bold text-gray-700 mb-2">Coverage</h3>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <SumCard label={filtered ? "Coverage (selected range)" : "Coverage (30d)"} value={a.counts?.coverage_total || 0} accent />
+          <SumCard label="Positive" value={a.counts?.positive || 0} />
+          <SumCard label="Neutral" value={a.counts?.neutral || 0} />
+          <SumCard label="Negative" value={a.counts?.negative || 0} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

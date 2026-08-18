@@ -142,10 +142,39 @@ export async function GET(req) {
       debFilter.params
     );
 
+    // Debate status cards — computed from the ACTUAL debates records in one pass
+    // (each debate counted once; the channel join is many-to-one so no
+    // fan-out/duplicates), respecting the date filter on d.debate_date:
+    //   • total     — every debate scheduled onto the calendar (all statuses)
+    //   • done      — status = 'aired' (the debate's "completed/done" state)
+    //   • positive/neutral/negative — the debate's tone, taken from its news
+    //     channel's stored tone (supportive → positive, neutral → neutral,
+    //     opposing → negative). unknown / no channel is left unclassified. This
+    //     is the same tone model the Channel Tone card already uses.
+    const [dbg] = await query(
+      `SELECT
+          COUNT(*) AS total,
+          COALESCE(SUM(d.status = 'aired'), 0) AS done,
+          COALESCE(SUM(ch.tone = 'supportive'), 0) AS positive,
+          COALESCE(SUM(ch.tone = 'neutral'), 0) AS neutral,
+          COALESCE(SUM(ch.tone = 'opposing'), 0) AS negative
+         FROM debates d
+         LEFT JOIN news_channels ch ON ch.id = d.channel_id
+        WHERE 1=1${debFilter.clause}`,
+      debFilter.params
+    );
+    const debateStats = {
+      total: Number(dbg?.total) || 0,
+      done: Number(dbg?.done) || 0,
+      positive: Number(dbg?.positive) || 0,
+      neutral: Number(dbg?.neutral) || 0,
+      negative: Number(dbg?.negative) || 0,
+    };
+
     return NextResponse.json({
       newspapers, newspaperStats, channels, spokespersons, journalists,
       recentNotes, upcomingDebates, conferences,
-      analytics: { counts, channelTone, topSpokespersons },
+      analytics: { counts, channelTone, topSpokespersons, debateStats },
     });
   } catch (err) {
     console.error("media GET error:", err);
