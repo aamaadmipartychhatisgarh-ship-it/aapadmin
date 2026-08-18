@@ -35,6 +35,25 @@ export async function GET(req) {
     await ensureNewsChannelsSeed();
     await ensureConferenceSchema();
     const newspapers = await query(`SELECT * FROM newspapers ORDER BY sort_order, name`);
+
+    // Per-newspaper positive / negative coverage counts — the SAME source of
+    // truth (press_notes.sentiment keyed by newspaper_id) that the Analytics
+    // tab and the Reports press_notes module use. The date filter sits in the
+    // LEFT JOIN's ON clause so EVERY newspaper is returned (including ones with
+    // zero coverage in range → 0/0), and press_notes→newspaper is many-to-one
+    // so each coverage row is counted exactly once (no duplicate counting).
+    const newspaperStats = await query(
+      `SELECT np.id, np.name,
+              COALESCE(SUM(pn.sentiment = 'positive'), 0) AS positive,
+              COALESCE(SUM(pn.sentiment = 'negative'), 0) AS negative,
+              COUNT(pn.id) AS total
+         FROM newspapers np
+         LEFT JOIN press_notes pn ON pn.newspaper_id = np.id${noteFilter.clause}
+        GROUP BY np.id, np.name
+        ORDER BY np.sort_order, np.name`,
+      noteFilter.params
+    );
+
     const channels = await query(`SELECT * FROM news_channels ORDER BY sort_order, name`);
     const spokespersons = await query(`SELECT * FROM spokespersons ORDER BY name`);
     const journalists = await query(`SELECT * FROM journalists ORDER BY name`);
@@ -124,7 +143,7 @@ export async function GET(req) {
     );
 
     return NextResponse.json({
-      newspapers, channels, spokespersons, journalists,
+      newspapers, newspaperStats, channels, spokespersons, journalists,
       recentNotes, upcomingDebates, conferences,
       analytics: { counts, channelTone, topSpokespersons },
     });

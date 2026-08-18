@@ -176,12 +176,26 @@ function NewspapersTab({ data, onChange, flash, filtered }) {
   const [editing, setEditing] = useState(null);
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        {data.newspapers.map((np) => (
+      {/* Per-newspaper coverage summary — Positive (green) / Negative (red)
+          counts from the shared newspaperStats source, respecting the date
+          filter. Every newspaper is shown (zero coverage → 0 / 0). */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {(data.newspaperStats || []).map((np) => (
           <div key={np.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-            <Newspaper className="text-[#164FA3] mb-2" size={20} />
-            <div className="font-bold text-gray-900 text-sm">{np.name}</div>
-            <div className="text-xs text-gray-500 mt-1">{np.circulation || "—"}</div>
+            <div className="flex items-center gap-2 mb-3">
+              <Newspaper className="text-[#164FA3] shrink-0" size={18} />
+              <div className="font-bold text-gray-900 text-sm truncate" title={np.name}>{np.name}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 rounded-lg bg-emerald-50 px-2.5 py-1.5">
+                <div className="text-lg font-bold text-emerald-600 tabular-nums leading-none">{Number(np.positive) || 0}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700/70 mt-1">Positive</div>
+              </div>
+              <div className="flex-1 rounded-lg bg-red-50 px-2.5 py-1.5">
+                <div className="text-lg font-bold text-red-600 tabular-nums leading-none">{Number(np.negative) || 0}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-red-700/70 mt-1">Negative</div>
+              </div>
+            </div>
           </div>
         ))}
       </div>
