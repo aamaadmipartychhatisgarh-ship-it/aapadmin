@@ -124,13 +124,13 @@ export default function AnalyticsPanel() {
   // (backend already includes zero-worker districts and sorts by worker count).
   const districtStats = useMemo(() => data?.treemap || [], [data]);
 
+  // Date × hour heat map: an array of { day, hours: {10: n, …}, total } — one
+  // row per actual calendar date in the window (zero-call days included).
   const heatmap = data?.heatmap || [];
-  // Scale colours (and the empty-state check) to the hours actually shown — the
-  // office-hour window — so intensity reflects the busiest displayed cell and
-  // "empty" means no activity within office hours, not across all 24h.
+  // Scale colours to the busiest office-hour cell actually shown.
   const heatmapMax = useMemo(() => {
     let m = 0;
-    heatmap.forEach((row) => OFFICE_HOURS.forEach((h) => { const v = row[h] || 0; if (v > m) m = v; }));
+    heatmap.forEach((row) => OFFICE_HOURS.forEach((h) => { const v = (row.hours?.[h]) || 0; if (v > m) m = v; }));
     return m;
   }, [heatmap]);
 
@@ -293,9 +293,9 @@ export default function AnalyticsPanel() {
             )}
           </Panel>
 
-          {/* Row 5: Heatmap (custom CSS grid) */}
-          <Panel title="Activity Heatmap (10 AM–7 PM × day of week)" icon={Grid3x3}>
-            {heatmapMax === 0 ? <Empty /> : (
+          {/* Row 5: Activity heat map — actual dates × office hours */}
+          <Panel title="Activity Heat Map (calls per hour, 10 AM–7 PM)" icon={Grid3x3}>
+            {heatmap.length === 0 ? <Empty /> : (
               <Heatmap data={heatmap} max={heatmapMax} />
             )}
           </Panel>
@@ -344,53 +344,84 @@ function fmtHour12(h) {
   return `${h12} ${ampm}`;
 }
 
+// Short IST date label for a heat-map row, e.g. "Mon 18 Aug".
+function fmtHeatDay(ymd) {
+  const d = new Date(`${ymd}T00:00:00+05:30`);
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone: "Asia/Kolkata" });
+}
+
 function Heatmap({ data, max }) {
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // Click a cell to pin its exact count below the grid.
+  const [sel, setSel] = useState(null); // { day, hour, v }
+  const hourRange = (h) => `${fmtHour12(h)}–${fmtHour12((h + 1) % 24)}`;
   return (
     // overflow-x-auto is a safety net only: the grid fills the card width, and
     // min-w keeps cells readable — it scrolls just on very narrow phones.
     <div className="overflow-x-auto">
-      <div className="min-w-[520px]">
-        <div className="grid" style={{ gridTemplateColumns: `40px repeat(${OFFICE_HOURS.length}, minmax(0, 1fr))`, gap: 4 }}>
+      <div className="min-w-[640px]">
+        <div className="grid" style={{ gridTemplateColumns: `96px repeat(${OFFICE_HOURS.length}, minmax(0, 1fr))`, gap: 4 }}>
           <div />
           {OFFICE_HOURS.map((h) => (
             <div key={h} className="text-[10px] text-gray-400 text-center font-mono whitespace-nowrap">{fmtHour12(h)}</div>
           ))}
-          {data.map((row, d) => (
-            <DayRow key={d} day={days[d]} row={row} max={max} />
+          {data.map((row) => (
+            <DayRow key={row.day} row={row} max={max} sel={sel} onSelect={setSel} />
           ))}
         </div>
-        <div className="mt-3 flex items-center gap-1.5 text-[11px] text-gray-500">
-          <span>Less</span>
-          {[0, 0.2, 0.4, 0.6, 0.8, 1].map((t) => (
-            <div key={t} className="w-3.5 h-3.5 rounded-sm" style={{ background: heatColor(t * max, max) }} />
-          ))}
-          <span>More</span>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+            <span>No activity</span>
+            <div className="w-3.5 h-3.5 rounded-sm border border-gray-200 bg-white" />
+            {[0.2, 0.4, 0.6, 0.8, 1].map((t) => (
+              <div key={t} className="w-3.5 h-3.5 rounded-sm" style={{ background: heatColor(t * max, max) }} />
+            ))}
+            <span>More</span>
+          </div>
+          <div className="text-xs text-gray-600 min-h-[18px]">
+            {sel
+              ? <span><strong className="text-gray-900">{fmtHeatDay(sel.day)}</strong>, {hourRange(sel.hour)} → <strong className="text-[#164FA3]">{sel.v}</strong> call{sel.v === 1 ? "" : "s"}</span>
+              : <span className="text-gray-400">Click any cell to see its exact call count.</span>}
+          </div>
         </div>
       </div>
     </div>
   );
 }
-function DayRow({ day, row, max }) {
+
+function DayRow({ row, max, sel, onSelect }) {
+  const inactive = (row.total || 0) === 0;
   return (
     <>
-      <div className="text-xs text-gray-500 font-medium pr-2 self-center">{day}</div>
+      <div className="text-xs font-medium pr-2 self-center flex items-center justify-between gap-1">
+        <span className="text-gray-600 whitespace-nowrap">{fmtHeatDay(row.day)}</span>
+        {inactive && <span className="text-[9px] uppercase tracking-wide text-gray-300 whitespace-nowrap">No activity</span>}
+      </div>
       {OFFICE_HOURS.map((h) => {
-        const v = row[h] || 0;
+        const v = row.hours?.[h] || 0;
+        const isSel = sel && sel.day === row.day && sel.hour === h;
+        // Zero calls → a truly blank cell (white, faint border), never a colored
+        // shade — so a quiet hour/day never reads as low activity.
         return (
-          <div
+          <button
             key={h}
-            title={`${day} · ${fmtHour12(h)} — ${v} call${v === 1 ? "" : "s"}`}
-            className="h-8 rounded"
-            style={{ background: heatColor(v, max) }}
-          />
+            type="button"
+            onClick={() => onSelect({ day: row.day, hour: h, v })}
+            title={`${fmtHeatDay(row.day)} · ${fmtHour12(h)} — ${v} call${v === 1 ? "" : "s"}`}
+            className={`h-8 rounded flex items-center justify-center text-[10px] font-semibold tabular-nums transition-shadow ${v === 0 ? "border border-gray-100 text-transparent" : ""} ${isSel ? "ring-2 ring-[#164FA3] ring-offset-1" : ""}`}
+            style={{ background: v === 0 ? "#ffffff" : heatColor(v, max), color: v === 0 ? undefined : (v / max > 0.55 ? "#fff" : "#0B3A82") }}
+          >
+            {v === 0 ? "" : v}
+          </button>
         );
       })}
     </>
   );
 }
 function heatColor(v, max) {
-  if (max === 0 || v === 0) return "#f3f4f6";
+  // Zero is NEVER shaded — the caller renders 0-cells blank. This only colors
+  // cells with >=1 call, scaled to the busiest cell.
+  if (max === 0 || v <= 0) return "#ffffff";
   const t = Math.min(1, v / max);
   // Interpolate from light blue to dark blue
   const r = Math.round(219 - (219 - 22)  * t);

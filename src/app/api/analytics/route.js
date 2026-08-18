@@ -130,29 +130,70 @@ export async function GET(req) {
       return { day: r.day, cumulative_connected: running };
     });
 
-    // 6. Heatmap: hour-of-day × day-of-week. `called_at` is stored in UTC, but
-    // the dashboard (and its office-hour window) works in IST — so the hour and
-    // day-of-week MUST be derived from the IST wall-clock time, exactly like the
-    // rest of the app (overviewSummary uses the same +05:30 conversion).
-    // Without this the buckets are shifted ~5.5h and most office-hour calls land
-    // outside 10 AM–7 PM and vanish from the grid. Each call is counted once
-    // (plain COUNT over `calls`, no joins → no duplicates).
+    // 6. Activity heat map — one row per ACTUAL calendar DATE (not day-of-week),
+    // hour-by-hour, so a specific day with zero calls shows as a completely
+    // blank/inactive row instead of borrowing activity from other same-weekday
+    // dates (the old day-of-week aggregate did the latter, which read as false
+    // activity on quiet days).
+    //
+    // • Single source of truth: a plain COUNT over `calls`, grouped by the IST
+    //   calendar day AND hour of `called_at` — each call counted once (no joins
+    //   → no duplicates), non-cumulative (each cell = ONLY that hour's calls).
+    // • Timezone: `called_at` is UTC; the day/hour buckets and the window bounds
+    //   are all derived in IST (+05:30), matching the rest of the dashboard.
+    // • Window: the selected date range, else the last 14 IST days; capped at 31
+    //   rows so the grid stays readable/performant. EVERY date in the window is
+    //   returned (including zero-call days → blank), so "no calls that day" is
+    //   visibly inactive rather than missing.
     const IST = "+05:30";
     const istTs = `CONVERT_TZ(c.called_at, '+00:00', '${IST}')`;
-    const heatmapRaw = await query(
-      `SELECT DAYOFWEEK(${istTs}) AS dow, HOUR(${istTs}) AS hour, COUNT(*) AS n
+    const IST_MS = 5.5 * 3600 * 1000;
+    const istToday = () => new Date(Date.now() + IST_MS).toISOString().slice(0, 10);
+    const addDaysStr = (ymd, n) => {
+      const d = new Date(`${ymd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+    const daySpan = (a, b) => Math.round((new Date(`${b}T00:00:00Z`) - new Date(`${a}T00:00:00Z`)) / 86400000);
+
+    const HEAT_DEFAULT_DAYS = 14, HEAT_MAX_DAYS = 31;
+    let winTo = dateTo || istToday();
+    let winFrom = dateFrom || addDaysStr(winTo, -(HEAT_DEFAULT_DAYS - 1));
+    if (daySpan(winFrom, winTo) < 0) winFrom = winTo;               // guard inverted range
+    if (daySpan(winFrom, winTo) > HEAT_MAX_DAYS - 1) winFrom = addDaysStr(winTo, -(HEAT_MAX_DAYS - 1));
+
+    // Heat-map-specific WHERE: keep the territory/district scope but bound dates
+    // by the IST window (NOT the UTC-DATE range the other charts use), so a call
+    // near midnight lands on its correct IST day.
+    let heatWhere = "WHERE 1=1";
+    const heatParams = [];
+    if (districtId) { heatWhere += " AND c.district_id = ?"; heatParams.push(districtId); }
+    heatWhere += " " + scope.where; heatParams.push(...scope.params);
+    heatWhere += ` AND c.called_at >= CONVERT_TZ(CONCAT(?,' 00:00:00'),'${IST}','+00:00')`
+              +  ` AND c.called_at <  CONVERT_TZ(CONCAT(?,' 00:00:00'),'${IST}','+00:00') + INTERVAL 1 DAY`;
+    heatParams.push(winFrom, winTo);
+
+    const heatRows = await query(
+      `SELECT DATE(${istTs}) AS day, HOUR(${istTs}) AS hour, COUNT(*) AS n
          FROM calls c
-         ${where}
-         GROUP BY DAYOFWEEK(${istTs}), HOUR(${istTs})`,
-      params
+         ${heatWhere}
+         GROUP BY DATE(${istTs}), HOUR(${istTs})`,
+      heatParams
     );
-    // MySQL DAYOFWEEK: 1=Sunday … 7=Saturday. Build a 7×24 matrix.
-    const heatmap = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
-    heatmapRaw.forEach((r) => {
-      const d = (Number(r.dow) - 1 + 7) % 7; // 0..6 (Sun..Sat)
-      const h = Number(r.hour);
-      if (d >= 0 && d < 7 && h >= 0 && h < 24) heatmap[d][h] = Number(r.n) || 0;
-    });
+    // Index the counts, then emit EVERY date in the window (zero-call days
+    // included) so the front end can render them blank.
+    const byDayHour = new Map();
+    for (const r of heatRows) {
+      const day = String(r.day).slice(0, 10);
+      if (!byDayHour.has(day)) byDayHour.set(day, {});
+      byDayHour.get(day)[Number(r.hour)] = Number(r.n) || 0;
+    }
+    const heatmap = [];
+    for (let d = winTo; ; d = addDaysStr(d, -1)) {            // newest day first
+      const hours = byDayHour.get(d) || {};
+      const total = Object.values(hours).reduce((s, v) => s + v, 0);
+      heatmap.push({ day: d, hours, total });
+      if (d === winFrom) break;
+    }
 
     // 7. Treemap: workers per district. Built FROM the authoritative district
     // master (locations of type 'district') so every in-scope district is
