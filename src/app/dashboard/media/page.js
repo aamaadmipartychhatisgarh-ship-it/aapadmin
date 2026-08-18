@@ -640,13 +640,19 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
     <Modal title={editing ? "Edit Debate" : "Schedule Debate"} onClose={onClose}>
       <input className={inp} placeholder="Topic *" value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} />
       <div className="grid grid-cols-2 gap-3">
-        <select className={inp} value={form.channel_id} onChange={(e) => setForm({ ...form, channel_id: e.target.value })}>
-          <option value="">Channel</option>
-          {channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <input type="date" className={inp} value={form.debate_date} onChange={(e) => setForm({ ...form, debate_date: e.target.value })} />
-        <input type="time" className={inp} value={form.debate_time} onChange={(e) => setForm({ ...form, debate_time: e.target.value })} />
-        <div><label className="text-xs text-gray-500 mb-1 block">Brief PDF</label><FileUpload value={form.brief_pdf_url} onChange={(url) => setForm({ ...form, brief_pdf_url: url })} /></div>
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Channel</label>
+          <ChannelSelect options={channels} value={form.channel_id} onChange={(id) => setForm({ ...form, channel_id: id })} />
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Date *</label>
+          <input type="date" className={inp} value={form.debate_date} onChange={(e) => setForm({ ...form, debate_date: e.target.value })} />
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Time</label>
+          <input type="time" className={inp} value={form.debate_time} onChange={(e) => setForm({ ...form, debate_time: e.target.value })} />
+        </div>
+        <div><label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Brief PDF</label><FileUpload value={form.brief_pdf_url} onChange={(url) => setForm({ ...form, brief_pdf_url: url })} /></div>
       </div>
       <textarea className={inp} rows={2} placeholder="Talking points" value={form.talking_points} onChange={(e) => setForm({ ...form, talking_points: e.target.value })} />
       <textarea className={inp} rows={2} placeholder="Opposition counter points" value={form.opposition_counter} onChange={(e) => setForm({ ...form, opposition_counter: e.target.value })} />
@@ -668,6 +674,65 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.topic.trim() || !form.debate_date} />
     </Modal>
+  );
+}
+
+// Searchable single-select for the debate's News Channel. Options come from the
+// live News Channels master (data.channels) — never hardcoded. Stores the
+// channel's unique id (not its text); shows the currently-selected channel's
+// name (so editing pre-fills correctly); scrolls when the list is long; and
+// shows a clear empty state when no channels exist so the user isn't left with a
+// blank control.
+function ChannelSelect({ options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef(null);
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setQ(""); } }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+  // Loose match so a numeric id from the DB and a string form value both resolve.
+  const selected = options.find((o) => String(o.id) === String(value)) || null;
+  const filtered = options.filter((o) => o.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const noChannels = options.length === 0;
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => { if (!noChannels) setOpen((v) => !v); }}
+        className={`w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left flex items-center justify-between ${noChannels ? "bg-gray-50 cursor-not-allowed" : "hover:bg-gray-50"}`}
+      >
+        <span className={selected ? "text-gray-800 truncate" : "text-gray-400 truncate"}>
+          {noChannels ? "No news channels available" : selected ? selected.name : "Select news channel"}
+        </span>
+        {!noChannels && <ChevronDown size={16} className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />}
+      </button>
+      {open && !noChannels && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg">
+          <div className="p-2 border-b border-gray-100">
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search channel…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+          </div>
+          <div className="max-h-48 overflow-auto">
+            {/* Clear selection (channel is optional on a debate). */}
+            <button type="button" onClick={() => { onChange(""); setOpen(false); setQ(""); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-400 hover:bg-gray-50">
+              — No channel —
+            </button>
+            {filtered.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-400">No match for “{q}”.</div>
+            ) : filtered.map((o) => {
+              const on = String(o.id) === String(value);
+              return (
+                <button key={o.id} type="button" onClick={() => { onChange(o.id); setOpen(false); setQ(""); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50">
+                  <span className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${on ? "bg-[#164FA3] border-[#164FA3]" : "border-gray-300"}`}>{on && <Check size={11} className="text-white" />}</span>
+                  <span className="truncate">{o.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
