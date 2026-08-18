@@ -1094,7 +1094,11 @@ function CandidatesTab({ flash, fail }) {
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2.5 min-w-0">
                         <ProfilePhoto name={c.name} src={c.photo_url} size={34} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
-                        <div className="min-w-0"><div className="font-semibold text-gray-900 truncate">{c.name}</div>{c.phone && <div className="text-[11px] text-gray-400 truncate">{c.phone}</div>}</div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-gray-900 truncate">{c.name}</div>
+                          <AgeLine person={c} />
+                          {c.phone && <div className="text-[11px] text-gray-400 truncate">{c.phone}</div>}
+                        </div>
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{c.assembly_name || "—"}</td>
@@ -1251,10 +1255,9 @@ function AssessmentEditor({ c, endpoint, onChange, flash, fail }) {
 // fields are read-only here (Edit opens the full form); the assessment saves,
 // reloads and re-totals through AssessmentEditor.
 function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
-  const age = ageOf(c.date_of_birth);
   const rows = [
     ["Assembly", c.assembly_name], ["District", c.district],
-    ["Phone", c.phone], ["Age", age != null ? `${age} years` : null],
+    ["Phone", c.phone],
     ["Caste", c.caste], ["Type / Position", c.current_position],
     ["Net Worth", c.net_worth], ["Business", c.business],
     ["Monthly Income", c.monthly_income], ["Education", c.education],
@@ -1273,6 +1276,7 @@ function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
               <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Assessed" : "Pending"}</span>
               <span className="text-sm font-bold text-[#164FA3]">{c.total}/100</span>
             </div>
+            <AgeLine person={c} />
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 mt-3 text-xs">
               {rows.map(([k, v]) => (
                 <div key={k} className="min-w-0"><span className="text-gray-400">{k}</span><div className="text-gray-800 font-medium truncate" title={v || ""}>{v || "—"}</div></div>
@@ -1346,7 +1350,8 @@ function MlaVsAap({ b, ranked }) {
   const mla = b.mla || {};
   const m = mlaMetrics(b);
   const rows = [
-    { label: "Age", mla: mla.age != null ? `${mla.age}` : null, get: (c) => (c.age != null ? `${c.age}` : null) },
+    // Age is shown under each name in the header (not as its own metric row), so
+    // it's clear whose age it is.
     { label: "Election Wins", mla: m.wins != null ? `${m.wins}` : null, get: () => null },
     { label: "Public Reach", mla: null, get: (c) => c.assessment?.s_public_reach },
     { label: "Social Reach", mla: null, get: (c) => c.assessment?.s_social_reach },
@@ -1358,7 +1363,19 @@ function MlaVsAap({ b, ranked }) {
     <Card title="Current MLA vs AAP Candidates" icon={Scale} sub="Only fields with real data are compared — MLA assessment scores are not fabricated.">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr><th className="px-3 py-2 text-left font-semibold text-gray-500">Metric</th><th className="px-3 py-2 text-center font-semibold text-gray-900 bg-blue-50">MLA {mla.name ? `· ${mla.name}` : ""}</th>{ranked.map((c) => <th key={c.id} className="px-3 py-2 text-center font-semibold text-gray-900">{c.name}</th>)}</tr></thead>
+          <thead><tr>
+            <th className="px-3 py-2 text-left font-semibold text-gray-500 align-bottom">Metric</th>
+            <th className="px-3 py-2 text-center font-semibold text-gray-900 bg-blue-50 align-bottom">
+              <div>MLA{mla.name ? ` · ${mla.name}` : ""}</div>
+              <AgeLine person={mla} />
+            </th>
+            {ranked.map((c) => (
+              <th key={c.id} className="px-3 py-2 text-center font-semibold text-gray-900 align-bottom">
+                <div>{c.name}</div>
+                <AgeLine person={c} />
+              </th>
+            ))}
+          </tr></thead>
           <tbody className="divide-y divide-gray-100">
             {rows.map((r) => (
               <tr key={r.label} className={r.bold ? "font-bold bg-gray-50" : ""}>
@@ -1567,4 +1584,17 @@ function ageOf(dob) {
   if (!dob) return null; const d = new Date(dob); if (isNaN(d.getTime())) return null;
   const now = new Date(); let age = now.getFullYear() - d.getFullYear(); const mo = now.getMonth() - d.getMonth();
   if (mo < 0 || (mo === 0 && now.getDate() < d.getDate())) age--; return age >= 0 && age < 130 ? age : null;
+}
+// A person's displayable age: prefer an official stored `age` value if the
+// record carries one, else derive it from the stored date_of_birth (never a
+// guess). Returns the number or null.
+function personAge(p) {
+  if (p == null) return null;
+  if (p.age != null && p.age !== "") return Number(p.age);
+  return ageOf(p.date_of_birth);
+}
+// "Age: 27" / "Age: —" label shown directly under a candidate/MLA name.
+function AgeLine({ person }) {
+  const a = personAge(person);
+  return <div className="text-[11px] text-gray-500 font-normal">Age: {a != null ? a : "—"}</div>;
 }
