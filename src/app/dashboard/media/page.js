@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessMedia } from "@/lib/permissions";
 import {
@@ -28,17 +28,43 @@ function Body() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState("");
+  // Global Media Center date filter — kept at this level so it PERSISTS while
+  // switching tabs (item 8) and drives the shared /api/media fetch (items 3–5).
+  const [dateFilter, setDateFilter] = useState({ time: "all", from: "", to: "" });
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 3500); return () => clearTimeout(t); }, [toast]);
-  useEffect(() => { load(); }, []);
-  async function load() {
+
+  const load = useCallback(async () => {
     setLoading(true);
-    const r = await fetch("/api/media");
+    const qs = new URLSearchParams();
+    if (dateFilter.time && dateFilter.time !== "all") {
+      qs.set("time", dateFilter.time);
+      if (dateFilter.time === "custom") {
+        // Single "Custom Date" = one of the two inputs; "Custom Date Range" =
+        // both. Mirror a lone date to both bounds so it means that single day.
+        const from = dateFilter.from || dateFilter.to;
+        const to = dateFilter.to || dateFilter.from;
+        if (from) qs.set("from", from);
+        if (to) qs.set("to", to);
+      }
+    }
+    const r = await fetch(`/api/media${qs.toString() ? `?${qs}` : ""}`);
     if (r.ok) setData(await r.json());
     setLoading(false);
-  }
+  }, [dateFilter]);
 
-  if (loading || !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
+  useEffect(() => { load(); }, [load]);
+
+  const filterActive = dateFilter.time !== "all";
+
+  if (loading && !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
+  if (!data) return <div className="p-8 text-center text-gray-400">Couldn&apos;t load the Media Center.</div>;
+
+  // The date filter governs the date-based sections (coverage, debates,
+  // conferences, analytics). It's hidden on the Dashboard ("Yesterday's
+  // Performance", period-fixed) and the Spokespersons master tab, which aren't
+  // date-scoped. The Channels tab hosts the Debates list, so it's included.
+  const showFilter = ["newspapers", "channels", "conferences", "analytics"].includes(tab);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -59,12 +85,66 @@ function Body() {
         })}
       </div>
 
+      {showFilter && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3">
+          <MediaDateFilter value={dateFilter} onChange={setDateFilter} loading={loading} />
+        </div>
+      )}
+
       {tab === "dashboard" && <MediaDashboardTab />}
-      {tab === "newspapers" && <NewspapersTab data={data} onChange={load} flash={setToast} />}
-      {tab === "channels" && <ChannelsTab data={data} onChange={load} flash={setToast} />}
-      {tab === "conferences" && <ConferencesTab data={data} onChange={load} />}
+      {tab === "newspapers" && <NewspapersTab data={data} onChange={load} flash={setToast} filtered={filterActive} />}
+      {tab === "channels" && <ChannelsTab data={data} onChange={load} flash={setToast} filtered={filterActive} />}
+      {tab === "conferences" && <ConferencesTab data={data} onChange={load} filtered={filterActive} />}
       {tab === "spokespersons" && <SpokespersonsTab data={data} onChange={load} />}
-      {tab === "analytics" && <AnalyticsTab data={data} />}
+      {tab === "analytics" && <AnalyticsTab data={data} filtered={filterActive} />}
+    </div>
+  );
+}
+
+// Preset labels mirror src/lib/reports/timeRanges + the two "custom" modes.
+const MEDIA_PRESETS = [
+  { k: "all", l: "All dates" },
+  { k: "today", l: "Today" },
+  { k: "yesterday", l: "Yesterday" },
+  { k: "this_week", l: "This Week" },
+  { k: "this_month", l: "This Month" },
+  { k: "custom", l: "Custom" },
+];
+
+// Global date filter control: preset chips + a custom from/to range. Filtering
+// runs server-side against the real DB date columns (see /api/media); this only
+// picks the range. Selecting a preset highlights it (active filter shown), and a
+// Clear button resets to "All dates".
+function MediaDateFilter({ value, onChange, loading }) {
+  const active = value.time !== "all";
+  const pick = (k) => onChange(k === "custom"
+    ? { time: "custom", from: value.from || "", to: value.to || "" }
+    : { time: k, from: "", to: "" });
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 flex items-center gap-1"><Calendar size={13} /> Date</span>
+      {MEDIA_PRESETS.map((p) => (
+        <button
+          key={p.k}
+          onClick={() => pick(p.k)}
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${value.time === p.k ? "bg-[#164FA3] text-white border-[#164FA3]" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+        >
+          {p.l}
+        </button>
+      ))}
+      {value.time === "custom" && (
+        <span className="flex items-center gap-1.5">
+          <input type="date" value={value.from} max={value.to || undefined} onChange={(e) => onChange({ ...value, from: e.target.value })} className="border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-[#164FA3]" />
+          <span className="text-gray-400 text-xs">to</span>
+          <input type="date" value={value.to} min={value.from || undefined} onChange={(e) => onChange({ ...value, to: e.target.value })} className="border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-[#164FA3]" />
+        </span>
+      )}
+      {loading && <Loader2 size={14} className="animate-spin text-[#164FA3]" />}
+      {active && (
+        <button onClick={() => onChange({ time: "all", from: "", to: "" })} className="ml-auto text-xs text-gray-500 hover:text-red-600 inline-flex items-center gap-1">
+          <X size={12} /> Clear filter
+        </button>
+      )}
     </div>
   );
 }
@@ -91,7 +171,7 @@ function contentLabel(kind) {
 }
 const NEWSPAPER_OTHER = "__other__";
 
-function NewspapersTab({ data, onChange, flash }) {
+function NewspapersTab({ data, onChange, flash, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   return (
@@ -115,7 +195,7 @@ function NewspapersTab({ data, onChange, flash }) {
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {data.recentNotes.length === 0 ? (
-          <div className="p-8 text-gray-400 text-sm text-center">No press notes yet.</div>
+          <div className="p-8 text-gray-400 text-sm text-center">{filtered ? "No press notes found for the selected date range." : "No press notes yet."}</div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -165,7 +245,7 @@ function SentimentBadge({ s }) {
 }
 
 // ============================================================ CHANNELS
-function ChannelsTab({ data, onChange, flash }) {
+function ChannelsTab({ data, onChange, flash, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const TONE = { supportive: "bg-emerald-100 text-emerald-700", neutral: "bg-gray-100 text-gray-600", opposing: "bg-red-100 text-red-700", unknown: "bg-amber-100 text-amber-700" };
@@ -182,7 +262,7 @@ function ChannelsTab({ data, onChange, flash }) {
       </div>
 
       <div className="flex items-center justify-between">
-        <h3 className="font-bold text-gray-900">Today's & Upcoming Debates</h3>
+        <h3 className="font-bold text-gray-900">{filtered ? "Debates" : "Today's & Upcoming Debates"}</h3>
         <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-1.5 rounded-lg text-sm font-semibold">
           <Plus size={14} /> Schedule Debate
         </button>
@@ -190,7 +270,7 @@ function ChannelsTab({ data, onChange, flash }) {
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {data.upcomingDebates.length === 0 ? (
-          <div className="p-8 text-gray-400 text-sm text-center">No debates scheduled.</div>
+          <div className="p-8 text-gray-400 text-sm text-center">{filtered ? "No debates found for the selected date range." : "No debates scheduled."}</div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -236,7 +316,7 @@ function ChannelsTab({ data, onChange, flash }) {
 }
 
 // ============================================================ CONFERENCES
-function ConferencesTab({ data, onChange }) {
+function ConferencesTab({ data, onChange, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [inviting, setInviting] = useState(null);
@@ -251,7 +331,7 @@ function ConferencesTab({ data, onChange }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {data.conferences.length === 0 ? (
-          <div className="col-span-full bg-white rounded-2xl p-8 text-center text-gray-400 text-sm border border-gray-100">No press conferences.</div>
+          <div className="col-span-full bg-white rounded-2xl p-8 text-center text-gray-400 text-sm border border-gray-100">{filtered ? "No press conferences found for the selected date range." : "No press conferences."}</div>
         ) : data.conferences.map((c) => (
           <div key={c.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
             <div className="flex items-start justify-between gap-2">
@@ -346,12 +426,12 @@ function SpokespersonModal({ editing, onClose, onSaved }) {
 }
 
 // ============================================================ ANALYTICS
-function AnalyticsTab({ data }) {
+function AnalyticsTab({ data, filtered }) {
   const a = data.analytics;
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <SumCard label="Coverage (30d)" value={a.counts?.coverage_total || 0} accent />
+        <SumCard label={filtered ? "Coverage (selected range)" : "Coverage (30d)"} value={a.counts?.coverage_total || 0} accent />
         <SumCard label="Positive" value={a.counts?.positive || 0} />
         <SumCard label="Neutral" value={a.counts?.neutral || 0} />
         <SumCard label="Negative" value={a.counts?.negative || 0} />

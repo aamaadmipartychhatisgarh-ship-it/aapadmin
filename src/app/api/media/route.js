@@ -6,12 +6,28 @@ import { query } from "@/lib/db";
 import { ensurePressNotesSchema } from "@/lib/pressNotesSchema";
 import { ensureNewsChannelsSeed } from "@/lib/newsChannelsSeed";
 import { ensureConferenceSchema } from "@/lib/conferenceSchema";
+import { mediaDateFilter } from "@/lib/mediaDateFilter";
 
 // Aggregated GET for the Media hub page.
-export async function GET() {
+export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+
+    // Global Media Center date filter — applied to every date-based section
+    // (coverage / debates / conferences + their analytics) against the real DB
+    // date columns. When no range is selected ("all"), each section keeps its
+    // own default window so existing behaviour is preserved.
+    const { searchParams } = new URL(req.url);
+    const time = searchParams.get("time") || "all";
+    const dateFrom = searchParams.get("from") || "";
+    const dateTo = searchParams.get("to") || "";
+    const noteFilter = mediaDateFilter("pn.coverage_date", time, dateFrom, dateTo);
+    const covFilter = mediaDateFilter("coverage_date", time, dateFrom, dateTo);
+    const debFilter = mediaDateFilter("d.debate_date", time, dateFrom, dateTo);
+    const confFilter = mediaDateFilter("pc.conference_date", time, dateFrom, dateTo);
+    const active = !!noteFilter.range;
+    const listLimit = active ? 200 : 30;
 
     // Widen the press-note `kind` column (once) and seed the master newspaper
     // list so the dropdown is populated on first load.
@@ -26,15 +42,23 @@ export async function GET() {
     const recentNotes = await query(
       `SELECT pn.*, np.name AS newspaper_name
          FROM press_notes pn LEFT JOIN newspapers np ON np.id = pn.newspaper_id
-        ORDER BY pn.coverage_date DESC, pn.id DESC LIMIT 30`
+        WHERE 1=1${noteFilter.clause}
+        ORDER BY pn.coverage_date DESC, pn.id DESC LIMIT ${listLimit}`,
+      noteFilter.params
     );
 
+    // Default view shows upcoming debates (from a week ago onward); a date filter
+    // instead shows exactly the selected range (past included), newest first.
+    const debWhere = debFilter.clause
+      ? `WHERE 1=1${debFilter.clause}`
+      : `WHERE d.debate_date >= CURDATE() - INTERVAL 7 DAY`;
     const upcomingDebates = await query(
       `SELECT d.*, c.name AS channel_name,
               (SELECT COUNT(*) FROM debate_assignments da WHERE da.debate_id = d.id) AS assignee_count
          FROM debates d LEFT JOIN news_channels c ON c.id = d.channel_id
-        WHERE d.debate_date >= CURDATE() - INTERVAL 7 DAY
-        ORDER BY d.debate_date ASC, d.debate_time ASC LIMIT 30`
+        ${debWhere}
+        ORDER BY d.debate_date ${debFilter.clause ? "DESC" : "ASC"}, d.debate_time ASC LIMIT ${listLimit}`,
+      debFilter.params
     );
     // Attach the assigned spokespersons (id + name) to each debate so the edit
     // form can pre-select them and the list can show the names. One grouped
@@ -53,34 +77,50 @@ export async function GET() {
     }
     for (const d of upcomingDebates) d.spokespersons = byDebate[d.id] || [];
 
+    const confWhere = confFilter.clause
+      ? `WHERE 1=1${confFilter.clause}`
+      : `WHERE pc.conference_date >= NOW() - INTERVAL 30 DAY`;
     const conferences = await query(
       `SELECT pc.*,
               (SELECT COUNT(*) FROM journalist_invites ji WHERE ji.conference_id = pc.id) AS invited,
               (SELECT COUNT(*) FROM journalist_invites ji WHERE ji.conference_id = pc.id AND ji.attended = 1) AS attended
          FROM press_conferences pc
-        WHERE pc.conference_date >= NOW() - INTERVAL 30 DAY
-        ORDER BY pc.conference_date ASC LIMIT 30`
+        ${confWhere}
+        ORDER BY pc.conference_date ${confFilter.clause ? "DESC" : "ASC"} LIMIT ${listLimit}`,
+      confFilter.params
     );
 
-    // Analytics: coverage count, channel tone breakdown, top topics, top spokesperson
+    // Analytics: coverage count, channel tone breakdown, top topics, top
+    // spokesperson — all responding to the SAME date filter (default: 30 days).
+    const covWhere = covFilter.clause
+      ? `WHERE 1=1${covFilter.clause}`
+      : `WHERE coverage_date >= CURDATE() - INTERVAL 30 DAY`;
     const [[counts]] = await query(
       `SELECT COUNT(*) AS coverage_total,
               SUM(sentiment='positive') AS positive,
               SUM(sentiment='neutral') AS neutral,
               SUM(sentiment='negative') AS negative
-         FROM press_notes WHERE coverage_date >= CURDATE() - INTERVAL 30 DAY`
+         FROM press_notes ${covWhere}`,
+      covFilter.params
     ).then((r) => [r]);
 
     const channelTone = await query(`SELECT tone, COUNT(*) AS n FROM news_channels GROUP BY tone`);
 
+    // Top spokespersons by viral score across debates in the selected range
+    // (when a filter is active); otherwise across all debates. The date filter
+    // sits in the debates join ON clause and we COUNT/SUM the matched debate rows
+    // so out-of-range debates don't count (a spokesperson with no in-range debate
+    // still lists with 0). COUNT(d.id) == COUNT(da.id) when unfiltered (every
+    // assignment has a debate), so the default view is unchanged.
     const topSpokespersons = await query(
-      `SELECT s.id, s.name, COUNT(da.id) AS debates,
+      `SELECT s.id, s.name, COUNT(d.id) AS debates,
               COALESCE(SUM(d.viral_score), 0) AS total_viral
          FROM spokespersons s
          LEFT JOIN debate_assignments da ON da.spokesperson_id = s.id
-         LEFT JOIN debates d ON d.id = da.debate_id
+         LEFT JOIN debates d ON d.id = da.debate_id${debFilter.clause}
         GROUP BY s.id, s.name
-        ORDER BY total_viral DESC, debates DESC LIMIT 5`
+        ORDER BY total_viral DESC, debates DESC LIMIT 5`,
+      debFilter.params
     );
 
     return NextResponse.json({
