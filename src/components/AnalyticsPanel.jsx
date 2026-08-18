@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
-  CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
+  CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, LabelList,
 } from "recharts";
 import { Loader2, Filter, BarChart3, PieChart as PieIcon, TrendingUp, Layers, Activity, Grid3x3, Radio } from "lucide-react";
 import { useLiveAnalytics } from "@/hooks/useLiveAnalytics";
@@ -123,6 +123,14 @@ export default function AnalyticsPanel() {
   // Workers by District — EVERY district from the shared district-stats service
   // (backend already includes zero-worker districts and sorts by worker count).
   const districtStats = useMemo(() => data?.treemap || [], [data]);
+  // Dedicated bar-chart dataset: District → ACTUAL workers only (the live
+  // Contacts count `count` from districtWorkerStats — NOT required workers,
+  // attempt calls or strength %), sorted highest → lowest, all districts kept.
+  const workersByDistrict = useMemo(() =>
+    districtStats
+      .map((d) => ({ district: d.district, workers: Number(d.count) || 0 }))
+      .sort((a, b) => b.workers - a.workers || a.district.localeCompare(b.district)),
+  [districtStats]);
 
   // Date × hour heat map: an array of { day, hours: {10: n, …}, total } — one
   // row per actual calendar date in the window (zero-call days included).
@@ -300,29 +308,27 @@ export default function AnalyticsPanel() {
             )}
           </Panel>
 
-          {/* Row 6: Workers by District — every district (incl. zero) with actual /
-              required workers and Strength %, from the shared district-stats source. */}
+          {/* Row 6: Workers by District — a dedicated horizontal bar chart of the
+              ACTUAL worker count per district (District → workers), sorted
+              high→low, every district incl. zero. Deliberately NOT the
+              Organization Map's tile/strength design. */}
           <Panel title="Workers by District" icon={Layers}>
-            {districtStats.length === 0 ? (
+            <p className="text-xs text-gray-400 -mt-3 mb-3">Actual workers per district (live Contacts count), highest to lowest.</p>
+            {workersByDistrict.length === 0 ? (
               <div className="h-[120px] flex items-center justify-center text-gray-400 text-sm">No district data available.</div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {districtStats.map((d) => {
-                  const pct = Number(d.strengthPercentage) || 0;
-                  const color = pct >= 60 ? "bg-emerald-500" : pct >= 35 ? "bg-[#164FA3]" : "bg-amber-500";
-                  return (
-                    <div key={d.id ?? d.district} className="border border-gray-100 rounded-xl p-3">
-                      <div className="font-semibold text-gray-900 text-sm truncate" title={d.district}>{d.district}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">
-                        {Number(d.count || 0).toLocaleString("en-IN")} / {Number(d.requiredWorkers || 0).toLocaleString("en-IN")} workers
-                      </div>
-                      <div className="flex items-center gap-2 mt-2">
-                        <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>
-                        <span className="text-xs font-bold text-gray-700 w-11 text-right shrink-0">{pct}%</span>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="overflow-y-auto" style={{ maxHeight: 520 }}>
+                <ResponsiveContainer width="100%" height={Math.max(220, workersByDistrict.length * 26)}>
+                  <BarChart layout="vertical" data={workersByDistrict} margin={{ top: 4, right: 44, bottom: 4, left: 8 }} barCategoryGap={4}>
+                    <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="#eef2f7" />
+                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#9ca3af" }} />
+                    <YAxis type="category" dataKey="district" width={120} interval={0} tick={{ fontSize: 11, fill: "#374151" }} />
+                    <Tooltip cursor={{ fill: "rgba(22,79,163,0.06)" }} content={<WorkersByDistrictTooltip />} />
+                    <Bar dataKey="workers" fill="#164FA3" radius={[0, 4, 4, 0]} maxBarSize={20} isAnimationActive={false}>
+                      <LabelList dataKey="workers" position="right" formatter={(v) => Number(v).toLocaleString("en-IN")} style={{ fontSize: 11, fill: "#374151", fontWeight: 600 }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             )}
           </Panel>
@@ -444,6 +450,19 @@ function Panel({ title, icon: Icon, className = "", children }) {
 
 function Empty() {
   return <div className="h-[300px] flex items-center justify-center text-gray-400 text-sm">No data in this range.</div>;
+}
+
+// Workers-by-District tooltip — shows ONLY the district name and its actual
+// worker count (no required/attempt/strength values).
+function WorkersByDistrictTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-md px-3 py-2 text-xs">
+      <div className="font-bold text-gray-900">{d.district}</div>
+      <div className="text-gray-600 mt-0.5">Actual Workers: <strong className="text-[#164FA3]">{Number(d.workers).toLocaleString("en-IN")}</strong></div>
+    </div>
+  );
 }
 
 function Field({ label, children }) {
