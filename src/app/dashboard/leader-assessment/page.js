@@ -319,16 +319,9 @@ function Overview({ flash, fail }) {
       <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
         <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
       </Card>
+      {/* Search result / selected assembly — appears directly BELOW the Search
+          Card; the Search Card above never moves. */}
       {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={openAssemblyFullView} version={dataVersion} />}
-
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <Stat label="Total Completed Assemblies" value={s?.total_completed_assemblies} />
-        <Stat label="With MLA Data" value={s?.assemblies_with_mla} />
-        <Stat label="With Candidates Data" value={s?.assemblies_with_candidates} />
-        <Stat label="Total Candidates" value={s?.total_candidates} />
-        <Stat label="Assessment Done" value={s?.assessments_completed} />
-        <Stat label="Avg Candidate Score" value={s?.average_score != null ? `${s.average_score}/100` : null} />
-      </div>
 
       {/* Assembly-wise Top Ranking — ranked by the single Assembly Score
           (top AAP candidate assessment total), computed on the backend. */}
@@ -372,6 +365,17 @@ function Overview({ flash, fail }) {
           </div>
         </Card>
       )}
+
+      {/* Overview status cards — part of "Other Overview sections", below the
+          Search Card, selected assembly and Top Ranked sections. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <Stat label="Total Completed Assemblies" value={s?.total_completed_assemblies} />
+        <Stat label="With MLA Data" value={s?.assemblies_with_mla} />
+        <Stat label="With Candidates Data" value={s?.assemblies_with_candidates} />
+        <Stat label="Total Candidates" value={s?.total_candidates} />
+        <Stat label="Assessment Done" value={s?.assessments_completed} />
+        <Stat label="Avg Candidate Score" value={s?.average_score != null ? `${s.average_score}/100` : null} />
+      </div>
 
       <Card title="Assemblies" icon={Building2}>
         {assemblies.length === 0 ? <Empty msg="No assemblies yet. Add one on the Assemblies tab." /> : (
