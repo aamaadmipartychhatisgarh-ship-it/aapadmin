@@ -379,9 +379,13 @@ function Overview({ flash, fail }) {
             each counted once) — NOT assembly-wise, not assumed 3/assembly, not
             hardcoded. Updates on candidate create/delete/update. */}
         <Stat label="Total Candidate" value={s?.total_candidates} />
+        {/* Candidate Assessment Done is the third metric: individual candidates
+            whose FULL 10-parameter assessment is complete (all 10 scores > 0) —
+            not merely an assessment record existing, not partial, not total-score
+            only. Recomputed live from the scores on every load. */}
+        <Stat label="Candidate Assessment Done" value={s?.assessments_completed} />
         <Stat label="Total Completed Assemblies" value={s?.total_completed_assemblies} />
         <Stat label="With Candidates Data" value={s?.assemblies_with_candidates} />
-        <Stat label="Assessment Done" value={s?.assessments_completed} />
         <Stat label="Avg Candidate Score" value={s?.average_score != null ? `${s.average_score}/100` : null} />
       </div>
 
