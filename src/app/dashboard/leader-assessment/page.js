@@ -323,48 +323,47 @@ function Overview({ flash, fail }) {
           Card; the Search Card above never moves. */}
       {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={openAssemblyFullView} version={dataVersion} />}
 
-      {/* Assembly-wise Top Ranking — ranked by the single Assembly Score
-          (top AAP candidate assessment total), computed on the backend. */}
-      {data?.top_assemblies?.length > 0 && (
-        <Card title="Top 3 Ranked Assemblies" icon={Trophy} sub="The 3 highest-scoring assemblies by Assembly Score = the sitting assembly's top AAP candidate assessment total (highest → lowest).">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Rank", "Assembly", "District", "Sitting MLA", "MLA Score", "Top Candidate Score", "Assembly Score"].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
-              <tbody className="divide-y divide-gray-100">
-                {/* Top 3 only — the API already caps at 3; slice again defensively
-                    so a future change can never leak a 4th row here. */}
-                {data.top_assemblies.slice(0, 3).map((r) => (
-                  <tr key={r.assembly_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setPickedId(r.assembly_id)}>
-                    <td className="px-3 py-2.5"><span className={`font-bold ${r.rank <= 3 ? RANK_COLOR[r.rank - 1] : "text-gray-400"}`}>{r.rank}</span></td>
-                    <td className="px-3 py-2.5 font-semibold text-gray-900">{r.assembly_name}</td>
-                    <td className="px-3 py-2.5 text-gray-600">{r.district || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-700">{r.mla_name || <span className="text-gray-300">No MLA</span>}</td>
-                    <td className="px-3 py-2.5 text-gray-400">{r.mla_score != null ? `${r.mla_score}/100` : "N/A"}</td>
-                    <td className="px-3 py-2.5 font-semibold">{r.top_candidate_score != null ? `${r.top_candidate_score}/100` : "—"}</td>
-                    <td className="px-3 py-2.5"><span className="font-bold text-[#164FA3]">{r.assembly_score != null ? `${r.assembly_score}/100` : "—"}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {/* Top 10 rankings — side-by-side on desktop (LEFT: assemblies, RIGHT:
+          candidates), stacked on tablet/mobile. Both ranked by the real
+          assessment scores computed on the backend and capped at 10; fewer than
+          10 valid records simply show fewer rows. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* LEFT: Top 10 Ranked Assemblies (by Assembly Score, highest → lowest) */}
+        <Card title="Top 10 Ranked Assemblies" icon={Trophy} sub="By Assembly Score = the assembly's top AAP candidate assessment total (highest → lowest).">
+          {!(data?.top_assemblies?.length > 0) ? (
+            <div className="text-sm text-gray-400">No assemblies have an assessment score yet.</div>
+          ) : (
+            <div className="space-y-2.5">
+              {data.top_assemblies.slice(0, 10).map((r) => (
+                <div key={r.assembly_id} onClick={() => setPickedId(r.assembly_id)} className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 rounded-lg -mx-1 px-1 py-1" title="Open this assembly">
+                  <span className={`w-6 text-center font-bold shrink-0 ${r.rank <= 3 ? RANK_COLOR[r.rank - 1] : "text-gray-400"}`}>{r.rank}</span>
+                  <div className="w-36 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{r.assembly_name}</div><div className="text-xs text-gray-400 truncate">{[r.district, r.mla_name].filter(Boolean).join(" · ") || "—"}</div></div>
+                  <div className="flex-1 min-w-0"><ScoreBar value={r.assembly_score} max={100} showValue={false} /></div>
+                  <span className="font-bold text-[#164FA3] w-16 text-right shrink-0">{r.assembly_score}/100</span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
-      )}
 
-      {data?.top_candidates?.length > 0 && (
-        <Card title="Top 3 Ranked Candidates" icon={Trophy}>
-          <div className="space-y-2.5">
-            {/* Top 3 only — the API already caps at 3; slice again defensively. */}
-            {data.top_candidates.slice(0, 3).map((c, i) => (
-              <div key={c.id} className="flex items-center gap-3">
-                <span className={`w-6 text-center font-bold ${i < 3 ? RANK_COLOR[i] : "text-gray-400"}`}>{i + 1}</span>
-                <div className="w-40 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div><div className="text-xs text-gray-400 truncate">{c.assembly_name}</div></div>
-                <div className="flex-1"><ScoreBar value={c.total} max={100} showValue={false} /></div>
-                <span className="font-bold text-[#164FA3] w-16 text-right">{c.total}/100</span>
-              </div>
-            ))}
-          </div>
+        {/* RIGHT: Top 10 Ranked Candidates (by total assessment score) */}
+        <Card title="Top 10 Ranked Candidates" icon={Trophy} sub="By total 10-parameter assessment score, 0–100 (highest → lowest).">
+          {!(data?.top_candidates?.length > 0) ? (
+            <div className="text-sm text-gray-400">No candidates have an assessment score yet.</div>
+          ) : (
+            <div className="space-y-2.5">
+              {data.top_candidates.slice(0, 10).map((c, i) => (
+                <div key={c.id} className="flex items-center gap-3">
+                  <span className={`w-6 text-center font-bold shrink-0 ${i < 3 ? RANK_COLOR[i] : "text-gray-400"}`}>{i + 1}</span>
+                  <div className="w-36 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div><div className="text-xs text-gray-400 truncate">{c.assembly_name}</div></div>
+                  <div className="flex-1 min-w-0"><ScoreBar value={c.total} max={100} showValue={false} /></div>
+                  <span className="font-bold text-[#164FA3] w-16 text-right shrink-0">{c.total}/100</span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
-      )}
+      </div>
 
       {/* Overview status cards — part of "Other Overview sections", below the
           Search Card, selected assembly and Top Ranked sections. */}

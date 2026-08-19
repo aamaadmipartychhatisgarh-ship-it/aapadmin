@@ -113,12 +113,12 @@ export async function GET() {
     const scored = rows.map((r) => ({ id: r.id, name: r.name, assembly_id: r.assembly_id, assembly_name: r.assembly_name, total: assessmentTotal(r) }));
     const avg = scored.length ? Math.round((scored.reduce((s, r) => s + r.total, 0) / scored.length) * 10) / 10 : 0;
     // Top-ranked candidates: only those with a real assessment score (> 0),
-    // highest → lowest, capped at the top 3 — enforced at the data level.
-    // Fewer than 3 scored candidates → fewer rows (never padded).
+    // highest → lowest, capped at the top 10 — enforced at the data level.
+    // Fewer than 10 scored candidates → fewer rows (never padded).
     const top = [...scored]
       .filter((c) => c.total > 0)
       .sort((x, y) => y.total - x.total)
-      .slice(0, 3);
+      .slice(0, 10);
 
     // ---- Assembly-wise Top Ranking -------------------------------------------
     // ONE consistent Assembly Ranking Score, used here and reusable everywhere:
@@ -163,12 +163,12 @@ export async function GET() {
         };
       })
       // Only rank assemblies that actually have an assessment score (highest →
-      // lowest), then keep ONLY the top 3 — enforced here at the data level, not
-      // just hidden in the UI. Fewer than 3 scored assemblies → fewer rows (never
+      // lowest), then keep ONLY the top 10 — enforced here at the data level, not
+      // just hidden in the UI. Fewer than 10 scored assemblies → fewer rows (never
       // padded with placeholders).
       .filter((m) => m.assembly_score != null)
       .sort((x, y) => y.assembly_score - x.assembly_score)
-      .slice(0, 3)
+      .slice(0, 10)
       .map((m, i) => ({ ...m, rank: i + 1 }));
 
     return NextResponse.json({
