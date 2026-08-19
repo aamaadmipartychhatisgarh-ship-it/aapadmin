@@ -297,6 +297,18 @@ function Overview({ flash, fail }) {
   // version so the open panel/full-view reload their own bundles — everything
   // updates with no manual refresh.
   const refresh = useCallback(() => { load({ silent: true }); setDataVersion((v) => v + 1); }, [load]);
+
+  // THE single entry point to the one Full Assessment modal (AssemblyFullView).
+  // BOTH the Assembly Search panel's "Full View" button AND every Assemblies List
+  // "Open" button call this exact function with the assembly's real DB id — so
+  // there is only ever one Full View component, one data flow, one popup. Guards
+  // a missing/invalid id so a bad row can never open an "undefined" assembly.
+  const openAssemblyFullView = useCallback((assemblyId) => {
+    const id = Number(assemblyId);
+    if (!Number.isInteger(id) || id <= 0) return;
+    setOpenId(id);
+  }, []);
+
   const s = data?.stats;
   if (loading) return <LoadingBlock />;
   if (error) return <ErrorBlock msg={error} onRetry={() => load()} />;
@@ -307,7 +319,7 @@ function Overview({ flash, fail }) {
       <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
         <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
       </Card>
-      {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={setOpenId} version={dataVersion} />}
+      {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={openAssemblyFullView} version={dataVersion} />}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <Stat label="Total Completed Assemblies" value={s?.total_completed_assemblies} />
@@ -377,7 +389,7 @@ function Overview({ flash, fail }) {
                     <td className="px-3 py-2.5">{a.completed
                       ? <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Completed</span>
                       : <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Pending</span>}</td>
-                    <td className="px-3 py-2.5 text-right"><button onClick={() => setOpenId(a.id)} className="text-[#164FA3] font-semibold hover:underline text-xs">Open →</button></td>
+                    <td className="px-3 py-2.5 text-right"><button onClick={() => openAssemblyFullView(a.id)} className="text-[#164FA3] font-semibold hover:underline text-xs">Open →</button></td>
                   </tr>
                 ))}
               </tbody>
