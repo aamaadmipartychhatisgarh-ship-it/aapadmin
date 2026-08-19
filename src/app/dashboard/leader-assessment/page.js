@@ -374,9 +374,13 @@ function Overview({ flash, fail }) {
             master-linked count as the MLA Data List (never Master-Data blindly,
             never empty/duplicate profiles). Updates on MLA create/edit/delete. */}
         <Stat label="MLA Data" value={s?.assemblies_with_mla} />
+        {/* Total Candidate is the second metric: the candidate-wise total of all
+            valid candidate records across every assembly (COUNT of la_aap_candidates,
+            each counted once) — NOT assembly-wise, not assumed 3/assembly, not
+            hardcoded. Updates on candidate create/delete/update. */}
+        <Stat label="Total Candidate" value={s?.total_candidates} />
         <Stat label="Total Completed Assemblies" value={s?.total_completed_assemblies} />
         <Stat label="With Candidates Data" value={s?.assemblies_with_candidates} />
-        <Stat label="Total Candidates" value={s?.total_candidates} />
         <Stat label="Assessment Done" value={s?.assessments_completed} />
         <Stat label="Avg Candidate Score" value={s?.average_score != null ? `${s.average_score}/100` : null} />
       </div>
