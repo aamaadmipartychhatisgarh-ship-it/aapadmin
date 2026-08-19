@@ -386,10 +386,13 @@ function Overview({ flash, fail }) {
         )}
       </Card>
 
-      {/* One Full View modal for the whole Overview. Editing inside it triggers a
-          silent refresh of the stats/rankings + the open panel, so every surface
-          updates without a manual page refresh. */}
-      {openId && <AssemblyFullView assemblyId={openId} onClose={() => setOpenId(null)} onChange={refresh} flash={flash} fail={fail} />}
+      {/* ONE Full View modal for the whole Overview — used identically by the
+          Assemblies List "Open" and the Assembly Search panel's "Full View"
+          (both just set openId to the real la_assemblies id). key={openId}
+          forces a fresh mount per assembly, so switching from Assembly A to B
+          never shows A's stale data. Editing inside triggers a silent refresh of
+          the stats/rankings + open panel, so every surface updates. */}
+      {openId && <AssemblyFullView key={openId} assemblyId={openId} onClose={() => setOpenId(null)} onChange={refresh} flash={flash} fail={fail} />}
     </div>
   );
 }
@@ -459,7 +462,9 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
   // `version` is bumped by the parent after any edit, so the panel re-fetches and
   // its Top 3 candidates + MLA score reflect the latest assessment automatically.
   const load = useCallback(async () => {
-    setLoading(true); setError("");
+    // Clear stale data so a previously-selected assembly's overview never lingers
+    // while the newly-picked assembly loads.
+    setLoading(true); setError(""); setBundle(null);
     try { setBundle(await api(`/api/leader-assessment/assemblies/${assemblyId}`)); }
     catch (e) { setError(e.message || "Failed to load the assessment."); setBundle(null); }
     finally { setLoading(false); }
@@ -543,7 +548,9 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    setLoading(true); setError("");
+    // Clear the previous assembly's bundle up front so its data can never be
+    // shown while the newly-selected assembly loads (no stale A → B carryover).
+    setLoading(true); setError(""); setBundle(null);
     try { setBundle(await api(`/api/leader-assessment/assemblies/${assemblyId}`)); }
     catch (e) { setError(e.message || "Failed to load the assessment."); setBundle(null); }
     finally { setLoading(false); }
