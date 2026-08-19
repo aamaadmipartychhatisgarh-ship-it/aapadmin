@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, assessmentTotal, syncAssemblies } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, assessmentTotal, assemblyComplete, syncAssemblies } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -79,21 +79,29 @@ export async function GET() {
         WHERE ${CAND_COMPLETE} AND ${ALL_PARAMS}`
     ).then((r) => [r]);
 
-    // CARD 1 — Total Completed Assemblies: an assembly is COMPLETED when it has
-    // at least one candidate AND EVERY candidate linked to it has a complete
-    // 10-parameter assessment (the SAME assemblyComplete rule the Assemblies List
-    // and Full View use). No hardcoded candidate count; uses the actual
-    // candidates. An assembly with no candidates, or with any candidate whose
-    // assessment is incomplete/missing, is not counted.
-    const [[completed]] = await query(
-      `SELECT COUNT(DISTINCT COALESCE(a.location_id, -a.id)) AS n FROM la_assemblies a
-        WHERE EXISTS (SELECT 1 FROM la_aap_candidates c WHERE c.assembly_id = a.id)
-          AND NOT EXISTS (
-                SELECT 1 FROM la_aap_candidates c
-                LEFT JOIN la_candidate_assessments s ON s.candidate_id = c.id
-                WHERE c.assembly_id = a.id AND NOT (${ALL_PARAMS})
-              )`
-    ).then((r) => [r]);
+    // CARD 1 — Total Completed Assemblies. Computed with the EXACT SAME
+    // assemblyComplete() function the Assemblies List and Full View use, fed the
+    // SAME candidate rows (every candidate of each master-linked assembly, joined
+    // to its assessment), so the three can never disagree — one source of truth.
+    // assemblyComplete = at least one candidate AND every candidate's 10-parameter
+    // assessment complete. Zero candidates → not counted. No hardcoded count.
+    const compRows = await query(
+      `SELECT a.id AS assembly_id, ${ASSESSMENT_PARAMS.map((p) => `s.${p.key}`).join(", ")}
+         FROM la_assemblies a
+         JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
+         JOIN la_aap_candidates c ON c.assembly_id = a.id
+         LEFT JOIN la_candidate_assessments s ON s.candidate_id = c.id`
+    );
+    const candScoresByAsm = new Map();
+    for (const r of compRows) {
+      if (!candScoresByAsm.has(r.assembly_id)) candScoresByAsm.set(r.assembly_id, []);
+      candScoresByAsm.get(r.assembly_id).push(r); // r carries the 10 score columns
+    }
+    let completedAssemblies = 0;
+    for (const cands of candScoresByAsm.values()) {
+      if (assemblyComplete(cands)) completedAssemblies++;
+    }
+    const completed = { n: completedAssemblies };
 
     // Average score + top-ranked candidates (across all assemblies).
     const rows = await query(
@@ -166,7 +174,7 @@ export async function GET() {
     return NextResponse.json({
       stats: {
         total_assemblies: Number(a.total) || 0,                  // Master Data count (used elsewhere)
-        total_completed_assemblies: Number(completed.n) || 0,    // Card 1: MLA + all 3 candidates complete
+        total_completed_assemblies: Number(completed.n) || 0,    // Card 1: all candidates' assessments complete (assemblyComplete)
         assemblies_with_mla: Number(wm.n) || 0,                  // Card 2
         assemblies_with_candidates: Number(wc.n) || 0,           // Card 3: all 3 candidates complete
         total_candidates: Number(tc.n) || 0,                     // Card 4: valid candidate records
