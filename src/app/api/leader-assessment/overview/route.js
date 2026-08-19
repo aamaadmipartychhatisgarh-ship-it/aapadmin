@@ -34,10 +34,20 @@ export async function GET() {
     const CAND_COMPLETE = "c.name IS NOT NULL AND TRIM(c.name) <> ''";
     const ALL_PARAMS = ASSESSMENT_PARAMS.map((p) => `COALESCE(s.${p.key}, 0) > 0`).join(" AND ");
 
-    // CARD 2 — With MLA Data: assemblies whose MLA profile is complete
-    // (la_mla_profiles has one row per assembly).
+    // CARD 2 — With MLA Data: the number of actual, unique MLA profiles.
+    // la_mla_profiles already has UNIQUE(assembly_id), so there is one row per
+    // assembly — but the la_assemblies mirror can hold more than one row for the
+    // SAME real (master) assembly (a duplicate mirror, or a legacy row whose
+    // location_id is NULL), which would let two MLA rows represent ONE real
+    // assembly and over-count (e.g. show 5 when 4 exist). Counting DISTINCT by
+    // the master location_id collapses those duplicates to a single profile,
+    // while a legacy MLA with no master link (location_id NULL) still counts once
+    // via the -mp.id fallback. In a clean DB this equals a plain COUNT(*).
     const [[wm]] = await query(
-      `SELECT COUNT(*) AS n FROM la_mla_profiles mp WHERE ${MLA_COMPLETE}`
+      `SELECT COUNT(DISTINCT COALESCE(a.location_id, -mp.id)) AS n
+         FROM la_mla_profiles mp
+         JOIN la_assemblies a ON a.id = mp.assembly_id
+        WHERE ${MLA_COMPLETE}`
     ).then((r) => [r]);
 
     // CARD 3 — With Candidates Data: assemblies where ALL THREE candidates are
@@ -71,7 +81,7 @@ export async function GET() {
     // CARD 1 — Total Completed Assemblies: MLA complete AND all 3 candidates
     // complete. Only these count; NOT every assembly in Master Data.
     const [[completed]] = await query(
-      `SELECT COUNT(*) AS n FROM la_assemblies a
+      `SELECT COUNT(DISTINCT COALESCE(a.location_id, -a.id)) AS n FROM la_assemblies a
         WHERE EXISTS (SELECT 1 FROM la_mla_profiles mp WHERE mp.assembly_id = a.id AND ${MLA_COMPLETE})
           AND (SELECT COUNT(*) FROM la_aap_candidates c WHERE c.assembly_id = a.id AND ${CAND_COMPLETE}) >= 3`
     ).then((r) => [r]);
