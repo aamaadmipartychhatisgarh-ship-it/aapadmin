@@ -551,24 +551,49 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                 </div>
               )}
             </div>
-            {/* RIGHT: Sitting MLA */}
+            {/* RIGHT: Current Sitting MLA of THIS assembly (mla is fetched by the
+                selected assembly id, so it always belongs to this assembly). */}
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Sitting MLA</div>
-              <div className="border border-gray-100 rounded-xl p-4 text-center">
-                <ProfilePhoto name={mla?.name || "MLA"} src={mla?.photo_url} size={72} square editable={false} className="mx-auto bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
-                <div className="font-bold text-gray-900 mt-2 truncate">{mla?.name || <span className="text-gray-300">No MLA on record</span>}</div>
-                <div className="text-xs text-gray-500 mt-0.5 truncate">{[assembly.name, assembly.district].filter(Boolean).join(" · ")}</div>
-                <div className="grid grid-cols-1 gap-1.5 mt-3 text-left">
-                  <div className="flex justify-between text-sm"><span className="text-gray-400">MLA Score</span><span className={`font-semibold ${mla?.assessment_done ? "text-[#164FA3]" : "text-gray-400"}`}>{mla?.assessment_done ? `${mla.total}/100` : "Not assessed"}</span></div>
-                  {mla?.party && <div className="flex justify-between text-sm"><span className="text-gray-400">Party</span><span className="font-medium text-gray-700 truncate ml-2">{mla.party}</span></div>}
-                  <div className="flex justify-between text-sm"><span className="text-gray-400">Status</span><span className={`font-semibold ${status?.completed ? "text-emerald-600" : "text-gray-500"}`}>{status?.completed ? "Completed" : "Pending"}</span></div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Current Sitting MLA</div>
+              {mla && mla.name ? (
+                <div className="border border-gray-100 rounded-xl p-4">
+                  <div className="flex flex-col items-center text-center">
+                    <ProfilePhoto name={mla.name} src={mla.photo_url} size={72} square editable={false} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
+                    <div className="font-bold text-gray-900 mt-2 truncate max-w-full">{mla.name}</div>
+                    <div className="text-[11px] text-emerald-700 font-semibold mt-0.5">Current MLA · {assembly.name}{assembly.district ? ` · ${assembly.district}` : ""}</div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-1.5 mt-3 text-left">
+                    <MlaField label="Age" value={mla.age != null ? String(mla.age) : "—"} />
+                    <MlaField label="Party" value={mla.party || "—"} />
+                    <MlaField label="Caste" value={mla.caste || "—"} />
+                    <MlaField label="Criminal Cases" value={mla.criminal_cases != null ? String(mla.criminal_cases) : "—"} />
+                    <MlaField label="Net Worth" value={mla.net_worth || "—"} />
+                    <MlaField label="Times Won" value={mla.times_won != null ? String(mla.times_won) : "—"} />
+                    <MlaField label="MLA Score" value={mla.assessment_done ? `${mla.total}/100` : "Not assessed"} accent={mla.assessment_done} />
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="border border-dashed border-gray-200 rounded-xl p-6 text-center">
+                  <UserSquare2 size={28} className="mx-auto text-gray-300 mb-2" />
+                  <div className="text-sm font-medium text-gray-500">MLA Data Not Available</div>
+                  <div className="text-[11px] text-gray-400 mt-1">No MLA profile is linked to this assembly yet.</div>
+                </div>
+              )}
             </div>
           </div>
         )}
       </Card>
     </>
+  );
+}
+
+// One label/value row inside the Sitting MLA card.
+function MlaField({ label, value, accent }) {
+  return (
+    <div className="flex justify-between text-sm gap-2">
+      <span className="text-gray-400 shrink-0">{label}</span>
+      <span className={`font-medium truncate text-right ${accent ? "text-[#164FA3] font-semibold" : "text-gray-700"}`} title={value}>{value}</span>
+    </div>
   );
 }
 
