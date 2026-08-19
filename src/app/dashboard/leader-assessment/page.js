@@ -6,7 +6,7 @@ import ProfilePhoto from "@/components/ProfilePhoto";
 import {
   LayoutDashboard, Building2, UserSquare2, History, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
-  CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet, Scale,
+  CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet,
   Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
   Database, Power, Check,
 } from "lucide-react";
@@ -644,20 +644,7 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
 
 // -------------------------------- MLA -------------------------------------
 const EMPTY_MLA = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", criminal_cases: "", times_won: "", times_contested: "", largest_winning_margin: "", previous_winning_margin: "", party_won_from: "", party_defeated: "" };
-function mlaMetrics(b) {
-  const el = b.elections || [];
-  const mla = b.mla || {};
-  const wins = mla.times_won != null ? Number(mla.times_won) : el.filter((e) => /won/i.test(e.result || "")).length;
-  const contested = mla.times_contested != null ? Number(mla.times_contested) : el.length;
-  const winRate = contested > 0 ? Math.round((wins / contested) * 100) : null;
-  const wonMargins = el.filter((e) => /won/i.test(e.result || "") && e.margin != null).map((e) => Number(e.margin));
-  const best = mla.largest_winning_margin != null ? Number(mla.largest_winning_margin) : (wonMargins.length ? Math.max(...wonMargins) : null);
-  const latest = el[0];
-  const lastMargin = mla.previous_winning_margin != null ? Number(mla.previous_winning_margin) : (latest?.margin ?? null);
-  return { wins, contested, winRate, best, lastMargin, latestVotes: latest?.votes ?? null, latestShare: latest?.vote_percentage ?? null };
-}
-// (The old per-assembly MlaTab was replaced by the global MlaManager below.
-// mlaMetrics() above is still used by the MLA-vs-AAP comparison.)
+// (The old per-assembly MlaTab was replaced by the global MlaManager below.)
 
 // --------------------------- MLA MANAGER ----------------------------------
 // The MLA Profile tab: a global manager with a "+ Create MLA Profile" action and
@@ -1440,24 +1427,48 @@ function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
 function ComparisonTab({ b, onChange, flash, fail }) {
   const ranked = b.candidates;
   if (ranked.length === 0) return <Empty msg="No AAP candidates to compare yet. Add candidates and score them first." />;
-  const maxOf = (key) => Math.max(...ranked.map((c) => Number(c.assessment?.[key]) || 0));
-  const maxTotal = Math.max(...ranked.map((c) => c.total));
+
+  // ONE unified comparison: the sitting MLA is the first column, followed by all
+  // AAP candidates — the single source of truth for parameter-wise scores and
+  // totals. MLA scores come ONLY from the actual MLA assessment (b.mla.assessment);
+  // nothing is invented. A parameter with no stored MLA score shows "N/A", and an
+  // MLA with no assessment at all shows "Not Assessed" for its total.
+  const mla = b.mla;
+  const mlaAssessed = !!(mla && PARAMS.some((p) => mla.assessment?.[p.key] != null));
+  const columns = [];
+  if (mla) columns.push({ id: "mla", name: mla.name ? `MLA · ${mla.name}` : "MLA (Sitting)", isMla: true, assessment: mla.assessment || {}, total: mla.total, assessed: mlaAssessed });
+  for (const c of ranked) columns.push({ id: `c${c.id}`, name: c.name, isMla: false, assessment: c.assessment || {}, total: c.total, assessed: true });
+
+  // Highest score per parameter (across MLA + all candidates); unscored (null)
+  // counts as nothing. Totals only rank columns that carry a real assessment, so
+  // a not-assessed MLA never wins the total highlight.
+  const maxOf = (key) => Math.max(0, ...columns.map((col) => Number(col.assessment?.[key]) || 0));
+  const maxTotal = Math.max(0, ...columns.filter((col) => col.assessed).map((col) => Number(col.total) || 0));
   return (
     <div className="space-y-4">
-      <Card title="Candidate Comparison" icon={BarChart3} sub="Highest score in each row is highlighted.">
+      <Card title="Candidate & MLA Comparison" icon={BarChart3} sub="Sitting MLA and all AAP candidates side by side. Highest score in each row is highlighted; scroll sideways if needed.">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr><th className="px-3 py-2 text-left font-semibold text-gray-500">Parameter</th>{ranked.map((c) => <th key={c.id} className="px-3 py-2 text-center font-semibold text-gray-900 min-w-[110px]">{c.name}</th>)}</tr></thead>
+          <table className="w-full text-sm min-w-[560px]">
+            <thead><tr><th className="px-3 py-2 text-left font-semibold text-gray-500 min-w-[150px]">Parameter</th>{columns.map((col) => <th key={col.id} className={`px-3 py-2 text-center font-semibold text-gray-900 min-w-[110px] ${col.isMla ? "bg-blue-50" : ""}`}>{col.name}</th>)}</tr></thead>
             <tbody className="divide-y divide-gray-100">
               {PARAMS.map((p) => { const mx = maxOf(p.key); return (
                 <tr key={p.key}>
                   <td className="px-3 py-2 text-gray-600">{p.label} <span className="text-gray-400">/10</span></td>
-                  {ranked.map((c) => { const v = c.assessment?.[p.key]; const hi = v != null && Number(v) === mx && mx > 0; return <td key={c.id} className={`px-3 py-2 text-center ${hi ? "bg-emerald-50 font-bold text-emerald-700" : ""}`}>{v ?? "—"}</td>; })}
+                  {columns.map((col) => {
+                    const v = col.assessment?.[p.key];
+                    const hi = v != null && Number(v) === mx && mx > 0;
+                    const display = v != null ? v : (col.isMla ? "N/A" : "—");
+                    return <td key={col.id} className={`px-3 py-2 text-center ${hi ? "bg-emerald-50 font-bold text-emerald-700" : col.isMla ? "bg-blue-50/40 text-gray-700" : ""}`}>{display}</td>;
+                  })}
                 </tr>
               ); })}
               <tr className="bg-gray-50 font-bold">
                 <td className="px-3 py-2.5 text-gray-900">TOTAL / 100</td>
-                {ranked.map((c) => { const hi = c.total === maxTotal && maxTotal > 0; return <td key={c.id} className={`px-3 py-2.5 text-center ${hi ? "bg-amber-100 text-amber-800" : "text-[#164FA3]"}`}>{c.total}</td>; })}
+                {columns.map((col) => {
+                  if (col.isMla && !col.assessed) return <td key={col.id} className="px-3 py-2.5 text-center bg-blue-50/60 text-gray-400 font-semibold">Not Assessed</td>;
+                  const hi = Number(col.total) === maxTotal && maxTotal > 0;
+                  return <td key={col.id} className={`px-3 py-2.5 text-center ${hi ? "bg-amber-100 text-amber-800" : col.isMla ? "bg-blue-50/60 text-[#164FA3]" : "text-[#164FA3]"}`}>{col.total}</td>;
+                })}
               </tr>
             </tbody>
           </table>
@@ -1480,54 +1491,8 @@ function ComparisonTab({ b, onChange, flash, fail }) {
         </div>
       </Card>
 
-      <MlaVsAap b={b} ranked={ranked} />
       <Recommendation b={b} ranked={ranked} onChange={onChange} flash={flash} fail={fail} />
     </div>
-  );
-}
-
-function MlaVsAap({ b, ranked }) {
-  const mla = b.mla || {};
-  const m = mlaMetrics(b);
-  const rows = [
-    // Age is shown under each name in the header (not as its own metric row), so
-    // it's clear whose age it is.
-    { label: "Election Wins", mla: m.wins != null ? `${m.wins}` : null, get: () => null },
-    { label: "Public Reach", mla: null, get: (c) => c.assessment?.s_public_reach },
-    { label: "Social Reach", mla: null, get: (c) => c.assessment?.s_social_reach },
-    { label: "Organization", mla: null, get: (c) => c.assessment?.s_organization },
-    { label: "Winning Ability", mla: null, get: (c) => c.assessment?.s_winning },
-    { label: "Overall Score", mla: null, get: (c) => `${c.total}/100`, bold: true },
-  ];
-  return (
-    <Card title="Current MLA vs AAP Candidates" icon={Scale} sub="Only fields with real data are compared — MLA assessment scores are not fabricated.">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead><tr>
-            <th className="px-3 py-2 text-left font-semibold text-gray-500 align-bottom">Metric</th>
-            <th className="px-3 py-2 text-center font-semibold text-gray-900 bg-blue-50 align-bottom">
-              <div>MLA{mla.name ? ` · ${mla.name}` : ""}</div>
-              <AgeLine person={mla} />
-            </th>
-            {ranked.map((c) => (
-              <th key={c.id} className="px-3 py-2 text-center font-semibold text-gray-900 align-bottom">
-                <div>{c.name}</div>
-                <AgeLine person={c} />
-              </th>
-            ))}
-          </tr></thead>
-          <tbody className="divide-y divide-gray-100">
-            {rows.map((r) => (
-              <tr key={r.label} className={r.bold ? "font-bold bg-gray-50" : ""}>
-                <td className="px-3 py-2 text-gray-600">{r.label}</td>
-                <td className="px-3 py-2 text-center bg-blue-50/50">{r.mla ?? "—"}</td>
-                {ranked.map((c) => <td key={c.id} className="px-3 py-2 text-center">{r.get(c) ?? "—"}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
   );
 }
 
