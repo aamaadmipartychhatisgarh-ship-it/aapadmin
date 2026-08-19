@@ -849,7 +849,7 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
                   const pct = Number(row.percentage) || 0;
                   return (
                     <div key={i} className="flex items-center gap-3 text-sm">
-                      <span className="text-xs font-bold text-gray-400 w-14 shrink-0">Rank {i + 1}</span>
+                      <span className="text-xs font-bold text-gray-400 w-14 shrink-0">Caste {i + 1}</span>
                       <span className="text-gray-800 font-medium w-40 truncate">{row.name || "—"}</span>
                       <div className="flex-1 hidden sm:block"><div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3] rounded-full" style={{ width: `${Math.min(100, pct)}%` }} /></div></div>
                       <span className="font-semibold text-gray-900 w-12 text-right shrink-0">{pct}%</span>
@@ -1665,13 +1665,13 @@ function AnalysisTab({ b, onChange, flash, fail }) {
           {numbered("Top 3 Reasons for Winning", reasons, setReasons, "bg-emerald-100 text-emerald-700")}
         </div>
       </Card>
-      <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities (Rank · Name · %). Admin-entered; percentages are validated 0–100 and never auto-adjusted." right={<SaveBtn onClick={saveSocial} />}>
+      <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities (Caste · Name · %). Admin-entered; percentages are validated 0–100 and never auto-adjusted." right={<SaveBtn onClick={saveSocial} />}>
         <div className="space-y-3">
           {social.map((row, i) => {
             const pct = Number(row.percentage) || 0;
             return (
               <div key={i} className="flex items-center gap-3">
-                <span className="text-xs font-bold text-gray-400 w-14 shrink-0">Rank {i + 1}</span>
+                <span className="text-xs font-bold text-gray-400 w-14 shrink-0">Caste {i + 1}</span>
                 <input className={`${inp} max-w-xs`} placeholder="Community / Caste" value={row.name} onChange={(e) => setSocial((a) => a.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
                 <div className="flex-1 hidden sm:block"><div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3] rounded-full" style={{ width: `${Math.min(100, pct)}%` }} /></div></div>
                 <div className="relative shrink-0"><input type="number" min={0} max={100} step="0.1" className={`${inp} w-24 pr-6`} placeholder="%" value={row.percentage} onChange={(e) => setPct(i, e.target.value)} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span></div>
