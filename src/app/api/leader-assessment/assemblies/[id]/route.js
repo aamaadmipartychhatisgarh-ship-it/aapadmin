@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, assessmentTotal, assessmentComplete, ageFromDob, rankCandidates, parseList, assemblyElectorate } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, assessmentTotal, assessmentComplete, assemblyComplete, ageFromDob, rankCandidates, parseList, assemblyElectorate } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -103,15 +103,20 @@ export async function GET(_req, { params }) {
     const [strategyRow] = await query("SELECT * FROM la_candidate_strategy WHERE assembly_id = ?", [id]);
     const strategy = strategyRow || { mla_biggest_weakness: "", aap_biggest_strength: "", target_community: "", target_booth: "", main_issue: "" };
 
-    // Completion status (for badges / overview).
+    // Completion status (for badges / overview). `completed` is THE assembly
+    // status used everywhere: all its candidates have a complete 10-parameter
+    // assessment (via the shared assemblyComplete rule) — recomputed live from
+    // the candidates on every read, so it can't drift.
     const candDone = candidates.filter((c) => c.assessment_done).length;
+    const completed = assemblyComplete(candidates);
     const status = {
       mla: !!(mla && mla.name),
       elections: elections.length > 0,
       candidates_count: candidates.length,
       assessments_done: candDone,
-      assessment_complete: candidates.length > 0 && candDone === candidates.length,
-      ready: !!(mla && mla.name) && candidates.length > 0 && candDone === candidates.length,
+      completed,
+      assessment_complete: completed, // back-compat alias
+      ready: completed,
     };
 
     return NextResponse.json({ assembly, mla, elections, analysis, social, candidates: ranked, strategy, status }, { headers: noStore });

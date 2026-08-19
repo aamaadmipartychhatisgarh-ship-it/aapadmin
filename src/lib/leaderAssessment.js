@@ -311,6 +311,26 @@ export function assessmentComplete(a) {
   return ASSESSMENT_PARAMS.every((p) => Number(a[p.key]) > 0);
 }
 
+// SQL fragment (for `s` = la_candidate_assessments / la_mla_assessments alias):
+// TRUE when every one of the 10 parameters is scored (> 0). Reused so the DB
+// count and the in-memory helpers apply the SAME completion rule.
+export const ASSESSMENT_COMPLETE_SQL = (alias = "s") =>
+  ASSESSMENT_PARAMS.map((p) => `COALESCE(${alias}.${p.key}, 0) > 0`).join(" AND ");
+
+// An Assembly is COMPLETED only when it has at least one candidate AND EVERY
+// candidate linked to it has a complete 10-parameter assessment. Zero candidates
+// → not complete; one incomplete candidate → not complete. Uses the ACTUAL
+// candidates present (no hardcoded count). Each candidate may expose either a
+// precomputed `assessment_done` boolean or its raw `assessment` scores — both
+// resolve through the same assessmentComplete rule, so every surface agrees.
+export function assemblyComplete(candidates) {
+  const list = candidates || [];
+  if (!list.length) return false;
+  return list.every((c) =>
+    c && c.assessment_done != null ? !!c.assessment_done : assessmentComplete(c?.assessment || c)
+  );
+}
+
 // Automatic age from DOB using today's date. Returns null when DOB is absent —
 // callers show "Age not available". DOB is the single source of truth.
 export function ageFromDob(dob) {

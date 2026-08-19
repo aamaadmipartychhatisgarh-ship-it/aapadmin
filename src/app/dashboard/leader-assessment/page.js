@@ -250,8 +250,8 @@ function AssemblyHeader({ a, status }) {
           <h2 className="text-2xl font-bold">{a.name}</h2>
           <div className="text-sm text-white/85 flex items-center gap-2 mt-0.5"><MapPin size={13} /> {a.district || "—"}{a.number ? ` · Seat #${a.number}` : ""}</div>
         </div>
-        <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${status.ready ? "bg-emerald-400/25 text-emerald-50" : "bg-white/15 text-white/90"}`}>
-          {status.ready ? "● Assessment Ready" : "○ Assessment Incomplete"}
+        <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${status.completed ? "bg-emerald-400/25 text-emerald-50" : "bg-white/15 text-white/90"}`}>
+          {status.completed ? "● Completed" : "○ Pending"}
         </span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mt-4">
@@ -374,7 +374,9 @@ function Overview({ flash, fail }) {
                     <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{a.candidate_count}/3</span></td>
                     <td className="px-3 py-2.5 text-gray-700">{a.top_candidate || <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2.5 font-semibold">{a.top_score != null ? `${a.top_score}/100` : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-2.5">{a.mla_name && a.candidate_count > 0 ? <span className="text-xs font-semibold text-emerald-700">In progress</span> : <span className="text-xs text-gray-400">Incomplete</span>}</td>
+                    <td className="px-3 py-2.5">{a.completed
+                      ? <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Completed</span>
+                      : <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Pending</span>}</td>
                     <td className="px-3 py-2.5 text-right"><button onClick={() => setOpenId(a.id)} className="text-[#164FA3] font-semibold hover:underline text-xs">Open →</button></td>
                   </tr>
                 ))}
@@ -520,7 +522,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                 <div className="grid grid-cols-1 gap-1.5 mt-3 text-left">
                   <div className="flex justify-between text-sm"><span className="text-gray-400">MLA Score</span><span className={`font-semibold ${mla?.assessment_done ? "text-[#164FA3]" : "text-gray-400"}`}>{mla?.assessment_done ? `${mla.total}/100` : "Not assessed"}</span></div>
                   {mla?.party && <div className="flex justify-between text-sm"><span className="text-gray-400">Party</span><span className="font-medium text-gray-700 truncate ml-2">{mla.party}</span></div>}
-                  <div className="flex justify-between text-sm"><span className="text-gray-400">Status</span><span className={`font-semibold ${status?.ready ? "text-emerald-600" : "text-gray-500"}`}>{status?.ready ? "Assessment Ready" : "Incomplete"}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-gray-400">Status</span><span className={`font-semibold ${status?.completed ? "text-emerald-600" : "text-gray-500"}`}>{status?.completed ? "Completed" : "Pending"}</span></div>
                 </div>
               </div>
             </div>

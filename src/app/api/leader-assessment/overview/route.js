@@ -78,12 +78,20 @@ export async function GET() {
         WHERE ${CAND_COMPLETE} AND ${ALL_PARAMS}`
     ).then((r) => [r]);
 
-    // CARD 1 — Total Completed Assemblies: MLA complete AND all 3 candidates
-    // complete. Only these count; NOT every assembly in Master Data.
+    // CARD 1 — Total Completed Assemblies: an assembly is COMPLETED when it has
+    // at least one candidate AND EVERY candidate linked to it has a complete
+    // 10-parameter assessment (the SAME assemblyComplete rule the Assemblies List
+    // and Full View use). No hardcoded candidate count; uses the actual
+    // candidates. An assembly with no candidates, or with any candidate whose
+    // assessment is incomplete/missing, is not counted.
     const [[completed]] = await query(
       `SELECT COUNT(DISTINCT COALESCE(a.location_id, -a.id)) AS n FROM la_assemblies a
-        WHERE EXISTS (SELECT 1 FROM la_mla_profiles mp WHERE mp.assembly_id = a.id AND ${MLA_COMPLETE})
-          AND (SELECT COUNT(*) FROM la_aap_candidates c WHERE c.assembly_id = a.id AND ${CAND_COMPLETE}) >= 3`
+        WHERE EXISTS (SELECT 1 FROM la_aap_candidates c WHERE c.assembly_id = a.id)
+          AND NOT EXISTS (
+                SELECT 1 FROM la_aap_candidates c
+                LEFT JOIN la_candidate_assessments s ON s.candidate_id = c.id
+                WHERE c.assembly_id = a.id AND NOT (${ALL_PARAMS})
+              )`
     ).then((r) => [r]);
 
     // Average score + top-ranked candidates (across all assemblies).

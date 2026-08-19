@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { assessmentTotal, syncAssemblies } from "@/lib/leaderAssessment";
+import { assessmentTotal, assemblyComplete, syncAssemblies } from "@/lib/leaderAssessment";
 import { workersByDistrict } from "@/lib/workerCounts";
 
 export const dynamic = "force-dynamic";
@@ -54,7 +54,9 @@ export async function GET(req) {
       );
     }
     const topByAsm = {};
+    const candsByAsm = {};
     for (const c of cands) {
+      (candsByAsm[c.assembly_id] ||= []).push(c);
       const total = assessmentTotal(c);
       const cur = topByAsm[c.assembly_id];
       if (!cur || total > cur.total) topByAsm[c.assembly_id] = { name: c.name, total };
@@ -79,6 +81,11 @@ export async function GET(req) {
         worker_count: districtId != null ? (workerMap.get(districtId) || 0) : 0,
         top_candidate: topByAsm[r.id]?.name || null,
         top_score: topByAsm[r.id]?.total ?? null,
+        // THE assembly completion status (same rule everywhere): all its
+        // candidates have a complete 10-parameter assessment. Computed live from
+        // the candidates, so it recalculates whenever an assessment or the
+        // candidate set changes.
+        completed: assemblyComplete(candsByAsm[r.id] || []),
       };
     });
     return NextResponse.json({ assemblies }, { headers: noStore });
