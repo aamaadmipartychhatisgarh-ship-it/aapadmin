@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, assessmentTotal, ageFromDob, syncAssemblies } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, assessmentTotal, assessmentComplete, ageFromDob, syncAssemblies } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +32,7 @@ export async function GET() {
     );
     const mlas = rows.map((r) => {
       const assessment = {};
-      let anyScore = false;
-      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = r[p.key]; if (r[p.key] != null) anyScore = true; }
+      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = r[p.key]; }
       return {
         id: r.id,
         assembly_id: r.assembly_id,
@@ -57,7 +56,7 @@ export async function GET() {
         party_defeated: r.party_defeated,
         assessment,
         total: assessmentTotal(assessment),
-        assessment_done: anyScore,
+        assessment_done: assessmentComplete(assessment),
       };
     });
     return NextResponse.json({ mlas }, { headers: noStore });

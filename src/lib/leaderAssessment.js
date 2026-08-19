@@ -299,6 +299,18 @@ export function assessmentTotal(a) {
   return ASSESSMENT_PARAMS.reduce((sum, p) => sum + (Number(a[p.key]) || 0), 0);
 }
 
+// A candidate's assessment is COMPLETE only when ALL 10 parameters carry a valid
+// score (present and > 0 — 0/blank/null means "not yet scored"). A partial
+// assessment, or a record that merely exists, is NOT complete. This is the ONE
+// definition used everywhere (candidate list, overview, full view, rankings) so
+// the status can never disagree between surfaces or the DB. Computing it live
+// from the actual scores also means it flips back to incomplete automatically if
+// an edit clears a parameter — no stored flag to drift out of sync.
+export function assessmentComplete(a) {
+  if (!a) return false;
+  return ASSESSMENT_PARAMS.every((p) => Number(a[p.key]) > 0);
+}
+
 // Automatic age from DOB using today's date. Returns null when DOB is absent —
 // callers show "Age not available". DOB is the single source of truth.
 export function ageFromDob(dob) {

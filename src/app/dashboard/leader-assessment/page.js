@@ -1135,7 +1135,7 @@ function CandidatesTab({ flash, fail }) {
                     <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{c.assembly_name || "—"}</td>
                     <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{c.district || "—"}</td>
                     <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3] whitespace-nowrap">{c.current_position || "AAP Candidate"}</span></td>
-                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Assessed" : "Pending"}</span></td>
+                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Completed" : "Pending"}</span></td>
                     <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={c.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{c.total}/100</span></div></td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                       <button onClick={() => setOpening(c)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={14} /> Open</button>
@@ -1315,7 +1315,7 @@ function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-lg font-bold text-gray-900 truncate">{c.name}</h3>
-              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Assessed" : "Pending"}</span>
+              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Completed" : "Pending"}</span>
               <span className="text-sm font-bold text-[#164FA3]">{c.total}/100</span>
             </div>
             <AgeLine person={c} />

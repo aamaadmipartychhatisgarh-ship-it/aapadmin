@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, assessmentTotal } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, assessmentTotal, assessmentComplete } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -42,8 +42,7 @@ export async function GET(req) {
       // Records -> 10 Scores); the total is always recomputed from them, never
       // stored on its own.
       const assessment = {};
-      let anyScore = false;
-      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = r[p.key]; if (r[p.key] != null) anyScore = true; }
+      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = r[p.key]; }
       return {
         id: r.id,
         assembly_id: r.assembly_id,
@@ -65,7 +64,9 @@ export async function GET(req) {
         current_position: r.current_position,
         assessment,
         total: assessmentTotal(assessment),
-        assessment_done: anyScore,
+        // Completed ONLY when all 10 parameters are scored (auto — no manual
+        // toggle); flips back if an edit clears one.
+        assessment_done: assessmentComplete(assessment),
       };
     });
     return NextResponse.json({ candidates }, { headers: noStore });

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, assessmentTotal, ageFromDob, rankCandidates, parseList, assemblyElectorate } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, assessmentTotal, assessmentComplete, ageFromDob, rankCandidates, parseList, assemblyElectorate } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -42,9 +42,9 @@ export async function GET(_req, { params }) {
         [mlaRow.id]
       );
       const assessment = {};
-      let assessmentDone = false;
-      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = asmt?.[p.key] ?? null; if (asmt?.[p.key] != null) assessmentDone = true; }
-      mla = { ...mlaRow, age: ageFromDob(mlaRow.date_of_birth), assessment, total: assessmentTotal(assessment), assessment_done: assessmentDone };
+      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = asmt?.[p.key] ?? null; }
+      // Complete only when ALL 10 parameters are scored (not "any").
+      mla = { ...mlaRow, age: ageFromDob(mlaRow.date_of_birth), assessment, total: assessmentTotal(assessment), assessment_done: assessmentComplete(assessment) };
     }
 
     const elections = await query(
@@ -83,9 +83,11 @@ export async function GET(_req, { params }) {
     );
     const candidates = candRows.map((c) => {
       const assessment = {};
-      let anyScore = false;
-      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = c[p.key]; if (c[p.key] != null) anyScore = true; }
+      for (const p of ASSESSMENT_PARAMS) { assessment[p.key] = c[p.key]; }
       const total = assessmentTotal(assessment);
+      // "Completed" ONLY when all 10 parameters are scored — a partial or
+      // merely-existing assessment stays incomplete.
+      const done = assessmentComplete(assessment);
       return {
         id: c.id, assembly_id: c.assembly_id, photo_url: c.photo_url, name: c.name, phone: c.phone,
         address: c.address, date_of_birth: c.date_of_birth, age: ageFromDob(c.date_of_birth),
@@ -93,7 +95,7 @@ export async function GET(_req, { params }) {
         education: c.education, political_experience: c.political_experience,
         organization_experience: c.organization_experience, previous_elections: c.previous_elections,
         current_position: c.current_position,
-        assessment, total, assessment_done: anyScore, created_at: c.created_at, updated_at: c.updated_at,
+        assessment, total, assessment_done: done, created_at: c.created_at, updated_at: c.updated_at,
       };
     });
     const ranked = rankCandidates(candidates);
