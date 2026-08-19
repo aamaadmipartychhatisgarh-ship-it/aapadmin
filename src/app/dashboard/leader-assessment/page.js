@@ -8,6 +8,7 @@ import {
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet, Scale,
   Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
+  Database, Power, Check,
 } from "lucide-react";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
@@ -34,6 +35,10 @@ const TABS = [
   { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: false },
   { key: "elections", label: "Election History", icon: History, scoped: true },
   { key: "candidates", label: "AAP Candidates", icon: Users, scoped: false },
+  // Centralized Caste / Community master — the single source of truth for every
+  // Caste/Community value used across the module (Assembly Social Profile · Add
+  // Community). Not assembly-scoped.
+  { key: "castes", label: "Caste Master", icon: Database, scoped: false },
   // The standalone "Political Analysis" tab was removed — its full functionality
   // (Top Reasons / Strengths / Weaknesses + Assembly Social Profile) lives in the
   // Full View modal (AssemblyFullView → AnalysisTab). Nothing was deleted.
@@ -165,6 +170,7 @@ function Body() {
       {tab === "overview" && <Overview flash={flash} fail={fail} />}
       {tab === "mla" && <MlaManager flash={flash} fail={fail} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
+      {tab === "castes" && <CasteMaster flash={flash} fail={fail} />}
 
       {currentTab?.scoped && !selectedId && <Empty msg="Select an assembly above to begin." />}
       {currentTab?.scoped && selectedId && loadingBundle && !bundle && <LoadingBlock />}
@@ -1610,10 +1616,19 @@ function AnalysisTab({ b, onChange, flash, fail }) {
   const [weaknesses, setWeaknesses] = useState(() => padTo(b.analysis?.weaknesses, 10));
   const [strengths, setStrengths] = useState(() => padTo(b.analysis?.strengths, 5));
   const [social, setSocial] = useState(() => seedSocial(b.social));
+  const [casteOptions, setCasteOptions] = useState([]);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     setReasons(padTo(b.analysis?.reasons_won, 3)); setWeaknesses(padTo(b.analysis?.weaknesses, 10)); setStrengths(padTo(b.analysis?.strengths, 5)); setSocial(seedSocial(b.social));
   }, [b.assembly.id, b.analysis, b.social]);
+  // Load the ACTIVE Caste Master so new selections come only from it. Deactivated
+  // castes are intentionally excluded here (historical rows still show their
+  // stored name via CasteSelect).
+  useEffect(() => {
+    let alive = true;
+    api("/api/leader-assessment/castes?active=1").then((d) => { if (alive) setCasteOptions(d.castes || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   async function saveAnalysis() {
     setSaving(true);
     try { await api(`/api/leader-assessment/assemblies/${b.assembly.id}/analysis`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reasons_won: reasons, weaknesses, strengths }) }); flash("Political analysis saved."); onChange(); }
@@ -1631,14 +1646,24 @@ function AnalysisTab({ b, onChange, flash, fail }) {
   };
   const combinedPct = social.reduce((s, r) => s + (Number(r.percentage) || 0), 0);
   async function saveSocial() {
-    for (const r of social) {
+    // Keep only rows that carry a community (from the master, or a legacy name).
+    const rows = social.filter((r) => r.caste_id != null || String(r.name || "").trim());
+    for (const r of rows) {
       const raw = String(r.percentage ?? "").trim();
       if (raw !== "") {
         const n = Number(raw);
         if (!Number.isFinite(n) || n < 0 || n > 100) { fail("Each community percentage must be a number between 0 and 100."); return; }
       }
     }
-    try { await api(`/api/leader-assessment/assemblies/${b.assembly.id}/social`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: social }) }); flash("Social profile saved."); onChange(); }
+    // No duplicate community in the list.
+    const seen = new Set();
+    for (const r of rows) {
+      const key = r.caste_id != null ? `id:${r.caste_id}` : `nm:${String(r.name).trim().toLowerCase()}`;
+      if (seen.has(key)) { fail(`Duplicate community "${r.name}" — each caste can be listed only once.`); return; }
+      seen.add(key);
+    }
+    const payload = rows.map((r) => ({ caste_id: r.caste_id ?? null, name: r.name, percentage: r.percentage }));
+    try { await api(`/api/leader-assessment/assemblies/${b.assembly.id}/social`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: payload }) }); flash("Social profile saved."); onChange(); }
     catch (e) { fail(e.message); }
   }
   const numbered = (title, items, setItems, accent) => (
@@ -1665,14 +1690,18 @@ function AnalysisTab({ b, onChange, flash, fail }) {
           {numbered("Top 3 Reasons for Winning", reasons, setReasons, "bg-emerald-100 text-emerald-700")}
         </div>
       </Card>
-      <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities (Caste · Name · %). Admin-entered; percentages are validated 0–100 and never auto-adjusted." right={<SaveBtn onClick={saveSocial} />}>
+      <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities. Each community is chosen from the centralized Caste Master; percentages are validated 0–100 and never auto-adjusted. Add new castes on the Caste Master tab." right={<SaveBtn onClick={saveSocial} />}>
         <div className="space-y-3">
           {social.map((row, i) => {
             const pct = Number(row.percentage) || 0;
             return (
               <div key={i} className="flex items-center gap-3">
                 <span className="text-xs font-bold text-gray-400 w-14 shrink-0">Caste {i + 1}</span>
-                <input className={`${inp} max-w-xs`} placeholder="Community / Caste" value={row.name} onChange={(e) => setSocial((a) => a.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                <CasteSelect
+                  value={{ caste_id: row.caste_id, name: row.name }}
+                  options={casteOptions}
+                  onPick={(picked) => setSocial((a) => a.map((x, j) => (j === i ? { ...x, caste_id: picked.caste_id, name: picked.name } : x)))}
+                />
                 <div className="flex-1 hidden sm:block"><div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3] rounded-full" style={{ width: `${Math.min(100, pct)}%` }} /></div></div>
                 <div className="relative shrink-0"><input type="number" min={0} max={100} step="0.1" className={`${inp} w-24 pr-6`} placeholder="%" value={row.percentage} onChange={(e) => setPct(i, e.target.value)} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span></div>
                 <button onClick={() => setSocial((a) => a.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600 p-1.5 shrink-0" title="Remove"><X size={14} /></button>
@@ -1681,7 +1710,7 @@ function AnalysisTab({ b, onChange, flash, fail }) {
           })}
         </div>
         <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-3">
-          <button onClick={() => setSocial((a) => [...a, { name: "", percentage: "" }])} className="inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline"><Plus size={14} /> Add Community</button>
+          <button onClick={() => setSocial((a) => [...a, { caste_id: null, name: "", percentage: "" }])} className="inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline"><Plus size={14} /> Add Community</button>
           <div className="text-sm">
             <span className="text-gray-500 mr-2">Combined</span>
             <span className={`font-bold ${combinedPct > 100 ? "text-red-600" : "text-gray-800"}`}>{Math.round(combinedPct * 10) / 10}%</span>
@@ -1691,6 +1720,218 @@ function AnalysisTab({ b, onChange, flash, fail }) {
       </Card>
     </div>
   );
+}
+
+// --------------------------- Caste Master ----------------------------------
+// Centralized Caste / Community master management. Admins can Add, Edit, Search,
+// and Activate/Deactivate castes. Every caste has a Unique ID, Name, Status and
+// Created/Updated timestamps. Deactivating never deletes and never touches
+// historical records — it only stops a caste appearing for NEW selections.
+function CasteMaster({ flash, fail }) {
+  const [castes, setCastes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(true);
+  const [editing, setEditing] = useState(null); // null | {} (new) | caste (edit)
+  const [busyId, setBusyId] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const d = await api("/api/leader-assessment/castes");
+      setCastes(d.castes || []);
+    } catch (e) { fail(e.message); } finally { setLoading(false); }
+  }, [fail]);
+  useEffect(() => { load(); }, [load]);
+
+  const q = search.trim().toLowerCase();
+  const visible = castes.filter((c) => (showInactive || c.is_active) && (!q || c.name.toLowerCase().includes(q)));
+  const activeCount = castes.filter((c) => c.is_active).length;
+
+  async function toggleActive(c) {
+    setBusyId(c.id);
+    try {
+      await api(`/api/leader-assessment/castes/${c.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_active: !c.is_active }) });
+      flash(c.is_active ? `"${c.name}" deactivated.` : `"${c.name}" activated.`);
+      await load();
+    } catch (e) { fail(e.message); } finally { setBusyId(null); }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Stat label="Total Castes" value={castes.length} />
+        <Stat label="Active" value={activeCount} />
+        <Stat label="Deactivated" value={castes.length - activeCount} />
+        <Stat label="In Use" value={castes.filter((c) => c.usage_count > 0).length} hint="Referenced by a social profile" />
+      </div>
+
+      <Card
+        title="Caste / Community Master"
+        icon={Database}
+        sub="The single source of truth for every Caste / Community used in Leader Assessment. Add, edit, search and activate/deactivate here."
+        right={<button onClick={() => setEditing({})} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Caste</button>}
+      >
+        <div className="flex items-center gap-3 flex-wrap mb-4">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search castes / communities…" className={`${inp} pl-9`} />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600 select-none cursor-pointer">
+            <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="rounded border-gray-300" />
+            Show deactivated
+          </label>
+        </div>
+
+        {loading ? (
+          <div className="py-10 flex items-center justify-center text-gray-400"><Loader2 className="animate-spin mr-2" size={18} /> Loading…</div>
+        ) : visible.length === 0 ? (
+          <div className="py-10 text-center text-sm text-gray-400">{castes.length === 0 ? "No castes yet. Click “Add Caste” to create the first one." : "No castes match your search."}</div>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                  <th className="py-2 pr-3 w-16">ID</th>
+                  <th className="py-2 pr-3">Name</th>
+                  <th className="py-2 pr-3 w-24">Status</th>
+                  <th className="py-2 pr-3 w-20">Used</th>
+                  <th className="py-2 pr-3 w-36">Created</th>
+                  <th className="py-2 pr-3 w-36">Updated</th>
+                  <th className="py-2 pr-3 w-40 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((c) => (
+                  <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/60">
+                    <td className="py-2.5 pr-3 text-gray-400 font-mono text-xs">#{c.id}</td>
+                    <td className="py-2.5 pr-3 font-semibold text-gray-800">{c.name}</td>
+                    <td className="py-2.5 pr-3">
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.is_active ? "Active" : "Deactivated"}</span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-gray-500">{c.usage_count}</td>
+                    <td className="py-2.5 pr-3 text-gray-500 text-xs">{fmtDateTime(c.created_at)}</td>
+                    <td className="py-2.5 pr-3 text-gray-500 text-xs">{fmtDateTime(c.updated_at)}</td>
+                    <td className="py-2.5 pr-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => setEditing(c)} className="text-gray-500 hover:text-[#164FA3] p-1.5 rounded-md hover:bg-blue-50" title="Edit"><Pencil size={15} /></button>
+                        <button onClick={() => toggleActive(c)} disabled={busyId === c.id} className={`p-1.5 rounded-md ${c.is_active ? "text-gray-500 hover:text-red-600 hover:bg-red-50" : "text-gray-500 hover:text-emerald-600 hover:bg-emerald-50"}`} title={c.is_active ? "Deactivate" : "Activate"}>
+                          {busyId === c.id ? <Loader2 size={15} className="animate-spin" /> : c.is_active ? <Power size={15} /> : <Check size={15} />}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {editing && <CasteEditor caste={editing} existing={castes} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); flash(msg); load(); }} fail={fail} />}
+    </div>
+  );
+}
+
+function CasteEditor({ caste, existing, onClose, onSaved, fail }) {
+  const isNew = !caste?.id;
+  const [name, setName] = useState(caste?.name || "");
+  const [active, setActive] = useState(caste?.is_active !== false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Live client-side duplicate hint (case-insensitive) so the admin sees the
+  // clash before submitting; the server enforces it authoritatively too.
+  const norm = name.replace(/\s+/g, " ").trim().toLowerCase();
+  const dup = norm && (existing || []).some((c) => c.id !== caste?.id && c.name.trim().toLowerCase() === norm);
+
+  async function save() {
+    const clean = name.replace(/\s+/g, " ").trim();
+    if (!clean) { setErr("Caste / community name is required."); return; }
+    if (dup) { setErr(`"${clean}" already exists in the caste master.`); return; }
+    setSaving(true); setErr("");
+    try {
+      if (isNew) {
+        await api("/api/leader-assessment/castes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: clean, is_active: active }) });
+        onSaved(`"${clean}" added to the caste master.`);
+      } else {
+        await api(`/api/leader-assessment/castes/${caste.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: clean, is_active: active }) });
+        onSaved(`"${clean}" updated.`);
+      }
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  }
+
+  return (
+    <Modal title={isNew ? "Add Caste / Community" : "Edit Caste / Community"} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className={lbl}>Name <span className="text-red-500">*</span></label>
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !dup) save(); }} placeholder="e.g. Yadav, Sahu, Satnami…" className={inp} />
+          {dup && <div className="text-[11px] text-amber-600 mt-1">This name already exists in the caste master.</div>}
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-700 select-none cursor-pointer">
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="rounded border-gray-300" />
+          Active <span className="text-gray-400">(available for new selections)</span>
+        </label>
+        {!isNew && caste?.usage_count > 0 && !active && (
+          <div className="text-[11px] text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-2.5">
+            This caste is used by {caste.usage_count} record{caste.usage_count === 1 ? "" : "s"}. Deactivating keeps every existing record valid and unchanged — it only removes the caste from new selection lists.
+          </div>
+        )}
+        {err && <div className="text-sm text-red-600">{err}</div>}
+      </div>
+      <ModalActions onClose={onClose} onSave={save} saving={saving} />
+    </Modal>
+  );
+}
+
+// Searchable single-select bound to the ACTIVE Caste Master (plus, when editing a
+// historical row, its own possibly-deactivated caste so the value still shows).
+// Emits { caste_id, name } on pick. `value` = { caste_id, name }.
+function CasteSelect({ value, options, onPick, placeholder = "Select community / caste" }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const label = value?.name || "";
+  const ql = q.trim().toLowerCase();
+  const list = (options || []).filter((c) => !ql || c.name.toLowerCase().includes(ql));
+  // A historical caste that's been deactivated won't be in `options`; surface it
+  // (disabled) so the reader still understands what's stored.
+  const historicalMissing = value?.caste_id != null && !(options || []).some((c) => c.id === value.caste_id);
+
+  return (
+    <div className="relative max-w-xs w-full">
+      <button type="button" onClick={() => { setOpen((o) => !o); setQ(""); }} className={`${inp} flex items-center justify-between gap-2 text-left`}>
+        <span className={label ? "text-gray-800 truncate" : "text-gray-400"}>{label || placeholder}</span>
+        <ChevronDown size={15} className="text-gray-400 shrink-0" />
+      </button>
+      {historicalMissing && <div className="text-[10px] text-amber-600 mt-0.5">Recorded value (this caste is now deactivated)</div>}
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+          <div className="absolute z-[61] mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto">
+            <div className="p-2 sticky top-0 bg-white border-b border-gray-100">
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className={`${inp} text-sm py-1.5`} />
+            </div>
+            {list.length === 0 ? (
+              <div className="px-3 py-3 text-sm text-gray-400">No active castes match. Add it on the Caste Master tab.</div>
+            ) : list.map((c) => (
+              <button key={c.id} type="button" onClick={() => { onPick({ caste_id: c.id, name: c.name }); setOpen(false); }} className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between gap-2 ${value?.caste_id === c.id ? "bg-blue-50/60 font-semibold text-[#164FA3]" : "text-gray-700"}`}>
+                <span className="truncate">{c.name}</span>
+                {value?.caste_id === c.id && <Check size={14} className="text-[#164FA3] shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function fmtDateTime(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 // ------------------------------- helpers ----------------------------------
@@ -1714,7 +1955,7 @@ function ModalActions({ onClose, onSave, saving }) {
   );
 }
 function padTo(arr, n) { const a = Array.isArray(arr) ? [...arr] : []; while (a.length < n) a.push(""); return a.slice(0, n); }
-function seedSocial(social) { return social?.length ? social.map((s) => ({ name: s.name, percentage: s.percentage ?? "" })) : [{ name: "", percentage: "" }, { name: "", percentage: "" }, { name: "", percentage: "" }]; }
+function seedSocial(social) { return social?.length ? social.map((s) => ({ caste_id: s.caste_id ?? null, name: s.name || "", percentage: s.percentage ?? "" })) : [{ caste_id: null, name: "", percentage: "" }, { caste_id: null, name: "", percentage: "" }, { caste_id: null, name: "", percentage: "" }]; }
 function ageOf(dob) {
   if (!dob) return null; const d = new Date(dob); if (isNaN(d.getTime())) return null;
   const now = new Date(); let age = now.getFullYear() - d.getFullYear(); const mo = now.getMonth() - d.getMonth();

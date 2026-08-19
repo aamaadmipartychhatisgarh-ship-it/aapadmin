@@ -97,6 +97,22 @@ export async function ensureLeaderAssessmentTables() {
        INDEX idx_la_points_asm_kind (assembly_id, kind, sort_order),
        CONSTRAINT fk_la_points_asm FOREIGN KEY (assembly_id) REFERENCES la_assemblies(id) ON DELETE CASCADE
      )`,
+    // Centralized Caste / Community master. Every Caste/Community value used in
+    // Leader Assessment (Assembly Social Profile · Add Community) comes from here
+    // via caste_id — this table is the single source of truth. Names are UNIQUE
+    // (case-insensitive by the column's default collation) so duplicates cannot
+    // be created. Castes are NEVER deleted — they are deactivated (is_active = 0):
+    // historical records keep their caste_id/name and stay valid, while a
+    // deactivated caste simply stops appearing for NEW selections.
+    `CREATE TABLE IF NOT EXISTS la_castes (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       name VARCHAR(255) NOT NULL,
+       is_active TINYINT(1) NOT NULL DEFAULT 1,
+       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       UNIQUE KEY uq_la_caste_name (name),
+       INDEX idx_la_caste_active (is_active)
+     )`,
     `CREATE TABLE IF NOT EXISTS la_social_structure (
        id INT AUTO_INCREMENT PRIMARY KEY,
        assembly_id INT NOT NULL,
@@ -188,8 +204,52 @@ export async function ensureLeaderAssessmentTables() {
   // lists it; legacy rows (NULL) are kept but hidden once master rows exist.
   await ensureColumn("la_assemblies", "location_id", "INT NULL");
   try { await query("CREATE UNIQUE INDEX uq_la_asm_location ON la_assemblies (location_id)"); } catch { /* index already exists */ }
+  // Caste Master relationship: every social-profile row links to la_castes by
+  // caste_id (the authoritative relationship). The human-readable `name` is still
+  // stored on the row as the HISTORICAL snapshot, so a record keeps displaying the
+  // exact community it was recorded with even if that caste is later renamed or
+  // deactivated. Added idempotently for already-created deployments.
+  await ensureColumn("la_social_structure", "caste_id", "INT NULL");
+  try { await query("CREATE INDEX idx_la_social_caste ON la_social_structure (caste_id)"); } catch { /* index already exists */ }
+  try {
+    await query(
+      `ALTER TABLE la_social_structure
+         ADD CONSTRAINT fk_la_social_caste FOREIGN KEY (caste_id) REFERENCES la_castes(id) ON DELETE SET NULL`
+    );
+  } catch { /* constraint already exists (or engine skips) */ }
+  await seedCastesFromExisting();
   await syncAssemblies();
   ensured = true;
+}
+
+// One-time (per process) migration that maps EXISTING free-text caste values into
+// the centralized master without losing any data:
+//   1. Every distinct non-blank caste name already recorded in the Assembly Social
+//      Profile is inserted into la_castes (INSERT IGNORE → the UNIQUE name key
+//      silently skips ones already present, so it never creates duplicates).
+//   2. Each social row that still has no caste_id is linked to its matching master
+//      caste by name. The stored name is left untouched (historical snapshot).
+// Nothing is deleted or overwritten; rows whose name matches nothing stay as-is.
+async function seedCastesFromExisting() {
+  try {
+    await query(
+      `INSERT IGNORE INTO la_castes (name)
+         SELECT DISTINCT TRIM(name) FROM la_social_structure
+          WHERE name IS NOT NULL AND TRIM(name) <> ''`
+    );
+    await query(
+      `UPDATE la_social_structure s
+          JOIN la_castes c ON c.name = TRIM(s.name)
+           SET s.caste_id = c.id
+         WHERE s.caste_id IS NULL AND s.name IS NOT NULL AND TRIM(s.name) <> ''`
+    );
+  } catch (e) { console.error("[LA] seedCastesFromExisting:", e?.message || e); }
+}
+
+// Normalize a caste/community name for storage & duplicate checks: trims and
+// collapses internal whitespace. Returns "" for blank input.
+export function normalizeCasteName(v) {
+  return String(v ?? "").replace(/\s+/g, " ").trim();
 }
 
 // Mirror the authoritative Master Data assemblies — the `locations` rows of

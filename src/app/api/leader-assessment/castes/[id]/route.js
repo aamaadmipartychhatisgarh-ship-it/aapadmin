@@ -1,0 +1,86 @@
+import { NextResponse } from "next/server";
+import { query } from "@/lib/db";
+import { guard, noStore } from "@/lib/leaderAssessmentGuard";
+import { normalizeCasteName } from "@/lib/leaderAssessment";
+
+export const dynamic = "force-dynamic";
+
+// GET /api/leader-assessment/castes/[id] — a single caste (with usage count).
+export async function GET(_req, { params }) {
+  const { error } = await guard();
+  if (error) return error;
+  try {
+    const { id } = await params;
+    if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid caste id." }, { status: 400 });
+    const [row] = await query(
+      `SELECT c.id, c.name, c.is_active, c.created_at, c.updated_at,
+              (SELECT COUNT(*) FROM la_social_structure s WHERE s.caste_id = c.id) AS usage_count
+         FROM la_castes c WHERE c.id = ?`,
+      [id]
+    );
+    if (!row) return NextResponse.json({ message: "Caste not found." }, { status: 404 });
+    return NextResponse.json(
+      { caste: { ...row, is_active: !!Number(row.is_active), usage_count: Number(row.usage_count) || 0 } },
+      { headers: noStore }
+    );
+  } catch (e) {
+    console.error("[LA] caste GET:", e);
+    return NextResponse.json({ message: "Failed to load the caste." }, { status: 500 });
+  }
+}
+
+// PUT /api/leader-assessment/castes/[id] — edit a caste's name and/or Status
+// (activate / deactivate). Body: { name?, is_active? }.
+//   • Renaming is duplicate-checked (case-insensitive) against every OTHER caste.
+//   • Deactivating NEVER deletes and NEVER touches historical records — existing
+//     social-profile rows keep their caste_id + name and stay valid; the caste
+//     simply stops appearing for new selections. Reactivating brings it back.
+export async function PUT(req, { params }) {
+  const { error } = await guard();
+  if (error) return error;
+  try {
+    const { id } = await params;
+    if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid caste id." }, { status: 400 });
+    const [existing] = await query("SELECT id, name, is_active FROM la_castes WHERE id = ?", [id]);
+    if (!existing) return NextResponse.json({ message: "Caste not found." }, { status: 404 });
+
+    const d = await req.json().catch(() => ({}));
+    const sets = [];
+    const args = [];
+
+    if (d?.name !== undefined) {
+      const name = normalizeCasteName(d.name);
+      if (!name) return NextResponse.json({ message: "Caste / community name is required." }, { status: 400 });
+      if (name.length > 255) return NextResponse.json({ message: "Name is too long (max 255 characters)." }, { status: 400 });
+      const [dup] = await query("SELECT id FROM la_castes WHERE name = ? AND id <> ?", [name, id]);
+      if (dup) return NextResponse.json({ message: `"${name}" already exists in the caste master.` }, { status: 409 });
+      sets.push("name = ?"); args.push(name);
+    }
+    if (d?.is_active !== undefined) {
+      sets.push("is_active = ?"); args.push(d.is_active ? 1 : 0);
+    }
+    if (!sets.length) return NextResponse.json({ message: "Nothing to update." }, { status: 400 });
+
+    try {
+      await query(`UPDATE la_castes SET ${sets.join(", ")} WHERE id = ?`, [...args, id]);
+    } catch (e) {
+      if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) {
+        return NextResponse.json({ message: "That name already exists in the caste master." }, { status: 409 });
+      }
+      throw e;
+    }
+    const [row] = await query(
+      `SELECT c.id, c.name, c.is_active, c.created_at, c.updated_at,
+              (SELECT COUNT(*) FROM la_social_structure s WHERE s.caste_id = c.id) AS usage_count
+         FROM la_castes c WHERE c.id = ?`,
+      [id]
+    );
+    return NextResponse.json(
+      { ok: true, caste: { ...row, is_active: !!Number(row.is_active), usage_count: Number(row.usage_count) || 0 } },
+      { headers: noStore }
+    );
+  } catch (e) {
+    console.error("[LA] caste PUT:", e);
+    return NextResponse.json({ message: "Failed to update the caste." }, { status: 500 });
+  }
+}
