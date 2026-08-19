@@ -346,9 +346,10 @@ function Overview({ flash, fail }) {
       )}
 
       {data?.top_candidates?.length > 0 && (
-        <Card title="Top-Ranked Candidates" icon={Trophy}>
+        <Card title="Top 3 Ranked Candidates" icon={Trophy}>
           <div className="space-y-2.5">
-            {data.top_candidates.map((c, i) => (
+            {/* Top 3 only — the API already caps at 3; slice again defensively. */}
+            {data.top_candidates.slice(0, 3).map((c, i) => (
               <div key={c.id} className="flex items-center gap-3">
                 <span className={`w-6 text-center font-bold ${i < 3 ? RANK_COLOR[i] : "text-gray-400"}`}>{i + 1}</span>
                 <div className="w-40 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div><div className="text-xs text-gray-400 truncate">{c.assembly_name}</div></div>

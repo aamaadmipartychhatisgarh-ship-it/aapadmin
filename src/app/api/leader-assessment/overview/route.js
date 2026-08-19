@@ -85,7 +85,13 @@ export async function GET() {
     );
     const scored = rows.map((r) => ({ id: r.id, name: r.name, assembly_id: r.assembly_id, assembly_name: r.assembly_name, total: assessmentTotal(r) }));
     const avg = scored.length ? Math.round((scored.reduce((s, r) => s + r.total, 0) / scored.length) * 10) / 10 : 0;
-    const top = [...scored].sort((x, y) => y.total - x.total).slice(0, 5);
+    // Top-ranked candidates: only those with a real assessment score (> 0),
+    // highest → lowest, capped at the top 3 — enforced at the data level.
+    // Fewer than 3 scored candidates → fewer rows (never padded).
+    const top = [...scored]
+      .filter((c) => c.total > 0)
+      .sort((x, y) => y.total - x.total)
+      .slice(0, 3);
 
     // ---- Assembly-wise Top Ranking -------------------------------------------
     // ONE consistent Assembly Ranking Score, used here and reusable everywhere:
