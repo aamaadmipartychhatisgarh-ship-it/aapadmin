@@ -369,8 +369,12 @@ function Overview({ flash, fail }) {
       {/* Overview status cards — part of "Other Overview sections", below the
           Search Card, selected assembly and Top Ranked sections. */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* MLA Data is the first metric: the actual number of unique assemblies
+            that currently have a valid, linked MLA profile — same DISTINCT
+            master-linked count as the MLA Data List (never Master-Data blindly,
+            never empty/duplicate profiles). Updates on MLA create/edit/delete. */}
+        <Stat label="MLA Data" value={s?.assemblies_with_mla} />
         <Stat label="Total Completed Assemblies" value={s?.total_completed_assemblies} />
-        <Stat label="With MLA Data" value={s?.assemblies_with_mla} />
         <Stat label="With Candidates Data" value={s?.assemblies_with_candidates} />
         <Stat label="Total Candidates" value={s?.total_candidates} />
         <Stat label="Assessment Done" value={s?.assessments_completed} />
