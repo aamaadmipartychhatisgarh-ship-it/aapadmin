@@ -129,10 +129,13 @@ export async function GET() {
           assembly_score: assemblyScore,   // the ranking score (approved overall assembly score)
         };
       })
-      // Only rank assemblies that actually have an assessment score.
+      // Only rank assemblies that actually have an assessment score (highest →
+      // lowest), then keep ONLY the top 3 — enforced here at the data level, not
+      // just hidden in the UI. Fewer than 3 scored assemblies → fewer rows (never
+      // padded with placeholders).
       .filter((m) => m.assembly_score != null)
       .sort((x, y) => y.assembly_score - x.assembly_score)
-      .slice(0, 10)
+      .slice(0, 3)
       .map((m, i) => ({ ...m, rank: i + 1 }));
 
     return NextResponse.json({

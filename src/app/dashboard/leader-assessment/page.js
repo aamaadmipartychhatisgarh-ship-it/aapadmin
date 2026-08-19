@@ -321,12 +321,14 @@ function Overview({ flash, fail }) {
       {/* Assembly-wise Top Ranking — ranked by the single Assembly Score
           (top AAP candidate assessment total), computed on the backend. */}
       {data?.top_assemblies?.length > 0 && (
-        <Card title="Top Ranked Assemblies" icon={Trophy} sub="Ranked by Assembly Score = the sitting assembly's top AAP candidate assessment total (highest → lowest).">
+        <Card title="Top 3 Ranked Assemblies" icon={Trophy} sub="The 3 highest-scoring assemblies by Assembly Score = the sitting assembly's top AAP candidate assessment total (highest → lowest).">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Rank", "Assembly", "District", "Sitting MLA", "MLA Score", "Top Candidate Score", "Assembly Score"].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
-                {data.top_assemblies.map((r) => (
+                {/* Top 3 only — the API already caps at 3; slice again defensively
+                    so a future change can never leak a 4th row here. */}
+                {data.top_assemblies.slice(0, 3).map((r) => (
                   <tr key={r.assembly_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setPickedId(r.assembly_id)}>
                     <td className="px-3 py-2.5"><span className={`font-bold ${r.rank <= 3 ? RANK_COLOR[r.rank - 1] : "text-gray-400"}`}>{r.rank}</span></td>
                     <td className="px-3 py-2.5 font-semibold text-gray-900">{r.assembly_name}</td>
