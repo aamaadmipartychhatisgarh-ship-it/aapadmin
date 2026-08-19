@@ -384,7 +384,13 @@ function Overview({ flash, fail }) {
             not merely an assessment record existing, not partial, not total-score
             only. Recomputed live from the scores on every load. */}
         <Stat label="Candidate Assessment Done" value={s?.assessments_completed} />
-        <Stat label="Total Completed Assemblies" value={s?.total_completed_assemblies} />
+        {/* Assembly Candidate is the fourth metric — ASSEMBLY-WISE (never per
+            candidate): the number of unique assemblies counted once when EVERY
+            candidate in the assembly has a complete 10-parameter assessment (the
+            shared assemblyComplete rule = total_completed_assemblies). An assembly
+            with any pending candidate counts 0; 3 completed candidates count as 1.
+            Auto-updates when candidate assessments change. */}
+        <Stat label="Assembly Candidate" value={s?.total_completed_assemblies} />
         <Stat label="With Candidates Data" value={s?.assemblies_with_candidates} />
         <Stat label="Avg Candidate Score" value={s?.average_score != null ? `${s.average_score}/100` : null} />
       </div>
