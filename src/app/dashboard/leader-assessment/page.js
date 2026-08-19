@@ -836,9 +836,10 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
       {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            <ReadList title="Top 3 Reasons for Winning" items={reasons} accent="text-emerald-700" empty="No reasons recorded." />
-            <ReadList title="Top 5 Strengths" items={strengths} accent="text-[#164FA3]" empty="No strengths recorded." />
+            {/* Order: Weakness → Strength → Winning. */}
             <ReadList title="Top 10 Weaknesses" items={weaknesses} accent="text-red-600" empty="No weaknesses recorded." />
+            <ReadList title="Top 5 Strengths" items={strengths} accent="text-[#164FA3]" empty="No strengths recorded." />
+            <ReadList title="Top 3 Reasons for Winning" items={reasons} accent="text-emerald-700" empty="No reasons recorded." />
           </div>
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Assembly Social Profile · Top 3 Caste / Community</div>
@@ -1658,9 +1659,10 @@ function AnalysisTab({ b, onChange, flash, fail }) {
       <CurrentMlaBanner b={b} />
       <Card title="Political Analysis" icon={Brain} right={<SaveBtn onClick={saveAnalysis} saving={saving} />}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {numbered("Top 3 Reasons for Winning", reasons, setReasons, "bg-emerald-100 text-emerald-700")}
-          {numbered("Top 5 Strengths", strengths, setStrengths, "bg-[#164FA3]/10 text-[#164FA3]")}
+          {/* Order: Weakness → Strength → Winning (values/edit unchanged). */}
           {numbered("Top 10 Weaknesses", weaknesses, setWeaknesses, "bg-red-100 text-red-600")}
+          {numbered("Top 5 Strengths", strengths, setStrengths, "bg-[#164FA3]/10 text-[#164FA3]")}
+          {numbered("Top 3 Reasons for Winning", reasons, setReasons, "bg-emerald-100 text-emerald-700")}
         </div>
       </Card>
       <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities (Rank · Name · %). Admin-entered; percentages are validated 0–100 and never auto-adjusted." right={<SaveBtn onClick={saveSocial} />}>
