@@ -542,7 +542,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                   {top3.map((c, i) => (
                     <div key={c.id} className="flex items-center gap-3 border border-gray-100 rounded-xl p-2.5">
                       <span className={`w-6 text-center font-bold ${i < 3 ? RANK_COLOR[i] : "text-gray-400"}`}>{i + 1}</span>
-                      <ProfilePhoto name={c.name} src={c.photo_url} size={36} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
+                      <ProfilePhoto name={c.name} src={c.photo_url} size={48} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
                       <div className="w-32 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div></div>
                       <div className="flex-1"><ScoreBar value={c.total} max={100} showValue={false} /></div>
                       <span className="font-bold text-[#164FA3] w-16 text-right">{c.total}/100</span>
@@ -558,7 +558,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
               {mla && mla.name ? (
                 <div className="border border-gray-100 rounded-xl p-4">
                   <div className="flex flex-col items-center text-center">
-                    <ProfilePhoto name={mla.name} src={mla.photo_url} size={72} square editable={false} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
+                    <ProfilePhoto name={mla.name} src={mla.photo_url} size={96} square editable={false} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
                     <div className="font-bold text-gray-900 mt-2 truncate max-w-full">{mla.name}</div>
                     <div className="text-[11px] text-emerald-700 font-semibold mt-0.5">Current MLA · {assembly.name}{assembly.district ? ` · ${assembly.district}` : ""}</div>
                   </div>
