@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, normalizeScore, assessmentTotal } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, normalizeScore, assessmentTotal, assessmentComplete } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -37,9 +37,22 @@ export async function PUT(req, { params }) {
     } else {
       await query(`INSERT INTO la_mla_assessments (mla_id, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [id, ...keys.map((k) => scores[k])]);
     }
-    // Return the database-persisted scores + the server-computed total.
+    // Return the persisted scores + server-computed total AND completion status,
+    // recalculated from the saved values (COMPLETED only when all 10 are valid).
     const [saved] = await query(`SELECT ${keys.join(", ")} FROM la_mla_assessments WHERE mla_id = ?`, [id]);
-    return NextResponse.json({ ok: true, assessment: saved || {}, total: assessmentTotal(saved || {}) }, { headers: noStore });
+    const row = saved || {};
+    const completedParameters = ASSESSMENT_PARAMS.filter((p) => Number(row[p.key]) > 0).length;
+    const done = assessmentComplete(row);
+    return NextResponse.json({
+      ok: true,
+      mlaId: Number(id),
+      assessment: row,
+      total: assessmentTotal(row),
+      completedParameters,
+      totalParameters: ASSESSMENT_PARAMS.length,
+      assessment_done: done,
+      status: done ? "COMPLETED" : "INCOMPLETE",
+    }, { headers: noStore });
   } catch (e) {
     console.error("[LA] mla assessment PUT:", e);
     return NextResponse.json({ message: "Failed to save the assessment." }, { status: 500 });

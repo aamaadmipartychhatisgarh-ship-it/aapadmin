@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, normalizeScore, assessmentTotal } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, normalizeScore, assessmentTotal, assessmentComplete } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +36,25 @@ export async function PUT(req, { params }) {
     } else {
       await query(`INSERT INTO la_candidate_assessments (candidate_id, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [cid, ...keys.map((k) => scores[k])]);
     }
-    // Return the database-persisted scores + the server-computed total.
+    // Return the database-persisted scores + the SERVER-computed total AND
+    // completion status, recalculated here from the saved values (never trusted
+    // from the client). status is COMPLETED only when all 10 parameters carry a
+    // valid score — so the caller gets the authoritative status immediately after
+    // save, and it can never disagree with what the list/overview later derive.
     const [saved] = await query(`SELECT ${keys.join(", ")} FROM la_candidate_assessments WHERE candidate_id = ?`, [cid]);
-    return NextResponse.json({ ok: true, assessment: saved || {}, total: assessmentTotal(saved || {}) }, { headers: noStore });
+    const row = saved || {};
+    const completedParameters = ASSESSMENT_PARAMS.filter((p) => Number(row[p.key]) > 0).length;
+    const done = assessmentComplete(row);
+    return NextResponse.json({
+      ok: true,
+      candidateId: Number(cid),
+      assessment: row,
+      total: assessmentTotal(row),
+      completedParameters,
+      totalParameters: ASSESSMENT_PARAMS.length,
+      assessment_done: done,
+      status: done ? "COMPLETED" : "INCOMPLETE",
+    }, { headers: noStore });
   } catch (e) {
     console.error("[LA] assessment PUT:", e);
     return NextResponse.json({ message: "Failed to save the assessment." }, { status: 500 });

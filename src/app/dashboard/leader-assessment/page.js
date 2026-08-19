@@ -1266,6 +1266,12 @@ function AssessmentEditor({ c, endpoint, onChange, flash, fail }) {
   const [saving, setSaving] = useState(false);
   useEffect(() => { setScores(Object.fromEntries(PARAMS.map((p) => [p.key, c.assessment?.[p.key] ?? ""]))); }, [c.id, c.assessment]);
   const total = PARAMS.reduce((s, p) => s + (Number(scores[p.key]) || 0), 0);
+  // Live completion progress — a parameter counts only with a valid score (>0),
+  // the SAME rule the backend uses (assessmentComplete). All 10 → Completed.
+  const filledParams = PARAMS.filter((p) => Number(scores[p.key]) > 0);
+  const completedCount = filledParams.length;
+  const isComplete = completedCount === PARAMS.length;
+  const missing = PARAMS.filter((p) => !(Number(scores[p.key]) > 0));
   function setScore(k, v) {
     if (v === "") return setScores((s) => ({ ...s, [k]: "" }));
     let n = Math.floor(Number(v)); if (isNaN(n)) return; n = Math.max(SCORE_MIN, Math.min(SCORE_MAX, n));
@@ -1279,6 +1285,18 @@ function AssessmentEditor({ c, endpoint, onChange, flash, fail }) {
   }
   return (
     <div>
+      {/* Assessment progress — X/10 completed + status. Backend re-validates on
+          save; this is the live in-form indicator. */}
+      <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Assessment Progress</span>
+          <span className="text-sm font-bold text-gray-800 tabular-nums">{completedCount} / {PARAMS.length} completed</span>
+          <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${isComplete ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{isComplete ? "Completed" : "Incomplete"}</span>
+        </div>
+        <div className="w-40 h-2 bg-gray-100 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full ${isComplete ? "bg-emerald-500" : "bg-[#164FA3]"}`} style={{ width: `${(completedCount / PARAMS.length) * 100}%` }} />
+        </div>
+      </div>
       <div className="space-y-2">
         {PARAMS.map((p, i) => (
           <div key={p.key} className="flex items-center gap-3">
@@ -1291,6 +1309,12 @@ function AssessmentEditor({ c, endpoint, onChange, flash, fail }) {
           </div>
         ))}
       </div>
+      {!isComplete && missing.length > 0 && (
+        <div className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <span className="font-semibold">{missing.length} parameter{missing.length === 1 ? "" : "s"} still needed for completion:</span>{" "}
+          {missing.map((p) => p.label).join(", ")}
+        </div>
+      )}
       <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
         <span className="text-sm font-semibold text-gray-700">TOTAL (auto)</span>
         <div className="flex items-center gap-3">
