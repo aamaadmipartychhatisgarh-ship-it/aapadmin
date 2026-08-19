@@ -27,7 +27,7 @@ export async function GET() {
          JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
          LEFT JOIN locations dl ON dl.id = ml.parent_id AND dl.type = 'district'
          LEFT JOIN la_mla_assessments s ON s.mla_id = mp.id
-        WHERE mp.name IS NOT NULL AND mp.name <> ''
+        WHERE mp.name IS NOT NULL AND TRIM(mp.name) <> ''
         ORDER BY ml.name ASC`
     );
     const mlas = rows.map((r) => {

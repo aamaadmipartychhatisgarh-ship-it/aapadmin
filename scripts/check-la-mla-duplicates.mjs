@@ -1,14 +1,15 @@
 // Diagnostic for the Leader Assessment "With MLA Data" count.
 //
-// The card counts UNIQUE MLA profiles (one per real/master assembly). If it
-// reads higher than the number of MLA profiles you actually maintain, the usual
-// cause is a duplicate la_assemblies mirror row for the SAME master assembly
-// (same location_id), or a legacy mirror row whose location_id is NULL — either
-// gives two MLA rows representing one real assembly.
+// The Overview card must equal the MLA Data List (/api/leader-assessment/mlas),
+// which counts la_mla_profiles that INNER JOIN through la_assemblies to an
+// existing MASTER assembly (locations type='assembly'). An MLA whose mirror row
+// has a NULL or dangling location_id (a legacy/orphan assembly no longer in
+// Master Data) is shown in NEITHER — but a query that joins only la_assemblies
+// would still count it, which is the classic "5 vs 4" over-count.
 //
-// This script lists every named MLA profile with its mirror's location_id and
-// flags: duplicate location_ids (real duplicates) and NULL location_ids (legacy
-// / unlinked). It only READS — it changes nothing.
+// This script prints: every named MLA profile, whether it links to a live master
+// assembly, the count the card/list now use (master-linked), and flags the
+// orphan rows that used to inflate the number. It only READS.
 //
 //   node scripts/check-la-mla-duplicates.mjs
 import mysql from "mysql2/promise";
@@ -23,50 +24,43 @@ const conn = await mysql.createConnection({
 
 const [rows] = await conn.query(
   `SELECT mp.id AS mla_id, mp.name AS mla_name, mp.assembly_id,
-          a.location_id, a.name AS mirror_name, ml.name AS master_name
+          a.location_id,
+          ml.id AS master_id, ml.name AS master_name,
+          a.name AS mirror_name
      FROM la_mla_profiles mp
      JOIN la_assemblies a ON a.id = mp.assembly_id
      LEFT JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
     WHERE mp.name IS NOT NULL AND TRIM(mp.name) <> ''
-    ORDER BY a.location_id IS NULL, a.location_id, mp.id`
+    ORDER BY master_id IS NULL DESC, mp.id`
 );
 
-const plainCount = rows.length;
-const byLoc = new Map();
-let nullLoc = 0;
-for (const r of rows) {
-  if (r.location_id == null) { nullLoc++; continue; }
-  byLoc.set(r.location_id, (byLoc.get(r.location_id) || 0) + 1);
-}
-const uniqueCount = [...byLoc.keys()].length + nullLoc; // matches the card's DISTINCT logic
+const linked = rows.filter((r) => r.master_id != null);
+const orphans = rows.filter((r) => r.master_id == null);
 
-console.log("Named MLA profile rows (old COUNT*):", plainCount);
-console.log("Unique MLA profiles (card value)   :", uniqueCount);
+console.log("Named MLA profile rows (old join-only count):", rows.length);
+console.log("Master-linked MLA profiles (card & list value):", linked.length);
 console.log("");
-console.log("mla_id  assembly_id  location_id  master/mirror name");
-console.log("-".repeat(64));
+console.log("mla_id  assembly_id  location_id  master?  name");
+console.log("-".repeat(66));
 for (const r of rows) {
-  const flag = r.location_id == null
-    ? "  ⚠ legacy (no master link)"
-    : (byLoc.get(r.location_id) > 1 ? "  ✗ DUPLICATE location_id" : "");
+  const ok = r.master_id != null;
   console.log(
     String(r.mla_id).padEnd(7),
     String(r.assembly_id).padEnd(12),
     String(r.location_id ?? "NULL").padEnd(12),
-    `${r.master_name || r.mirror_name || "?"} — MLA: ${r.mla_name}${flag}`
+    (ok ? "yes    " : "NO     "),
+    `${r.master_name || r.mirror_name || "?"} — MLA: ${r.mla_name}${ok ? "" : "   ✗ orphan (not in Master Data)"}`
   );
 }
 
-const dupLocs = [...byLoc.entries()].filter(([, n]) => n > 1);
-if (dupLocs.length) {
-  console.log("\nDuplicate mirror location_ids:", dupLocs.map(([l, n]) => `${l}×${n}`).join(", "));
-  console.log("These are the extra rows inflating the count. Keep the mirror row");
-  console.log("that has the real assessment data and remove/merge the duplicate");
-  console.log("la_assemblies row (and its MLA) during a maintenance window.");
-} else if (nullLoc) {
-  console.log("\nNo duplicate location_ids; the extra rows are legacy (NULL location_id).");
+if (orphans.length) {
+  console.log(`\n⚠ ${orphans.length} orphan MLA profile(s) point at a la_assemblies row whose`);
+  console.log("  master assembly no longer exists (NULL/dangling location_id).");
+  console.log("  These are correctly EXCLUDED from the card and the MLA Data List now.");
+  console.log("  To fully clean up, delete the orphan la_assemblies row (its MLA cascades)");
+  console.log("  during a maintenance window.");
 } else {
-  console.log("\nNo duplicates found — the plain and unique counts match.");
+  console.log("\nNo orphan MLA profiles — the count already matched the MLA Data List.");
 }
 
 await conn.end();

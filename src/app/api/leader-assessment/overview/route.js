@@ -34,19 +34,20 @@ export async function GET() {
     const CAND_COMPLETE = "c.name IS NOT NULL AND TRIM(c.name) <> ''";
     const ALL_PARAMS = ASSESSMENT_PARAMS.map((p) => `COALESCE(s.${p.key}, 0) > 0`).join(" AND ");
 
-    // CARD 2 — With MLA Data: the number of actual, unique MLA profiles.
-    // la_mla_profiles already has UNIQUE(assembly_id), so there is one row per
-    // assembly — but the la_assemblies mirror can hold more than one row for the
-    // SAME real (master) assembly (a duplicate mirror, or a legacy row whose
-    // location_id is NULL), which would let two MLA rows represent ONE real
-    // assembly and over-count (e.g. show 5 when 4 exist). Counting DISTINCT by
-    // the master location_id collapses those duplicates to a single profile,
-    // while a legacy MLA with no master link (location_id NULL) still counts once
-    // via the -mp.id fallback. In a clean DB this equals a plain COUNT(*).
+    // CARD 2 — With MLA Data: the number of actual MLA profiles, computed with
+    // the EXACT same FROM/JOIN/WHERE as the MLA Data List (/api/.../mlas) so the
+    // two can never disagree. That list INNER JOINs la_mla_profiles → la_assemblies
+    // → master `locations`, so an MLA whose assembly no longer exists in Master
+    // Data (e.g. an orphan/legacy mirror row with a NULL or dangling location_id)
+    // is excluded here just as it is from the list — this is the "5 vs 4" gap:
+    // the previous query joined only la_assemblies and counted that orphan MLA.
+    // COUNT(DISTINCT mp.id) guarantees each unique MLA profile is counted exactly
+    // once even if a joined table (assessments, etc.) ever fanned out.
     const [[wm]] = await query(
-      `SELECT COUNT(DISTINCT COALESCE(a.location_id, -mp.id)) AS n
+      `SELECT COUNT(DISTINCT mp.id) AS n
          FROM la_mla_profiles mp
          JOIN la_assemblies a ON a.id = mp.assembly_id
+         JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
         WHERE ${MLA_COMPLETE}`
     ).then((r) => [r]);
 
