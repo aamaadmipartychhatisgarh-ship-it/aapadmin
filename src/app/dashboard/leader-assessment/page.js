@@ -560,7 +560,11 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
             : <Empty msg="No AAP candidates yet — add candidates and score them to see the 10-parameter assessment." />}
           <AnalysisTab b={bundle} onChange={reload} flash={flash} fail={fail} />
         </div>
-      ) : null}
+      ) : (
+        // Graceful empty state instead of a blank modal when the assembly has no
+        // loadable record (e.g. removed from Master Data after the list loaded).
+        <Empty msg="This assembly's assessment could not be loaded. It may no longer exist in Master Data." action={<button onClick={load} className="text-sm font-semibold text-[#164FA3] hover:underline">Retry</button>} />
+      )}
     </Modal>
   );
 }
