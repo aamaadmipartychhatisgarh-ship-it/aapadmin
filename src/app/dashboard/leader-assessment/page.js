@@ -289,19 +289,28 @@ function Overview({ flash, fail }) {
   }, []);
 
   const s = data?.stats;
-  if (loading) return <LoadingBlock />;
-  if (error) return <ErrorBlock msg={error} onRetry={() => load()} />;
   return (
     <div className="space-y-5">
-      {/* Assembly search — options come only from the master-backed list; the
-          selected id (a real DB id) drives the assessment load below. */}
+      {/* SEARCH CARD — a PERMANENT top-level block: it is the first child here and
+          is rendered UNCONDITIONALLY (never behind the loading/error/selection
+          gates below), so it can never move, hide, or be replaced as a side effect
+          of searching, selecting, opening Full View, or a background refresh.
+          Options come only from the master-backed list; the picked id drives the
+          result panel that renders BELOW — never in place of — this card. */}
       <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
         <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
       </Card>
-      {/* Search result / selected assembly — appears directly BELOW the Search
-          Card; the Search Card above never moves. */}
-      {pickedId && <AssemblyAssessmentPanel assemblyId={pickedId} onOpen={openAssemblyFullView} version={dataVersion} />}
+      {/* Search result / selected assembly — a SEPARATE container directly BELOW
+          the Search Card. key={pickedId} cleanly remounts it when another assembly
+          is searched, so only the result changes while the card stays put. */}
+      {pickedId && <AssemblyAssessmentPanel key={pickedId} assemblyId={pickedId} onOpen={openAssemblyFullView} version={dataVersion} />}
 
+      {/* Only the DATA-DEPENDENT overview content (rankings, stats, assemblies
+          list) is gated on load/error — never the Search Card above it. So during
+          the initial load, an error, or a refetch, the Search Card remains mounted
+          at the very top. */}
+      {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={() => load()} /> : (
+      <>
       {/* Top 10 rankings — side-by-side on desktop (LEFT: assemblies, RIGHT:
           candidates), stacked on tablet/mobile. Both ranked by the real
           assessment scores computed on the backend and capped at 10; fewer than
@@ -397,6 +406,8 @@ function Overview({ flash, fail }) {
           </div>
         )}
       </Card>
+      </>
+      )}
 
       {/* ONE Full View modal for the whole Overview — used identically by the
           Assemblies List "Open" and the Assembly Search panel's "Full View"
