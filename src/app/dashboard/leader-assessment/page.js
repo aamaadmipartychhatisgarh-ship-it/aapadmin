@@ -5,7 +5,7 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import { initialsOf } from "@/components/Avatar";
 import {
-  LayoutDashboard, Building2, UserSquare2, History, Users, ClipboardCheck,
+  LayoutDashboard, Building2, UserSquare2, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet,
   Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
@@ -34,7 +34,6 @@ const SCORE_MAX = 10;
 const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, scoped: false },
   { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: false },
-  { key: "elections", label: "Election History", icon: History, scoped: true },
   { key: "candidates", label: "AAP Candidates", icon: Users, scoped: false },
   // Centralized Caste / Community master — the single source of truth for every
   // Caste/Community value used across the module (Assembly Social Profile · Add
@@ -119,39 +118,11 @@ function Body() {
     }
     return "overview";
   });
-  const [assemblies, setAssemblies] = useState([]);
-  const [asmLoading, setAsmLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState(null);
-  const [bundle, setBundle] = useState(null);
-  const [loadingBundle, setLoadingBundle] = useState(false);
-  const [bundleErr, setBundleErr] = useState("");
   const [notice, setNotice] = useState("");
   const [err, setErr] = useState("");
   const flash = (m) => { setNotice(m); setErr(""); };
   const fail = (m) => { setErr(m); setNotice(""); };
   useEffect(() => { if (notice || err) { const t = setTimeout(() => { setNotice(""); setErr(""); }, 3500); return () => clearTimeout(t); } }, [notice, err]);
-
-  const loadAssemblies = useCallback(async () => {
-    setAsmLoading(true);
-    try {
-      const d = await api("/api/leader-assessment/assemblies");
-      setAssemblies(d.assemblies || []);
-      setSelectedId((cur) => cur ?? (d.assemblies?.[0]?.id ?? null));
-    } catch (e) { fail(e.message); } finally { setAsmLoading(false); }
-  }, []);
-
-  const loadBundle = useCallback(async (id) => {
-    if (!id) { setBundle(null); return; }
-    setLoadingBundle(true); setBundleErr("");
-    try { setBundle(await api(`/api/leader-assessment/assemblies/${id}`)); }
-    catch (e) { setBundleErr(e.message); setBundle(null); }
-    finally { setLoadingBundle(false); }
-  }, []);
-
-  useEffect(() => { loadAssemblies(); }, [loadAssemblies]);
-  useEffect(() => { loadBundle(selectedId); }, [selectedId, loadBundle]);
-
-  const currentTab = TABS.find((t) => t.key === tab);
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500">
@@ -182,34 +153,11 @@ function Body() {
         })}
       </div>
 
-      {/* Assembly switcher (assembly-scoped tabs) */}
-      {currentTab?.scoped && (
-        <div className="flex items-center gap-3 flex-wrap bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3">
-          <span className="text-sm font-semibold text-gray-600 flex items-center gap-1.5"><MapPin size={15} className="text-[#164FA3]" /> Select Assembly</span>
-          <select value={selectedId || ""} onChange={(e) => setSelectedId(Number(e.target.value) || null)} className={`${inp} max-w-xs`}>
-            <option value="">— choose —</option>
-            {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}{a.district ? ` · ${a.district}` : ""}</option>)}
-          </select>
-          {loadingBundle && <Loader2 size={16} className="animate-spin text-[#164FA3]" />}
-          {!asmLoading && !assemblies.length && <span className="text-sm text-gray-400">No assemblies yet — add one on the Assemblies tab.</span>}
-        </div>
-      )}
-
       {tab === "overview" && <Overview flash={flash} fail={fail} />}
       {tab === "mla" && <MlaManager flash={flash} fail={fail} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
       {tab === "castes" && <CasteMaster flash={flash} fail={fail} />}
       {tab === "polling" && <PollingMaster flash={flash} fail={fail} />}
-
-      {currentTab?.scoped && !selectedId && <Empty msg="Select an assembly above to begin." />}
-      {currentTab?.scoped && selectedId && loadingBundle && !bundle && <LoadingBlock />}
-      {currentTab?.scoped && selectedId && bundleErr && <ErrorBlock msg={bundleErr} onRetry={() => loadBundle(selectedId)} />}
-      {currentTab?.scoped && selectedId && bundle && (
-        <>
-          <AssemblyHeader a={bundle.assembly} status={bundle.status} />
-          {tab === "elections" && <ElectionsTab b={bundle} onChange={() => loadBundle(selectedId)} flash={flash} fail={fail} />}
-        </>
-      )}
     </div>
   );
 }
@@ -266,11 +214,6 @@ function ScoreBar({ value, max = 10, showValue = true }) {
 }
 function SaveBtn({ onClick, saving, label = "Save" }) {
   return <button onClick={onClick} disabled={saving} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">{saving ? <Loader2 size={14} className="animate-spin" /> : null} {label}</button>;
-}
-function ResultBadge({ v }) {
-  if (!v) return <span className="text-gray-300">—</span>;
-  const won = /won/i.test(v), lost = /lost/i.test(v);
-  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${won ? "bg-emerald-50 text-emerald-700" : lost ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-600"}`}>{v}</span>;
 }
 function AssemblyHeader({ a, status }) {
   const items = [
@@ -1091,128 +1034,10 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
 }
 
 // ----------------------------- ELECTIONS ----------------------------------
-const EMPTY_ELEC = { election_year: "", election_type: "", party: "", candidate: "", status: "", votes: "", vote_percentage: "", margin: "", result: "", runner_up: "", runner_up_votes: "" };
-function ElectionsTab({ b, onChange, flash, fail }) {
-  const [editing, setEditing] = useState(null);
-  async function del(e) {
-    if (!confirm("Remove this election record?")) return;
-    try { await api(`/api/leader-assessment/elections/${e.id}`, { method: "DELETE" }); flash("Election removed."); onChange(); } catch (er) { fail(er.message); }
-  }
-  const last10 = b.elections.slice(0, 10);
-  return (
-    <Card title="Assembly Election History" icon={History} sub={b.elections.length > 10 ? `Showing the latest 10 of ${b.elections.length} records (newest first).` : "Newest first."} right={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Election</button>}>
-      {b.elections.length === 0 ? <Empty msg="No election records yet." action={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Election</button>} /> : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-gray-500"><tr>{["Year", "Category", "Party", "Person", "Votes", "Vote %", "Margin", "Result", "Runner-up", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
-            <tbody className="divide-y divide-gray-100">
-              {last10.map((e) => (
-                <tr key={e.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2.5 font-semibold">{e.election_year}</td>
-                  <td className="px-3 py-2.5">{e.person_category ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">{e.person_category}</span> : "—"}</td>
-                  <td className="px-3 py-2.5">{e.party || "—"}</td>
-                  <td className="px-3 py-2.5">{e.candidate || "—"}</td>
-                  <td className="px-3 py-2.5">{nfmt(e.votes) || "—"}</td>
-                  <td className="px-3 py-2.5">{e.vote_percentage != null ? `${e.vote_percentage}%` : "—"}</td>
-                  <td className="px-3 py-2.5">{nfmt(e.margin) || "—"}</td>
-                  <td className="px-3 py-2.5"><ResultBadge v={e.result || e.status} /></td>
-                  <td className="px-3 py-2.5 text-gray-600">{e.runner_up || "—"}{e.runner_up_votes != null ? ` (${nfmt(e.runner_up_votes)})` : ""}</td>
-                  <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                    <button onClick={() => setEditing(e)} className="text-gray-500 hover:text-[#164FA3] p-1"><Pencil size={14} /></button>
-                    <button onClick={() => del(e)} className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={14} /></button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {editing && <ElectionModal assemblyId={b.assembly.id} assembly={b.assembly} mla={b.mla} candidates={b.candidates} initial={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); flash("Election saved."); onChange(); }} fail={fail} />}
-    </Card>
-  );
-}
-const ELEC_CATEGORIES = ["AAP", "MLA", "Candidate"];
-// People available for a category come from the SELECTED assembly's live data —
-// AAP candidates (la_aap_candidates) and the current MLA (la_mla_profiles) — so
-// the Name dropdown can never list someone from another district/assembly.
-function peopleForCategory(cat, mla, candidates) {
-  if (cat === "MLA") return mla?.name ? [mla.name] : [];
-  if (cat === "AAP" || cat === "Candidate") return (candidates || []).map((c) => c.name).filter(Boolean);
-  return [];
-}
-function ElectionModal({ assemblyId, assembly, mla, candidates, initial, onClose, onSaved, fail }) {
-  const initCat = initial?.person_category || "";
-  const initNames = peopleForCategory(initCat, mla, candidates);
-  const initOther = !!(initial?.candidate && !initNames.includes(initial.candidate));
-  const [form, setForm] = useState(() => ({ ...EMPTY_ELEC, ...(initial || {}) }));
-  const [category, setCategory] = useState(initCat);
-  const [nameChoice, setNameChoice] = useState(initial?.candidate ? (initOther ? "__other__" : initial.candidate) : "");
-  const [saving, setSaving] = useState(false);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const options = peopleForCategory(category, mla, candidates);
-
-  function pickCategory(cat) { setCategory(cat); setNameChoice(""); set("candidate", ""); }
-  function pickName(v) { setNameChoice(v); set("candidate", v === "__other__" ? "" : v); }
-
-  async function save() {
-    if (!category) { fail("Select a category (AAP / MLA / Candidate)."); return; }
-    if (!String(form.candidate || "").trim()) { fail("Select or enter the person this election record is for."); return; }
-    if (!String(form.election_year).trim()) { fail("Election year is required."); return; }
-    const yr = Number(form.election_year);
-    if (!Number.isInteger(yr) || yr < 1900 || yr > 2100) { fail("Enter a valid election year."); return; }
-    setSaving(true);
-    try {
-      const payload = { ...form, person_category: category };
-      const url = initial ? `/api/leader-assessment/elections/${initial.id}` : `/api/leader-assessment/assemblies/${assemblyId}/elections`;
-      await api(url, { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      onSaved();
-    } catch (e) { fail(e.message); setSaving(false); }
-  }
-  return (
-    <Modal title={initial ? "Edit Election" : "Add Election"} onClose={onClose}>
-      {/* Step 1-3: District (context) → Category → Name */}
-      <div className="grid grid-cols-3 gap-3 mb-1">
-        <div>
-          <span className={lbl}>1 · District</span>
-          <div className={`${inp} bg-gray-50 text-gray-700 font-medium truncate`}>{assembly?.district || assembly?.name || "—"}</div>
-        </div>
-        <div>
-          <span className={lbl}>2 · Category</span>
-          <select className={inp} value={category} onChange={(e) => pickCategory(e.target.value)}>
-            <option value="">— choose —</option>
-            {ELEC_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div>
-          <span className={lbl}>3 · Name</span>
-          {category ? (
-            <select className={inp} value={nameChoice} onChange={(e) => pickName(e.target.value)}>
-              <option value="">— choose —</option>
-              {options.map((n) => <option key={n} value={n}>{n}</option>)}
-              <option value="__other__">Other (type manually)</option>
-            </select>
-          ) : <div className={`${inp} bg-gray-50 text-gray-400`}>Select a category first</div>}
-        </div>
-      </div>
-      {category && options.length === 0 && nameChoice !== "__other__" && (
-        <div className="text-[11px] text-amber-600 mb-2">No {category} {category === "MLA" ? "profile" : "candidates"} added for this district yet — choose “Other” to type a name, or add them on their tab first.</div>
-      )}
-      {nameChoice === "__other__" && (
-        <div className="mb-3"><span className={lbl}>Person Name *</span><input className={inp} value={form.candidate ?? ""} onChange={(e) => set("candidate", e.target.value)} placeholder="Type the person's name" /></div>
-      )}
-      <div className="border-t border-gray-100 my-3" />
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Election Year *" type="number" value={form.election_year} onChange={(v) => set("election_year", v)} /><Field label="Election Type" value={form.election_type} onChange={(v) => set("election_type", v)} />
-        <Field label="Party" value={form.party} onChange={(v) => set("party", v)} />
-        <div><span className={lbl}>Result</span><select className={inp} value={form.result || ""} onChange={(e) => set("result", e.target.value)}><option value="">—</option><option value="Won">Won</option><option value="Lost">Lost</option></select></div>
-        <Field label="Votes" type="number" value={form.votes} onChange={(v) => set("votes", v)} /><Field label="Vote %" type="number" value={form.vote_percentage} onChange={(v) => set("vote_percentage", v)} />
-        <Field label="Margin" type="number" value={form.margin} onChange={(v) => set("margin", v)} />
-        <Field label="Runner-up" value={form.runner_up} onChange={(v) => set("runner_up", v)} /><Field label="Runner-up Votes" type="number" value={form.runner_up_votes} onChange={(v) => set("runner_up_votes", v)} />
-      </div>
-      <ModalActions onClose={onClose} onSave={save} saving={saving} />
-    </Modal>
-  );
-}
+// Election History (the old MLA Profile Election History section) was removed —
+// that functionality now lives in the Candidate / Election Data structure. The
+// la_mla_elections table and its API routes are intentionally KEPT so existing
+// election records are preserved and remain accessible; only the old UI is gone.
 
 // ----------------------------- CANDIDATES ---------------------------------
 // Standalone, Master-Data-driven Candidates workspace: a "+ Create Candidate"
