@@ -820,8 +820,8 @@ function SpokespersonsTab({ data, onChange }) {
 function SpokespersonModal({ editing, onClose, onSaved }) {
   const [form, setForm] = useState(editing ? {
     name: editing.name || "", mobile: editing.mobile || "",
-    expertise: editing.expertise || "", languages: editing.languages || "",
-  } : { name: "", mobile: "", expertise: "", languages: "" });
+    languages: editing.languages || "",
+  } : { name: "", mobile: "", languages: "" });
   const [saving, setSaving] = useState(false);
   async function save() {
     setSaving(true);
@@ -834,7 +834,6 @@ function SpokespersonModal({ editing, onClose, onSaved }) {
     <Modal title={editing ? "Edit Spokesperson" : "Add Spokesperson"} onClose={onClose}>
       <input className={inp} placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       <input className={inp} placeholder="Mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
-      <input className={inp} placeholder="Expertise (e.g. Education, Health)" value={form.expertise} onChange={(e) => setForm({ ...form, expertise: e.target.value })} />
       <input className={inp} placeholder="Languages (e.g. Hindi, English)" value={form.languages} onChange={(e) => setForm({ ...form, languages: e.target.value })} />
       <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.name} />
     </Modal>
