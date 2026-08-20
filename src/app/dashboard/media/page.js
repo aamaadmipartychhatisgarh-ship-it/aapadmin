@@ -463,33 +463,151 @@ function NewspaperPhoto({ url, title, onPreview }) {
   return <div className={`${box} text-gray-300`} title="No newspaper image"><Newspaper size={26} /></div>;
 }
 
+// A clock that re-renders on an interval, so proximity-based colours track the
+// real remaining time without a manual refresh (item 5). Defaults to 60s.
+function useNow(intervalMs = 60000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), intervalMs); return () => clearInterval(t); }, [intervalMs]);
+  return now;
+}
+// Combine a debate's saved date + time into a real Date (local). Missing time
+// defaults to midday so a date-only debate still sorts sensibly.
+function debateStart(d) {
+  if (!d?.debate_date) return null;
+  const date = String(d.debate_date).slice(0, 10);
+  let time = d.debate_time ? String(d.debate_time).slice(0, 8) : "12:00:00";
+  if (time.length === 5) time += ":00";
+  const dt = new Date(`${date}T${time}`);
+  return isNaN(dt.getTime()) ? null : dt;
+}
+// Nearest upcoming (or currently live) debate for a channel, plus how many more
+// are queued. Cancelled/aired debates are excluded from "upcoming". Scoped by
+// channel_id so one channel never borrows another's debates (item 3).
+function channelUpcoming(channelId, debates, now) {
+  const list = (debates || [])
+    .filter((d) => String(d.channel_id) === String(channelId) && d.status !== "cancelled" && d.status !== "aired")
+    .map((d) => ({ d, start: debateStart(d) }))
+    .filter((x) => x.start && x.start.getTime() >= now - 3 * 3600000) // keep live (up to 3h old)
+    .sort((a, b) => a.start - b.start);
+  return { nearest: list[0]?.d || null, start: list[0]?.start || null, more: Math.max(0, list.length - 1) };
+}
+// Proximity → gradual green. Returns an inline style whose green intensity grows
+// as the debate approaches (over a 7-day window), plus a status label. Nothing is
+// hardcoded per channel — it's all derived from the actual remaining time.
+function proximityVisual(start, now, status) {
+  if (!start) return { style: {}, label: null, tone: "none" };
+  const ms = start.getTime() - now;
+  if (status === "live" || (ms <= 0 && ms > -3 * 3600000)) {
+    return { style: { borderColor: "rgba(239,68,68,0.7)", backgroundColor: "rgba(239,68,68,0.06)" }, label: "Live now", tone: "live" };
+  }
+  const hours = ms / 3600000;
+  const WINDOW = 168; // 7 days → full ramp
+  const proximity = Math.max(0, Math.min(1, 1 - hours / WINDOW));
+  const style = {
+    borderColor: `rgba(16,185,129,${(0.18 + 0.72 * proximity).toFixed(3)})`,
+    backgroundColor: `rgba(16,185,129,${(0.03 + 0.13 * proximity).toFixed(3)})`,
+  };
+  let label;
+  if (hours <= 6) label = "Starting soon";
+  else if (hours <= 24) label = "Within a day";
+  else if (hours <= 72) label = "In a few days";
+  else label = "Upcoming";
+  return { style, label, proximity, tone: "upcoming" };
+}
+function fmtDebateWhen(start) {
+  if (!start) return "—";
+  return `${start.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })} @ ${start.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+}
+
+// ONE reusable channel card = the entry point for Schedule Debate + Debate List
+// (item 1), and it surfaces THIS channel's nearest upcoming debate (item 2) with
+// a real-time proximity colour (item 4). Clicking the card opens the two options.
+function ChannelCard({ ch, debates, now, tone, onSchedule, onDebateList }) {
+  const [open, setOpen] = useState(false);
+  const { nearest, start, more } = channelUpcoming(ch.id, debates, now);
+  const vis = proximityVisual(start, now, nearest?.status);
+  const speakers = (nearest?.spokespersons || []).map((s) => s.name).filter(Boolean);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={vis.style}
+        className={`w-full text-left bg-white rounded-2xl border shadow-sm p-4 transition-colors hover:shadow-md ${vis.tone === "none" ? "border-gray-100" : ""}`}
+        title="Open Schedule Debate / Debate List for this channel"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <Tv className={vis.tone === "live" ? "text-red-600" : "text-[#164FA3]"} size={20} />
+          {vis.label && <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${vis.tone === "live" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{vis.label}</span>}
+        </div>
+        <div className="font-bold text-gray-900 text-sm mt-2 truncate" title={ch.name}>{ch.name}</div>
+        <span className={`mt-1 inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${tone[ch.tone] || tone.unknown}`}>{ch.tone}</span>
+
+        {nearest ? (
+          <div className="mt-3 pt-3 border-t border-gray-200/70 space-y-0.5">
+            <div className="text-xs font-semibold text-gray-900 truncate" title={nearest.topic}>{nearest.topic || "Debate"}</div>
+            <div className="text-[11px] text-gray-600">{fmtDebateWhen(start)}</div>
+            <div className="text-[11px] text-gray-500 truncate">{speakers.length ? speakers.join(", ") : "No spokesperson yet"}</div>
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${nearest.status === "live" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>{nearest.status}</span>
+              {more > 0 && <span className="text-[10px] text-gray-400">+{more} more</span>}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-400">No upcoming debate.</div>
+        )}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute z-50 left-3 right-3 top-3 bg-white border border-gray-100 rounded-xl shadow-lg p-1">
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-400 truncate">{ch.name}</div>
+            <button type="button" onClick={() => { onSchedule(ch); setOpen(false); }} className="w-full flex items-center gap-2 px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg text-left"><Plus size={14} className="text-[#164FA3]" /> Schedule Debate</button>
+            <button type="button" onClick={() => { onDebateList(ch); setOpen(false); }} className="w-full flex items-center gap-2 px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg text-left"><FileText size={14} className="text-[#164FA3]" /> Debate List</button>
+            <button type="button" onClick={() => setOpen(false)} className="w-full flex items-center gap-2 px-2 py-2 text-sm text-gray-500 hover:bg-gray-50 rounded-lg text-left"><X size={14} /> Close</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ============================================================ CHANNELS
 function ChannelsTab({ data, onChange, flash, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [scheduleFor, setScheduleFor] = useState(null); // channel id to preselect
+  const [fChannel, setFChannel] = useState(null); // { id, name } — Debate List filter
+  const now = useNow(60000);
+  const debatesRef = useRef(null);
   const TONE = { supportive: "bg-emerald-100 text-emerald-700", neutral: "bg-gray-100 text-gray-600", opposing: "bg-red-100 text-red-700", unknown: "bg-amber-100 text-amber-700" };
+
+  const scheduleForChannel = (ch) => { setScheduleFor(ch.id); setShowAdd(true); };
+  const debateListForChannel = (ch) => { setFChannel({ id: ch.id, name: ch.name }); setTimeout(() => debatesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); };
+  const debateRows = (data.upcomingDebates || []).filter((d) => !fChannel || String(d.channel_id) === String(fChannel.id));
+
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {data.channels.map((c) => (
-          <div key={c.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-            <Tv className="text-[#164FA3] mb-2" size={20} />
-            <div className="font-bold text-gray-900 text-sm">{c.name}</div>
-            <span className={`mt-2 inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${TONE[c.tone]}`}>{c.tone}</span>
-          </div>
+          <ChannelCard key={c.id} ch={c} debates={data.upcomingDebates} now={now} tone={TONE} onSchedule={scheduleForChannel} onDebateList={debateListForChannel} />
         ))}
       </div>
 
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-gray-900">{filtered ? "Debates" : "Today's & Upcoming Debates"}</h3>
+      <div ref={debatesRef} className="flex items-center justify-between scroll-mt-4">
+        <div>
+          <h3 className="font-bold text-gray-900">{fChannel ? "Debate List" : filtered ? "Debates" : "Today's & Upcoming Debates"}</h3>
+          {fChannel && <div className="text-xs text-gray-500 mt-0.5">Showing only <span className="font-semibold text-[#164FA3]">{fChannel.name}</span> · <button onClick={() => setFChannel(null)} className="text-gray-500 hover:text-red-600 underline">clear</button></div>}
+        </div>
         <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-1.5 rounded-lg text-sm font-semibold">
           <Plus size={14} /> Schedule Debate
         </button>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {data.upcomingDebates.length === 0 ? (
-          <div className="p-8 text-gray-400 text-sm text-center">{filtered ? "No debates found for the selected date range." : "No debates scheduled."}</div>
+        {debateRows.length === 0 ? (
+          <div className="p-8 text-gray-400 text-sm text-center">{fChannel ? `No debates for ${fChannel.name}.` : filtered ? "No debates found for the selected date range." : "No debates scheduled."}</div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -505,7 +623,7 @@ function ChannelsTab({ data, onChange, flash, filtered }) {
               </tr>
             </thead>
             <tbody>
-              {data.upcomingDebates.map((d) => (
+              {debateRows.map((d) => (
                 <tr key={d.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                     {d.debate_date?.slice(0, 10)}{d.debate_time ? ` @ ${d.debate_time.slice(0, 5)}` : ""}
@@ -528,7 +646,7 @@ function ChannelsTab({ data, onChange, flash, filtered }) {
         )}
       </div>
 
-      {showAdd && <DebateModal channels={data.channels} spokespersons={data.spokespersons} onClose={() => setShowAdd(false)} onSaved={(msg) => { setShowAdd(false); onChange(); flash?.(msg); }} />}
+      {showAdd && <DebateModal channels={data.channels} spokespersons={data.spokespersons} defaultChannelId={scheduleFor} onClose={() => { setShowAdd(false); setScheduleFor(null); }} onSaved={(msg) => { setShowAdd(false); setScheduleFor(null); onChange(); flash?.(msg); }} />}
       {editing && <DebateModal editing={editing} channels={data.channels} spokespersons={data.spokespersons} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); onChange(); flash?.(msg); }} />}
     </div>
   );
@@ -997,7 +1115,7 @@ function SpokespersonMultiSelect({ options, value, onChange }) {
   );
 }
 
-function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
+function DebateModal({ channels, spokespersons, onClose, onSaved, editing, defaultChannelId }) {
   const [form, setForm] = useState(editing ? {
     channel_id: editing.channel_id || "", topic: editing.topic || "",
     debate_date: editing.debate_date ? editing.debate_date.slice(0, 10) : "",
@@ -1008,7 +1126,7 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing }) {
     status: editing.status || "scheduled",
     viral_score: editing.viral_score || 0,
     spokesperson_ids: (editing.spokespersons || []).map((s) => s.id),
-  } : { channel_id: "", topic: "", debate_date: "", debate_time: "20:00", brief_pdf_url: "", talking_points: "", opposition_counter: "", spokesperson_ids: [] });
+  } : { channel_id: defaultChannelId ? String(defaultChannelId) : "", topic: "", debate_date: "", debate_time: "20:00", brief_pdf_url: "", talking_points: "", opposition_counter: "", spokesperson_ids: [] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function save() {
