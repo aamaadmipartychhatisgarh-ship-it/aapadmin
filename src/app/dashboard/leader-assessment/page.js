@@ -1191,6 +1191,8 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
   }));
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({}); // { assembly_id, name, _server }
+  const [showElections, setShowElections] = useState(false);
+  const [electionsDraft, setElectionsDraft] = useState([]); // staged rows for a NEW candidate
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e)); };
   const age = ageOf(form.date_of_birth);
   async function persistPhoto(blob) {
@@ -1210,7 +1212,16 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
     setSaving(true);
     try {
       const url = initial ? `/api/leader-assessment/candidates/${initial.id}` : `/api/leader-assessment/assemblies/${form.assembly_id}/candidates`;
-      await api(url, { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const resp = await api(url, { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      // NEW candidate: persist any staged election history against the freshly
+      // created candidate id (one insert per record → no duplicates). Existing
+      // candidates manage their election history live, so nothing to flush here.
+      if (!initial && resp?.id && electionsDraft.length) {
+        for (const e of electionsDraft) {
+          // eslint-disable-next-line no-await-in-loop
+          await api(`/api/leader-assessment/candidates/${resp.id}/elections`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(e) });
+        }
+      }
       onSaved(); // parent closes the modal + refreshes the list + shows a toast
     } catch (e) {
       // Server error → keep the form open with all data; show a clear message.
@@ -1243,9 +1254,150 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
         <Field label="Organization Experience" value={form.organization_experience} onChange={(v) => set("organization_experience", v)} /><Field label="Previous Elections" value={form.previous_elections} onChange={(v) => set("previous_elections", v)} />
         <Field label="Address" full value={form.address} onChange={(v) => set("address", v)} />
       </div>
+
+      {/* Election Data — candidate-level previous election history (Times Won,
+          Party Defeated, Total Votes, Party Won). Linked to the Candidate ID. */}
+      <div className="mt-3 border-t border-gray-100 pt-3">
+        <button type="button" onClick={() => setShowElections((s) => !s)} className="w-full flex items-center justify-between gap-2 text-left">
+          <span className="text-sm font-bold text-gray-800 flex items-center gap-2"><Vote size={15} className="text-[#164FA3]" /> Election Data <span className="text-[11px] font-medium text-gray-400">Previous election history</span></span>
+          {showElections ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+        </button>
+        {showElections && (
+          <div className="mt-3">
+            <CandidateElections
+              candidateId={initial ? initial.id : null}
+              staged={electionsDraft}
+              onStagedChange={setElectionsDraft}
+              flash={() => {}}
+              fail={(m) => setErrors({ _server: m })}
+            />
+            {!initial && <div className="text-[11px] text-gray-400 mt-2">These records are saved together with the new candidate.</div>}
+          </div>
+        )}
+      </div>
+
       {errors._server && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-3">{errors._server}</div>}
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
     </Modal>
+  );
+}
+
+// Candidate-level Election Data manager. Records the candidate's previous
+// election history — Times Won, Party Defeated, Total Votes, Party Won — linked
+// to the Candidate ID (NOT the old MLA Election History).
+//   • Live mode  (candidateId set): every add/edit/delete persists immediately to
+//     /candidates/[cid]/elections; deleting asks for confirmation.
+//   • Staged mode (candidateId null, new candidate): rows are held locally and
+//     bubbled via onStagedChange so the parent can save them right after it
+//     creates the candidate — one insert per record, so no duplicates.
+const EMPTY_CELEC = { times_won: "", party_defeated: "", total_votes: "", party_won: "" };
+function CandidateElections({ candidateId, staged, onStagedChange, flash, fail, readOnly = false }) {
+  const live = candidateId != null;
+  const [rows, setRows] = useState(() => (live ? [] : (staged || [])));
+  const [loading, setLoading] = useState(live);
+  const [form, setForm] = useState(null); // { _mode:'new'|'edit', id?, _idx?, ...fields }
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!live) return;
+    let alive = true;
+    api(`/api/leader-assessment/candidates/${candidateId}/elections`)
+      .then((d) => { if (alive) setRows(d.elections || []); })
+      .catch((e) => fail?.(e.message))
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [live, candidateId, fail]);
+
+  const applyStaged = (next) => { setRows(next); onStagedChange?.(next); };
+  const validate = (f) => {
+    for (const [k, label] of [["times_won", "Times Won"], ["total_votes", "Total Votes"]]) {
+      const s = String(f[k] ?? "").trim();
+      if (s === "") continue;
+      const n = Number(s);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return `${label} must be a whole number (0 or more).`;
+    }
+    return "";
+  };
+
+  async function saveRow() {
+    const v = validate(form); if (v) { fail?.(v); return; }
+    const payload = { times_won: form.times_won, party_defeated: form.party_defeated, total_votes: form.total_votes, party_won: form.party_won };
+    if (live) {
+      setBusy(true);
+      try {
+        if (form.id) {
+          const d = await api(`/api/leader-assessment/candidates/${candidateId}/elections/${form.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          setRows((rs) => rs.map((r) => (r.id === form.id ? d.election : r)));
+        } else {
+          const d = await api(`/api/leader-assessment/candidates/${candidateId}/elections`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          setRows((rs) => [...rs, d.election]);
+        }
+        flash?.("Election record saved.");
+        setForm(null);
+      } catch (e) { fail?.(e.message); } finally { setBusy(false); }
+    } else {
+      if (form._idx != null) applyStaged(rows.map((r, i) => (i === form._idx ? payload : r)));
+      else applyStaged([...rows, payload]);
+      setForm(null);
+    }
+  }
+
+  async function del(row, idx) {
+    if (!confirm("Delete this election record?")) return;
+    if (live) {
+      try { await api(`/api/leader-assessment/candidates/${candidateId}/elections/${row.id}`, { method: "DELETE" }); setRows((rs) => rs.filter((r) => r.id !== row.id)); flash?.("Election record removed."); }
+      catch (e) { fail?.(e.message); }
+    } else {
+      applyStaged(rows.filter((_, i) => i !== idx));
+    }
+  }
+
+  if (loading) return <div className="py-4 text-sm text-gray-400 flex items-center gap-2"><Loader2 size={15} className="animate-spin" /> Loading election history…</div>;
+
+  return (
+    <div className="space-y-3">
+      {rows.length === 0 && !form ? (
+        <div className="text-sm text-gray-400">No previous election history recorded{readOnly ? "." : " — add one below."}</div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((r, i) => (
+            <div key={r.id ?? i} className="flex items-center gap-3 flex-wrap rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2 text-sm">
+              <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Election {i + 1}</span>
+              <span className="text-gray-700"><span className="text-gray-400">Times Won:</span> <span className="font-semibold">{r.times_won != null && r.times_won !== "" ? r.times_won : "—"}</span></span>
+              <span className="text-gray-700"><span className="text-gray-400">Party Won:</span> <span className="font-semibold">{r.party_won || "—"}</span></span>
+              <span className="text-gray-700"><span className="text-gray-400">Party Defeated:</span> <span className="font-semibold">{r.party_defeated || "—"}</span></span>
+              <span className="text-gray-700"><span className="text-gray-400">Total Votes:</span> <span className="font-semibold">{r.total_votes != null && r.total_votes !== "" ? nfmt(r.total_votes) : "—"}</span></span>
+              {!readOnly && (
+                <span className="ml-auto flex items-center gap-1 shrink-0">
+                  <button type="button" onClick={() => setForm({ _mode: "edit", id: r.id, _idx: i, times_won: r.times_won ?? "", party_defeated: r.party_defeated ?? "", total_votes: r.total_votes ?? "", party_won: r.party_won ?? "" })} className="text-gray-500 hover:text-[#164FA3] p-1" title="Edit"><Pencil size={13} /></button>
+                  <button type="button" onClick={() => del(r, i)} className="text-gray-400 hover:text-red-600 p-1" title="Delete"><Trash2 size={13} /></button>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!readOnly && form && (
+        <div className="rounded-xl border border-[#164FA3]/20 bg-[#164FA3]/5 p-3 space-y-2">
+          <div className="text-[11px] font-bold text-[#164FA3] uppercase tracking-wide">{form.id != null || form._idx != null ? "Edit Election" : "New Election"}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Field label="Times Won" type="number" value={form.times_won} onChange={(v) => setForm((f) => ({ ...f, times_won: v }))} />
+            <Field label="Total Votes" type="number" value={form.total_votes} onChange={(v) => setForm((f) => ({ ...f, total_votes: v }))} />
+            <Field label="Party Won" value={form.party_won} onChange={(v) => setForm((f) => ({ ...f, party_won: v }))} />
+            <Field label="Party Defeated" value={form.party_defeated} onChange={(v) => setForm((f) => ({ ...f, party_defeated: v }))} />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setForm(null)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+            <button type="button" onClick={saveRow} disabled={busy} className="px-3 py-1.5 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-1.5">{busy ? <Loader2 size={14} className="animate-spin" /> : null} Save Record</button>
+          </div>
+        </div>
+      )}
+
+      {!readOnly && !form && (
+        <button type="button" onClick={() => setForm({ _mode: "new", ...EMPTY_CELEC })} className="inline-flex items-center gap-1 text-sm font-semibold text-[#164FA3] hover:underline"><Plus size={14} /> Add Election</button>
+      )}
+    </div>
   );
 }
 
@@ -1354,6 +1506,13 @@ function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
             </div>
             <button onClick={onEdit} className="mt-3 text-xs font-semibold text-[#164FA3] hover:underline inline-flex items-center gap-1"><Pencil size={13} /> Edit profile</button>
           </div>
+        </div>
+        {/* Election Data — candidate-level previous election history (live: add /
+            edit / delete persist immediately against this candidate id). */}
+        <div className="border-t border-gray-100 pt-4">
+          <h4 className="font-bold text-gray-900 flex items-center gap-2 mb-1"><Vote size={16} className="text-[#164FA3]" /> Election Data</h4>
+          <p className="text-xs text-gray-400 mb-3">Previous election history — Times Won, Party Defeated, Total Votes, Party Won.</p>
+          <CandidateElections candidateId={c.id} flash={flash} fail={fail} />
         </div>
         {/* 10-parameter assessment interface */}
         <div className="border-t border-gray-100 pt-4">

@@ -172,6 +172,22 @@ export async function ensureLeaderAssessmentTables() {
        UNIQUE KEY uq_la_assess_cand (candidate_id),
        CONSTRAINT fk_la_assess_cand FOREIGN KEY (candidate_id) REFERENCES la_aap_candidates(id) ON DELETE CASCADE
      )`,
+    // Candidate-level previous election history — one row per past election,
+    // linked to the candidate by candidate_id (NOT the MLA election history; this
+    // is entirely separate). Each record: Times Won, Party Defeated, Total Votes,
+    // Party Won. Deleting a candidate cascades these away.
+    `CREATE TABLE IF NOT EXISTS la_candidate_elections (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       candidate_id INT NOT NULL,
+       times_won INT NULL,
+       party_defeated VARCHAR(255) NULL,
+       total_votes INT NULL,
+       party_won VARCHAR(255) NULL,
+       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       INDEX idx_la_cand_elec_cand (candidate_id),
+       CONSTRAINT fk_la_cand_elec_cand FOREIGN KEY (candidate_id) REFERENCES la_aap_candidates(id) ON DELETE CASCADE
+     )`,
     // Sitting-MLA assessment — the SAME 10 parameters as the candidate
     // assessment, one row per MLA profile. Kept separate from the candidate
     // scores so neither can affect the other.
