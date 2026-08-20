@@ -1562,39 +1562,12 @@ function ComparisonTab({ b, onChange, flash, fail }) {
   const maxTotal = Math.max(0, ...columns.filter((col) => col.assessed).map((col) => Number(col.total) || 0));
   return (
     <div className="space-y-4">
-      {/* Main MLA section — the current MLA of this assembly with a clearly
-          readable passport-style photo. This is the single MLA profile block;
-          the MLA also appears as the first comparison column below. */}
-      <Card title="Current MLA" icon={UserSquare2} sub={`Sitting MLA · ${b.assembly.name}${b.assembly.district ? ` · ${b.assembly.district}` : ""}`}>
-        {mla && mla.name ? (
-          <div className="flex items-start gap-4 flex-wrap">
-            <PassportPhoto name={mla.name} src={mla.photo_url} w={104} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-lg font-bold text-gray-900 truncate">{mla.name}</h3>
-                {mla.party && <span className="text-xs font-semibold text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full">{mla.party}</span>}
-                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${mla.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{mla.assessment_done ? `${mla.total}/100` : "Not Assessed"}</span>
-              </div>
-              <AgeLine person={mla} />
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 mt-3 text-xs">
-                {[["Party", mla.party], ["Caste", mla.caste], ["Criminal Cases", mla.criminal_cases != null ? String(mla.criminal_cases) : null], ["Net Worth", mla.net_worth], ["Times Won", mla.times_won != null ? String(mla.times_won) : null], ["Winning Margin", mla.competitor_margin != null ? nfmt(mla.competitor_margin) : null]].map(([k, v]) => (
-                  <div key={k} className="min-w-0"><span className="text-gray-400">{k}</span><div className="text-gray-800 font-medium truncate" title={v || ""}>{v || "—"}</div></div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 text-gray-500">
-            <PassportPhoto name="" src={null} w={72} />
-            <div>
-              <div className="text-sm font-medium text-gray-500">MLA Data Not Available</div>
-              <div className="text-[11px] text-gray-400 mt-0.5">No MLA profile is linked to this assembly yet — add it on the MLA Profile tab.</div>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      <Card title="Candidate & MLA Comparison" icon={BarChart3} sub="Sitting MLA and all AAP candidates side by side. Highest score in each row is highlighted; scroll sideways if needed.">
+      {/* THE ONE comparison for the whole Full View: the sitting MLA is the first
+          column, followed by every AAP candidate — one combined 10-parameter table.
+          There is deliberately NO separate MLA profile card and NO second MLA-vs-
+          candidate section; the MLA lives only as a column here (photo + name in
+          the header, its own scores + total). */}
+      <Card title="MLA + Candidate 10-Parameter Comparison" icon={BarChart3} sub="Sitting MLA and all AAP candidates side by side, scored on the same 10 parameters. Highest score in each row is highlighted; scroll sideways if needed.">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[560px]">
             <thead><tr><th className="px-3 py-2 text-left font-semibold text-gray-500 min-w-[150px] align-bottom">Parameter</th>{columns.map((col) => (
