@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
+import { initialsOf } from "@/components/Avatar";
 import {
   LayoutDashboard, Building2, UserSquare2, History, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
@@ -62,6 +63,31 @@ function Field({ label, type = "text", full, value, onChange, error }) {
     </div>
   );
 }
+// Passport-ratio (3:4 portrait) profile photo used for the MLA and every
+// candidate in the Full View. Reuses the shared initials/placeholder logic so a
+// missing photo shows a clean placeholder (never a broken image); object-cover
+// keeps the aspect ratio without stretching or distorting the image. `w` is the
+// width in px; height is derived to keep a consistent passport ratio everywhere.
+function PassportPhoto({ name, src, w = 64, className = "" }) {
+  const h = Math.round((w * 4) / 3);
+  const [errored, setErrored] = useState(false);
+  useEffect(() => { setErrored(false); }, [src]);
+  const ini = initialsOf(name);
+  const showImg = src && !errored;
+  return (
+    <div style={{ width: w, height: h }} className={`rounded-lg overflow-hidden border border-gray-200 bg-[#164FA3]/10 flex items-center justify-center shrink-0 ${className}`}>
+      {showImg ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt={name || "photo"} loading="lazy" decoding="async" onError={() => setErrored(true)} className="w-full h-full object-cover" />
+      ) : ini ? (
+        <span className="font-bold text-[#164FA3] leading-none" style={{ fontSize: Math.round(w * 0.4) }}>{ini}</span>
+      ) : (
+        <UserSquare2 size={Math.round(w * 0.5)} className="text-[#164FA3]" />
+      )}
+    </div>
+  );
+}
+
 const RANK_ICON = [Trophy, Medal, Award];
 const RANK_COLOR = ["text-[#FCB712]", "text-gray-400", "text-amber-700"];
 const nfmt = (v) => (v == null || v === "" ? null : Number(v).toLocaleString("en-IN"));
@@ -1496,11 +1522,14 @@ function ComparisonTab({ b, onChange, flash, fail }) {
   // totals. MLA scores come ONLY from the actual MLA assessment (b.mla.assessment);
   // nothing is invented. A parameter with no stored MLA score shows "N/A", and an
   // MLA with no assessment at all shows "Not Assessed" for its total.
+  // MLA is scoped to THIS assembly only (b.mla comes from this assembly's bundle),
+  // so it can never show another assembly's MLA. Candidate/MLA photos + data come
+  // straight from their saved profiles.
   const mla = b.mla;
   const mlaAssessed = !!(mla && PARAMS.some((p) => mla.assessment?.[p.key] != null));
   const columns = [];
-  if (mla) columns.push({ id: "mla", name: mla.name ? `MLA · ${mla.name}` : "MLA (Sitting)", isMla: true, assessment: mla.assessment || {}, total: mla.total, assessed: mlaAssessed });
-  for (const c of ranked) columns.push({ id: `c${c.id}`, name: c.name, isMla: false, assessment: c.assessment || {}, total: c.total, assessed: true });
+  if (mla && mla.name) columns.push({ id: "mla", name: mla.name, role: "Sitting MLA", isMla: true, photo: mla.photo_url, assessment: mla.assessment || {}, total: mla.total, assessed: mlaAssessed });
+  ranked.forEach((c, i) => columns.push({ id: `c${c.id}`, name: c.name, role: `Candidate ${i + 1}`, isMla: false, photo: c.photo_url, assessment: c.assessment || {}, total: c.total, assessed: true }));
 
   // Highest score per parameter (across MLA + all candidates); unscored (null)
   // counts as nothing. Totals only rank columns that carry a real assessment, so
@@ -1509,10 +1538,52 @@ function ComparisonTab({ b, onChange, flash, fail }) {
   const maxTotal = Math.max(0, ...columns.filter((col) => col.assessed).map((col) => Number(col.total) || 0));
   return (
     <div className="space-y-4">
+      {/* Main MLA section — the current MLA of this assembly with a clearly
+          readable passport-style photo. This is the single MLA profile block;
+          the MLA also appears as the first comparison column below. */}
+      <Card title="Current MLA" icon={UserSquare2} sub={`Sitting MLA · ${b.assembly.name}${b.assembly.district ? ` · ${b.assembly.district}` : ""}`}>
+        {mla && mla.name ? (
+          <div className="flex items-start gap-4 flex-wrap">
+            <PassportPhoto name={mla.name} src={mla.photo_url} w={104} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-lg font-bold text-gray-900 truncate">{mla.name}</h3>
+                {mla.party && <span className="text-xs font-semibold text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full">{mla.party}</span>}
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${mla.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{mla.assessment_done ? `${mla.total}/100` : "Not Assessed"}</span>
+              </div>
+              <AgeLine person={mla} />
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 mt-3 text-xs">
+                {[["Party", mla.party], ["Caste", mla.caste], ["Criminal Cases", mla.criminal_cases != null ? String(mla.criminal_cases) : null], ["Net Worth", mla.net_worth], ["Times Won", mla.times_won != null ? String(mla.times_won) : null], ["Winning Margin", mla.competitor_margin != null ? nfmt(mla.competitor_margin) : null]].map(([k, v]) => (
+                  <div key={k} className="min-w-0"><span className="text-gray-400">{k}</span><div className="text-gray-800 font-medium truncate" title={v || ""}>{v || "—"}</div></div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 text-gray-500">
+            <PassportPhoto name="" src={null} w={72} />
+            <div>
+              <div className="text-sm font-medium text-gray-500">MLA Data Not Available</div>
+              <div className="text-[11px] text-gray-400 mt-0.5">No MLA profile is linked to this assembly yet — add it on the MLA Profile tab.</div>
+            </div>
+          </div>
+        )}
+      </Card>
+
       <Card title="Candidate & MLA Comparison" icon={BarChart3} sub="Sitting MLA and all AAP candidates side by side. Highest score in each row is highlighted; scroll sideways if needed.">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[560px]">
-            <thead><tr><th className="px-3 py-2 text-left font-semibold text-gray-500 min-w-[150px]">Parameter</th>{columns.map((col) => <th key={col.id} className={`px-3 py-2 text-center font-semibold text-gray-900 min-w-[110px] ${col.isMla ? "bg-blue-50" : ""}`}>{col.name}</th>)}</tr></thead>
+            <thead><tr><th className="px-3 py-2 text-left font-semibold text-gray-500 min-w-[150px] align-bottom">Parameter</th>{columns.map((col) => (
+              <th key={col.id} className={`px-3 py-2 text-center font-semibold text-gray-900 min-w-[110px] align-bottom ${col.isMla ? "bg-blue-50" : ""}`}>
+                <div className="flex flex-col items-center gap-1.5">
+                  <PassportPhoto name={col.name} src={col.photo} w={40} />
+                  <div className="leading-tight">
+                    <div className="truncate max-w-[120px]">{col.name}</div>
+                    <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">{col.role}</div>
+                  </div>
+                </div>
+              </th>
+            ))}</tr></thead>
             <tbody className="divide-y divide-gray-100">
               {PARAMS.map((p) => { const mx = maxOf(p.key); return (
                 <tr key={p.key}>
@@ -1606,39 +1677,6 @@ function Recommendation({ b, ranked, onChange, flash, fail }) {
 }
 
 // ----------------------------- ANALYSIS -----------------------------------
-// Current MLA for the selected assembly — auto-identified from that assembly's
-// MLA record (b.mla, part of the assembly bundle). It is always scoped to the
-// selected assembly, so switching assemblies immediately updates it and it can
-// never show another assembly's MLA. No manual typing: the name is read from
-// the stored MLA. When the assembly has no MLA record yet, a clean
-// "Current MLA not available" state is shown.
-function CurrentMlaBanner({ b }) {
-  const mla = b.mla;
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-      {mla?.name ? (
-        <>
-          <ProfilePhoto name={mla.name} src={mla.photo_url} size={44} editable={false} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Current MLA · {b.assembly.name}</div>
-            <div className="font-bold text-gray-900 truncate flex items-center gap-2">
-              {mla.name}
-              {mla.party && <span className="text-xs font-semibold text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full">{mla.party}</span>}
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 shrink-0"><UserSquare2 size={20} /></div>
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Current MLA · {b.assembly.name}</div>
-            <div className="text-sm font-medium text-gray-400">Current MLA not available — add it on the MLA Profile tab.</div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 function AnalysisTab({ b, onChange, flash, fail }) {
   const [reasons, setReasons] = useState(() => padTo(b.analysis?.reasons_won, 3));
   const [weaknesses, setWeaknesses] = useState(() => padTo(b.analysis?.weaknesses, 10));
@@ -1709,7 +1747,6 @@ function AnalysisTab({ b, onChange, flash, fail }) {
   );
   return (
     <div className="space-y-4">
-      <CurrentMlaBanner b={b} />
       <Card title="Political Analysis" icon={Brain} right={<SaveBtn onClick={saveAnalysis} saving={saving} />}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Order: Weakness → Strength → Winning (values/edit unchanged). */}
