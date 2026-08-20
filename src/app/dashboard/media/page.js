@@ -1353,7 +1353,9 @@ function ConferenceModal({ onClose, onSaved, editing }) {
       <input className={inp} placeholder="Title *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
       <input type="datetime-local" className={inp} value={form.conference_date} onChange={(e) => setForm({ ...form, conference_date: e.target.value })} />
       <input className={inp} placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
-      <textarea className={inp} rows={3} placeholder="Agenda" value={form.agenda} onChange={(e) => setForm({ ...form, agenda: e.target.value })} />
+      {/* UI label is "Press Points"; the stored field remains `agenda` so existing
+          data and the backend/API are unaffected. */}
+      <textarea className={inp} rows={3} placeholder="Press Points" value={form.agenda} onChange={(e) => setForm({ ...form, agenda: e.target.value })} />
       <div>
         <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Document / Media File (PDF, JPG, PNG, WEBP)</label>
         <FileUpload value={form.file_url} onChange={(url) => setForm({ ...form, file_url: url })} endpoint="/api/media/uploads" accept=".pdf,.jpg,.jpeg,.png,.webp" />
