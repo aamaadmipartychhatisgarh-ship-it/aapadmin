@@ -25,6 +25,9 @@ const DEFAULT_CHANNELS = [
 export async function ensureNewsChannelsSeed() {
   if (ensured) return;
   try {
+    // A channel maps to a Lok Sabha (locations.id where type='lok_sabha'). Added
+    // idempotently for existing DBs; NULL on legacy rows (they keep working).
+    await ensureColumn("news_channels", "lok_sabha_id", "INT NULL");
     const [{ n } = { n: 0 }] = await query("SELECT COUNT(*) AS n FROM news_channels");
     if (Number(n) === 0) {
       for (let i = 0; i < DEFAULT_CHANNELS.length; i++) {
@@ -39,4 +42,16 @@ export async function ensureNewsChannelsSeed() {
   } catch (e) {
     console.error("[media] ensureNewsChannelsSeed:", e?.message || e);
   }
+}
+
+// Add a column only if missing (MySQL lacks ADD COLUMN IF NOT EXISTS).
+async function ensureColumn(table, column, def) {
+  try {
+    const rows = await query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [table, column]
+    );
+    if (Number(rows[0]?.n || 0) === 0) await query(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+  } catch (e) { console.error(`[media] ensureColumn ${table}.${column}:`, e?.message || e); }
 }

@@ -55,7 +55,12 @@ export async function GET(req) {
       noteFilter.params
     );
 
-    const channels = await query(`SELECT * FROM news_channels ORDER BY sort_order, name`);
+    const channels = await query(
+      `SELECT nc.*, ls.name AS lok_sabha_name
+         FROM news_channels nc
+         LEFT JOIN locations ls ON ls.id = nc.lok_sabha_id AND ls.type = 'lok_sabha'
+        ORDER BY nc.sort_order, nc.name`
+    );
     const spokespersons = await query(`SELECT * FROM spokespersons ORDER BY name`);
     const journalists = await query(`SELECT * FROM journalists ORDER BY name`);
 

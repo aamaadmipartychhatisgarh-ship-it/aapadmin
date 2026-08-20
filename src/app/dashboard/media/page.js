@@ -541,6 +541,7 @@ function ChannelCard({ ch, debates, now, tone, onSchedule, onDebateList }) {
           {vis.label && <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${vis.tone === "live" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{vis.label}</span>}
         </div>
         <div className="font-bold text-gray-900 text-sm mt-2 truncate" title={ch.name}>{ch.name}</div>
+        {ch.lok_sabha_name && <div className="text-[11px] font-medium text-gray-400 truncate" title={ch.lok_sabha_name}>{ch.lok_sabha_name}</div>}
         <span className={`mt-1 inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${tone[ch.tone] || tone.unknown}`}>{ch.tone}</span>
 
         {nearest ? (
@@ -573,12 +574,76 @@ function ChannelCard({ ch, debates, now, tone, onSchedule, onDebateList }) {
   );
 }
 
+// Add Channel — exactly two fields: Channel Name + Lok Sabha. Lok Sabha options
+// come live from the existing Lok Sabha Master (GET /api/locations?type=lok_sabha),
+// the single source of truth — nothing hardcoded.
+function ChannelModal({ onClose, onSaved }) {
+  const [name, setName] = useState("");
+  const [lokSabha, setLokSabha] = useState("");
+  const [options, setOptions] = useState([]);
+  const [loadingLs, setLoadingLs] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/locations?type=lok_sabha")
+      .then((r) => (r.ok ? r.json() : { locations: [] }))
+      .then((d) => { if (alive) setOptions(d.locations || []); })
+      .catch(() => { if (alive) setError("Couldn't load the Lok Sabha list. Please try again."); })
+      .finally(() => { if (alive) setLoadingLs(false); });
+    return () => { alive = false; };
+  }, []);
+
+  async function save() {
+    if (saving) return;
+    const clean = name.trim();
+    if (!clean) { setError("Channel name is required."); return; }
+    if (!lokSabha) { setError("Please select a Lok Sabha."); return; }
+    setSaving(true); setError("");
+    try {
+      const r = await fetch("/api/media/channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: clean, lok_sabha_id: Number(lokSabha) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.message || "Could not add the channel."); setSaving(false); return; }
+      onSaved("Channel added successfully.");
+    } catch {
+      setError("Could not add the channel. Please try again.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Add Channel" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Channel Name <span className="text-red-500">*</span></label>
+          <input autoFocus className={inp} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} placeholder="e.g. IBC24" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Lok Sabha <span className="text-red-500">*</span></label>
+          <select className={inp} value={lokSabha} onChange={(e) => { setLokSabha(e.target.value); setError(""); }} disabled={loadingLs}>
+            <option value="">{loadingLs ? "Loading…" : "— select Lok Sabha —"}</option>
+            {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <p className="text-[11px] text-gray-400 mt-1">Sourced live from the Lok Sabha Master.</p>
+        </div>
+        {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-2">{saving ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : "Add Channel"}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ============================================================ CHANNELS
 function ChannelsTab({ data, onChange, flash, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [scheduleFor, setScheduleFor] = useState(null); // channel id to preselect
   const [fChannel, setFChannel] = useState(null); // { id, name } — Debate List filter
+  const [showAddChannel, setShowAddChannel] = useState(false);
   const now = useNow(60000);
   const debatesRef = useRef(null);
   const TONE = { supportive: "bg-emerald-100 text-emerald-700", neutral: "bg-gray-100 text-gray-600", opposing: "bg-red-100 text-red-700", unknown: "bg-amber-100 text-amber-700" };
@@ -589,6 +654,15 @@ function ChannelsTab({ data, onChange, flash, filtered }) {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="font-bold text-gray-900">News Channels</h3>
+          <p className="text-sm text-gray-500">Click a channel to schedule a debate or view its debate list.</p>
+        </div>
+        <button onClick={() => setShowAddChannel(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
+          <Plus size={15} /> Add Channel
+        </button>
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {data.channels.map((c) => (
           <ChannelCard key={c.id} ch={c} debates={data.upcomingDebates} now={now} tone={TONE} onSchedule={scheduleForChannel} onDebateList={debateListForChannel} />
@@ -648,6 +722,7 @@ function ChannelsTab({ data, onChange, flash, filtered }) {
 
       {showAdd && <DebateModal channels={data.channels} spokespersons={data.spokespersons} defaultChannelId={scheduleFor} onClose={() => { setShowAdd(false); setScheduleFor(null); }} onSaved={(msg) => { setShowAdd(false); setScheduleFor(null); onChange(); flash?.(msg); }} />}
       {editing && <DebateModal editing={editing} channels={data.channels} spokespersons={data.spokespersons} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); onChange(); flash?.(msg); }} />}
+      {showAddChannel && <ChannelModal onClose={() => setShowAddChannel(false)} onSaved={(msg) => { setShowAddChannel(false); onChange(); flash?.(msg); }} />}
     </div>
   );
 }
