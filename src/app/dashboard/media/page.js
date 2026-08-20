@@ -1327,8 +1327,7 @@ function ConferenceModal({ onClose, onSaved, editing }) {
     venue: editing.venue || "",
     agenda: editing.agenda || "",
     status: editing.status || "scheduled",
-    file_url: editing.file_url || "",
-  } : { title: "", conference_date: "", venue: "AAP State Office, Raipur", agenda: "", file_url: "" });
+  } : { title: "", conference_date: "", venue: "AAP State Office, Raipur", agenda: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function save() {
@@ -1356,11 +1355,6 @@ function ConferenceModal({ onClose, onSaved, editing }) {
       {/* UI label is "Press Points"; the stored field remains `agenda` so existing
           data and the backend/API are unaffected. */}
       <textarea className={inp} rows={3} placeholder="Press Points" value={form.agenda} onChange={(e) => setForm({ ...form, agenda: e.target.value })} />
-      <div>
-        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Document / Media File (PDF, JPG, PNG, WEBP)</label>
-        <FileUpload value={form.file_url} onChange={(url) => setForm({ ...form, file_url: url })} endpoint="/api/media/uploads" accept=".pdf,.jpg,.jpeg,.png,.webp" />
-        <p className="text-[11px] text-gray-400 mt-1">Speech, press note, briefing document or related media material.</p>
-      </div>
       {editing && (
         <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
           <option value="scheduled">Scheduled</option>
