@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 import FloatingPopover from "@/components/FloatingPopover";
+import Avatar from "@/components/Avatar";
 
 export default function Page() {
   return <SupervisorGuard allow={canAccessMedia}><Body /></SupervisorGuard>;
@@ -751,6 +752,9 @@ function ConferencesTab({ data, onChange, filtered }) {
                 <div className="text-xs text-gray-500 uppercase tracking-wide">{new Date(c.conference_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", weekday: "short" })}</div>
                 <h4 className="font-bold text-gray-900 mt-1">{c.title}</h4>
                 {c.venue && <div className="text-xs text-gray-500 mt-1">{c.venue}</div>}
+                {c.spokesperson_name && (
+                  <div className="mt-2 inline-flex items-center gap-1.5"><Avatar name={c.spokesperson_name} src={c.spokesperson_photo} size={22} /><span className="text-xs font-medium text-gray-700">{c.spokesperson_name}</span></div>
+                )}
                 {c.file_url && (
                   <a href={c.file_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-[#164FA3] hover:underline">
                     <FileText size={13} /> Open document
@@ -770,8 +774,8 @@ function ConferencesTab({ data, onChange, filtered }) {
         ))}
       </div>
 
-      {showAdd && <ConferenceModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); onChange(); }} />}
-      {editing && <ConferenceModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChange(); }} />}
+      {showAdd && <ConferenceModal spokespersons={data.spokespersons} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); onChange(); }} />}
+      {editing && <ConferenceModal editing={editing} spokespersons={data.spokespersons} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChange(); }} />}
       {inviting && <InviteModal conference={inviting} journalists={data.journalists} onClose={() => setInviting(null)} onChange={onChange} />}
     </div>
   );
@@ -1190,6 +1194,56 @@ function SpokespersonMultiSelect({ options, value, onChange }) {
   );
 }
 
+// Searchable single-select spokesperson dropdown with photos. Options come from
+// the live Spokesperson master (never hardcoded); it stores the spokesperson's
+// ID (the relationship) and shows [photo] name in the trigger, each option, and
+// the selected chip. Avatar renders the saved photo or a clean initials/avatar
+// fallback — never a broken image. Portaled + scrollable so a long list works.
+function SpokespersonSelect({ options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const anchorRef = useRef(null);
+  const [width, setWidth] = useState(320);
+  const selected = options.find((o) => String(o.id) === String(value)) || null;
+  const filtered = options.filter((o) => (o.name || "").toLowerCase().includes(q.trim().toLowerCase()));
+  const openMenu = () => { if (anchorRef.current) setWidth(anchorRef.current.getBoundingClientRect().width); setOpen((v) => !v); };
+  return (
+    <div>
+      <button ref={anchorRef} type="button" onClick={openMenu} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left flex items-center justify-between gap-2 hover:bg-gray-50">
+        {selected ? (
+          <span className="flex items-center gap-2 min-w-0"><Avatar name={selected.name} src={selected.photo_url} size={24} /><span className="truncate text-gray-800">{selected.name}</span></span>
+        ) : <span className="text-gray-400">Select spokesperson</span>}
+        <ChevronDown size={16} className={`text-gray-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      <FloatingPopover anchorRef={anchorRef} open={open} onClose={() => { setOpen(false); setQ(""); }} align="left" width={width} estimatedHeight={320}>
+        <div className="p-2 border-b border-gray-100">
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search spokesperson…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+        </div>
+        <div className="max-h-60 overflow-auto">
+          {options.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-400">No spokespersons exist yet. Add them on the Spokespersons tab.</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-400">No match for “{q}”.</div>
+          ) : filtered.map((o) => (
+            <button key={o.id} type="button" onClick={() => { onChange(String(o.id)); setOpen(false); setQ(""); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left hover:bg-gray-50">
+              <Avatar name={o.name} src={o.photo_url} size={30} />
+              <span className="truncate flex-1">{o.name}</span>
+              {String(o.id) === String(value) && <Check size={14} className="text-[#164FA3] shrink-0" />}
+            </button>
+          ))}
+        </div>
+      </FloatingPopover>
+      {selected && (
+        <div className="flex items-center gap-2 mt-2">
+          <Avatar name={selected.name} src={selected.photo_url} size={32} />
+          <span className="text-sm font-medium text-gray-800 truncate">{selected.name}</span>
+          <button type="button" onClick={() => onChange("")} className="ml-1 text-gray-400 hover:text-red-600" title="Clear"><X size={13} /></button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DebateModal({ channels, spokespersons, onClose, onSaved, editing, defaultChannelId }) {
   const [form, setForm] = useState(editing ? {
     channel_id: editing.channel_id || "", topic: editing.topic || "",
@@ -1320,16 +1374,26 @@ function ChannelSelect({ options, value, onChange }) {
   );
 }
 
-function ConferenceModal({ onClose, onSaved, editing }) {
+function ConferenceModal({ onClose, onSaved, editing, spokespersons = [] }) {
   const [form, setForm] = useState(editing ? {
     title: editing.title || "",
     conference_date: editing.conference_date ? new Date(editing.conference_date).toISOString().slice(0, 16) : "",
     venue: editing.venue || "",
     agenda: editing.agenda || "",
     status: editing.status || "scheduled",
-  } : { title: "", conference_date: "", venue: "AAP State Office, Raipur", agenda: "" });
+    spokesperson_id: editing.spokesperson_id ? String(editing.spokesperson_id) : "",
+  } : { title: "", conference_date: "", venue: "AAP State Office, Raipur", agenda: "", spokesperson_id: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Active spokespersons for selection. When editing, include the saved
+  // spokesperson even if it's now inactive, so its name + photo still load.
+  const spokesOptions = (() => {
+    const active = (spokespersons || []).filter((s) => s.is_active == null || Number(s.is_active) === 1);
+    if (editing?.spokesperson_id && !active.some((s) => String(s.id) === String(editing.spokesperson_id))) {
+      return [{ id: editing.spokesperson_id, name: editing.spokesperson_name || "Spokesperson", photo_url: editing.spokesperson_photo || null, is_active: 0 }, ...active];
+    }
+    return active;
+  })();
   async function save() {
     setError("");
     if (!form.title.trim()) { setError("Title is required."); return; }
@@ -1355,6 +1419,10 @@ function ConferenceModal({ onClose, onSaved, editing }) {
       {/* UI label is "Press Points"; the stored field remains `agenda` so existing
           data and the backend/API are unaffected. */}
       <textarea className={inp} rows={3} placeholder="Press Points" value={form.agenda} onChange={(e) => setForm({ ...form, agenda: e.target.value })} />
+      <div>
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Spokesperson</label>
+        <SpokespersonSelect options={spokesOptions} value={form.spokesperson_id} onChange={(id) => setForm({ ...form, spokesperson_id: id })} />
+      </div>
       {editing && (
         <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
           <option value="scheduled">Scheduled</option>

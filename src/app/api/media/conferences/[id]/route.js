@@ -12,7 +12,7 @@ export async function PUT(req, { params }) {
     await ensureConferenceSchema();
     const { id } = await params;
     const d = await req.json();
-    const fields = ["title", "conference_date", "venue", "agenda", "status", "file_url"];
+    const fields = ["title", "conference_date", "venue", "agenda", "status", "file_url", "spokesperson_id"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });

@@ -12,9 +12,10 @@ export async function POST(req) {
     await ensureConferenceSchema();
     const d = await req.json();
     if (!d.title || !d.conference_date) return NextResponse.json({ message: "Title and date required" }, { status: 400 });
+    const spokespersonId = d.spokesperson_id != null && /^\d+$/.test(String(d.spokesperson_id)) ? Number(d.spokesperson_id) : null;
     const res = await query(
-      `INSERT INTO press_conferences (title, conference_date, venue, agenda, status, file_url) VALUES (?, ?, ?, ?, ?, ?)`,
-      [d.title, d.conference_date, d.venue || null, d.agenda || null, d.status || "scheduled", d.file_url || null]
+      `INSERT INTO press_conferences (title, conference_date, venue, agenda, status, file_url, spokesperson_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [d.title, d.conference_date, d.venue || null, d.agenda || null, d.status || "scheduled", d.file_url || null, spokespersonId]
     );
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {

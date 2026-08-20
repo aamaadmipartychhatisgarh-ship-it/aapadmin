@@ -109,10 +109,11 @@ export async function GET(req) {
       ? `WHERE 1=1${confFilter.clause}`
       : `WHERE pc.conference_date >= NOW() - INTERVAL 30 DAY`;
     const conferences = await query(
-      `SELECT pc.*,
+      `SELECT pc.*, sp.name AS spokesperson_name, sp.photo_url AS spokesperson_photo,
               (SELECT COUNT(*) FROM journalist_invites ji WHERE ji.conference_id = pc.id) AS invited,
               (SELECT COUNT(*) FROM journalist_invites ji WHERE ji.conference_id = pc.id AND ji.attended = 1) AS attended
          FROM press_conferences pc
+         LEFT JOIN spokespersons sp ON sp.id = pc.spokesperson_id
         ${confWhere}
         ORDER BY pc.conference_date ${confFilter.clause ? "DESC" : "ASC"} LIMIT ${listLimit}`,
       confFilter.params
