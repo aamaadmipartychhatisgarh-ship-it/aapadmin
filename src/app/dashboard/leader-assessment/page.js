@@ -40,6 +40,8 @@ const TABS = [
   // Caste/Community value used across the module (Assembly Social Profile · Add
   // Community). Not assembly-scoped.
   { key: "castes", label: "Caste Master", icon: Database, scoped: false },
+  // Assembly-wise polling / electorate master (booths, voters, male, female).
+  { key: "polling", label: "Polling Station Master", icon: Building2, scoped: false },
   // The standalone "Political Analysis" tab was removed — its full functionality
   // (Top Reasons / Strengths / Weaknesses + Assembly Social Profile) lives in the
   // Full View modal (AssemblyFullView → AnalysisTab). Nothing was deleted.
@@ -197,6 +199,7 @@ function Body() {
       {tab === "mla" && <MlaManager flash={flash} fail={fail} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
       {tab === "castes" && <CasteMaster flash={flash} fail={fail} />}
+      {tab === "polling" && <PollingMaster flash={flash} fail={fail} />}
 
       {currentTab?.scoped && !selectedId && <Empty msg="Select an assembly above to begin." />}
       {currentTab?.scoped && selectedId && loadingBundle && !bundle && <LoadingBlock />}
@@ -271,8 +274,9 @@ function ResultBadge({ v }) {
 }
 function AssemblyHeader({ a, status }) {
   const items = [
-    ["Total Voters", nfmt(a.total_voters)], ["Polling Stations", a.total_polling_stations], ["Total Booths", a.total_booths],
-    ["District", a.district], ["Lok Sabha", a.lok_sabha], ["Last Election", a.election_year],
+    ["Total Voters", nfmt(a.total_voters)], ["Male Voters", nfmt(a.male_voters)], ["Female Voters", nfmt(a.female_voters)],
+    ["Total Booths", nfmt(a.total_booths)], ["Polling Stations", a.total_polling_stations], ["District", a.district],
+    ["Lok Sabha", a.lok_sabha], ["Last Election", a.election_year],
   ];
   return (
     <div className="bg-gradient-to-br from-[#164FA3] to-[#0B3A82] rounded-2xl p-5 text-white shadow-sm">
@@ -2022,6 +2026,179 @@ function fmtDateTime(v) {
   const d = new Date(v);
   if (isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// --------------------------- Polling Station Master ------------------------
+// Assembly-wise polling data (Total Booths / Total Voters / Male / Female). Every
+// record is keyed to its assembly by ID (never by name), so data is never mixed
+// between assemblies. An assembly with no record shows "No polling data available"
+// rather than a fake 0. Search/select an assembly, then edit its figures.
+function PollingMaster({ flash, fail }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState(null); // the assembly row being edited
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const d = await api("/api/leader-assessment/polling"); setItems(d.items || []); }
+    catch (e) { fail(e.message); } finally { setLoading(false); }
+  }, [fail]);
+  useEffect(() => { load(); }, [load]);
+
+  const q = search.trim().toLowerCase();
+  const visible = items.filter((r) => !q || `${r.assembly_name} ${r.district || ""}`.toLowerCase().includes(q));
+  const withData = items.filter((r) => r.has_data).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Stat label="Assemblies" value={items.length} />
+        <Stat label="With Polling Data" value={withData} />
+        <Stat label="Pending" value={items.length - withData} hint="No polling data yet" />
+        <Stat label="Total Voters (all)" value={nfmt(items.reduce((s, r) => s + (Number(r.total_voters) || 0), 0)) || 0} />
+      </div>
+
+      <Card
+        title="Polling Station Master"
+        icon={Building2}
+        sub="Assembly-wise polling summary — Total Booths, Total Voters, Male & Female voters. Each record is tied to its Assembly by ID; select an assembly to view or edit only its data."
+      >
+        <div className="relative max-w-md mb-4">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search assembly or district…" className={`${inp} pl-9`} />
+        </div>
+
+        {loading ? (
+          <div className="py-10 flex items-center justify-center text-gray-400"><Loader2 className="animate-spin mr-2" size={18} /> Loading…</div>
+        ) : visible.length === 0 ? (
+          <div className="py-10 text-center text-sm text-gray-400">{items.length === 0 ? "No assemblies found." : "No assemblies match your search."}</div>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-sm min-w-[720px]">
+              <thead>
+                <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                  <th className="py-2 pr-3">Assembly</th>
+                  <th className="py-2 pr-3">District</th>
+                  <th className="py-2 pr-3 text-right">Total Booths</th>
+                  <th className="py-2 pr-3 text-right">Total Voters</th>
+                  <th className="py-2 pr-3 text-right">Male</th>
+                  <th className="py-2 pr-3 text-right">Female</th>
+                  <th className="py-2 pr-3 text-right w-24">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((r) => (
+                  <tr key={r.assembly_id} className="border-b border-gray-50 hover:bg-gray-50/60">
+                    <td className="py-2.5 pr-3 font-semibold text-gray-800">{r.assembly_name}</td>
+                    <td className="py-2.5 pr-3 text-gray-600">{r.district || "—"}</td>
+                    {r.has_data ? (
+                      <>
+                        <td className="py-2.5 pr-3 text-right tabular-nums">{r.total_booths != null ? nfmt(r.total_booths) : "—"}</td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums">{r.total_voters != null ? nfmt(r.total_voters) : "—"}</td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums">{r.male_voters != null ? nfmt(r.male_voters) : "—"}</td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums">{r.female_voters != null ? nfmt(r.female_voters) : "—"}</td>
+                      </>
+                    ) : (
+                      <td colSpan={4} className="py-2.5 pr-3 text-center text-gray-400 italic">No polling data available</td>
+                    )}
+                    <td className="py-2.5 pr-3 text-right">
+                      <button onClick={() => setEditing(r)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><Pencil size={13} /> {r.has_data ? "Edit" : "Add"}</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {editing && <PollingEditor row={editing} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); flash(msg); load(); }} fail={fail} />}
+    </div>
+  );
+}
+
+function PollingEditor({ row, onClose, onSaved, fail }) {
+  const [form, setForm] = useState({ total_booths: "", total_voters: "", male_voters: "", female_voters: "" });
+  const [meta, setMeta] = useState(null); // { auto_booths, auto_polling_stations }
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const d = await api(`/api/leader-assessment/polling/${row.assembly_id}`);
+        if (!alive) return;
+        const p = d.polling || {};
+        setForm({
+          total_booths: p.total_booths ?? "",
+          total_voters: p.total_voters ?? "",
+          male_voters: p.male_voters ?? "",
+          female_voters: p.female_voters ?? "",
+        });
+        setMeta({ auto_booths: p.auto_booths ?? 0, auto_polling_stations: p.auto_polling_stations ?? 0 });
+      } catch (e) { setErr(e.message); } finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [row.assembly_id]);
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const num = (v) => { const s = String(v ?? "").trim(); return s === "" ? null : Number(s); };
+  const maleFemale = (Number(form.male_voters) || 0) + (Number(form.female_voters) || 0);
+  const totalV = num(form.total_voters);
+  const exceeds = totalV != null && (form.male_voters !== "" || form.female_voters !== "") && maleFemale > totalV;
+
+  function validate() {
+    for (const [k, label] of [["total_booths", "Total Booths"], ["total_voters", "Total Voters"], ["male_voters", "Male Voters"], ["female_voters", "Female Voters"]]) {
+      const s = String(form[k] ?? "").trim();
+      if (s === "") continue;
+      const n = Number(s);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return `${label} must be a whole number (0 or more).`;
+    }
+    if (exceeds) return "Male + Female voters cannot exceed Total Voters.";
+    return "";
+  }
+
+  async function save() {
+    const v = validate();
+    if (v) { setErr(v); return; }
+    setSaving(true); setErr("");
+    try {
+      await api(`/api/leader-assessment/polling/${row.assembly_id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ total_booths: form.total_booths, total_voters: form.total_voters, male_voters: form.male_voters, female_voters: form.female_voters }),
+      });
+      onSaved(`Polling data saved for ${row.assembly_name}.`);
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  }
+
+  return (
+    <Modal title={`Polling Data · ${row.assembly_name}`} onClose={onClose} wide>
+      {loading ? <LoadingBlock /> : (
+        <div className="space-y-4">
+          <div className="text-sm text-gray-500 flex items-center gap-1.5"><MapPin size={14} className="text-[#164FA3]" /> {row.assembly_name}{row.district ? ` · ${row.district}` : ""}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <Field label="Total Booths" type="number" value={form.total_booths} onChange={(v) => set("total_booths", v)} />
+              {meta?.auto_booths ? <div className="text-[11px] text-gray-400 mt-0.5">Master location tree currently has {nfmt(meta.auto_booths)} booth{meta.auto_booths === 1 ? "" : "s"}{meta.auto_polling_stations ? `, ${nfmt(meta.auto_polling_stations)} polling station${meta.auto_polling_stations === 1 ? "" : "s"}` : ""}.</div> : null}
+            </div>
+            <Field label="Total Voters" type="number" value={form.total_voters} onChange={(v) => set("total_voters", v)} />
+            <Field label="Male Voters" type="number" value={form.male_voters} onChange={(v) => set("male_voters", v)} />
+            <Field label="Female Voters" type="number" value={form.female_voters} onChange={(v) => set("female_voters", v)} />
+          </div>
+          <div className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-2.5">
+            Male + Female = <span className={`font-semibold ${exceeds ? "text-red-600" : "text-gray-700"}`}>{nfmt(maleFemale) || 0}</span>
+            {totalV != null && <> of Total Voters <span className="font-semibold text-gray-700">{nfmt(totalV) || 0}</span></>}
+            . Leave a field blank if unknown — blanks are stored as no value, not 0.
+          </div>
+          {err && <div className="text-sm text-red-600">{err}</div>}
+        </div>
+      )}
+      <ModalActions onClose={onClose} onSave={save} saving={saving || loading} />
+    </Modal>
+  );
 }
 
 // ------------------------------- helpers ----------------------------------

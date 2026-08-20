@@ -113,6 +113,25 @@ export async function ensureLeaderAssessmentTables() {
        UNIQUE KEY uq_la_caste_name (name),
        INDEX idx_la_caste_active (is_active)
      )`,
+    // Assembly-wise polling / electorate summary. ONE row per assembly (UNIQUE
+    // assembly_id → no duplicate records for the same assembly), keyed by the
+    // authoritative assembly id (NOT the name) so renamed/duplicate names can
+    // never mis-map data. Holds Total Booths / Total Voters / Male / Female. All
+    // NULL until entered, so a missing record reads as "No polling data available"
+    // (never a fake 0). Booths/stations can also be counted live from the master
+    // location tree; the stored value here is the admin-entered authority.
+    `CREATE TABLE IF NOT EXISTS la_polling_data (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       assembly_id INT NOT NULL,
+       total_booths INT NULL,
+       total_voters INT NULL,
+       male_voters INT NULL,
+       female_voters INT NULL,
+       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       UNIQUE KEY uq_la_polling_asm (assembly_id),
+       CONSTRAINT fk_la_polling_asm FOREIGN KEY (assembly_id) REFERENCES la_assemblies(id) ON DELETE CASCADE
+     )`,
     `CREATE TABLE IF NOT EXISTS la_social_structure (
        id INT AUTO_INCREMENT PRIMARY KEY,
        assembly_id INT NOT NULL,
@@ -229,8 +248,53 @@ export async function ensureLeaderAssessmentTables() {
     );
   } catch { /* constraint already exists (or engine skips) */ }
   await seedCastesFromExisting();
+  await seedPollingFromAssemblies();
   await syncAssemblies();
   ensured = true;
+}
+
+// Preserve existing electorate data: seed la_polling_data from the figures already
+// stored on la_assemblies (total_voters / total_booths) for any assembly that has
+// them but no polling row yet. INSERT IGNORE + the UNIQUE assembly_id key means it
+// never overwrites an existing polling row and never creates duplicates.
+async function seedPollingFromAssemblies() {
+  try {
+    await query(
+      `INSERT IGNORE INTO la_polling_data (assembly_id, total_booths, total_voters)
+         SELECT a.id, a.total_booths, a.total_voters
+           FROM la_assemblies a
+          WHERE a.total_voters IS NOT NULL OR a.total_booths IS NOT NULL`
+    );
+  } catch (e) { console.error("[LA] seedPollingFromAssemblies:", e?.message || e); }
+}
+
+// Assembly-wise polling summary for one assembly (by assembly id — the primary
+// relationship). Returns the stored row (or null if none), plus live booth/station
+// counts from the master location tree so callers can show/auto-fill them.
+export async function pollingForAssembly(assembly) {
+  const id = Number(assembly?.id);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const [row] = await query("SELECT * FROM la_polling_data WHERE assembly_id = ?", [id]);
+  const auto = await assemblyElectorate(assembly); // { total_voters, total_polling_stations, total_booths }
+  return {
+    has_data: !!row,
+    total_booths: row?.total_booths ?? null,
+    total_voters: row?.total_voters ?? null,
+    male_voters: row?.male_voters ?? null,
+    female_voters: row?.female_voters ?? null,
+    auto_booths: auto.total_booths,
+    auto_polling_stations: auto.total_polling_stations,
+    updated_at: row?.updated_at ?? null,
+  };
+}
+
+// Validate one polling count: blank → null; otherwise a whole number ≥ 0. Rejects
+// negatives and non-numeric text so bad data can never be stored.
+export function normalizePollingCount(v, label) {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) throw `${label} must be a whole number (0 or more).`;
+  return n;
 }
 
 // One-time (per process) migration that maps EXISTING free-text caste values into

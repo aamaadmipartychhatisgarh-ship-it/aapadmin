@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
-import { ASSESSMENT_PARAMS, assessmentTotal, assessmentComplete, assemblyComplete, ageFromDob, rankCandidates, parseList, assemblyElectorate } from "@/lib/leaderAssessment";
+import { ASSESSMENT_PARAMS, assessmentTotal, assessmentComplete, assemblyComplete, ageFromDob, rankCandidates, parseList, assemblyElectorate, pollingForAssembly } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +33,16 @@ export async function GET(_req, { params }) {
     // (voters / polling stations / booths) so the header never shows stale or
     // empty stored columns.
     Object.assign(assembly, await assemblyElectorate(assembly));
+    // Merge the assembly-wise Polling Station Master record (keyed by assembly id).
+    // Stored admin figures take precedence for the headline counts; Male/Female
+    // voters come only from here. When nothing is stored, the fields stay null so
+    // the UI shows "No polling data available" instead of a fabricated 0.
+    const polling = await pollingForAssembly(assembly);
+    assembly.polling = polling;
+    if (polling.total_voters != null) assembly.total_voters = polling.total_voters;
+    if (polling.total_booths != null) assembly.total_booths = polling.total_booths;
+    assembly.male_voters = polling.male_voters;
+    assembly.female_voters = polling.female_voters;
 
     const [mlaRow] = await query("SELECT * FROM la_mla_profiles WHERE assembly_id = ?", [id]);
     let mla = null;
