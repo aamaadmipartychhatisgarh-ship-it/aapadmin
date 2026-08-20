@@ -1197,11 +1197,10 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing, defau
     debate_time: editing.debate_time ? editing.debate_time.slice(0, 5) : "20:00",
     brief_pdf_url: editing.brief_pdf_url || "",
     talking_points: editing.talking_points || "",
-    opposition_counter: editing.opposition_counter || "",
     status: editing.status || "scheduled",
     viral_score: editing.viral_score || 0,
     spokesperson_ids: (editing.spokespersons || []).map((s) => s.id),
-  } : { channel_id: defaultChannelId ? String(defaultChannelId) : "", topic: "", debate_date: "", debate_time: "20:00", brief_pdf_url: "", talking_points: "", opposition_counter: "", spokesperson_ids: [] });
+  } : { channel_id: defaultChannelId ? String(defaultChannelId) : "", topic: "", debate_date: "", debate_time: "20:00", brief_pdf_url: "", talking_points: "", spokesperson_ids: [] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function save() {
@@ -1240,7 +1239,6 @@ function DebateModal({ channels, spokespersons, onClose, onSaved, editing, defau
         <div><label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Debate File (PDF, JPG, PNG, WEBP)</label><FileUpload value={form.brief_pdf_url} onChange={(url) => setForm({ ...form, brief_pdf_url: url })} endpoint="/api/media/uploads" accept=".pdf,.jpg,.jpeg,.png,.webp" /></div>
       </div>
       <textarea className={inp} rows={2} placeholder="Talking points" value={form.talking_points} onChange={(e) => setForm({ ...form, talking_points: e.target.value })} />
-      <textarea className={inp} rows={2} placeholder="Opposition counter points" value={form.opposition_counter} onChange={(e) => setForm({ ...form, opposition_counter: e.target.value })} />
       <div>
         <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Select Spokesperson</label>
         <SpokespersonMultiSelect options={spokespersons} value={form.spokesperson_ids} onChange={(ids) => setForm({ ...form, spokesperson_ids: ids })} />
