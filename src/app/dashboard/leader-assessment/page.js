@@ -950,7 +950,32 @@ function MlaAssessmentEditModal({ mla, onClose, onChange, flash, fail }) {
     <Modal title={`Assessment · ${mla.name}`} onClose={onClose} size="full">
       {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : bundle ? (
         <div className="space-y-5">
-          <Card title="MLA 10-Parameter Assessment" icon={ClipboardCheck} sub="Each parameter is scored 1–10; the total is calculated automatically out of 100.">
+          {/* Current MLA header — ABOVE the 10 parameters so the person being
+              assessed is clear before any question is answered. Scoped to the
+              selected assembly's MLA (bundle.mla); shows a clear not-available
+              state if the assembly has no MLA. */}
+          {(bundle.mla && bundle.mla.name) ? (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center gap-4">
+              <PassportPhoto name={bundle.mla.name} src={bundle.mla.photo_url} w={72} />
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Current MLA</div>
+                <h3 className="text-lg font-bold text-gray-900 truncate flex items-center gap-2">
+                  {bundle.mla.name}
+                  {bundle.mla.party && <span className="text-xs font-semibold text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full">{bundle.mla.party}</span>}
+                </h3>
+                <div className="text-sm text-gray-500 flex items-center gap-1.5 mt-0.5"><MapPin size={13} className="text-[#164FA3]" /> {bundle.assembly?.name || mla.assembly_name || "—"}{bundle.assembly?.district ? ` · ${bundle.assembly.district}` : (mla.district ? ` · ${mla.district}` : "")}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-6 flex items-center gap-4 text-gray-500">
+              <PassportPhoto name="" src={null} w={64} />
+              <div>
+                <div className="text-sm font-semibold text-gray-600">Current MLA not available</div>
+                <div className="text-[11px] text-gray-400 mt-0.5">No MLA profile is linked to this assembly yet.</div>
+              </div>
+            </div>
+          )}
+          <Card title="10 Assessment Parameters" icon={ClipboardCheck} sub="Each parameter is scored 1–10; the total is calculated automatically out of 100.">
             <AssessmentEditor c={mla} endpoint={`/api/leader-assessment/mlas/${mla.id}/assessment`} onChange={reload} flash={flash} fail={fail} />
           </Card>
           <AnalysisTab b={bundle} onChange={reload} flash={flash} fail={fail} />
