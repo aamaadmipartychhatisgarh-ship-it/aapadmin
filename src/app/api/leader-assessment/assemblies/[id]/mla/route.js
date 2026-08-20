@@ -7,6 +7,14 @@ export const dynamic = "force-dynamic";
 const numOrNull = (v) => (v === "" || v == null || isNaN(Number(v)) ? null : Number(v));
 const strOrNull = (v) => { const s = String(v ?? "").trim(); return s ? s : null; };
 const dateOrNull = (v) => { const s = String(v ?? "").trim(); return s ? s.slice(0, 10) : null; };
+// Vote counts: blank → null (never NaN/undefined); otherwise a whole number ≥ 0.
+// Invalid text is rejected so it can never be stored as a vote count.
+const votesOrThrow = (v, label) => {
+  if (v === "" || v == null) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) throw `${label} must be a whole number of votes (0 or more).`;
+  return n;
+};
 
 // PUT /api/leader-assessment/assemblies/[id]/mla — upsert the single MLA
 // profile for this assembly (one row per assembly). Age is NEVER stored — only
@@ -21,6 +29,18 @@ export async function PUT(req, { params }) {
     if (!asm) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
     const d = await req.json().catch(() => ({}));
     if (!strOrNull(d.name)) return NextResponse.json({ message: "MLA name is required." }, { status: 400 });
+    let competitor1_votes, competitor2_votes;
+    try {
+      competitor1_votes = votesOrThrow(d.competitor1_votes, "Total Votes 1");
+      competitor2_votes = votesOrThrow(d.competitor2_votes, "Total Votes 2");
+    } catch (msg) {
+      return NextResponse.json({ message: String(msg) }, { status: 400 });
+    }
+    // Margin is DERIVED, never taken from the client: ABS() guarantees it is never
+    // negative. It stays null until BOTH competitor vote counts are present.
+    const competitor_margin = competitor1_votes != null && competitor2_votes != null
+      ? Math.abs(competitor1_votes - competitor2_votes)
+      : null;
     const cols = {
       photo_url: strOrNull(d.photo_url),
       name: strOrNull(d.name),
@@ -37,6 +57,11 @@ export async function PUT(req, { params }) {
       previous_winning_margin: numOrNull(d.previous_winning_margin),
       party_won_from: strOrNull(d.party_won_from),
       party_defeated: strOrNull(d.party_defeated),
+      competitor1_party: strOrNull(d.competitor1_party),
+      competitor1_votes,
+      competitor2_party: strOrNull(d.competitor2_party),
+      competitor2_votes,
+      competitor_margin,
     };
     const keys = Object.keys(cols);
     const [existing] = await query("SELECT id FROM la_mla_profiles WHERE assembly_id = ?", [id]);

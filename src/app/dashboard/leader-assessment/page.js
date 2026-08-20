@@ -574,6 +574,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                     <MlaField label="Criminal Cases" value={mla.criminal_cases != null ? String(mla.criminal_cases) : "—"} />
                     <MlaField label="Net Worth" value={mla.net_worth || "—"} />
                     <MlaField label="Times Won" value={mla.times_won != null ? String(mla.times_won) : "—"} />
+                    <MlaField label="Winning Margin" value={mla.competitor_margin != null ? nfmt(mla.competitor_margin) : "—"} />
                     <MlaField label="MLA Score" value={mla.assessment_done ? `${mla.total}/100` : "Not assessed"} accent={mla.assessment_done} />
                   </div>
                 </div>
@@ -643,7 +644,19 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
 }
 
 // -------------------------------- MLA -------------------------------------
-const EMPTY_MLA = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", criminal_cases: "", times_won: "", times_contested: "", largest_winning_margin: "", previous_winning_margin: "", party_won_from: "", party_defeated: "" };
+const EMPTY_MLA = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", criminal_cases: "", times_won: "", times_contested: "", largest_winning_margin: "", previous_winning_margin: "", party_won_from: "", party_defeated: "", competitor1_party: "", competitor1_votes: "", competitor2_party: "", competitor2_votes: "" };
+
+// Victory margin between the two leading competitors — computed live for the form
+// preview (the backend recomputes and stores the authoritative value). Returns
+// null unless BOTH vote counts are valid whole numbers ≥ 0; ABS() keeps it from
+// ever being negative.
+function competitorMargin(v1, v2) {
+  const a = String(v1 ?? "").trim(), b = String(v2 ?? "").trim();
+  if (a === "" || b === "") return null;
+  const n1 = Number(a), n2 = Number(b);
+  if (!Number.isFinite(n1) || !Number.isFinite(n2)) return null;
+  return Math.abs(n1 - n2);
+}
 // (The old per-assembly MlaTab was replaced by the global MlaManager below.)
 
 // --------------------------- MLA MANAGER ----------------------------------
@@ -826,6 +839,28 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
         </div>
       </div>
 
+      {/* Competitor election result + derived margin. Absent on legacy profiles → "—". */}
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Competitor Election Result</div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-gray-100 p-3">
+            <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 1</div>
+            <div className="font-semibold text-gray-900 truncate">{mla.competitor1_party || "—"}</div>
+            <div className="text-sm text-gray-600">{mla.competitor1_votes != null ? `${nfmt(mla.competitor1_votes)} votes` : "—"}</div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-3">
+            <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 2</div>
+            <div className="font-semibold text-gray-900 truncate">{mla.competitor2_party || "—"}</div>
+            <div className="text-sm text-gray-600">{mla.competitor2_votes != null ? `${nfmt(mla.competitor2_votes)} votes` : "—"}</div>
+          </div>
+          <div className="rounded-xl border border-[#164FA3]/20 bg-[#164FA3]/5 p-3">
+            <div className="text-[11px] font-bold text-[#164FA3] uppercase tracking-wide">Margin</div>
+            <div className="text-lg font-bold text-[#164FA3]">{mla.competitor_margin != null ? nfmt(mla.competitor_margin) : "—"}</div>
+            <div className="text-[11px] text-gray-400">|Votes 1 − Votes 2|</div>
+          </div>
+        </div>
+      </div>
+
       {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -913,6 +948,8 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
   const [errors, setErrors] = useState({}); // { assembly_id, name, _server }
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e)); };
   const age = ageOf(form.date_of_birth);
+  // Live margin preview; the server recomputes and stores the authoritative value.
+  const liveMargin = competitorMargin(form.competitor1_votes, form.competitor2_votes);
   // On create, hide assemblies that already have an MLA (prevents accidental
   // duplicate profiles); on edit, the assembly is fixed.
   const options = initial ? assemblies : assemblies.filter((a) => !(taken && taken.has(Number(a.id))));
@@ -927,6 +964,11 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
     const errs = {};
     if (!String(form.assembly_id).trim()) errs.assembly_id = "Select the assembly this MLA represents.";
     if (!String(form.name).trim()) errs.name = "MLA name is required.";
+    // Votes must be numeric only (whole number ≥ 0); invalid text is blocked so it
+    // can never be stored as a vote count. Empty is allowed (no NaN produced).
+    const validVotes = (v) => { const s = String(v ?? "").trim(); if (s === "") return true; const n = Number(s); return Number.isFinite(n) && Number.isInteger(n) && n >= 0; };
+    if (!validVotes(form.competitor1_votes)) errs.competitor1_votes = "Enter a whole number of votes (0 or more).";
+    if (!validVotes(form.competitor2_votes)) errs.competitor2_votes = "Enter a whole number of votes (0 or more).";
     setErrors(errs);
     if (Object.keys(errs).length) return; // keep the form open, values intact
     setSaving(true);
@@ -965,6 +1007,27 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
         <Field label="Times Won" type="number" value={form.times_won} onChange={(v) => set("times_won", v)} /><Field label="Times Contested" type="number" value={form.times_contested} onChange={(v) => set("times_contested", v)} />
         <Field label="Largest Winning Margin" type="number" value={form.largest_winning_margin} onChange={(v) => set("largest_winning_margin", v)} /><Field label="Previous Winning Margin" type="number" value={form.previous_winning_margin} onChange={(v) => set("previous_winning_margin", v)} />
         <Field label="Party Won From" value={form.party_won_from} onChange={(v) => set("party_won_from", v)} /><Field label="Party Defeated" value={form.party_defeated} onChange={(v) => set("party_defeated", v)} />
+
+        <div className="col-span-2 border-t border-gray-100 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Competitor election result</div>
+        <div className="col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-2">
+            <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Competitor 1</div>
+            <Field label="Party Name 1" full value={form.competitor1_party} onChange={(v) => set("competitor1_party", v)} />
+            <Field label="Total Votes 1" full type="number" value={form.competitor1_votes} onChange={(v) => set("competitor1_votes", v)} error={errors.competitor1_votes} />
+          </div>
+          <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-2">
+            <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Competitor 2</div>
+            <Field label="Party Name 2" full value={form.competitor2_party} onChange={(v) => set("competitor2_party", v)} />
+            <Field label="Total Votes 2" full type="number" value={form.competitor2_votes} onChange={(v) => set("competitor2_votes", v)} error={errors.competitor2_votes} />
+          </div>
+        </div>
+        <div className="col-span-2">
+          <span className={lbl}>Margin (auto-calculated)</span>
+          <div className={`${inp} bg-gray-50 text-gray-700 font-semibold`}>
+            {liveMargin != null ? nfmt(liveMargin) : "—"}
+            <span className="ml-2 text-[11px] font-normal text-gray-400">= |Total Votes 1 − Total Votes 2|</span>
+          </div>
+        </div>
       </div>
       {errors._server && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-3">{errors._server}</div>}
       <ModalActions onClose={onClose} onSave={save} saving={saving} />
