@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Newspaper, Mic, Tv, FileText, Clock, TrendingUp, TrendingDown, Minus, Loader2 } from "lucide-react";
+import { Newspaper, Mic, Tv, TrendingUp, TrendingDown, Minus, Loader2 } from "lucide-react";
 
 // Yesterday's Performance — six KPI cards, each with Yesterday/Weekly/
 // Monthly counts and a trend arrow, sourced from GET /api/media/dashboard
@@ -15,8 +15,6 @@ const CARDS = [
   { key: "newspapersPublished", label: "Newspapers Published", icon: Newspaper, color: "bg-blue-50 text-[#164FA3]", tab: "newspapers" },
   { key: "pressConferences", label: "Press Conferences Held", icon: Mic, color: "bg-violet-50 text-violet-600", tab: "conferences" },
   { key: "tvDebates", label: "TV News Debates", icon: Tv, color: "bg-amber-50 text-amber-600", tab: "channels" },
-  { key: "mediaCoverageTotal", label: "Media Coverage Total", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600", tab: "newspapers" },
-  { key: "pressNotesReleased", label: "Press Notes Released", icon: FileText, color: "bg-sky-50 text-sky-600", tab: "newspapers" },
 ];
 
 function trend(current, previous) {
@@ -85,24 +83,6 @@ export default function MediaDashboardTab({ onOpenTab }) {
             </button>
           );
         })}
-
-        {/* Pending Media Activities — forward-looking, no historical trend */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-9 h-9 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0"><Clock size={18} /></div>
-            <span className="font-semibold text-gray-800 text-sm flex-1">Pending Media Activities</span>
-          </div>
-          <div className="flex items-end gap-2 mb-1">
-            <span className="text-3xl font-bold text-gray-900">{data.pendingActivities.due_today.toLocaleString()}</span>
-            <span className="text-xs text-gray-400 mb-1">due today</span>
-          </div>
-          <div className="flex items-center gap-4 text-xs text-gray-500 pt-2 border-t border-gray-100 mt-2">
-            <span>Due this week: <span className="font-semibold text-gray-700">{data.pendingActivities.due_week.toLocaleString()}</span></span>
-          </div>
-          <div className="flex items-center gap-4 text-xs text-gray-500">
-            <span>Due this month: <span className="font-semibold text-gray-700">{data.pendingActivities.due_month.toLocaleString()}</span></span>
-          </div>
-        </div>
       </div>
     </div>
   );
