@@ -175,6 +175,35 @@ function NewspapersTab({ data, onChange, flash, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [showAddNewspaper, setShowAddNewspaper] = useState(false);
+  // Published List local filters (Date / Lok Sabha / Title) — applied on top of
+  // the real DB rows in data.recentNotes (no dummy data).
+  const [fDate, setFDate] = useState("");
+  const [fLok, setFLok] = useState("");
+  const [fTitle, setFTitle] = useState("");
+  const [lokOptions, setLokOptions] = useState([]);
+  const [preview, setPreview] = useState(null); // full-size newspaper cutting URL
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/locations?type=lok_sabha")
+      .then((r) => (r.ok ? r.json() : { locations: [] }))
+      .then((d) => { if (alive) setLokOptions(d.locations || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const hasFilters = fDate || fLok || fTitle.trim();
+  const q = fTitle.trim().toLowerCase();
+  const publishedRows = (data.recentNotes || []).filter((n) => {
+    if (fDate && (n.coverage_date?.slice(0, 10) !== fDate)) return false;
+    if (fLok) {
+      if (fLok === "__all__") { if (!n.lok_sabha_all) return false; }
+      else if (String(n.lok_sabha_id || "") !== String(fLok)) return false;
+    }
+    if (q && !String(n.title || "").toLowerCase().includes(q)) return false;
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       {/* Newspaper master — add a newspaper (with its Lok Sabha mapping). */}
@@ -214,41 +243,65 @@ function NewspapersTab({ data, onChange, flash, filtered }) {
         ))}
       </div>
 
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-gray-900">Press Notes & Coverage Archive</h3>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h3 className="font-bold text-gray-900">Published List</h3>
         <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-1.5 rounded-lg text-sm font-semibold">
           <Plus size={14} /> Upload
         </button>
       </div>
 
+      {/* Search / Filters — Date · Lok Sabha · Title · Clear. All filter the real
+          DB rows client-side; combined with AND (a row must match every set filter). */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Date</label>
+            <input type="date" value={fDate} onChange={(e) => setFDate(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Lok Sabha</label>
+            <select value={fLok} onChange={(e) => setFLok(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3] min-w-[160px]">
+              <option value="">All Lok Sabha</option>
+              <option value="__all__">All (constituency-wide papers)</option>
+              {lokOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Search by Title</label>
+            <input value={fTitle} onChange={(e) => setFTitle(e.target.value)} placeholder="Type part of a title…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+          </div>
+          {hasFilters && (
+            <button onClick={() => { setFDate(""); setFLok(""); setFTitle(""); }} className="text-sm text-gray-500 hover:text-red-600 inline-flex items-center gap-1 py-1.5"><X size={14} /> Clear</button>
+          )}
+        </div>
+      </div>
+
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {data.recentNotes.length === 0 ? (
-          <div className="p-8 text-gray-400 text-sm text-center">{filtered ? "No press notes found for the selected date range." : "No press notes yet."}</div>
+        {publishedRows.length === 0 ? (
+          <div className="p-8 text-gray-400 text-sm text-center">
+            {hasFilters ? "No published records match the selected filters." : filtered ? "No published records found for the selected date range." : "No published records yet."}
+          </div>
         ) : (
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left">
               <tr>
-                <th className="px-4 py-3 font-semibold text-gray-600">Date</th>
+                <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Date</th>
+                <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Lok Sabha</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Title</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Newspaper</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Sentiment</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">File</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Brief</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Photo</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody>
-              {data.recentNotes.map((n) => (
-                <tr key={n.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{n.coverage_date?.slice(0, 10) || "—"}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{n.title}</td>
-                  <td className="px-4 py-3 text-gray-600">{n.newspaper_name || "—"}</td>
-                  <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{contentLabel(n.kind)}</span></td>
-                  <td className="px-4 py-3"><SentimentBadge s={n.sentiment} /></td>
-                  <td className="px-4 py-3">
-                    {n.file_url ? <a href={n.file_url} target="_blank" rel="noreferrer" className="text-[#164FA3] hover:underline text-xs flex items-center gap-1"><FileText size={13} /> Open</a> : <span className="text-gray-300">—</span>}
-                  </td>
+              {publishedRows.map((n) => (
+                <tr key={n.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtNewsDate(n.coverage_date)}</td>
+                  <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{n.lok_sabha_all ? "All" : (n.lok_sabha_name || "—")}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900 max-w-[260px] whitespace-normal break-words">{n.title}</td>
+                  <td className="px-4 py-3 text-gray-600 max-w-[320px] whitespace-normal break-words">{n.summary || "—"}</td>
+                  <td className="px-4 py-3"><NewspaperPhoto url={n.file_url} title={n.title} onPreview={setPreview} /></td>
                   <td className="px-4 py-3">
                     <button onClick={() => setEditing(n)} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
                   </td>
@@ -259,6 +312,15 @@ function NewspapersTab({ data, onChange, flash, filtered }) {
           </div>
         )}
       </div>
+
+      {/* Full-size newspaper cutting preview (lightbox). */}
+      {preview && (
+        <div className="fixed inset-0 z-[90] bg-black/80 flex items-center justify-center p-4" onClick={() => setPreview(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={preview} alt="Newspaper cutting" className="max-w-[92vw] max-h-[92vh] rounded-lg object-contain" />
+          <button onClick={() => setPreview(null)} className="absolute top-4 right-4 text-white/80 hover:text-white"><X size={28} /></button>
+        </div>
+      )}
 
       {showAdd && <PressNoteModal newspapers={data.newspapers} onClose={() => setShowAdd(false)} onSaved={(msg) => { setShowAdd(false); onChange(); flash?.(msg); }} />}
       {editing && <PressNoteModal editing={editing} newspapers={data.newspapers} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); onChange(); flash?.(msg); }} />}
@@ -340,6 +402,41 @@ function SentimentBadge({ s }) {
   if (!s) return <span className="text-gray-300 text-xs">—</span>;
   const map = { positive: "bg-emerald-100 text-emerald-700", neutral: "bg-gray-100 text-gray-600", negative: "bg-red-100 text-red-700" };
   return <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${map[s]}`}>{s}</span>;
+}
+
+// Consistent Newspaper-module date format, e.g. "20 Aug 2026". Uses the saved DB
+// date (YYYY-MM-DD or a datetime); returns "—" when absent/invalid.
+function fmtNewsDate(v) {
+  if (!v) return "—";
+  const s = String(v).slice(0, 10);
+  const d = new Date(`${s}T00:00:00`);
+  if (isNaN(d.getTime())) return s;
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif|bmp)$/i;
+// Newspaper cutting thumbnail. Shows the actual uploaded image (object-contain →
+// aspect ratio kept, never stretched) in a consistent container; clicking opens a
+// full-size lightbox. A non-image file (e.g. PDF) opens in a new tab. When no
+// image exists, a proper newspaper icon is shown — never a tiny generic file icon.
+function NewspaperPhoto({ url, title, onPreview }) {
+  const box = "w-16 h-20 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden shrink-0";
+  if (url && IMAGE_RE.test(String(url).split("?")[0])) {
+    return (
+      <button type="button" onClick={() => onPreview?.(url)} className={`${box} hover:ring-2 hover:ring-[#164FA3]/40`} title="View full newspaper cutting">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={title || "Newspaper cutting"} loading="lazy" decoding="async" className="w-full h-full object-contain" />
+      </button>
+    );
+  }
+  if (url) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className={`${box} text-[#164FA3] hover:ring-2 hover:ring-[#164FA3]/40`} title="Open uploaded file">
+        <Newspaper size={26} />
+      </a>
+    );
+  }
+  return <div className={`${box} text-gray-300`} title="No newspaper image"><Newspaper size={26} /></div>;
 }
 
 // ============================================================ CHANNELS

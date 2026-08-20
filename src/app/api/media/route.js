@@ -60,8 +60,11 @@ export async function GET(req) {
     const journalists = await query(`SELECT * FROM journalists ORDER BY name`);
 
     const recentNotes = await query(
-      `SELECT pn.*, np.name AS newspaper_name
-         FROM press_notes pn LEFT JOIN newspapers np ON np.id = pn.newspaper_id
+      `SELECT pn.*, np.name AS newspaper_name,
+              np.lok_sabha_id, np.lok_sabha_all, ls.name AS lok_sabha_name
+         FROM press_notes pn
+         LEFT JOIN newspapers np ON np.id = pn.newspaper_id
+         LEFT JOIN locations ls ON ls.id = np.lok_sabha_id AND ls.type = 'lok_sabha'
         WHERE 1=1${noteFilter.clause}
         ORDER BY pn.coverage_date DESC, pn.id DESC LIMIT ${listLimit}`,
       noteFilter.params
