@@ -174,17 +174,31 @@ const NEWSPAPER_OTHER = "__other__";
 function NewspapersTab({ data, onChange, flash, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [showAddNewspaper, setShowAddNewspaper] = useState(false);
   return (
     <div className="space-y-6">
+      {/* Newspaper master — add a newspaper (with its Lok Sabha mapping). */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="font-bold text-gray-900">Newspapers</h3>
+          <p className="text-sm text-gray-500">Coverage summary per newspaper. Positive / Negative counts respect the date filter.</p>
+        </div>
+        <button onClick={() => setShowAddNewspaper(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
+          <Plus size={15} /> Add Newspaper
+        </button>
+      </div>
       {/* Per-newspaper coverage summary — Positive (green) / Negative (red)
           counts from the shared newspaperStats source, respecting the date
           filter. Every newspaper is shown (zero coverage → 0 / 0). */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         {(data.newspaperStats || []).map((np) => (
           <div key={np.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-1">
               <Newspaper className="text-[#164FA3] shrink-0" size={18} />
               <div className="font-bold text-gray-900 text-sm truncate" title={np.name}>{np.name}</div>
+            </div>
+            <div className="text-[11px] font-medium text-gray-400 mb-3 truncate" title={np.lok_sabha_all ? "All Lok Sabha" : (np.lok_sabha_name || "")}>
+              {np.lok_sabha_all ? "All Lok Sabha" : (np.lok_sabha_name ? `Lok Sabha · ${np.lok_sabha_name}` : "—")}
             </div>
             <div className="flex items-center gap-2">
               <div className="flex-1 rounded-lg bg-emerald-50 px-2.5 py-1.5">
@@ -248,7 +262,77 @@ function NewspapersTab({ data, onChange, flash, filtered }) {
 
       {showAdd && <PressNoteModal newspapers={data.newspapers} onClose={() => setShowAdd(false)} onSaved={(msg) => { setShowAdd(false); onChange(); flash?.(msg); }} />}
       {editing && <PressNoteModal editing={editing} newspapers={data.newspapers} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); onChange(); flash?.(msg); }} />}
+      {showAddNewspaper && <NewspaperModal onClose={() => setShowAddNewspaper(false)} onSaved={(msg) => { setShowAddNewspaper(false); onChange(); flash?.(msg); }} />}
     </div>
+  );
+}
+
+// Add Newspaper — name + Lok Sabha mapping. The Lok Sabha options are fetched
+// live from the existing Lok Sabha Master (GET /api/locations?type=lok_sabha) —
+// the single source of truth — so updates to that master flow through here
+// automatically; nothing is hardcoded. An "All" option maps the newspaper to
+// every constituency (stored as a flag, not a fake Lok Sabha row).
+function NewspaperModal({ onClose, onSaved }) {
+  const [name, setName] = useState("");
+  const [lokSabha, setLokSabha] = useState(""); // "" | "all" | "<id>"
+  const [options, setOptions] = useState([]);
+  const [loadingLs, setLoadingLs] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/locations?type=lok_sabha")
+      .then((r) => (r.ok ? r.json() : { locations: [] }))
+      .then((d) => { if (alive) setOptions(d.locations || []); })
+      .catch(() => { if (alive) setError("Couldn't load the Lok Sabha list. Please try again."); })
+      .finally(() => { if (alive) setLoadingLs(false); });
+    return () => { alive = false; };
+  }, []);
+
+  async function save() {
+    if (saving) return;
+    const clean = name.trim();
+    if (!clean) { setError("Newspaper name is required."); return; }
+    if (!lokSabha) { setError("Please select a Lok Sabha (or choose “All”)."); return; }
+    setSaving(true); setError("");
+    const body = lokSabha === "all"
+      ? { name: clean, lok_sabha_all: true }
+      : { name: clean, lok_sabha_id: Number(lokSabha) };
+    try {
+      const r = await fetch("/api/media/newspapers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.message || "Could not add the newspaper."); setSaving(false); return; }
+      onSaved("Newspaper added successfully.");
+    } catch {
+      setError("Could not add the newspaper. Please try again.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="Add Newspaper" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Newspaper Name <span className="text-red-500">*</span></label>
+          <input autoFocus className={inp} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} placeholder="e.g. Dainik Bhaskar" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Lok Sabha <span className="text-red-500">*</span></label>
+          <select className={inp} value={lokSabha} onChange={(e) => { setLokSabha(e.target.value); setError(""); }} disabled={loadingLs}>
+            <option value="">{loadingLs ? "Loading…" : "— select Lok Sabha —"}</option>
+            <option value="all">All (applies to all Lok Sabha)</option>
+            {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <p className="text-[11px] text-gray-400 mt-1">Sourced live from the Lok Sabha Master.</p>
+        </div>
+        {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-2">{saving ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : "Add Newspaper"}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

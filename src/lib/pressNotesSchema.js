@@ -28,6 +28,16 @@ export async function ensurePressNotesSchema() {
     if (String(col[0]?.t || "").toLowerCase().startsWith("enum")) {
       await query("ALTER TABLE press_notes MODIFY COLUMN kind VARCHAR(50) NULL DEFAULT 'press_note'");
     }
+    // Lok Sabha mapping for a newspaper (added idempotently for existing DBs):
+    //   • lok_sabha_id  → the specific Lok Sabha (locations.id where type='lok_sabha')
+    //   • lok_sabha_all → 1 when the newspaper applies to ALL constituencies. This
+    //     is a clear, supported flag — NOT a fake Lok Sabha record — so "All" and
+    //     a specific selection are unambiguous. Legacy rows: all=0, id=NULL.
+    // created_at / updated_at track when a newspaper row was added / last changed.
+    await ensureColumn("newspapers", "lok_sabha_id", "INT NULL");
+    await ensureColumn("newspapers", "lok_sabha_all", "TINYINT(1) NOT NULL DEFAULT 0");
+    await ensureColumn("newspapers", "created_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP");
+    await ensureColumn("newspapers", "updated_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
     // Seed the master newspaper list (idempotent — `name` is UNIQUE).
     for (let i = 0; i < DEFAULT_NEWSPAPERS.length; i++) {
       await query("INSERT IGNORE INTO newspapers (name, sort_order) VALUES (?, ?)", [DEFAULT_NEWSPAPERS[i], i]);
@@ -36,6 +46,19 @@ export async function ensurePressNotesSchema() {
   } catch (e) {
     console.error("[media] ensurePressNotesSchema:", e?.message || e);
   }
+}
+
+// Add a column only if it's missing (MySQL lacks ADD COLUMN IF NOT EXISTS), so
+// both fresh and already-created deployments converge without a manual step.
+async function ensureColumn(table, column, def) {
+  try {
+    const rows = await query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [table, column]
+    );
+    if (Number(rows[0]?.n || 0) === 0) await query(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+  } catch (e) { console.error(`[media] ensureColumn ${table}.${column}:`, e?.message || e); }
 }
 
 // Find-or-create a newspaper by name and return its id — used when the form

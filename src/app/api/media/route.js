@@ -43,13 +43,14 @@ export async function GET(req) {
     // zero coverage in range → 0/0), and press_notes→newspaper is many-to-one
     // so each coverage row is counted exactly once (no duplicate counting).
     const newspaperStats = await query(
-      `SELECT np.id, np.name,
+      `SELECT np.id, np.name, np.lok_sabha_id, np.lok_sabha_all, ls.name AS lok_sabha_name,
               COALESCE(SUM(pn.sentiment = 'positive'), 0) AS positive,
               COALESCE(SUM(pn.sentiment = 'negative'), 0) AS negative,
               COUNT(pn.id) AS total
          FROM newspapers np
+         LEFT JOIN locations ls ON ls.id = np.lok_sabha_id AND ls.type = 'lok_sabha'
          LEFT JOIN press_notes pn ON pn.newspaper_id = np.id${noteFilter.clause}
-        GROUP BY np.id, np.name
+        GROUP BY np.id, np.name, np.lok_sabha_id, np.lok_sabha_all, ls.name
         ORDER BY np.sort_order, np.name`,
       noteFilter.params
     );
