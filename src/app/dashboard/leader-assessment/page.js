@@ -1094,7 +1094,7 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
             </div>
           ))}
         </div>
-        <div className="col-span-2 text-[11px] text-gray-400 -mt-1">Manage these on the Voter Master tab; the MLA profile always reads the latest values from there.</div>
+        <div className="col-span-2 text-[11px] text-gray-400 -mt-1">Manage these under Administration → Polling Station Master; the MLA profile always reads the latest values from there.</div>
 
         <div className="col-span-2 border-t border-gray-100 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Election result</div>
         <div className="col-span-2">
@@ -1844,7 +1844,7 @@ function AnalysisTab({ b, onChange, flash, fail }) {
           {numbered("Top 3 Reasons for Winning", reasons, setReasons, "bg-emerald-100 text-emerald-700")}
         </div>
       </Card>
-      <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities. Each community is chosen from the centralized Caste Master; percentages are validated 0–100 and never auto-adjusted. Add new castes on the Caste Master tab." right={<SaveBtn onClick={saveSocial} />}>
+      <Card title="Assembly Social Profile" icon={Users} sub="Top castes / communities. Each community is chosen from the centralized Caste Master; percentages are validated 0–100 and never auto-adjusted. Add new castes under Administration → Caste Master." right={<SaveBtn onClick={saveSocial} />}>
         <div className="space-y-3">
           {social.map((row, i) => {
             const pct = Number(row.percentage) || 0;
@@ -2078,7 +2078,7 @@ function CasteSelect({ value, options, onPick, placeholder = "Select community /
               <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className={`${inp} text-sm py-1.5`} />
             </div>
             {list.length === 0 ? (
-              <div className="px-3 py-3 text-sm text-gray-400">No active castes match. Add it on the Caste Master tab.</div>
+              <div className="px-3 py-3 text-sm text-gray-400">No active castes match. Add it under Administration → Caste Master.</div>
             ) : list.map((c) => (
               <button key={c.id} type="button" onClick={() => { onPick({ caste_id: c.id, name: c.name }); setOpen(false); }} className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between gap-2 ${value?.caste_id === c.id ? "bg-blue-50/60 font-semibold text-[#164FA3]" : "text-gray-700"}`}>
                 <span className="truncate">{c.name}</span>
