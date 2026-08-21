@@ -534,27 +534,9 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
           />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* LEFT: Top 3 AAP candidates by score */}
-            <div className="lg:col-span-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Top 3 AAP Candidates</div>
-              {top3.length === 0 ? (
-                <div className="text-sm text-gray-400">No AAP candidates added yet.</div>
-              ) : (
-                <div className="space-y-2.5">
-                  {top3.map((c, i) => (
-                    <div key={c.id} className="flex items-center gap-3 border border-gray-100 rounded-xl p-2.5">
-                      <span className={`w-6 text-center font-bold ${i < 3 ? RANK_COLOR[i] : "text-gray-400"}`}>{i + 1}</span>
-                      <ProfilePhoto name={c.name} src={c.photo_url} size={48} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
-                      <div className="w-32 min-w-0"><div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div></div>
-                      <div className="flex-1"><ScoreBar value={c.total} max={100} showValue={false} /></div>
-                      <span className="font-bold text-[#164FA3] w-16 text-right">{c.total}/100</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {/* RIGHT: Current Sitting MLA of THIS assembly (mla is fetched by the
-                selected assembly id, so it always belongs to this assembly). */}
+            {/* LEFT (previously the Candidate position): now the Current Sitting
+                MLA of THIS assembly. `mla` is fetched by the selected assembly id,
+                so it always belongs to this assembly — never stale from another. */}
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Current Sitting MLA</div>
               {mla && mla.name ? (
@@ -580,6 +562,33 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                   <UserSquare2 size={28} className="mx-auto text-gray-300 mb-2" />
                   <div className="text-sm font-medium text-gray-500">MLA Data Not Available</div>
                   <div className="text-[11px] text-gray-400 mt-1">No MLA profile is linked to this assembly yet.</div>
+                </div>
+              )}
+            </div>
+            {/* RIGHT (previously the MLA position): now the AAP candidates. This
+                search-result card intentionally shows ONLY Age / Caste / Network
+                per candidate (fuller details live in the candidate profile / Full
+                View). */}
+            <div className="lg:col-span-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Top 3 AAP Candidates</div>
+              {top3.length === 0 ? (
+                <div className="text-sm text-gray-400">No AAP candidates added yet.</div>
+              ) : (
+                <div className="space-y-2.5">
+                  {top3.map((c, i) => (
+                    <div key={c.id} className="flex items-center gap-3 border border-gray-100 rounded-xl p-2.5">
+                      <span className={`w-6 text-center font-bold shrink-0 ${i < 3 ? RANK_COLOR[i] : "text-gray-400"}`}>{i + 1}</span>
+                      <ProfilePhoto name={c.name} src={c.photo_url} size={48} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div>
+                        <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5">
+                          <span>Age: <span className="text-gray-700 font-medium">{c.age != null ? c.age : "—"}</span></span>
+                          <span>Caste: <span className="text-gray-700 font-medium">{c.caste || "—"}</span></span>
+                          <span>Network: <span className="text-gray-700 font-medium">{c.net_worth || "—"}</span></span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
