@@ -457,55 +457,44 @@ function fmtDebateWhen(start) {
 // ONE reusable channel card = the entry point for Schedule Debate + Debate List
 // (item 1), and it surfaces THIS channel's nearest upcoming debate (item 2) with
 // a real-time proximity colour (item 4). Clicking the card opens the two options.
-function ChannelCard({ ch, debates, now, tone, onSchedule, onDebateList }) {
-  const [open, setOpen] = useState(false);
+// Channel card — clicking the card / Channel Name opens the dedicated channel
+// page (by channel ID). It shows basic info (name, Lok Sabha, tone) and this
+// channel's nearest upcoming debate with a real-time proximity colour. Schedule
+// Debate / Debate List now live on the detail page (not an inline menu here).
+function ChannelCard({ ch, debates, now, tone, onOpen }) {
   const { nearest, start, more } = channelUpcoming(ch.id, debates, now);
   const vis = proximityVisual(start, now, nearest?.status);
   const speakers = (nearest?.spokespersons || []).map((s) => s.name).filter(Boolean);
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        style={vis.style}
-        className={`w-full text-left bg-white rounded-2xl border shadow-sm p-4 transition-colors hover:shadow-md ${vis.tone === "none" ? "border-gray-100" : ""}`}
-        title="Open Schedule Debate / Debate List for this channel"
-      >
-        <div className="flex items-center justify-between gap-2">
-          <Tv className={vis.tone === "live" ? "text-red-600" : "text-[#164FA3]"} size={20} />
-          {vis.label && <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${vis.tone === "live" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{vis.label}</span>}
+    <button
+      type="button"
+      onClick={() => onOpen(ch)}
+      style={vis.style}
+      className={`w-full text-left bg-white rounded-2xl border shadow-sm p-4 transition-colors hover:shadow-md ${vis.tone === "none" ? "border-gray-100" : ""}`}
+      title={`Open ${ch.name}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <Tv className={vis.tone === "live" ? "text-red-600" : "text-[#164FA3]"} size={20} />
+        {vis.label && <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${vis.tone === "live" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{vis.label}</span>}
+      </div>
+      <div className="font-bold text-gray-900 text-sm mt-2 truncate hover:text-[#164FA3]" title={ch.name}>{ch.name}</div>
+      {ch.lok_sabha_name && <div className="text-[11px] font-medium text-gray-400 truncate" title={ch.lok_sabha_name}>{ch.lok_sabha_name}</div>}
+      <span className={`mt-1 inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${tone[ch.tone] || tone.unknown}`}>{ch.tone}</span>
+
+      {nearest ? (
+        <div className="mt-3 pt-3 border-t border-gray-200/70 space-y-0.5">
+          <div className="text-xs font-semibold text-gray-900 truncate" title={nearest.topic}>{nearest.topic || "Debate"}</div>
+          <div className="text-[11px] text-gray-600">{fmtDebateWhen(start)}</div>
+          <div className="text-[11px] text-gray-500 truncate">{speakers.length ? speakers.join(", ") : "No spokesperson yet"}</div>
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${nearest.status === "live" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>{nearest.status}</span>
+            {more > 0 && <span className="text-[10px] text-gray-400">+{more} more</span>}
+          </div>
         </div>
-        <div className="font-bold text-gray-900 text-sm mt-2 truncate" title={ch.name}>{ch.name}</div>
-        {ch.lok_sabha_name && <div className="text-[11px] font-medium text-gray-400 truncate" title={ch.lok_sabha_name}>{ch.lok_sabha_name}</div>}
-        <span className={`mt-1 inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${tone[ch.tone] || tone.unknown}`}>{ch.tone}</span>
-
-        {nearest ? (
-          <div className="mt-3 pt-3 border-t border-gray-200/70 space-y-0.5">
-            <div className="text-xs font-semibold text-gray-900 truncate" title={nearest.topic}>{nearest.topic || "Debate"}</div>
-            <div className="text-[11px] text-gray-600">{fmtDebateWhen(start)}</div>
-            <div className="text-[11px] text-gray-500 truncate">{speakers.length ? speakers.join(", ") : "No spokesperson yet"}</div>
-            <div className="flex items-center gap-1.5 pt-0.5">
-              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${nearest.status === "live" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>{nearest.status}</span>
-              {more > 0 && <span className="text-[10px] text-gray-400">+{more} more</span>}
-            </div>
-          </div>
-        ) : (
-          <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-400">No upcoming debate.</div>
-        )}
-      </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute z-50 left-3 right-3 top-3 bg-white border border-gray-100 rounded-xl shadow-lg p-1">
-            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-400 truncate">{ch.name}</div>
-            <button type="button" onClick={() => { onSchedule(ch); setOpen(false); }} className="w-full flex items-center gap-2 px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg text-left"><Plus size={14} className="text-[#164FA3]" /> Schedule Debate</button>
-            <button type="button" onClick={() => { onDebateList(ch); setOpen(false); }} className="w-full flex items-center gap-2 px-2 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg text-left"><FileText size={14} className="text-[#164FA3]" /> Debate List</button>
-            <button type="button" onClick={() => setOpen(false)} className="w-full flex items-center gap-2 px-2 py-2 text-sm text-gray-500 hover:bg-gray-50 rounded-lg text-left"><X size={14} /> Close</button>
-          </div>
-        </>
+      ) : (
+        <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-400">No upcoming debate.</div>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -573,26 +562,22 @@ function ChannelModal({ onClose, onSaved }) {
 }
 
 // ============================================================ CHANNELS
-function ChannelsTab({ data, onChange, flash, filtered }) {
-  const [showAdd, setShowAdd] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [scheduleFor, setScheduleFor] = useState(null); // channel id to preselect
-  const [fChannel, setFChannel] = useState(null); // { id, name } — Debate List filter
+function ChannelsTab({ data, onChange, flash }) {
+  const router = useRouter();
   const [showAddChannel, setShowAddChannel] = useState(false);
   const now = useNow(60000);
-  const debatesRef = useRef(null);
   const TONE = { supportive: "bg-emerald-100 text-emerald-700", neutral: "bg-gray-100 text-gray-600", opposing: "bg-red-100 text-red-700", unknown: "bg-amber-100 text-amber-700" };
 
-  const scheduleForChannel = (ch) => { setScheduleFor(ch.id); setShowAdd(true); };
-  const debateListForChannel = (ch) => { setFChannel({ id: ch.id, name: ch.name }); setTimeout(() => debatesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); };
-  const debateRows = (data.upcomingDebates || []).filter((d) => !fChannel || String(d.channel_id) === String(fChannel.id));
+  // Clicking a channel opens its dedicated page (by channel ID). Schedule Debate
+  // and the Debate List live there — not inline on this main page.
+  const openChannel = (ch) => router.push(`/dashboard/media/channels/${ch.id}`);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h3 className="font-bold text-gray-900">News Channels</h3>
-          <p className="text-sm text-gray-500">Click a channel to schedule a debate or view its debate list.</p>
+          <p className="text-sm text-gray-500">Click a channel to open its page — schedule debates and see its debate list there.</p>
         </div>
         <button onClick={() => setShowAddChannel(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
           <Plus size={15} /> Add Channel
@@ -600,63 +585,10 @@ function ChannelsTab({ data, onChange, flash, filtered }) {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {data.channels.map((c) => (
-          <ChannelCard key={c.id} ch={c} debates={data.upcomingDebates} now={now} tone={TONE} onSchedule={scheduleForChannel} onDebateList={debateListForChannel} />
+          <ChannelCard key={c.id} ch={c} debates={data.upcomingDebates} now={now} tone={TONE} onOpen={openChannel} />
         ))}
       </div>
 
-      <div ref={debatesRef} className="flex items-center justify-between scroll-mt-4">
-        <div>
-          <h3 className="font-bold text-gray-900">{fChannel ? "Debate List" : filtered ? "Debates" : "Today's & Upcoming Debates"}</h3>
-          {fChannel && <div className="text-xs text-gray-500 mt-0.5">Showing only <span className="font-semibold text-[#164FA3]">{fChannel.name}</span> · <button onClick={() => setFChannel(null)} className="text-gray-500 hover:text-red-600 underline">clear</button></div>}
-        </div>
-        <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-1.5 rounded-lg text-sm font-semibold">
-          <Plus size={14} /> Schedule Debate
-        </button>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {debateRows.length === 0 ? (
-          <div className="p-8 text-gray-400 text-sm text-center">{fChannel ? `No debates for ${fChannel.name}.` : filtered ? "No debates found for the selected date range." : "No debates scheduled."}</div>
-        ) : (
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left">
-              <tr>
-                <th className="px-4 py-3 font-semibold text-gray-600">When</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Channel</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Topic</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Spokespersons</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Brief</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {debateRows.map((d) => (
-                <tr key={d.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                    {d.debate_date?.slice(0, 10)}{d.debate_time ? ` @ ${d.debate_time.slice(0, 5)}` : ""}
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">{d.channel_name || "—"}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{d.topic}</td>
-                  <td className="px-4 py-3 text-gray-600">{(d.spokespersons && d.spokespersons.length) ? d.spokespersons.map((s) => s.name).join(", ") : <span className="text-gray-300">—</span>}</td>
-                  <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${d.status === "aired" ? "bg-blue-100 text-blue-700" : d.status === "live" ? "bg-red-100 text-red-700" : d.status === "cancelled" ? "bg-gray-100 text-gray-400" : "bg-amber-100 text-amber-700"}`}>{d.status}</span></td>
-                  <td className="px-4 py-3">
-                    {d.brief_pdf_url ? <a href={d.brief_pdf_url} target="_blank" rel="noreferrer" className="text-[#164FA3] hover:underline text-xs flex items-center gap-1"><FileText size={13} /> PDF</a> : <span className="text-gray-300">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => setEditing(d)} title="Edit debate" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        )}
-      </div>
-
-      {showAdd && <DebateModal channels={data.channels} spokespersons={data.spokespersons} defaultChannelId={scheduleFor} onClose={() => { setShowAdd(false); setScheduleFor(null); }} onSaved={(msg) => { setShowAdd(false); setScheduleFor(null); onChange(); flash?.(msg); }} />}
-      {editing && <DebateModal editing={editing} channels={data.channels} spokespersons={data.spokespersons} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); onChange(); flash?.(msg); }} />}
       {showAddChannel && <ChannelModal onClose={() => setShowAddChannel(false)} onSaved={(msg) => { setShowAddChannel(false); onChange(); flash?.(msg); }} />}
     </div>
   );
@@ -1177,7 +1109,7 @@ function SpokespersonSelect({ options, value, onChange }) {
   );
 }
 
-function DebateModal({ channels, spokespersons, onClose, onSaved, editing, defaultChannelId }) {
+export function DebateModal({ channels, spokespersons, onClose, onSaved, editing, defaultChannelId }) {
   const [form, setForm] = useState(editing ? {
     channel_id: editing.channel_id || "", topic: editing.topic || "",
     debate_date: editing.debate_date ? editing.debate_date.slice(0, 10) : "",
