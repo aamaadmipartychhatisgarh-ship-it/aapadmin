@@ -59,6 +59,7 @@ export async function GET() {
         competitor2_party: r.competitor2_party ?? null,
         competitor2_votes: r.competitor2_votes ?? null,
         competitor_margin: r.competitor_margin ?? null,
+        mla_votes: r.mla_votes ?? null,
         assessment,
         total: assessmentTotal(assessment),
         assessment_done: assessmentComplete(assessment),

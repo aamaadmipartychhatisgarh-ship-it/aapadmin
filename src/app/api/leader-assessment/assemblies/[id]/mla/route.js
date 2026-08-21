@@ -29,17 +29,19 @@ export async function PUT(req, { params }) {
     if (!asm) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
     const d = await req.json().catch(() => ({}));
     if (!strOrNull(d.name)) return NextResponse.json({ message: "MLA name is required." }, { status: 400 });
-    let competitor1_votes, competitor2_votes;
+    let competitor1_votes, competitor2_votes, mla_votes;
     try {
+      mla_votes = votesOrThrow(d.mla_votes, "MLA Total Votes");
       competitor1_votes = votesOrThrow(d.competitor1_votes, "Total Votes 1");
       competitor2_votes = votesOrThrow(d.competitor2_votes, "Total Votes 2");
     } catch (msg) {
       return NextResponse.json({ message: String(msg) }, { status: 400 });
     }
-    // Margin is DERIVED, never taken from the client: ABS() guarantees it is never
-    // negative. It stays null until BOTH competitor vote counts are present.
-    const competitor_margin = competitor1_votes != null && competitor2_votes != null
-      ? Math.abs(competitor1_votes - competitor2_votes)
+    // Winning Margin is DERIVED, never taken from the client, and is ALWAYS
+    // (MLA votes − Competitor 1 votes). Competitor 2 NEVER affects it. Stays null
+    // until both MLA votes and Competitor 1 votes are present.
+    const competitor_margin = mla_votes != null && competitor1_votes != null
+      ? mla_votes - competitor1_votes
       : null;
     const cols = {
       photo_url: strOrNull(d.photo_url),
@@ -62,6 +64,7 @@ export async function PUT(req, { params }) {
       competitor2_party: strOrNull(d.competitor2_party),
       competitor2_votes,
       competitor_margin,
+      mla_votes,
     };
     const keys = Object.keys(cols);
     const [existing] = await query("SELECT id FROM la_mla_profiles WHERE assembly_id = ?", [id]);

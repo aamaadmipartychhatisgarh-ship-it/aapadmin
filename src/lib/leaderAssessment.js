@@ -238,6 +238,9 @@ export async function ensureLeaderAssessmentTables() {
   await ensureColumn("la_mla_profiles", "competitor2_party", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_profiles", "competitor2_votes", "INT NULL");
   await ensureColumn("la_mla_profiles", "competitor_margin", "INT NULL");
+  // Votes received by the current MLA. Winning Margin is derived as
+  // (mla_votes − competitor1_votes) — Competitor 2 never affects it.
+  await ensureColumn("la_mla_profiles", "mla_votes", "INT NULL");
   // Election History is entered against a person picked via District → Category
   // (AAP / MLA / Candidate) → Name; the category is stored so editing reloads it.
   await ensureColumn("la_mla_elections", "person_category", "VARCHAR(50) NULL");
