@@ -40,7 +40,7 @@ const TABS = [
   // Community). Not assembly-scoped.
   { key: "castes", label: "Caste Master", icon: Database, scoped: false },
   // Assembly-wise polling / electorate master (booths, voters, male, female).
-  { key: "polling", label: "Polling Station Master", icon: Building2, scoped: false },
+  { key: "polling", label: "Voter Master", icon: Building2, scoped: false },
   // The standalone "Political Analysis" tab was removed — its full functionality
   // (Top Reasons / Strengths / Weaknesses + Assembly Social Profile) lives in the
   // Full View modal (AssemblyFullView → AnalysisTab). Nothing was deleted.
@@ -104,6 +104,19 @@ async function api(url, opts) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.message || "Request failed");
   return data;
+}
+
+// Active castes from the centralized Caste Master — the SINGLE source for every
+// caste/community dropdown (Social Profile, MLA, Candidate). Loaded live, never
+// hardcoded, so adding/editing/deleting a caste in Caste Master flows everywhere.
+function useActiveCastes() {
+  const [castes, setCastes] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    api("/api/leader-assessment/castes?active=1").then((d) => { if (alive) setCastes(d.castes || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return castes;
 }
 
 export default function Page() {
@@ -957,6 +970,7 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
   const [errors, setErrors] = useState({}); // { assembly_id, name, _server }
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e)); };
   const age = ageOf(form.date_of_birth);
+  const casteOptions = useActiveCastes();
   // Live margin preview; the server recomputes and stores the authoritative value.
   const liveMargin = competitorMargin(form.competitor1_votes, form.competitor2_votes);
   // On create, hide assemblies that already have an MLA (prevents accidental
@@ -1009,7 +1023,11 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
         <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} /><Field label="Party" value={form.party} onChange={(v) => set("party", v)} />
         <Field label="Date of Birth" type="date" value={form.date_of_birth} onChange={(v) => set("date_of_birth", v)} />
         <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
-        <Field label="Caste" value={form.caste} onChange={(v) => set("caste", v)} /><Field label="Net Worth" value={form.net_worth} onChange={(v) => set("net_worth", v)} />
+        <div>
+          <span className={lbl}>Caste</span>
+          <CasteSelect value={{ caste_id: null, name: form.caste }} options={casteOptions} onPick={(p) => set("caste", p.name)} placeholder="Select from Caste Master" />
+        </div>
+        <Field label="Net Worth" value={form.net_worth} onChange={(v) => set("net_worth", v)} />
         <Field label="Criminal Cases" type="number" value={form.criminal_cases} onChange={(v) => set("criminal_cases", v)} />
         <Field label="Address" full value={form.address} onChange={(v) => set("address", v)} />
         <div className="col-span-2 border-t border-gray-100 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Political / Election details</div>
@@ -1204,6 +1222,7 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
   const [errors, setErrors] = useState({}); // { assembly_id, name, _server }
   const [showElections, setShowElections] = useState(false);
   const [electionsDraft, setElectionsDraft] = useState([]); // staged rows for a NEW candidate
+  const casteOptions = useActiveCastes();
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e)); };
   const age = ageOf(form.date_of_birth);
   async function persistPhoto(blob) {
@@ -1258,7 +1277,10 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
         <Field label="Full Name *" full value={form.name} onChange={(v) => set("name", v)} error={errors.name} />
         <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} /><Field label="Date of Birth" type="date" value={form.date_of_birth} onChange={(v) => set("date_of_birth", v)} />
         <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
-        <Field label="Caste" value={form.caste} onChange={(v) => set("caste", v)} />
+        <div>
+          <span className={lbl}>Caste</span>
+          <CasteSelect value={{ caste_id: null, name: form.caste }} options={casteOptions} onPick={(p) => set("caste", p.name)} placeholder="Select from Caste Master" />
+        </div>
         <Field label="Net Worth" value={form.net_worth} onChange={(v) => set("net_worth", v)} /><Field label="Business" value={form.business} onChange={(v) => set("business", v)} />
         <Field label="Monthly Income" value={form.monthly_income} onChange={(v) => set("monthly_income", v)} /><Field label="Education" value={form.education} onChange={(v) => set("education", v)} />
         <Field label="Type / Current Position" value={form.current_position} onChange={(v) => set("current_position", v)} /><Field label="Political Experience" value={form.political_experience} onChange={(v) => set("political_experience", v)} />
@@ -1818,6 +1840,16 @@ function CasteMaster({ flash, fail }) {
       await load();
     } catch (e) { fail(e.message); } finally { setBusyId(null); }
   }
+  async function removeCaste(c) {
+    const used = c.usage_count > 0 ? `\n\nIt is used by ${c.usage_count} record${c.usage_count === 1 ? "" : "s"} — those keep their recorded caste name, but lose the link to this master entry.` : "";
+    if (!confirm(`Delete "${c.name}" from the Caste Master? This cannot be undone.${used}\n\nTip: use Deactivate instead to keep it but hide it from new selections.`)) return;
+    setBusyId(c.id);
+    try {
+      await api(`/api/leader-assessment/castes/${c.id}`, { method: "DELETE" });
+      flash(`"${c.name}" deleted.`);
+      await load();
+    } catch (e) { fail(e.message); } finally { setBusyId(null); }
+  }
 
   return (
     <div className="space-y-4">
@@ -1880,6 +1912,7 @@ function CasteMaster({ flash, fail }) {
                         <button onClick={() => toggleActive(c)} disabled={busyId === c.id} className={`p-1.5 rounded-md ${c.is_active ? "text-gray-500 hover:text-red-600 hover:bg-red-50" : "text-gray-500 hover:text-emerald-600 hover:bg-emerald-50"}`} title={c.is_active ? "Deactivate" : "Activate"}>
                           {busyId === c.id ? <Loader2 size={15} className="animate-spin" /> : c.is_active ? <Power size={15} /> : <Check size={15} />}
                         </button>
+                        <button onClick={() => removeCaste(c)} disabled={busyId === c.id} className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50" title="Delete"><Trash2 size={15} /></button>
                       </div>
                     </td>
                   </tr>
@@ -2015,7 +2048,7 @@ function PollingMaster({ flash, fail }) {
   useEffect(() => { load(); }, [load]);
 
   const q = search.trim().toLowerCase();
-  const visible = items.filter((r) => !q || `${r.assembly_name} ${r.district || ""}`.toLowerCase().includes(q));
+  const visible = items.filter((r) => !q || `${r.assembly_name} ${r.district || ""} ${r.lok_sabha || ""} ${r.zone || ""}`.toLowerCase().includes(q));
   const withData = items.filter((r) => r.has_data).length;
 
   return (
@@ -2028,13 +2061,13 @@ function PollingMaster({ flash, fail }) {
       </div>
 
       <Card
-        title="Polling Station Master"
+        title="Voter Master"
         icon={Building2}
-        sub="Assembly-wise polling summary — Total Booths, Total Voters, Male & Female voters. Each record is tied to its Assembly by ID; select an assembly to view or edit only its data."
+        sub="Assembly-wise voter & booth data. District, Lok Sabha and Zone are derived automatically from Master Data by the selected Assembly (never typed). Each record is tied to its Assembly by ID; select an assembly to view or edit only its data."
       >
         <div className="relative max-w-md mb-4">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search assembly or district…" className={`${inp} pl-9`} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search assembly, district, Lok Sabha or zone…" className={`${inp} pl-9`} />
         </div>
 
         {loading ? (
@@ -2043,15 +2076,17 @@ function PollingMaster({ flash, fail }) {
           <div className="py-10 text-center text-sm text-gray-400">{items.length === 0 ? "No assemblies found." : "No assemblies match your search."}</div>
         ) : (
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm min-w-[720px]">
+            <table className="w-full text-sm min-w-[920px]">
               <thead>
                 <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
                   <th className="py-2 pr-3">Assembly</th>
                   <th className="py-2 pr-3">District</th>
-                  <th className="py-2 pr-3 text-right">Total Booths</th>
+                  <th className="py-2 pr-3">Lok Sabha</th>
+                  <th className="py-2 pr-3">Zone</th>
                   <th className="py-2 pr-3 text-right">Total Voters</th>
                   <th className="py-2 pr-3 text-right">Male</th>
                   <th className="py-2 pr-3 text-right">Female</th>
+                  <th className="py-2 pr-3 text-right">Total Booths</th>
                   <th className="py-2 pr-3 text-right w-24">Action</th>
                 </tr>
               </thead>
@@ -2060,15 +2095,17 @@ function PollingMaster({ flash, fail }) {
                   <tr key={r.assembly_id} className="border-b border-gray-50 hover:bg-gray-50/60">
                     <td className="py-2.5 pr-3 font-semibold text-gray-800">{r.assembly_name}</td>
                     <td className="py-2.5 pr-3 text-gray-600">{r.district || "—"}</td>
+                    <td className="py-2.5 pr-3 text-gray-600">{r.lok_sabha || "—"}</td>
+                    <td className="py-2.5 pr-3 text-gray-600">{r.zone || "—"}</td>
                     {r.has_data ? (
                       <>
-                        <td className="py-2.5 pr-3 text-right tabular-nums">{r.total_booths != null ? nfmt(r.total_booths) : "—"}</td>
                         <td className="py-2.5 pr-3 text-right tabular-nums">{r.total_voters != null ? nfmt(r.total_voters) : "—"}</td>
                         <td className="py-2.5 pr-3 text-right tabular-nums">{r.male_voters != null ? nfmt(r.male_voters) : "—"}</td>
                         <td className="py-2.5 pr-3 text-right tabular-nums">{r.female_voters != null ? nfmt(r.female_voters) : "—"}</td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums">{r.total_booths != null ? nfmt(r.total_booths) : "—"}</td>
                       </>
                     ) : (
-                      <td colSpan={4} className="py-2.5 pr-3 text-center text-gray-400 italic">No polling data available</td>
+                      <td colSpan={4} className="py-2.5 pr-3 text-center text-gray-400 italic">No voter data available</td>
                     )}
                     <td className="py-2.5 pr-3 text-right">
                       <button onClick={() => setEditing(r)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><Pencil size={13} /> {r.has_data ? "Edit" : "Add"}</button>
@@ -2089,6 +2126,7 @@ function PollingMaster({ flash, fail }) {
 function PollingEditor({ row, onClose, onSaved, fail }) {
   const [form, setForm] = useState({ total_booths: "", total_voters: "", male_voters: "", female_voters: "" });
   const [meta, setMeta] = useState(null); // { auto_booths, auto_polling_stations }
+  const [geo, setGeo] = useState({ district: row.district || null, lok_sabha: row.lok_sabha || null, zone: row.zone || null });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -2100,6 +2138,9 @@ function PollingEditor({ row, onClose, onSaved, fail }) {
         const d = await api(`/api/leader-assessment/polling/${row.assembly_id}`);
         if (!alive) return;
         const p = d.polling || {};
+        // District / Lok Sabha / Zone come from the server (Master Data tree) for
+        // the selected assembly — auto-loaded, never asked from the user.
+        setGeo({ district: d.assembly?.district || null, lok_sabha: d.assembly?.lok_sabha || null, zone: d.assembly?.zone || null });
         setForm({
           total_booths: p.total_booths ?? "",
           total_voters: p.total_voters ?? "",
@@ -2110,7 +2151,7 @@ function PollingEditor({ row, onClose, onSaved, fail }) {
       } catch (e) { setErr(e.message); } finally { if (alive) setLoading(false); }
     })();
     return () => { alive = false; };
-  }, [row.assembly_id]);
+  }, [row.assembly_id, row.district, row.lok_sabha, row.zone]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const num = (v) => { const s = String(v ?? "").trim(); return s === "" ? null : Number(s); };
@@ -2143,18 +2184,31 @@ function PollingEditor({ row, onClose, onSaved, fail }) {
   }
 
   return (
-    <Modal title={`Polling Data · ${row.assembly_name}`} onClose={onClose} wide>
+    <Modal title={`Voter Data · ${row.assembly_name}`} onClose={onClose} wide>
       {loading ? <LoadingBlock /> : (
         <div className="space-y-4">
-          <div className="text-sm text-gray-500 flex items-center gap-1.5"><MapPin size={14} className="text-[#164FA3]" /> {row.assembly_name}{row.district ? ` · ${row.district}` : ""}</div>
+          {/* Auto-derived from Master Data by the selected Assembly — read-only,
+              never manually entered. */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[["Assembly", row.assembly_name], ["District", geo.district], ["Lok Sabha", geo.lok_sabha], ["Zone", geo.zone]].map(([k, v]) => (
+              <div key={k} className="rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{k}</div>
+                <div className="text-sm font-semibold text-gray-800 truncate" title={v || ""}>{v || "—"}</div>
+              </div>
+            ))}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <Field label="Total Booths" type="number" value={form.total_booths} onChange={(v) => set("total_booths", v)} />
-              {meta?.auto_booths ? <div className="text-[11px] text-gray-400 mt-0.5">Master location tree currently has {nfmt(meta.auto_booths)} booth{meta.auto_booths === 1 ? "" : "s"}{meta.auto_polling_stations ? `, ${nfmt(meta.auto_polling_stations)} polling station${meta.auto_polling_stations === 1 ? "" : "s"}` : ""}.</div> : null}
-            </div>
             <Field label="Total Voters" type="number" value={form.total_voters} onChange={(v) => set("total_voters", v)} />
-            <Field label="Male Voters" type="number" value={form.male_voters} onChange={(v) => set("male_voters", v)} />
-            <Field label="Female Voters" type="number" value={form.female_voters} onChange={(v) => set("female_voters", v)} />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Male Voters" type="number" value={form.male_voters} onChange={(v) => set("male_voters", v)} />
+              <Field label="Female Voters" type="number" value={form.female_voters} onChange={(v) => set("female_voters", v)} />
+            </div>
+            <Field label="Total Booths" type="number" value={form.total_booths} onChange={(v) => set("total_booths", v)} />
+            <div>
+              <span className={lbl}>Polling Stations (auto)</span>
+              <div className={`${inp} bg-gray-50 text-gray-600`}>{meta?.auto_polling_stations != null ? nfmt(meta.auto_polling_stations) || 0 : "—"}</div>
+              {meta?.auto_booths ? <div className="text-[11px] text-gray-400 mt-0.5">Master location tree has {nfmt(meta.auto_booths)} booth{meta.auto_booths === 1 ? "" : "s"} mapped under this assembly.</div> : null}
+            </div>
           </div>
           <div className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg p-2.5">
             Male + Female = <span className={`font-semibold ${exceeds ? "text-red-600" : "text-gray-700"}`}>{nfmt(maleFemale) || 0}</span>

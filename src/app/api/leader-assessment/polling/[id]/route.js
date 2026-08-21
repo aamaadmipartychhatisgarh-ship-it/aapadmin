@@ -9,10 +9,13 @@ export const dynamic = "force-dynamic";
 // data (never the assembly name), so renamed/duplicate names can't mis-map data.
 async function loadAssembly(id) {
   const [a] = await query(
-    `SELECT a.id, a.location_id, ml.name AS name, dl.name AS district
+    `SELECT a.id, a.location_id, ml.name AS name,
+            dl.name AS district, lsl.name AS lok_sabha, zl.name AS zone
        FROM la_assemblies a
        JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
        LEFT JOIN locations dl ON dl.id = ml.parent_id AND dl.type = 'district'
+       LEFT JOIN locations lsl ON lsl.id = dl.parent_id AND lsl.type = 'lok_sabha'
+       LEFT JOIN locations zl ON zl.id = lsl.parent_id AND zl.type = 'zone'
       WHERE a.id = ?`,
     [id]
   );
@@ -31,7 +34,7 @@ export async function GET(_req, { params }) {
     const assembly = await loadAssembly(id);
     if (!assembly) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
     const polling = await pollingForAssembly(assembly);
-    return NextResponse.json({ assembly: { id: assembly.id, name: assembly.name, district: assembly.district || null }, polling }, { headers: noStore });
+    return NextResponse.json({ assembly: { id: assembly.id, name: assembly.name, district: assembly.district || null, lok_sabha: assembly.lok_sabha || null, zone: assembly.zone || null }, polling }, { headers: noStore });
   } catch (e) {
     console.error("[LA] polling GET:", e);
     return NextResponse.json({ message: "Failed to load polling data." }, { status: 500 });
@@ -86,7 +89,7 @@ export async function PUT(req, { params }) {
     await query("UPDATE la_assemblies SET total_voters = ?, total_booths = ? WHERE id = ?", [total_voters, total_booths, id]);
 
     const polling = await pollingForAssembly(assembly);
-    return NextResponse.json({ ok: true, assembly: { id: assembly.id, name: assembly.name, district: assembly.district || null }, polling }, { headers: noStore });
+    return NextResponse.json({ ok: true, assembly: { id: assembly.id, name: assembly.name, district: assembly.district || null, lok_sabha: assembly.lok_sabha || null, zone: assembly.zone || null }, polling }, { headers: noStore });
   } catch (e) {
     console.error("[LA] polling PUT:", e);
     return NextResponse.json({ message: "Failed to save polling data." }, { status: 500 });

@@ -84,3 +84,23 @@ export async function PUT(req, { params }) {
     return NextResponse.json({ message: "Failed to update the caste." }, { status: 500 });
   }
 }
+
+// DELETE /api/leader-assessment/castes/[id] — permanently remove a caste from the
+// master. Historical social-profile rows that referenced it keep their recorded
+// NAME (the FK is ON DELETE SET NULL, so only the caste_id link is cleared) — so
+// deleting never corrupts past records. Deactivate instead if you only want to
+// hide it from new selections.
+export async function DELETE(_req, { params }) {
+  const { error } = await guard();
+  if (error) return error;
+  try {
+    const { id } = await params;
+    if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid caste id." }, { status: 400 });
+    const res = await query("DELETE FROM la_castes WHERE id = ?", [id]);
+    if (!res.affectedRows) return NextResponse.json({ message: "Caste not found." }, { status: 404 });
+    return NextResponse.json({ ok: true }, { headers: noStore });
+  } catch (e) {
+    console.error("[LA] caste DELETE:", e);
+    return NextResponse.json({ message: "Failed to delete the caste." }, { status: 500 });
+  }
+}
