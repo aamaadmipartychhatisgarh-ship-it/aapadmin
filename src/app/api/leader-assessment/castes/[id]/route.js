@@ -13,14 +13,17 @@ export async function GET(_req, { params }) {
     const { id } = await params;
     if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid caste id." }, { status: 400 });
     const [row] = await query(
-      `SELECT c.id, c.name, c.is_active, c.created_at, c.updated_at,
+      `SELECT c.id, c.name, c.is_active, c.polling_station_id, ps.name AS polling_station_name,
+              c.created_at, c.updated_at,
               (SELECT COUNT(*) FROM la_social_structure s WHERE s.caste_id = c.id) AS usage_count
-         FROM la_castes c WHERE c.id = ?`,
+         FROM la_castes c
+         LEFT JOIN locations ps ON ps.id = c.polling_station_id AND ps.type = 'polling_station'
+        WHERE c.id = ?`,
       [id]
     );
     if (!row) return NextResponse.json({ message: "Caste not found." }, { status: 404 });
     return NextResponse.json(
-      { caste: { ...row, is_active: !!Number(row.is_active), usage_count: Number(row.usage_count) || 0 } },
+      { caste: { ...row, is_active: !!Number(row.is_active), polling_station_id: row.polling_station_id ?? null, polling_station_name: row.polling_station_name || null, usage_count: Number(row.usage_count) || 0 } },
       { headers: noStore }
     );
   } catch (e) {
@@ -59,6 +62,17 @@ export async function PUT(req, { params }) {
     if (d?.is_active !== undefined) {
       sets.push("is_active = ?"); args.push(d.is_active ? 1 : 0);
     }
+    // Polling station (required whenever it's part of the edit). Validate against
+    // Master Data so an invalid/non-existing id can never be saved.
+    if (d?.polling_station_id !== undefined) {
+      if (d.polling_station_id == null || d.polling_station_id === "" || !/^\d+$/.test(String(d.polling_station_id))) {
+        return NextResponse.json({ message: "Please select a Polling Station." }, { status: 400 });
+      }
+      const psId = Number(d.polling_station_id);
+      const [ps] = await query("SELECT id FROM locations WHERE id = ? AND type = 'polling_station'", [psId]);
+      if (!ps) return NextResponse.json({ message: "The selected Polling Station no longer exists. Refresh and try again." }, { status: 400 });
+      sets.push("polling_station_id = ?"); args.push(psId);
+    }
     if (!sets.length) return NextResponse.json({ message: "Nothing to update." }, { status: 400 });
 
     try {
@@ -70,13 +84,16 @@ export async function PUT(req, { params }) {
       throw e;
     }
     const [row] = await query(
-      `SELECT c.id, c.name, c.is_active, c.created_at, c.updated_at,
+      `SELECT c.id, c.name, c.is_active, c.polling_station_id, ps.name AS polling_station_name,
+              c.created_at, c.updated_at,
               (SELECT COUNT(*) FROM la_social_structure s WHERE s.caste_id = c.id) AS usage_count
-         FROM la_castes c WHERE c.id = ?`,
+         FROM la_castes c
+         LEFT JOIN locations ps ON ps.id = c.polling_station_id AND ps.type = 'polling_station'
+        WHERE c.id = ?`,
       [id]
     );
     return NextResponse.json(
-      { ok: true, caste: { ...row, is_active: !!Number(row.is_active), usage_count: Number(row.usage_count) || 0 } },
+      { ok: true, caste: { ...row, is_active: !!Number(row.is_active), polling_station_id: row.polling_station_id ?? null, polling_station_name: row.polling_station_name || null, usage_count: Number(row.usage_count) || 0 } },
       { headers: noStore }
     );
   } catch (e) {

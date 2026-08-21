@@ -27,9 +27,11 @@ export async function GET(req) {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const rows = await query(
-      `SELECT c.id, c.name, c.is_active, c.created_at, c.updated_at,
+      `SELECT c.id, c.name, c.is_active, c.polling_station_id, ps.name AS polling_station_name,
+              c.created_at, c.updated_at,
               (SELECT COUNT(*) FROM la_social_structure s WHERE s.caste_id = c.id) AS usage_count
          FROM la_castes c
+         LEFT JOIN locations ps ON ps.id = c.polling_station_id AND ps.type = 'polling_station'
          ${whereSql}
         ORDER BY c.is_active DESC, c.name ASC`,
       args
@@ -38,6 +40,8 @@ export async function GET(req) {
       id: r.id,
       name: r.name,
       is_active: !!Number(r.is_active),
+      polling_station_id: r.polling_station_id ?? null,
+      polling_station_name: r.polling_station_name || null,
       usage_count: Number(r.usage_count) || 0,
       created_at: r.created_at,
       updated_at: r.updated_at,
@@ -62,6 +66,15 @@ export async function POST(req) {
     if (!name) return NextResponse.json({ message: "Caste / community name is required." }, { status: 400 });
     if (name.length > 255) return NextResponse.json({ message: "Name is too long (max 255 characters)." }, { status: 400 });
 
+    // Polling Station is required and must be a real polling station from Master
+    // Data (locations type='polling_station') — the single source of truth.
+    if (d?.polling_station_id == null || d.polling_station_id === "" || !/^\d+$/.test(String(d.polling_station_id))) {
+      return NextResponse.json({ message: "Please select a Polling Station." }, { status: 400 });
+    }
+    const pollingStationId = Number(d.polling_station_id);
+    const [ps] = await query("SELECT id FROM locations WHERE id = ? AND type = 'polling_station'", [pollingStationId]);
+    if (!ps) return NextResponse.json({ message: "The selected Polling Station no longer exists. Refresh and try again." }, { status: 400 });
+
     // Duplicate guard (case-insensitive). The UNIQUE key is the hard backstop;
     // this explicit check returns a friendlier message before we hit it.
     const [dup] = await query("SELECT id, name, is_active FROM la_castes WHERE name = ?", [name]);
@@ -74,7 +87,7 @@ export async function POST(req) {
     const isActive = d?.is_active === false ? 0 : 1;
     let res;
     try {
-      res = await query("INSERT INTO la_castes (name, is_active) VALUES (?, ?)", [name, isActive]);
+      res = await query("INSERT INTO la_castes (name, is_active, polling_station_id) VALUES (?, ?, ?)", [name, isActive, pollingStationId]);
     } catch (e) {
       if (e && (e.code === "ER_DUP_ENTRY" || e.errno === 1062)) {
         return NextResponse.json({ message: `"${name}" already exists in the caste master.` }, { status: 409 });

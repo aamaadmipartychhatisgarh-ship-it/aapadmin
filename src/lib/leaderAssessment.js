@@ -268,6 +268,10 @@ export async function ensureLeaderAssessmentTables() {
          ADD CONSTRAINT fk_la_social_caste FOREIGN KEY (caste_id) REFERENCES la_castes(id) ON DELETE SET NULL`
     );
   } catch { /* constraint already exists (or engine skips) */ }
+  // A caste may be linked to a polling station (locations.id where
+  // type='polling_station') — the Polling Station Master. Stored by ID; no FK so
+  // deleting a location never cascades a caste away (the API validates the id).
+  await ensureColumn("la_castes", "polling_station_id", "INT NULL");
   await seedCastesFromExisting();
   await seedPollingFromAssemblies();
   await syncAssemblies();

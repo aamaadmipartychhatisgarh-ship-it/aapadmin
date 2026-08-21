@@ -1945,11 +1945,12 @@ export function CasteMaster({ flash, fail }) {
           <div className="py-10 text-center text-sm text-gray-400">{castes.length === 0 ? "No castes yet. Click “Add Caste” to create the first one." : "No castes match your search."}</div>
         ) : (
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm min-w-[640px]">
+            <table className="w-full text-sm min-w-[760px]">
               <thead>
                 <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
                   <th className="py-2 pr-3 w-16">ID</th>
                   <th className="py-2 pr-3">Name</th>
+                  <th className="py-2 pr-3">Polling Station</th>
                   <th className="py-2 pr-3 w-24">Status</th>
                   <th className="py-2 pr-3 w-20">Used</th>
                   <th className="py-2 pr-3 w-36">Created</th>
@@ -1962,6 +1963,7 @@ export function CasteMaster({ flash, fail }) {
                   <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/60">
                     <td className="py-2.5 pr-3 text-gray-400 font-mono text-xs">#{c.id}</td>
                     <td className="py-2.5 pr-3 font-semibold text-gray-800">{c.name}</td>
+                    <td className="py-2.5 pr-3 text-gray-600">{c.polling_station_name || <span className="text-gray-300">—</span>}</td>
                     <td className="py-2.5 pr-3">
                       <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.is_active ? "Active" : "Deactivated"}</span>
                     </td>
@@ -1990,12 +1992,79 @@ export function CasteMaster({ flash, fail }) {
   );
 }
 
+// Merge freshly-fetched options into any pre-seeded list, de-duplicated by id.
+// Keeps the pre-seeded saved option (so an edited record's current value shows
+// immediately, even before the full list loads) and normalizes to { id, name }.
+function mergeOptions(prev, incoming) {
+  const byId = new Map();
+  for (const o of prev || []) {
+    if (o?.id != null) byId.set(Number(o.id), { id: Number(o.id), name: o.name || `#${o.id}` });
+  }
+  for (const o of incoming || []) {
+    if (o?.id != null) byId.set(Number(o.id), { id: Number(o.id), name: o.name || `#${o.id}` });
+  }
+  return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Searchable / scrollable single-select over id-keyed options ([{ id, name }]).
+// `value` is the id as a string (""=none); `onChange(idString)` fires on pick.
+// Used for the Polling Station picker so a long Master list stays usable.
+function IdSearchSelect({ value, options, onChange, placeholder = "Select…", emptyText = "No options found." }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const selected = (options || []).find((o) => String(o.id) === String(value));
+  const label = selected?.name || "";
+  const ql = q.trim().toLowerCase();
+  const list = (options || []).filter((o) => !ql || o.name.toLowerCase().includes(ql));
+
+  return (
+    <div className="relative w-full">
+      <button type="button" onClick={() => { setOpen((o) => !o); setQ(""); }} className={`${inp} flex items-center justify-between gap-2 text-left`}>
+        <span className={label ? "text-gray-800 truncate" : "text-gray-400"}>{label || placeholder}</span>
+        <ChevronDown size={15} className="text-gray-400 shrink-0" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+          <div className="absolute z-[61] mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto">
+            <div className="p-2 sticky top-0 bg-white border-b border-gray-100">
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className={`${inp} text-sm py-1.5`} />
+            </div>
+            {list.length === 0 ? (
+              <div className="px-3 py-3 text-sm text-gray-400">{emptyText}</div>
+            ) : list.map((o) => (
+              <button key={o.id} type="button" onClick={() => { onChange(String(o.id)); setOpen(false); }} className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between gap-2 ${String(o.id) === String(value) ? "bg-blue-50/60 font-semibold text-[#164FA3]" : "text-gray-700"}`}>
+                <span className="truncate">{o.name}</span>
+                {String(o.id) === String(value) && <Check size={14} className="text-[#164FA3] shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CasteEditor({ caste, existing, onClose, onSaved, fail }) {
   const isNew = !caste?.id;
   const [name, setName] = useState(caste?.name || "");
   const [active, setActive] = useState(caste?.is_active !== false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  // Polling Station — required, chosen from the Polling Station Master
+  // (locations type='polling_station'). Store the id; keep the saved name so an
+  // edit shows the current value even before the option list loads.
+  const [psId, setPsId] = useState(caste?.polling_station_id != null ? String(caste.polling_station_id) : "");
+  const [psOptions, setPsOptions] = useState(caste?.polling_station_id != null ? [{ id: caste.polling_station_id, name: caste.polling_station_name || `#${caste.polling_station_id}` }] : []);
+  const [psLoading, setPsLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    api("/api/locations?type=polling_station")
+      .then((d) => { if (alive) setPsOptions((prev) => mergeOptions(prev, d.locations || [])); })
+      .catch(() => {})
+      .finally(() => { if (alive) setPsLoading(false); });
+    return () => { alive = false; };
+  }, []);
 
   // Live client-side duplicate hint (case-insensitive) so the admin sees the
   // clash before submitting; the server enforces it authoritatively too.
@@ -2006,13 +2075,15 @@ function CasteEditor({ caste, existing, onClose, onSaved, fail }) {
     const clean = name.replace(/\s+/g, " ").trim();
     if (!clean) { setErr("Caste / community name is required."); return; }
     if (dup) { setErr(`"${clean}" already exists in the caste master.`); return; }
+    if (!psId) { setErr("Please select a Polling Station."); return; }
     setSaving(true); setErr("");
+    const body = { name: clean, is_active: active, polling_station_id: Number(psId) };
     try {
       if (isNew) {
-        await api("/api/leader-assessment/castes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: clean, is_active: active }) });
+        await api("/api/leader-assessment/castes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         onSaved(`"${clean}" added to the caste master.`);
       } else {
-        await api(`/api/leader-assessment/castes/${caste.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: clean, is_active: active }) });
+        await api(`/api/leader-assessment/castes/${caste.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         onSaved(`"${clean}" updated.`);
       }
     } catch (e) { setErr(e.message); } finally { setSaving(false); }
@@ -2022,9 +2093,14 @@ function CasteEditor({ caste, existing, onClose, onSaved, fail }) {
     <Modal title={isNew ? "Add Caste / Community" : "Edit Caste / Community"} onClose={onClose}>
       <div className="space-y-4">
         <div>
-          <label className={lbl}>Name <span className="text-red-500">*</span></label>
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !dup) save(); }} placeholder="e.g. Yadav, Sahu, Satnami…" className={inp} />
+          <label className={lbl}>Caste Name <span className="text-red-500">*</span></label>
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Yadav, Sahu, Satnami…" className={inp} />
           {dup && <div className="text-[11px] text-amber-600 mt-1">This name already exists in the caste master.</div>}
+        </div>
+        <div>
+          <label className={lbl}>Polling Station <span className="text-red-500">*</span></label>
+          <IdSearchSelect value={psId} options={psOptions} onChange={setPsId} placeholder={psLoading ? "Loading polling stations…" : "Select a polling station"} emptyText="No polling stations found in Master Data." />
+          <p className="text-[11px] text-gray-400 mt-1">From the Polling Station Master (Master Data). Searchable.</p>
         </div>
         <label className="flex items-center gap-2 text-sm text-gray-700 select-none cursor-pointer">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="rounded border-gray-300" />
