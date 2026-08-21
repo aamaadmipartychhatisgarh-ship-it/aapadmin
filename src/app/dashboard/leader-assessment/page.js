@@ -1900,7 +1900,6 @@ export function CasteMaster({ flash, fail }) {
 
   const q = search.trim().toLowerCase();
   const visible = castes.filter((c) => (showInactive || c.is_active) && (!q || c.name.toLowerCase().includes(q)));
-  const activeCount = castes.filter((c) => c.is_active).length;
 
   async function toggleActive(c) {
     setBusyId(c.id);
@@ -1923,13 +1922,6 @@ export function CasteMaster({ flash, fail }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat label="Total Castes" value={castes.length} />
-        <Stat label="Active" value={activeCount} />
-        <Stat label="Deactivated" value={castes.length - activeCount} />
-        <Stat label="In Use" value={castes.filter((c) => c.usage_count > 0).length} hint="Referenced by a social profile" />
-      </div>
-
       <Card
         title="Caste / Community Master"
         icon={Database}
@@ -2119,17 +2111,9 @@ export function PollingMaster({ flash, fail }) {
 
   const q = search.trim().toLowerCase();
   const visible = items.filter((r) => !q || `${r.assembly_name} ${r.district || ""} ${r.lok_sabha || ""} ${r.zone || ""}`.toLowerCase().includes(q));
-  const withData = items.filter((r) => r.has_data).length;
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat label="Assemblies" value={items.length} />
-        <Stat label="With Polling Data" value={withData} />
-        <Stat label="Pending" value={items.length - withData} hint="No polling data yet" />
-        <Stat label="Total Voters (all)" value={nfmt(items.reduce((s, r) => s + (Number(r.total_voters) || 0), 0)) || 0} />
-      </div>
-
       <Card
         title="Voter Master"
         icon={Building2}
