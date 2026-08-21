@@ -178,12 +178,35 @@ function NewspapersTab({ data, onChange, flash }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showAddNewspaper, setShowAddNewspaper] = useState(false);
   const [uploadFor, setUploadFor] = useState(null); // newspaper id to pre-select on Upload
+  // Dedicated Lok Sabha-wise search over the newspaper cards. "" = no filter;
+  // "__all__" = papers mapped to All Lok Sabha; otherwise a specific Lok Sabha id.
+  const [lokSearch, setLokSearch] = useState("");
+  const [lokOptions, setLokOptions] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/locations?type=lok_sabha")
+      .then((r) => (r.ok ? r.json() : { locations: [] }))
+      .then((d) => { if (alive) setLokOptions(d.locations || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // Open the upload flow pre-associated with this newspaper.
   const uploadForNewspaper = (np) => { setUploadFor(np.id); setShowAdd(true); };
   // Published List opens a DEDICATED page for that newspaper (by its ID), not an
   // inline section below the cards.
   const viewListFor = (np) => router.push(`/dashboard/media/newspapers/${np.id}/published-list`);
+
+  // Filter the cards by the selected Lok Sabha using the ID relationship (never
+  // the display name). No new list is created — the same cards are filtered.
+  const allCards = data.newspaperStats || [];
+  const shownCards = allCards.filter((np) => {
+    if (!lokSearch) return true;
+    if (lokSearch === "__all__") return !!np.lok_sabha_all;
+    return String(np.lok_sabha_id || "") === String(lokSearch);
+  });
+  const selectedLokName = lokSearch === "__all__" ? "All Lok Sabha (constituency-wide)" : (lokOptions.find((o) => String(o.id) === String(lokSearch))?.name || "");
 
   return (
     <div className="space-y-6">
@@ -197,13 +220,39 @@ function NewspapersTab({ data, onChange, flash }) {
           <Plus size={15} /> Add Newspaper
         </button>
       </div>
+
+      {/* Dedicated Lok Sabha-wise search — separate from the cards. Options are
+          fetched live from the Lok Sabha Master (nothing hardcoded). */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5"><Search size={15} className="text-[#164FA3]" /> Lok Sabha Search</span>
+          <select value={lokSearch} onChange={(e) => setLokSearch(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3] min-w-[200px]">
+            <option value="">All Lok Sabha (show all)</option>
+            <option value="__all__">All (constituency-wide papers)</option>
+            {lokOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          {lokSearch && (
+            <>
+              <span className="text-xs text-gray-500">Showing newspapers mapped to <span className="font-semibold text-[#164FA3]">{selectedLokName || "—"}</span> ({shownCards.length})</span>
+              <button onClick={() => setLokSearch("")} className="text-sm text-gray-500 hover:text-red-600 inline-flex items-center gap-1 ml-auto"><X size={14} /> Clear</button>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* One reusable NewspaperCard per newspaper. "Published List" navigates to a
           dedicated per-newspaper page; nothing renders inline below the cards. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {(data.newspaperStats || []).map((np) => (
-          <NewspaperCard key={np.id} np={np} onUpload={uploadForNewspaper} onViewList={viewListFor} />
-        ))}
-      </div>
+      {shownCards.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-400">
+          {allCards.length === 0 ? "No newspapers yet — add one above." : "No newspapers are mapped to the selected Lok Sabha."}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {shownCards.map((np) => (
+            <NewspaperCard key={np.id} np={np} onUpload={uploadForNewspaper} onViewList={viewListFor} />
+          ))}
+        </div>
+      )}
 
       {showAdd && <PressNoteModal newspapers={data.newspapers} defaultNewspaperId={uploadFor} onClose={() => { setShowAdd(false); setUploadFor(null); }} onSaved={(msg) => { setShowAdd(false); setUploadFor(null); onChange(); flash?.(msg); }} />}
       {showAddNewspaper && <NewspaperModal onClose={() => setShowAddNewspaper(false)} onSaved={(msg) => { setShowAddNewspaper(false); onChange(); flash?.(msg); }} />}
