@@ -35,12 +35,10 @@ const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, scoped: false },
   { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: false },
   { key: "candidates", label: "AAP Candidates", icon: Users, scoped: false },
-  // Centralized Caste / Community master — the single source of truth for every
-  // Caste/Community value used across the module (Assembly Social Profile · Add
-  // Community). Not assembly-scoped.
-  { key: "castes", label: "Caste Master", icon: Database, scoped: false },
-  // Assembly-wise polling / electorate master (booths, voters, male, female).
-  { key: "polling", label: "Voter Master", icon: Building2, scoped: false },
+  // Caste Master and Voter Master (Polling Station Master) were MOVED to
+  // Administration → they are no longer tabs here. The CasteMaster / PollingMaster
+  // components are still defined in this file and exported for that page to reuse
+  // (one implementation, no duplication).
   // The standalone "Political Analysis" tab was removed — its full functionality
   // (Top Reasons / Strengths / Weaknesses + Assembly Social Profile) lives in the
   // Full View modal (AssemblyFullView → AnalysisTab). Nothing was deleted.
@@ -169,8 +167,6 @@ function Body() {
       {tab === "overview" && <Overview flash={flash} fail={fail} />}
       {tab === "mla" && <MlaManager flash={flash} fail={fail} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
-      {tab === "castes" && <CasteMaster flash={flash} fail={fail} />}
-      {tab === "polling" && <PollingMaster flash={flash} fail={fail} />}
     </div>
   );
 }
@@ -1885,7 +1881,7 @@ function AnalysisTab({ b, onChange, flash, fail }) {
 // and Activate/Deactivate castes. Every caste has a Unique ID, Name, Status and
 // Created/Updated timestamps. Deactivating never deletes and never touches
 // historical records — it only stops a caste appearing for NEW selections.
-function CasteMaster({ flash, fail }) {
+export function CasteMaster({ flash, fail }) {
   const [castes, setCastes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -2108,7 +2104,7 @@ function fmtDateTime(v) {
 // record is keyed to its assembly by ID (never by name), so data is never mixed
 // between assemblies. An assembly with no record shows "No polling data available"
 // rather than a fake 0. Search/select an assembly, then edit its figures.
-function PollingMaster({ flash, fail }) {
+export function PollingMaster({ flash, fail }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");

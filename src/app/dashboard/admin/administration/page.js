@@ -3,18 +3,25 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, UserCog } from "lucide-react";
+import { Loader2, UserCog, CheckCircle2, AlertCircle } from "lucide-react";
 import { isOversight, isSuperAdmin } from "@/lib/permissions";
 import PageHeader from "@/components/PageHeader";
 import TeamsTab from "./TeamsTab";
 import UsersTab from "./UsersTab";
 import MasterDataSettings from "../settings/page";
+// Caste Master + Voter (Polling Station) Master were moved here from the Leader
+// Assessment module. Reuse the EXACT same components (same APIs, same records) —
+// no duplicate implementation.
+import { CasteMaster, PollingMaster } from "@/app/dashboard/leader-assessment/page";
 
 const TABS = [
   { key: "teams", label: "Teams" },
   { key: "users", label: "Users" },
   { key: "master", label: "Master Data" },
+  { key: "castes", label: "Caste Master" },
+  { key: "polling", label: "Polling Station Master" },
 ];
+const ADMIN_MASTER_TABS = new Set(["castes", "polling"]);
 
 // The people-management hub — Teams and Users are tabs on one page rather
 // than separate routes. Worker Management (a third "Workers" tab here, plus
@@ -45,10 +52,15 @@ function Body({ session }) {
   const [tab, setTab] = useState(() => {
     if (typeof window !== "undefined") {
       const t = new URLSearchParams(window.location.search).get("tab");
+      if (ADMIN_MASTER_TABS.has(t)) return t;
       if ((t === "users" || t === "master") && canSeeUsers) return t;
     }
     return "teams";
   });
+  const [toast, setToast] = useState(null); // { kind: 'ok'|'err', text }
+  useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 3500); return () => clearTimeout(id); }, [toast]);
+  const flash = (m) => setToast({ kind: "ok", text: m });
+  const fail = (m) => setToast({ kind: "err", text: m });
   // The lazy initializer above only covers a hard page load. A client-side
   // redirect (the old /dashboard/admin/workers URLs bouncing here with
   // ?tab=teams — see next.config.mjs) mounts this component before
@@ -56,7 +68,8 @@ function Body({ session }) {
   // params directly.
   useEffect(() => {
     const t = searchParams.get("tab");
-    if ((t === "users" || t === "master") && canSeeUsers) setTab(t);
+    if (ADMIN_MASTER_TABS.has(t)) setTab(t);
+    else if ((t === "users" || t === "master") && canSeeUsers) setTab(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, canSeeUsers]);
 
@@ -73,10 +86,17 @@ function Body({ session }) {
 
   // Master Data (like Users) is shown to super admins here — it was moved off
   // the Super Admin sidebar into this Administration tab.
-  const visibleTabs = TABS.filter((t) => t.key === "teams" || ((t.key === "users" || t.key === "master") && canSeeUsers));
+  // Caste Master + Polling Station Master are available to any oversight user who
+  // can reach this page (same gate their APIs use).
+  const visibleTabs = TABS.filter((t) => t.key === "teams" || ADMIN_MASTER_TABS.has(t.key) || ((t.key === "users" || t.key === "master") && canSeeUsers));
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {toast && (
+        <div className={`fixed top-4 right-4 z-[80] flex items-center gap-2 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg ${toast.kind === "ok" ? "bg-emerald-600" : "bg-red-600"}`}>
+          {toast.kind === "ok" ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}{toast.text}
+        </div>
+      )}
       <PageHeader
         icon={UserCog}
         title="Administration"
@@ -103,6 +123,8 @@ function Body({ session }) {
       {tab === "teams" && <TeamsTab session={session} />}
       {tab === "users" && canSeeUsers && <UsersTab session={session} />}
       {tab === "master" && canSeeUsers && <MasterDataSettings embedded />}
+      {tab === "castes" && <CasteMaster flash={flash} fail={fail} />}
+      {tab === "polling" && <PollingMaster flash={flash} fail={fail} />}
     </div>
   );
 }
