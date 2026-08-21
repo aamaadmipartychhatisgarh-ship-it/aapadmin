@@ -838,20 +838,23 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
         </div>
       </div>
 
-      {/* 10-parameter assessment */}
+      {/* 10-parameter assessment — ALL ten parameters in ONE horizontal row on
+          desktop; scrolls sideways on narrow screens instead of stacking. Scores
+          come from the saved MLA assessment (mla.assessment). */}
       <div>
         <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">10-Parameter Assessment</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
-          {PARAMS.map((p, i) => {
-            const v = mla.assessment?.[p.key];
-            return (
-              <div key={p.key} className="flex items-center gap-2 text-sm">
-                <span className="text-gray-400 w-5 shrink-0">{i + 1}.</span>
-                <span className="text-gray-700 flex-1 truncate">{p.label}</span>
-                <span className="font-semibold text-gray-900 shrink-0">{v != null ? v : "—"}<span className="text-gray-400 font-normal">/10</span></span>
-              </div>
-            );
-          })}
+        <div className="overflow-x-auto -mx-1 px-1">
+          <div className="flex items-stretch gap-2 min-w-max">
+            {PARAMS.map((p, i) => {
+              const v = mla.assessment?.[p.key];
+              return (
+                <div key={p.key} className="shrink-0 w-[112px] rounded-xl border border-gray-100 bg-gray-50/60 px-2.5 py-2 text-center">
+                  <div className="text-[10px] font-semibold text-gray-400 leading-tight truncate" title={p.label}><span className="text-gray-300">{i + 1}</span> {p.label}</div>
+                  <div className="mt-1 text-sm font-bold text-gray-900">{v != null ? v : "—"}<span className="text-gray-400 font-normal text-xs">/10</span></div>
+                </div>
+              );
+            })}
+          </div>
         </div>
         <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-700">Total Score</span>
