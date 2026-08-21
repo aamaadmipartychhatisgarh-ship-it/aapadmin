@@ -411,7 +411,7 @@ function Overview({ flash, fail }) {
                     <td className="px-3 py-2.5">{a.completed
                       ? <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Completed</span>
                       : <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Pending</span>}</td>
-                    <td className="px-3 py-2.5 text-right"><button onClick={() => openAssemblyFullView(a.id)} className="text-[#164FA3] font-semibold hover:underline text-xs">Open →</button></td>
+                    <td className="px-3 py-2.5 text-right"><button type="button" onClick={() => openAssemblyFullView(a.id)} className="text-[#164FA3] font-semibold hover:underline text-xs">Open →</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -522,7 +522,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
         icon={ClipboardCheck}
         sub={[assembly.district, assembly.number ? `Seat #${assembly.number}` : null].filter(Boolean).join(" · ")}
         right={
-          <button onClick={() => onOpen(assembly.id)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
+          <button type="button" onClick={() => onOpen(assembly.id)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
             <BarChart3 size={16} /> Full View
           </button>
         }
