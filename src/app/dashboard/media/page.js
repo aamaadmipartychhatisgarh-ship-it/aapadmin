@@ -10,6 +10,7 @@ import {
 import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 import FloatingPopover from "@/components/FloatingPopover";
 import Avatar from "@/components/Avatar";
+import { useRouter } from "next/navigation";
 
 export default function Page() {
   return <SupervisorGuard allow={canAccessMedia}><Body /></SupervisorGuard>;
@@ -172,50 +173,17 @@ function contentLabel(kind) {
 }
 const NEWSPAPER_OTHER = "__other__";
 
-function NewspapersTab({ data, onChange, flash, filtered }) {
+function NewspapersTab({ data, onChange, flash }) {
+  const router = useRouter();
   const [showAdd, setShowAdd] = useState(false);
-  const [editing, setEditing] = useState(null);
   const [showAddNewspaper, setShowAddNewspaper] = useState(false);
-  // Published List local filters (Date / Lok Sabha / Title / Newspaper) — applied
-  // on top of the real DB rows in data.recentNotes (no dummy data).
-  const [fDate, setFDate] = useState("");
-  const [fLok, setFLok] = useState("");
-  const [fTitle, setFTitle] = useState("");
-  const [fNewspaper, setFNewspaper] = useState(null); // { id, name } | null
-  const [lokOptions, setLokOptions] = useState([]);
-  const [preview, setPreview] = useState(null); // full-size newspaper cutting URL
   const [uploadFor, setUploadFor] = useState(null); // newspaper id to pre-select on Upload
-  const listRef = useRef(null);
-
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/locations?type=lok_sabha")
-      .then((r) => (r.ok ? r.json() : { locations: [] }))
-      .then((d) => { if (alive) setLokOptions(d.locations || []); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
 
   // Open the upload flow pre-associated with this newspaper.
   const uploadForNewspaper = (np) => { setUploadFor(np.id); setShowAdd(true); };
-  // Show only THIS newspaper's published records and jump to the list.
-  const viewListFor = (np) => {
-    setFNewspaper({ id: np.id, name: np.name });
-    setTimeout(() => listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-  };
-
-  const hasFilters = fDate || fLok || fTitle.trim() || fNewspaper;
-  const q = fTitle.trim().toLowerCase();
-  const publishedRows = (data.recentNotes || []).filter((n) => {
-    if (fNewspaper && String(n.newspaper_id || "") !== String(fNewspaper.id)) return false;
-    if (fDate && (n.coverage_date?.slice(0, 10) !== fDate)) return false;
-    if (fLok) {
-      if (fLok === "__all__") { if (!n.lok_sabha_all) return false; }
-      else if (String(n.lok_sabha_id || "") !== String(fLok)) return false;
-    }
-    if (q && !String(n.title || "").toLowerCase().includes(q)) return false;
-    return true;
-  });
+  // Published List opens a DEDICATED page for that newspaper (by its ID), not an
+  // inline section below the cards.
+  const viewListFor = (np) => router.push(`/dashboard/media/newspapers/${np.id}/published-list`);
 
   return (
     <div className="space-y-6">
@@ -229,98 +197,15 @@ function NewspapersTab({ data, onChange, flash, filtered }) {
           <Plus size={15} /> Add Newspaper
         </button>
       </div>
-      {/* One reusable NewspaperCard per newspaper — identical design/structure for
-          every newspaper. Total Published is the live DB coverage count. */}
+      {/* One reusable NewspaperCard per newspaper. "Published List" navigates to a
+          dedicated per-newspaper page; nothing renders inline below the cards. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {(data.newspaperStats || []).map((np) => (
           <NewspaperCard key={np.id} np={np} onUpload={uploadForNewspaper} onViewList={viewListFor} />
         ))}
       </div>
 
-      <div ref={listRef} className="flex items-center justify-between gap-3 flex-wrap scroll-mt-4">
-        <div>
-          <h3 className="font-bold text-gray-900">Published List</h3>
-          {fNewspaper && <div className="text-xs text-gray-500 mt-0.5">Showing only <span className="font-semibold text-[#164FA3]">{fNewspaper.name}</span></div>}
-        </div>
-        <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-1.5 rounded-lg text-sm font-semibold">
-          <Plus size={14} /> Upload
-        </button>
-      </div>
-
-      {/* Search / Filters — Date · Lok Sabha · Title · Clear. All filter the real
-          DB rows client-side; combined with AND (a row must match every set filter). */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Date</label>
-            <input type="date" value={fDate} onChange={(e) => setFDate(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
-          </div>
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Lok Sabha</label>
-            <select value={fLok} onChange={(e) => setFLok(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3] min-w-[160px]">
-              <option value="">All Lok Sabha</option>
-              <option value="__all__">All (constituency-wide papers)</option>
-              {lokOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </div>
-          <div className="flex-1 min-w-[180px]">
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Search by Title</label>
-            <input value={fTitle} onChange={(e) => setFTitle(e.target.value)} placeholder="Type part of a title…" className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
-          </div>
-          {hasFilters && (
-            <button onClick={() => { setFDate(""); setFLok(""); setFTitle(""); setFNewspaper(null); }} className="text-sm text-gray-500 hover:text-red-600 inline-flex items-center gap-1 py-1.5"><X size={14} /> Clear</button>
-          )}
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {publishedRows.length === 0 ? (
-          <div className="p-8 text-gray-400 text-sm text-center">
-            {hasFilters ? "No published records match the selected filters." : filtered ? "No published records found for the selected date range." : "No published records yet."}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left">
-              <tr>
-                <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Date</th>
-                <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Lok Sabha</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Title</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Brief</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Photo</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {publishedRows.map((n) => (
-                <tr key={n.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtNewsDate(n.coverage_date)}</td>
-                  <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{n.lok_sabha_all ? "All" : (n.lok_sabha_name || "—")}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900 max-w-[260px] whitespace-normal break-words">{n.title}</td>
-                  <td className="px-4 py-3 text-gray-600 max-w-[320px] whitespace-normal break-words">{n.summary || "—"}</td>
-                  <td className="px-4 py-3"><NewspaperPhoto url={n.file_url} title={n.title} onPreview={setPreview} /></td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => setEditing(n)} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        )}
-      </div>
-
-      {/* Full-size newspaper cutting preview (lightbox). */}
-      {preview && (
-        <div className="fixed inset-0 z-[90] bg-black/80 flex items-center justify-center p-4" onClick={() => setPreview(null)}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="Newspaper cutting" className="max-w-[92vw] max-h-[92vh] rounded-lg object-contain" />
-          <button onClick={() => setPreview(null)} className="absolute top-4 right-4 text-white/80 hover:text-white"><X size={28} /></button>
-        </div>
-      )}
-
       {showAdd && <PressNoteModal newspapers={data.newspapers} defaultNewspaperId={uploadFor} onClose={() => { setShowAdd(false); setUploadFor(null); }} onSaved={(msg) => { setShowAdd(false); setUploadFor(null); onChange(); flash?.(msg); }} />}
-      {editing && <PressNoteModal editing={editing} newspapers={data.newspapers} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); onChange(); flash?.(msg); }} />}
       {showAddNewspaper && <NewspaperModal onClose={() => setShowAddNewspaper(false)} onSaved={(msg) => { setShowAddNewspaper(false); onChange(); flash?.(msg); }} />}
     </div>
   );
@@ -1043,7 +928,7 @@ function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api
 
 const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
 
-function PressNoteModal({ newspapers, onClose, onSaved, editing, defaultNewspaperId }) {
+export function PressNoteModal({ newspapers, onClose, onSaved, editing, defaultNewspaperId }) {
   const [form, setForm] = useState(editing ? {
     title: editing.title || "", summary: editing.summary || "", kind: editing.kind || "press_note",
     newspaper_id: editing.newspaper_id ? String(editing.newspaper_id) : "",
