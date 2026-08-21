@@ -694,6 +694,20 @@ function MlaManager({ flash, fail }) {
   useEffect(() => { loadAssemblies(); loadMlas(); }, [loadAssemblies, loadMlas]);
   // After any assessment/analysis edit, refresh both the list and the inline view.
   const afterEdit = () => { loadMlas(); setVersion((v) => v + 1); };
+  // Delete ONE MLA by its unique id (with confirmation). Its assessment cascades
+  // away; the list + count refresh from the DB so no stale row lingers.
+  const [deletingId, setDeletingId] = useState(null);
+  async function del(m) {
+    if (!confirm(`Are you sure you want to delete this MLA profile?\n\n${m.name}${m.assembly_name ? ` · ${m.assembly_name}` : ""}\n\nThis also removes its assessment and cannot be undone.`)) return;
+    setDeletingId(m.id);
+    try {
+      await api(`/api/leader-assessment/mlas/${m.id}`, { method: "DELETE" });
+      if (expandedId === m.id) setExpandedId(null);
+      flash?.(`"${m.name}" deleted.`);
+      await loadMlas();
+      setVersion((v) => v + 1);
+    } catch (e) { fail?.(e.message); } finally { setDeletingId(null); }
+  }
 
   // Assemblies that already have an MLA — excluded from the Create dropdown so a
   // second profile can't be created for the same assembly (edit the existing one).
@@ -750,6 +764,7 @@ function MlaManager({ flash, fail }) {
                         <td className="px-3 py-2.5 text-right whitespace-nowrap">
                           <button onClick={() => setExpandedId(open ? null : m.id)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {open ? "Close" : "Open"}</button>
                           <button onClick={() => setEditingAssessment(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Add Assessment</button>
+                          <button onClick={() => del(m)} disabled={deletingId === m.id} title="Delete MLA profile" className="text-xs font-bold text-red-600 hover:bg-red-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-50">{deletingId === m.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete</button>
                         </td>
                       </tr>
                       {open && (
