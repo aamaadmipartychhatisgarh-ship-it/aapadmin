@@ -1177,10 +1177,14 @@ function CandidatesTab({ flash, fail }) {
     ? [...candidates].sort((a, b) => (b.total - a.total) || String(a.name || "").localeCompare(String(b.name || "")))
     : candidates;
 
+  const [deletingId, setDeletingId] = useState(null);
   async function del(c) {
-    if (!confirm(`Remove candidate "${c.name}"?`)) return;
-    try { await api(`/api/leader-assessment/candidates/${c.id}`, { method: "DELETE" }); flash("Candidate removed."); refresh(); }
-    catch (e) { fail(e.message); }
+    // Delete by the candidate's unique id (never the name). Its assessment and
+    // election records cascade away (FKs ON DELETE CASCADE); nothing else changes.
+    if (!confirm(`Are you sure you want to delete this candidate?\n\n${c.name}${c.assembly_name ? ` · ${c.assembly_name}` : ""}\n\nThis also removes its assessment and election records and cannot be undone.`)) return;
+    setDeletingId(c.id);
+    try { await api(`/api/leader-assessment/candidates/${c.id}`, { method: "DELETE" }); flash("Candidate deleted."); refresh(); }
+    catch (e) { fail(e.message); } finally { setDeletingId(null); }
   }
 
   return (
@@ -1236,7 +1240,7 @@ function CandidatesTab({ flash, fail }) {
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                       <button onClick={() => setOpening(c)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={14} /> Open</button>
                       <button onClick={() => setEditing(c)} className="text-gray-500 hover:text-[#164FA3] p-1" title="Edit"><Pencil size={14} /></button>
-                      <button onClick={() => del(c)} className="text-gray-400 hover:text-red-600 p-1" title="Remove"><Trash2 size={14} /></button>
+                      <button onClick={() => del(c)} disabled={deletingId === c.id} title="Delete candidate" className="text-xs font-bold text-red-600 hover:bg-red-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-50">{deletingId === c.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete</button>
                     </td>
                   </tr>
                 ))}
