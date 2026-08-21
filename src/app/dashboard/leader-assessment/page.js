@@ -650,7 +650,7 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
 }
 
 // -------------------------------- MLA -------------------------------------
-const EMPTY_MLA = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", criminal_cases: "", times_won: "", times_contested: "", largest_winning_margin: "", previous_winning_margin: "", party_won_from: "", party_defeated: "", mla_votes: "", competitor1_party: "", competitor1_votes: "", competitor2_party: "", competitor2_votes: "" };
+const EMPTY_MLA = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", criminal_cases: "", times_won: "", times_contested: "", largest_winning_margin: "", previous_winning_margin: "", party_won_from: "", party_defeated: "", mla_votes: "", competitor1_name: "", competitor1_party: "", competitor1_votes: "", competitor2_name: "", competitor2_party: "", competitor2_votes: "" };
 
 // Winning Margin — computed live for the form preview (the backend recomputes and
 // stores the authoritative value). ALWAYS (MLA votes − Competitor 1 votes);
@@ -869,12 +869,14 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
           </div>
           <div className="rounded-xl border border-gray-100 p-3">
             <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 1</div>
-            <div className="font-semibold text-gray-900 truncate">{mla.competitor1_party || "—"}</div>
+            <div className="font-semibold text-gray-900 truncate">{mla.competitor1_name || "—"}</div>
+            <div className="text-xs text-gray-500 truncate">{mla.competitor1_party || "—"}</div>
             <div className="text-sm text-gray-600">{mla.competitor1_votes != null ? `${nfmt(mla.competitor1_votes)} votes` : "—"}</div>
           </div>
           <div className="rounded-xl border border-gray-100 p-3">
             <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 2</div>
-            <div className="font-semibold text-gray-900 truncate">{mla.competitor2_party || "—"}</div>
+            <div className="font-semibold text-gray-900 truncate">{mla.competitor2_name || "—"}</div>
+            <div className="text-xs text-gray-500 truncate">{mla.competitor2_party || "—"}</div>
             <div className="text-sm text-gray-600">{mla.competitor2_votes != null ? `${nfmt(mla.competitor2_votes)} votes` : "—"}</div>
           </div>
           <div className="rounded-xl border border-[#164FA3]/20 bg-[#164FA3]/5 p-3">
@@ -1102,12 +1104,14 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
         <div className="col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-2">
             <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Competitor 1</div>
-            <Field label="Party Name 1" full value={form.competitor1_party} onChange={(v) => set("competitor1_party", v)} />
+            <Field label="Competitor 1 Name" full value={form.competitor1_name} onChange={(v) => set("competitor1_name", v)} />
+            <Field label="Competitor 1 Party Name" full value={form.competitor1_party} onChange={(v) => set("competitor1_party", v)} />
             <Field label="Competitor 1 Votes" full type="number" value={form.competitor1_votes} onChange={(v) => set("competitor1_votes", v)} error={errors.competitor1_votes} />
           </div>
           <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-2">
             <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Competitor 2</div>
-            <Field label="Party Name 2" full value={form.competitor2_party} onChange={(v) => set("competitor2_party", v)} />
+            <Field label="Competitor 2 Name" full value={form.competitor2_name} onChange={(v) => set("competitor2_name", v)} />
+            <Field label="Competitor 2 Party Name" full value={form.competitor2_party} onChange={(v) => set("competitor2_party", v)} />
             <Field label="Competitor 2 Votes" full type="number" value={form.competitor2_votes} onChange={(v) => set("competitor2_votes", v)} error={errors.competitor2_votes} />
           </div>
         </div>

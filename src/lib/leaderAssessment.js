@@ -233,8 +233,10 @@ export async function ensureLeaderAssessmentTables() {
   // client — so the stored value and the API response can never disagree. All are
   // NULL for existing profiles with no competitor data (they load normally, shown
   // as "—").
+  await ensureColumn("la_mla_profiles", "competitor1_name", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_profiles", "competitor1_party", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_profiles", "competitor1_votes", "INT NULL");
+  await ensureColumn("la_mla_profiles", "competitor2_name", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_profiles", "competitor2_party", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_profiles", "competitor2_votes", "INT NULL");
   await ensureColumn("la_mla_profiles", "competitor_margin", "INT NULL");
