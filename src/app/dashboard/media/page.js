@@ -345,7 +345,7 @@ function NewspaperCard({ np, onUpload, onViewList }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-3 h-full">
       <div className="flex items-center gap-2.5 min-w-0">
-        <div className="w-9 h-9 rounded-xl bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center shrink-0"><Newspaper size={18} /></div>
+        <div className="w-7 h-7 rounded-lg bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center shrink-0"><Newspaper size={15} /></div>
         <div className="min-w-0">
           <div className="font-bold text-gray-900 text-sm truncate" title={np.name}>{np.name}</div>
           <div className="text-[11px] font-medium text-gray-400 truncate" title={lokSabha}>{lokSabha}</div>
