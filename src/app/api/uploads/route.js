@@ -6,10 +6,24 @@ import { writeFile, mkdir } from "fs/promises";
 import { randomUUID } from "crypto";
 import path from "path";
 import { sniffImage, IMAGE_TYPES } from "@/lib/imageSniff";
+import { saveMediaFile } from "@/lib/mediaFileStore";
 
 // POST /api/uploads (multipart/form-data: field "file")
 // Returns: { url: "/uploads/...." }
-// Files are stored under /public/uploads/ which Next.js serves statically.
+//
+// Profile-photo upload for Worker/Contact photos AND Leader-Assessment MLA /
+// candidate photos (both go through the shared ProfilePhoto component). JPG /
+// PNG / WEBP only, validated by magic bytes.
+//
+// DURABILITY (the reason a saved photo used to vanish after a refresh/redeploy):
+// this host's public/uploads disk is NOT guaranteed to persist across redeploys,
+// and Next.js only static-serves files that existed at BUILD time — so a photo
+// written only to disk 404'd once the process/deploy that wrote it went away.
+// We now store the bytes in the durable DB blob store FIRST (media_files, the
+// same store the Media Center uses), keyed by the file's UUID. The returned
+// `/uploads/<uuid>.<ext>` URL is served by /api/media/[file], which reads the DB
+// stores before falling back to disk — so the photo survives refreshes and
+// redeploys. The disk write is kept as a best-effort backward-compatible copy.
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -33,12 +47,35 @@ export async function POST(req) {
     if (!sniffed || !IMAGE_TYPES[sniffed]) {
       return NextResponse.json({ message: "Unsupported file type. Use JPG, PNG or WEBP." }, { status: 415 });
     }
-    const dir = path.join(process.cwd(), "public", "uploads");
-    await mkdir(dir, { recursive: true });
+
     // Store under a random UUID name (never the client filename) with the sniffed
     // extension, so uploads can't collide, be guessed, or carry a script name.
-    const filename = `${randomUUID()}.${IMAGE_TYPES[sniffed]}`;
-    await writeFile(path.join(dir, filename), buffer);
+    // A fresh UUID per upload also means replacing a photo yields a NEW URL, so
+    // no browser/CDN cache ever serves the old image for the new one.
+    const id = randomUUID();
+    const ext = IMAGE_TYPES[sniffed];
+    const filename = `${id}.${ext}`;
+
+    // Durable store FIRST (survives redeploys / non-persistent disk). Best-effort:
+    // returns false (never throws) if the DB rejects the blob — the disk copy then
+    // carries the file for this process's lifetime.
+    const durable = await saveMediaFile({
+      id, mimeType: sniffed, ext, size: file.size, data: buffer, userId: session?.user?.id,
+    });
+
+    // Also write a disk copy — backward-compatible with the existing `/uploads/...`
+    // serving fallback and a same-process safety net when the durable write
+    // failed. A read-only/full disk must NOT fail the upload once the durable
+    // copy succeeded.
+    try {
+      const dir = path.join(process.cwd(), "public", "uploads");
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, filename), buffer);
+    } catch (diskErr) {
+      if (!durable) throw diskErr; // neither store worked → a genuine failure
+      console.error("[uploads] disk write skipped (durable copy saved):", diskErr?.code || diskErr?.message);
+    }
+
     return NextResponse.json({ url: `/uploads/${filename}`, size: file.size, type: sniffed });
   } catch (err) {
     console.error("upload error:", err);
