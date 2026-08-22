@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
-import { initialsOf } from "@/components/Avatar";
+import Avatar, { initialsOf } from "@/components/Avatar";
 import PartySelect, { usePartyMaster, PartyLogo, PartyBadge } from "@/components/PartySelect";
 import {
   LayoutDashboard, Building2, UserSquare2, Users, ClipboardCheck,
@@ -399,9 +399,17 @@ function Overview({ flash, fail }) {
                 {assemblies.map((a) => (
                   <tr key={a.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2.5"><div className="font-semibold text-gray-900">{a.name}</div><div className="text-xs text-gray-400">{a.district || "—"}</div></td>
-                    <td className="px-3 py-2.5 text-gray-700">{a.mla_name || <span className="text-gray-300">No MLA</span>}</td>
+                    <td className="px-3 py-2.5 text-gray-700">
+                      {a.mla_name ? (
+                        <div className="flex items-center gap-2 min-w-0"><Avatar name={a.mla_name} src={a.mla_photo_url} size={30} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-[10px]" /><span className="truncate">{a.mla_name}</span></div>
+                      ) : <span className="text-gray-300">No MLA</span>}
+                    </td>
                     <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{a.candidate_count}/3</span></td>
-                    <td className="px-3 py-2.5 text-gray-700">{a.top_candidate || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-2.5 text-gray-700">
+                      {a.top_candidate ? (
+                        <div className="flex items-center gap-2 min-w-0"><Avatar name={a.top_candidate} src={a.top_candidate_photo_url} size={30} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-[10px]" /><span className="truncate">{a.top_candidate}</span></div>
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-3 py-2.5 font-semibold">{a.top_score != null ? `${a.top_score}/100` : <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-2.5">{a.completed
                       ? <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Completed</span>
@@ -584,6 +592,19 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                           <span>Caste: <span className="text-gray-700 font-medium">{c.caste || "—"}</span></span>
                           <span>Net Worth: <span className="text-gray-700 font-medium">{c.net_worth || "—"}</span></span>
                         </div>
+                      </div>
+                      {/* Actual assessment score (§3.3) — the live 10-parameter total,
+                          not a hardcoded value. Ranking above uses this same total.
+                          Shows a clear pending state when not yet assessed. */}
+                      <div className="shrink-0 text-right">
+                        {c.assessment_done ? (
+                          <>
+                            <div className="text-base font-bold text-[#164FA3] leading-none">{c.total}<span className="text-gray-400 font-normal text-xs">/100</span></div>
+                            <div className="text-[10px] text-gray-400 mt-0.5">Score</div>
+                          </>
+                        ) : (
+                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Pending</span>
+                        )}
                       </div>
                     </div>
                   ))}

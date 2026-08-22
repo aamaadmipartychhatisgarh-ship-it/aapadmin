@@ -31,7 +31,7 @@ export async function GET(req) {
     // authoritative name + parent district are read straight from master.
     const rows = await query(
       `SELECT a.*, ml.name AS master_name, dl.name AS master_district, dl.id AS master_district_id,
-              m.name AS mla_name,
+              m.name AS mla_name, m.photo_url AS mla_photo_url,
               (SELECT COUNT(*) FROM la_aap_candidates c WHERE c.assembly_id = a.id) AS candidate_count
          FROM la_assemblies a
          JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
@@ -46,7 +46,7 @@ export async function GET(req) {
     let cands = [];
     if (ids.length) {
       cands = await query(
-        `SELECT c.id, c.assembly_id, c.name, s.*
+        `SELECT c.id, c.assembly_id, c.name, c.photo_url, s.*
            FROM la_aap_candidates c
            LEFT JOIN la_candidate_assessments s ON s.candidate_id = c.id
           WHERE c.assembly_id IN (${ids.map(() => "?").join(",")})`,
@@ -59,7 +59,7 @@ export async function GET(req) {
       (candsByAsm[c.assembly_id] ||= []).push(c);
       const total = assessmentTotal(c);
       const cur = topByAsm[c.assembly_id];
-      if (!cur || total > cur.total) topByAsm[c.assembly_id] = { name: c.name, total };
+      if (!cur || total > cur.total) topByAsm[c.assembly_id] = { name: c.name, total, photo_url: c.photo_url || null };
     }
     // Live worker count per assembly: resolved from real users/workers keyed by
     // the assembly's district_id (never stored, so it auto-updates as workers
@@ -79,7 +79,9 @@ export async function GET(req) {
         candidate_count: Number(r.candidate_count) || 0,
         required_workers: r.required_workers != null ? Number(r.required_workers) : null,
         worker_count: districtId != null ? (workerMap.get(districtId) || 0) : 0,
+        mla_photo_url: r.mla_photo_url || null,
         top_candidate: topByAsm[r.id]?.name || null,
+        top_candidate_photo_url: topByAsm[r.id]?.photo_url || null,
         top_score: topByAsm[r.id]?.total ?? null,
         // THE assembly completion status (same rule everywhere): all its
         // candidates have a complete 10-parameter assessment. Computed live from
