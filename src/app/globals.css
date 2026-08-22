@@ -199,3 +199,31 @@
    almost solid black (multiply darkens everything). Use normal blending
    in dark mode instead, with a light backing chip so it still reads. */
 .dark .leader-photo { mix-blend-mode: normal; background: rgba(255,255,255,0.9); border-radius: 9999px; }
+
+/* ------------------------------------------------------------------ Print
+   Full View → Print (§1.6). When a printable Full View modal is open its
+   overlay carries `.la-print-root`. On print we hide the whole app and show
+   ONLY that modal's content, with its scroll/height caps lifted so the
+   COMPLETE assessment prints (not just the on-screen portion). Interactive
+   chrome (Print/close buttons) is marked `.la-no-print` and omitted. */
+@media print {
+  body * { visibility: hidden !important; }
+  .la-print-root, .la-print-root * { visibility: visible !important; }
+  .la-print-root {
+    position: absolute !important; left: 0 !important; top: 0 !important;
+    width: 100% !important; height: auto !important;
+    background: #fff !important; display: block !important; padding: 0 !important;
+  }
+  .la-print-root .la-print-panel {
+    position: absolute !important; left: 0 !important; top: 0 !important;
+    width: 100% !important; max-width: 100% !important;
+    max-height: none !important; overflow: visible !important;
+    box-shadow: none !important; border-radius: 0 !important; margin: 0 !important;
+  }
+  .la-no-print, .la-no-print * { visibility: hidden !important; display: none !important; }
+  /* Let inner scroll containers expand so their full content prints. */
+  .la-print-root .overflow-auto, .la-print-root .overflow-x-auto, .la-print-root .overflow-y-auto {
+    overflow: visible !important; max-height: none !important;
+  }
+  @page { margin: 12mm; }
+}

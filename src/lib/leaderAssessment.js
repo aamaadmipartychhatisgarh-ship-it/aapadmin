@@ -243,6 +243,28 @@ export async function ensureLeaderAssessmentTables() {
   // Votes received by the current MLA. Winning Margin is derived as
   // (mla_votes − competitor1_votes) — Competitor 2 never affects it.
   await ensureColumn("la_mla_profiles", "mla_votes", "INT NULL");
+  // Competitor 3 (§1.3) — same shape as Competitor 1 & 2. NULL for existing
+  // profiles. Never affects the Winning Margin (still mla_votes − competitor1).
+  await ensureColumn("la_mla_profiles", "competitor3_name", "VARCHAR(255) NULL");
+  await ensureColumn("la_mla_profiles", "competitor3_party", "VARCHAR(255) NULL");
+  await ensureColumn("la_mla_profiles", "competitor3_votes", "INT NULL");
+  // Election Strategy → three independent election issues (§1.7). Each saves on
+  // its own column so editing one never overwrites the others. `main_issue`
+  // stays as the legacy single field (backfilled below) so old data is kept.
+  await ensureColumn("la_candidate_strategy", "election_issue_1", "TEXT NULL");
+  await ensureColumn("la_candidate_strategy", "election_issue_2", "TEXT NULL");
+  await ensureColumn("la_candidate_strategy", "election_issue_3", "TEXT NULL");
+  // One-time, non-destructive backfill: seed Election Issue 1 from the legacy
+  // main_issue where issue 1 is still empty, so existing strategy text is not
+  // lost when the UI switches to the three-issue layout. Never clears anything.
+  try {
+    await query(
+      `UPDATE la_candidate_strategy
+          SET election_issue_1 = main_issue
+        WHERE (election_issue_1 IS NULL OR election_issue_1 = '')
+          AND main_issue IS NOT NULL AND main_issue <> ''`
+    );
+  } catch (e) { console.error("[LA] election issue backfill:", e?.message || e); }
   // Election History is entered against a person picked via District → Category
   // (AAP / MLA / Candidate) → Name; the category is stored so editing reloads it.
   await ensureColumn("la_mla_elections", "person_category", "VARCHAR(50) NULL");

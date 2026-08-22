@@ -10,7 +10,7 @@ import {
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet,
   Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
-  Database, Power, Check,
+  Database, Power, Check, Printer,
 } from "lucide-react";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
@@ -629,7 +629,7 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
   // stats, rankings and open panel refresh too — no manual page refresh.
   const reload = () => { load(); onChange?.(); };
   return (
-    <Modal title="Full Assessment" onClose={onClose} size="full">
+    <Modal title="Full Assessment" onClose={onClose} size="full" printable>
       {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : bundle?.assembly ? (
         <div className="space-y-5">
           <AssemblyHeader a={bundle.assembly} status={bundle.status} />
@@ -648,7 +648,7 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
 }
 
 // -------------------------------- MLA -------------------------------------
-const EMPTY_MLA = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", criminal_cases: "", times_won: "", times_contested: "", largest_winning_margin: "", previous_winning_margin: "", party_won_from: "", party_defeated: "", mla_votes: "", competitor1_name: "", competitor1_party: "", competitor1_votes: "", competitor2_name: "", competitor2_party: "", competitor2_votes: "" };
+const EMPTY_MLA = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", criminal_cases: "", times_won: "", times_contested: "", largest_winning_margin: "", previous_winning_margin: "", party_won_from: "", party_defeated: "", mla_votes: "", competitor1_name: "", competitor1_party: "", competitor1_votes: "", competitor2_name: "", competitor2_party: "", competitor2_votes: "", competitor3_name: "", competitor3_party: "", competitor3_votes: "" };
 
 // Winning Margin — computed live for the form preview (the backend recomputes and
 // stores the authoritative value). ALWAYS (MLA votes − Competitor 1 votes);
@@ -863,7 +863,7 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
       {/* Competitor election result + derived margin. Absent on legacy profiles → "—". */}
       <div>
         <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Election Result</div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <div className="rounded-xl border border-gray-100 p-3">
             <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">MLA Votes</div>
             <div className="font-semibold text-gray-900">{mla.mla_votes != null ? `${nfmt(mla.mla_votes)}` : "—"}</div>
@@ -879,6 +879,12 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
             <div className="font-semibold text-gray-900 truncate">{mla.competitor2_name || "—"}</div>
             <div className="text-xs text-gray-500 truncate">{mla.competitor2_party || "—"}</div>
             <div className="text-sm text-gray-600">{mla.competitor2_votes != null ? `${nfmt(mla.competitor2_votes)} votes` : "—"}</div>
+          </div>
+          <div className="rounded-xl border border-gray-100 p-3">
+            <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 3</div>
+            <div className="font-semibold text-gray-900 truncate">{mla.competitor3_name || "—"}</div>
+            <div className="text-xs text-gray-500 truncate">{mla.competitor3_party || "—"}</div>
+            <div className="text-sm text-gray-600">{mla.competitor3_votes != null ? `${nfmt(mla.competitor3_votes)} votes` : "—"}</div>
           </div>
           <div className="rounded-xl border border-[#164FA3]/20 bg-[#164FA3]/5 p-3">
             <div className="text-[11px] font-bold text-[#164FA3] uppercase tracking-wide">Winning Margin</div>
@@ -1041,6 +1047,7 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
     if (!validVotes(form.mla_votes)) errs.mla_votes = "Enter a whole number of votes (0 or more).";
     if (!validVotes(form.competitor1_votes)) errs.competitor1_votes = "Enter a whole number of votes (0 or more).";
     if (!validVotes(form.competitor2_votes)) errs.competitor2_votes = "Enter a whole number of votes (0 or more).";
+    if (!validVotes(form.competitor3_votes)) errs.competitor3_votes = "Enter a whole number of votes (0 or more).";
     setErrors(errs);
     if (Object.keys(errs).length) return; // keep the form open, values intact
     setSaving(true);
@@ -1103,7 +1110,7 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
         <div className="col-span-2">
           <Field label="MLA Total Votes" full type="number" value={form.mla_votes} onChange={(v) => set("mla_votes", v)} error={errors.mla_votes} />
         </div>
-        <div className="col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-2">
             <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Competitor 1</div>
             <Field label="Competitor 1 Name" full value={form.competitor1_name} onChange={(v) => set("competitor1_name", v)} />
@@ -1115,6 +1122,12 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
             <Field label="Competitor 2 Name" full value={form.competitor2_name} onChange={(v) => set("competitor2_name", v)} />
             <div><span className={lbl}>Competitor 2 Party</span><PartySelect value={form.competitor2_party} onChange={(v) => set("competitor2_party", v)} /></div>
             <Field label="Competitor 2 Votes" full type="number" value={form.competitor2_votes} onChange={(v) => set("competitor2_votes", v)} error={errors.competitor2_votes} />
+          </div>
+          <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-2">
+            <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Competitor 3</div>
+            <Field label="Competitor 3 Name" full value={form.competitor3_name} onChange={(v) => set("competitor3_name", v)} />
+            <div><span className={lbl}>Competitor 3 Party</span><PartySelect value={form.competitor3_party} onChange={(v) => set("competitor3_party", v)} /></div>
+            <Field label="Competitor 3 Votes" full type="number" value={form.competitor3_votes} onChange={(v) => set("competitor3_votes", v)} error={errors.competitor3_votes} />
           </div>
         </div>
         <div className="col-span-2">
@@ -1724,7 +1737,7 @@ function ComparisonTab({ b, onChange, flash, fail }) {
 
 function Recommendation({ b, ranked, onChange, flash, fail }) {
   const strongest = ranked.find((c) => c.rank === 1 && c.total > 0);
-  const seed = () => ({ mla_biggest_weakness: "", aap_biggest_strength: "", target_community: "", target_booth: "", main_issue: "", ...(b.strategy || {}) });
+  const seed = () => ({ mla_biggest_weakness: "", aap_biggest_strength: "", target_community: "", target_booth: "", main_issue: "", election_issue_1: "", election_issue_2: "", election_issue_3: "", ...(b.strategy || {}) });
   const [form, setForm] = useState(seed);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setForm(seed()); /* eslint-disable-next-line */ }, [b.assembly.id, b.strategy]);
@@ -1761,7 +1774,11 @@ function Recommendation({ b, ranked, onChange, flash, fail }) {
             <div><span className={lbl}>Key Community / Group</span><input className={inp} value={form.target_community ?? ""} onChange={(e) => set("target_community", e.target.value)} /></div>
             <div><span className={lbl}>Target Booth</span><input className={inp} value={form.target_booth ?? ""} onChange={(e) => set("target_booth", e.target.value)} /></div>
           </div>
-          <div><span className={lbl}><Vote size={12} className="inline mr-1" />Main Election Issue</span><textarea rows={2} className={inp} value={form.main_issue ?? ""} onChange={(e) => set("main_issue", e.target.value)} /></div>
+          {/* Three independent Election Issues (§1.7). Each is its own field/column;
+              editing one never overwrites the others. */}
+          <div><span className={lbl}><Vote size={12} className="inline mr-1" />Election Issue 1</span><textarea rows={2} className={inp} value={form.election_issue_1 ?? ""} onChange={(e) => set("election_issue_1", e.target.value)} /></div>
+          <div><span className={lbl}><Vote size={12} className="inline mr-1" />Election Issue 2</span><textarea rows={2} className={inp} value={form.election_issue_2 ?? ""} onChange={(e) => set("election_issue_2", e.target.value)} /></div>
+          <div><span className={lbl}><Vote size={12} className="inline mr-1" />Election Issue 3</span><textarea rows={2} className={inp} value={form.election_issue_3 ?? ""} onChange={(e) => set("election_issue_3", e.target.value)} /></div>
         </div>
       </Card>
     </div>
@@ -2282,12 +2299,26 @@ function PollingEditor({ row, onClose, onSaved, fail }) {
 }
 
 // ------------------------------- helpers ----------------------------------
-function Modal({ title, onClose, children, wide, size }) {
+function Modal({ title, onClose, children, wide, size, printable }) {
   const width = size === "full" ? "max-w-5xl" : wide ? "max-w-2xl" : "max-w-lg";
+  // When printable, the overlay is tagged `la-print-root` so the print CSS
+  // (globals.css) can hide the rest of the app and print ONLY this modal's
+  // content — in full, with the modal's scroll/height caps lifted so nothing is
+  // clipped to the visible portion (§1.6).
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`bg-white rounded-2xl shadow-xl w-full ${width} p-6 max-h-[90vh] overflow-auto`}>
-        <div className="flex items-center justify-between mb-4"><h2 className="text-xl font-bold text-gray-900">{title}</h2><button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button></div>
+    <div className={`fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4 ${printable ? "la-print-root" : ""}`} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className={`la-print-panel bg-white rounded-2xl shadow-xl w-full ${width} p-6 max-h-[90vh] overflow-auto`}>
+        <div className="flex items-center justify-between mb-4 gap-3">
+          <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+          <div className="flex items-center gap-1.5 la-no-print">
+            {printable && (
+              <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#164FA3] border border-[#164FA3]/30 hover:bg-[#164FA3]/10 px-3 py-1.5 rounded-lg" title="Print this Full View">
+                <Printer size={15} /> Print
+              </button>
+            )}
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1"><X size={20} /></button>
+          </div>
+        </div>
         {children}
       </div>
     </div>

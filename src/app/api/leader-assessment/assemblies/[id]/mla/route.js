@@ -29,11 +29,12 @@ export async function PUT(req, { params }) {
     if (!asm) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
     const d = await req.json().catch(() => ({}));
     if (!strOrNull(d.name)) return NextResponse.json({ message: "MLA name is required." }, { status: 400 });
-    let competitor1_votes, competitor2_votes, mla_votes;
+    let competitor1_votes, competitor2_votes, competitor3_votes, mla_votes;
     try {
       mla_votes = votesOrThrow(d.mla_votes, "MLA Total Votes");
       competitor1_votes = votesOrThrow(d.competitor1_votes, "Total Votes 1");
       competitor2_votes = votesOrThrow(d.competitor2_votes, "Total Votes 2");
+      competitor3_votes = votesOrThrow(d.competitor3_votes, "Total Votes 3");
     } catch (msg) {
       return NextResponse.json({ message: String(msg) }, { status: 400 });
     }
@@ -65,6 +66,9 @@ export async function PUT(req, { params }) {
       competitor2_name: strOrNull(d.competitor2_name),
       competitor2_party: strOrNull(d.competitor2_party),
       competitor2_votes,
+      competitor3_name: strOrNull(d.competitor3_name),
+      competitor3_party: strOrNull(d.competitor3_party),
+      competitor3_votes,
       competitor_margin,
       mla_votes,
     };
