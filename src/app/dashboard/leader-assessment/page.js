@@ -593,18 +593,16 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                           <span>Net Worth: <span className="text-gray-700 font-medium">{c.net_worth || "—"}</span></span>
                         </div>
                       </div>
-                      {/* Actual assessment score (§3.3) — the live 10-parameter total,
-                          not a hardcoded value. Ranking above uses this same total.
-                          Shows a clear pending state when not yet assessed. */}
+                      {/* Actual assessment score — the live 10-parameter total
+                          (assessmentTotal), the SAME value Rankings / Overview /
+                          Full View use. Always shown as a number for consistency;
+                          a small "pending" marker flags an incomplete assessment
+                          without hiding the score. */}
                       <div className="shrink-0 text-right">
-                        {c.assessment_done ? (
-                          <>
-                            <div className="text-base font-bold text-[#164FA3] leading-none">{c.total}<span className="text-gray-400 font-normal text-xs">/100</span></div>
-                            <div className="text-[10px] text-gray-400 mt-0.5">Score</div>
-                          </>
-                        ) : (
-                          <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Pending</span>
-                        )}
+                        <div className="text-base font-bold text-[#164FA3] leading-none">{c.total}<span className="text-gray-400 font-normal text-xs">/100</span></div>
+                        {c.assessment_done
+                          ? <div className="text-[10px] text-gray-400 mt-0.5">Score</div>
+                          : <div className="text-[10px] font-semibold text-amber-600 mt-0.5">pending</div>}
                       </div>
                     </div>
                   ))}
