@@ -364,48 +364,117 @@ function ApprovalsTab({ data, setStatus, onEdit }) {
 }
 
 // ============================================================ LOG
+// The local date (YYYY-MM-DD) of a post's actual DB Date & Time (posted_at,
+// falling back to created_at) — used by the date filter so a selected calendar
+// date matches the real stored timestamp.
+function postDateKey(p) {
+  const v = p.posted_at || p.created_at;
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function fmtDateTime(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "—";
+  return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} · ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 function LogTab({ data, onEdit }) {
+  const posts = data.recentPosts || [];
+  const [date, setDate] = useState("");     // "" = all dates
+  const [q, setQ] = useState("");
+  const [platform, setPlatform] = useState("");
+
+  const needle = q.trim().toLowerCase();
+  // All filtering runs over the real post records (posted_at / caption / handle),
+  // never a separate list — same rows Log a Post created.
+  const shown = posts.filter((p) => {
+    if (date && postDateKey(p) !== date) return false;
+    if (platform && p.platform !== platform) return false;
+    if (needle && !`${p.title || ""} ${p.caption || ""} ${p.handle || ""} ${p.lok_sabha_name || ""}`.toLowerCase().includes(needle)) return false;
+    return true;
+  });
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-      <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-left">
-          <tr>
-            <th className="px-4 py-3 font-semibold text-gray-600">When</th>
-            <th className="px-4 py-3 font-semibold text-gray-600">Platform</th>
-            <th className="px-4 py-3 font-semibold text-gray-600">Title</th>
-            <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
-            <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 text-right">Views</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 text-right">Engagement</th>
-            <th className="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.recentPosts.map((p) => {
-            const meta = PLATFORM[p.platform] || {};
-            const Icon = meta.icon || Share2;
-            const eng = (Number(p.likes) || 0) + (Number(p.comments) || 0) + (Number(p.shares) || 0);
-            return (
-              <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50">
-                <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">{p.posted_at ? new Date(p.posted_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "—"}</td>
-                <td className="px-4 py-3"><Icon size={14} style={{ color: meta.color }} className="inline mr-1" />{meta.label || p.platform}</td>
-                <td className="px-4 py-3 font-medium text-gray-900">
-                  {p.viral && <span className="mr-1 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-[#FCB712] text-[#164FA3]">VIRAL</span>}
-                  {p.title || <em className="text-gray-400">(untitled)</em>}
-                </td>
-                <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{p.post_type}</span></td>
-                <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${APPROVAL[p.approval_status]}`}>{p.approval_status}</span></td>
-                <td className="px-4 py-3 text-right text-gray-700">{fmt(p.views)}</td>
-                <td className="px-4 py-3 text-right text-gray-700">{fmt(eng)}</td>
-                <td className="px-4 py-3">
-                  <button onClick={() => onEdit(p)} title="Edit post" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      {/* Filter bar — pinned above the list; a calendar date filter over the
+          actual DB Date & Time, plus platform + text search. */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3 flex flex-wrap items-center gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 inline-flex items-center gap-1"><Clock size={13} /> Date</span>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
+        <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30">
+          <option value="">All platforms</option>
+          {Object.keys(PLATFORM).map((k) => <option key={k} value={k}>{PLATFORM[k].label}</option>)}
+        </select>
+        <div className="relative flex-1 min-w-[180px]">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search content / page…" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
+        </div>
+        <span className="text-xs text-gray-500">{shown.length} post{shown.length === 1 ? "" : "s"}</span>
+        {(date || platform || needle) && (
+          <button onClick={() => { setDate(""); setPlatform(""); setQ(""); }} className="text-xs text-gray-500 hover:text-red-600 inline-flex items-center gap-1"><X size={13} /> Clear</button>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[900px]">
+          <thead className="bg-gray-50 text-left">
+            <tr>
+              <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Date &amp; Time</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Platform</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Page</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Content</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Shot</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Link</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
+              <th className="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 ? (
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">{posts.length === 0 ? "No posts yet — use “Log a Post”." : "No posts match the selected filters."}</td></tr>
+            ) : shown.map((p) => {
+              const meta = PLATFORM[p.platform] || {};
+              const Icon = meta.icon || Share2;
+              const scheduled = p.publish_status === "scheduled";
+              return (
+                <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
+                  <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">{fmtDateTime(p.posted_at || p.created_at)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap"><Icon size={14} style={{ color: meta.color }} className="inline mr-1" />{meta.label || p.platform}</td>
+                  <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{p.handle || "—"}</td>
+                  <td className="px-4 py-3 text-gray-700 max-w-[22rem]">
+                    {p.title && <div className="font-medium text-gray-900 truncate">{p.title}</div>}
+                    {/* Preview only — full content is never lost; it opens intact in
+                        Edit. Clamp visually without mangling the stored text. */}
+                    <div className="text-xs text-gray-500 line-clamp-2" title={p.caption || ""}>{p.caption || <span className="text-gray-300">(no content)</span>}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {p.media_url ? (
+                      <a href={p.media_url} target="_blank" rel="noreferrer" title="Open screenshot"><img src={p.media_url} alt="" className="w-10 h-10 rounded object-cover border border-gray-200" /></a>
+                    ) : <span className="text-gray-300 text-xs">—</span>}
+                  </td>
+                  <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 capitalize">{p.post_type}</span></td>
+                  <td className="px-4 py-3">
+                    {p.external_url ? <a href={p.external_url} target="_blank" rel="noreferrer" className="text-[#164FA3] hover:underline text-xs inline-flex items-center gap-1"><ChevronRight size={12} /> Open</a> : <span className="text-gray-300 text-xs">—</span>}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full ${scheduled ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{scheduled ? "Scheduled" : "Published"}</span>
+                    {p.approval_status && p.approval_status !== "approved" && (
+                      <span className={`ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${APPROVAL[p.approval_status] || "bg-gray-100 text-gray-500"}`}>{p.approval_status}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => onEdit(p)} title="Edit / view post" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
       </div>
     </div>
   );
