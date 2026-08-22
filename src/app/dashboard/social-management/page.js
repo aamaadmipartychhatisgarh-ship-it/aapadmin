@@ -102,7 +102,7 @@ function Body() {
 
       {tab === "dashboard" && <SocialDashboardTab PLATFORM={PLATFORM} />}
       {tab === "overview"  && <OverviewTab data={data} />}
-      {tab === "pages"     && <PagesTab data={data} />}
+      {tab === "pages"     && <PagesTab data={data} onReload={load} />}
       {tab === "approvals" && <ApprovalsTab data={data} setStatus={setStatus} onEdit={setEditing} />}
       {tab === "log"       && <LogTab data={data} onEdit={setEditing} />}
       {tab === "per_ls"    && <PerLsTab data={data} />}
@@ -196,28 +196,118 @@ function OverviewTab({ data }) {
 }
 
 // ============================================================ PAGES
-function PagesTab({ data }) {
+// Social Media Master (BUG 1). Pages are grouped by platform (Facebook /
+// Instagram / Twitter-X) with an Add Page action. Page names are stored in the
+// social_pages table (handle) — the single source of truth every page-name
+// dropdown across the module reads from; nothing is hardcoded.
+function PagesTab({ data, onReload }) {
+  const [adding, setAdding] = useState(false);
+  const pages = data.pages || [];
+  // Order the platform groups by the master PLATFORM map so all three always
+  // show (even with zero pages), and each supports any number of pages (≥20).
+  const groups = Object.keys(PLATFORM).map((key) => ({
+    key,
+    meta: PLATFORM[key],
+    items: pages.filter((p) => p.platform === key),
+  }));
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-      {data.pages.map((p) => {
-        const meta = PLATFORM[p.platform]; const Icon = meta.icon;
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="font-bold text-gray-900">Social Media Master · Pages</h3>
+          <p className="text-sm text-gray-500">Add and manage pages per platform. Page names are saved in the database and used everywhere a page is selected.</p>
+        </div>
+        <button onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Page</button>
+      </div>
+
+      {groups.map(({ key, meta, items }) => {
+        const Icon = meta.icon;
         return (
-          <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={16} /></div>
-              <div className="flex-1 min-w-0">
-                <div className="font-bold text-gray-900 text-sm truncate">{p.lok_sabha_name || "—"}</div>
-                <div className="text-xs text-gray-500 truncate">{p.handle}</div>
+          <div key={key}>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-6 h-6 rounded-md flex items-center justify-center text-white" style={{ background: meta.color }}><Icon size={13} /></span>
+              <h4 className="font-semibold text-gray-800 text-sm">{meta.label}</h4>
+              <span className="text-xs text-gray-400">({items.length})</span>
+            </div>
+            {items.length === 0 ? (
+              <div className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-xl p-4">No {meta.label} pages yet — click “Add Page”.</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {items.map((p) => (
+                  <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={16} /></div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-gray-900 text-sm truncate">{p.handle}</div>
+                        <div className="text-xs text-gray-500 truncate">{p.lok_sabha_name || "—"}</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div><div className="text-gray-400">Followers</div><div className="font-bold text-gray-900">{fmt(p.followers)}</div></div>
+                      <div><div className="text-gray-400">Posts</div><div className="font-bold text-gray-900">{p.post_count}</div></div>
+                      <div><div className="text-gray-400">Views</div><div className="font-bold text-gray-900">{fmt(p.total_views)}</div></div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div><div className="text-gray-400">Followers</div><div className="font-bold text-gray-900">{fmt(p.followers)}</div></div>
-              <div><div className="text-gray-400">Posts</div><div className="font-bold text-gray-900">{p.post_count}</div></div>
-              <div><div className="text-gray-400">Views</div><div className="font-bold text-gray-900">{fmt(p.total_views)}</div></div>
-            </div>
+            )}
           </div>
         );
       })}
+
+      {adding && <PageModal onClose={() => setAdding(false)} onSaved={() => { setAdding(false); onReload?.(); }} />}
+    </div>
+  );
+}
+
+// Add Page to the Social Media Master: pick a platform + type the page name.
+// Saved to social_pages via /api/social-management/pages (duplicate names per
+// platform are rejected server-side).
+function PageModal({ onClose, onSaved }) {
+  const [platform, setPlatform] = useState("facebook");
+  const [handle, setHandle] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  async function save() {
+    const name = handle.replace(/\s+/g, " ").trim();
+    if (!name) { setErr("Page name is required."); return; }
+    setSaving(true); setErr("");
+    try {
+      const r = await fetch("/api/social-management/pages", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, handle: name }),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.message || "Could not add the page.");
+      onSaved();
+    } catch (e) { setErr(e.message); setSaving(false); }
+  }
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-gray-900">Add Page</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Platform *</label>
+          <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]/30">
+            {Object.keys(PLATFORM).map((k) => <option key={k} value={k}>{PLATFORM[k].label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Page Name *</label>
+          <input autoFocus value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="e.g. AAP Raipur Official" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
+        </div>
+        {err && <div className="text-sm text-red-600">{err}</div>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100">Cancel</button>
+          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60">
+            {saving && <Loader2 size={15} className="animate-spin" />} Save
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
