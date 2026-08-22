@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PhoneCall, PhoneForwarded, TrendingUp, Trophy, Heart, ArrowRight, Loader2 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { isAdmin, isSupervisorRole, isPressMedia, isSocialMedia } from "@/lib/permissions";
+import { isAdmin, isSupervisorRole, isPressMedia, isSocialMedia, isMediaUser } from "@/lib/permissions";
 import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 
 export default function UserDashboard() {
@@ -26,7 +26,7 @@ export default function UserDashboard() {
       router.push("/dashboard/admin");
     } else if (status === "authenticated" && !previewing && isSupervisorRole(session)) {
       router.push("/dashboard/supervisor");
-    } else if (status === "authenticated" && !previewing && isPressMedia(session)) {
+    } else if (status === "authenticated" && !previewing && (isPressMedia(session) || isMediaUser(session))) {
       router.push("/dashboard/media");
     } else if (status === "authenticated" && !previewing && isSocialMedia(session)) {
       router.push("/dashboard/social");
@@ -38,7 +38,7 @@ export default function UserDashboard() {
     }
   }, [status, session, router]);
 
-  if (status === "loading" || !session || (!previewingCaller && (isAdmin(session) || isSupervisorRole(session) || isPressMedia(session) || isSocialMedia(session)))) {
+  if (status === "loading" || !session || (!previewingCaller && (isAdmin(session) || isSupervisorRole(session) || isPressMedia(session) || isSocialMedia(session) || isMediaUser(session)))) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
 

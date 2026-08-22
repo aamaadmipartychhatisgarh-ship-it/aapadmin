@@ -20,6 +20,10 @@ export const ROLES = {
   WORKER: "worker",
   PRESS_MEDIA: "press_media",
   SOCIAL_MEDIA: "social_media",
+  // Dedicated Media-only user (§9.3): can access ONLY the Media Center. Belongs
+  // to no admin/oversight/caller capability group, so every non-media API
+  // rejects it by default — media access comes solely from canAccessMedia below.
+  MEDIA_USER: "media_user",
 };
 
 // Normalize any incoming role string (legacy or canonical) to canonical.
@@ -43,6 +47,7 @@ const RANK = {
   [ROLES.SUPERVISOR]: 40,
   [ROLES.PRESS_MEDIA]: 30,
   [ROLES.SOCIAL_MEDIA]: 30,
+  [ROLES.MEDIA_USER]: 30,
   [ROLES.CALLER]: 20,
   [ROLES.WORKER]: 10,
 };
@@ -103,8 +108,11 @@ export function canManageWorkers(session) {
 }
 // Module access: press media staff manage the Media Center; social media staff
 // manage Social Media + Social Command. Oversight roles keep access.
+export function isMediaUser(session) {
+  return roleOf(session) === ROLES.MEDIA_USER;
+}
 export function canAccessMedia(session) {
-  return isOversight(session) || isPressMedia(session);
+  return isOversight(session) || isPressMedia(session) || isMediaUser(session);
 }
 export function canAccessSocial(session) {
   return isOversight(session) || isSocialMedia(session);
@@ -143,6 +151,7 @@ export const ROLE_LABELS = {
   [ROLES.WORKER]: "Worker",
   [ROLES.PRESS_MEDIA]: "Press Media",
   [ROLES.SOCIAL_MEDIA]: "Social Media",
+  [ROLES.MEDIA_USER]: "Media User",
 };
 
 export function roleLabel(role) {
@@ -154,7 +163,7 @@ export const ASSIGNABLE_ROLES = [
   ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.ZONE_ADMIN,
   ROLES.DISTRICT_ADMIN, ROLES.ASSEMBLY_ADMIN,
   ROLES.SUPERVISOR, ROLES.CALLER, ROLES.WORKER,
-  ROLES.PRESS_MEDIA, ROLES.SOCIAL_MEDIA,
+  ROLES.PRESS_MEDIA, ROLES.SOCIAL_MEDIA, ROLES.MEDIA_USER,
 ];
 
 // --- Scope SQL helpers ----------------------------------------------------

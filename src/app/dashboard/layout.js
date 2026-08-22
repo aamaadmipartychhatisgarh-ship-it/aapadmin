@@ -284,6 +284,12 @@ export default function DashboardLayout({ children }) {
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
     ];
+  } else if (canonical === ROLES.MEDIA_USER) {
+    // Media User (§9.3): ONLY the Media Center — no Contacts, Leader Assessment,
+    // Administration, Reports or Tasks. Backend APIs enforce the same limit.
+    navItems = [
+      { name: "Media", href: "/dashboard/media", icon: Newspaper },
+    ];
   } else if (canonical === ROLES.SOCIAL_MEDIA) {
     // Social media staff: war room + command center.
     navItems = [
