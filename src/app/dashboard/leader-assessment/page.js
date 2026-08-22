@@ -832,6 +832,7 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
   const [ctx, setCtx] = useState(null);   // { analysis, social } for the assembly
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { byName: partyByName } = usePartyMaster(); // live party logos by name
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -892,19 +893,19 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
           <div className="rounded-xl border border-gray-100 p-3">
             <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 1</div>
             <div className="font-semibold text-gray-900 truncate">{mla.competitor1_name || "—"}</div>
-            <div className="text-xs text-gray-500 truncate">{mla.competitor1_party || "—"}</div>
+            <div className="text-xs text-gray-500 truncate">{mla.competitor1_party ? <PartyLogo name={mla.competitor1_party} byName={partyByName} size={16} /> : "—"}</div>
             <div className="text-sm text-gray-600">{mla.competitor1_votes != null ? `${nfmt(mla.competitor1_votes)} votes` : "—"}</div>
           </div>
           <div className="rounded-xl border border-gray-100 p-3">
             <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 2</div>
             <div className="font-semibold text-gray-900 truncate">{mla.competitor2_name || "—"}</div>
-            <div className="text-xs text-gray-500 truncate">{mla.competitor2_party || "—"}</div>
+            <div className="text-xs text-gray-500 truncate">{mla.competitor2_party ? <PartyLogo name={mla.competitor2_party} byName={partyByName} size={16} /> : "—"}</div>
             <div className="text-sm text-gray-600">{mla.competitor2_votes != null ? `${nfmt(mla.competitor2_votes)} votes` : "—"}</div>
           </div>
           <div className="rounded-xl border border-gray-100 p-3">
             <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 3</div>
             <div className="font-semibold text-gray-900 truncate">{mla.competitor3_name || "—"}</div>
-            <div className="text-xs text-gray-500 truncate">{mla.competitor3_party || "—"}</div>
+            <div className="text-xs text-gray-500 truncate">{mla.competitor3_party ? <PartyLogo name={mla.competitor3_party} byName={partyByName} size={16} /> : "—"}</div>
             <div className="text-sm text-gray-600">{mla.competitor3_votes != null ? `${nfmt(mla.competitor3_votes)} votes` : "—"}</div>
           </div>
           <div className="rounded-xl border border-[#164FA3]/20 bg-[#164FA3]/5 p-3">
@@ -989,7 +990,7 @@ function MlaAssessmentEditModal({ mla, onClose, onChange, flash, fail }) {
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Current MLA</div>
                 <h3 className="text-lg font-bold text-gray-900 truncate flex items-center gap-2">
                   {bundle.mla.name}
-                  {bundle.mla.party && <span className="text-xs font-semibold text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full">{bundle.mla.party}</span>}
+                  {bundle.mla.party && <span className="text-xs font-semibold text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full inline-flex items-center"><PartyBadge name={bundle.mla.party} size={14} /></span>}
                 </h3>
                 <div className="text-sm text-gray-500 flex items-center gap-1.5 mt-0.5"><MapPin size={13} className="text-[#164FA3]" /> {bundle.assembly?.name || mla.assembly_name || "—"}{bundle.assembly?.district ? ` · ${bundle.assembly.district}` : (mla.district ? ` · ${mla.district}` : "")}</div>
               </div>
@@ -1111,7 +1112,8 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
         <div className="col-span-2 border-t border-gray-100 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Political / Election details</div>
         <Field label="Times Won" type="number" value={form.times_won} onChange={(v) => set("times_won", v)} /><Field label="Times Contested" type="number" value={form.times_contested} onChange={(v) => set("times_contested", v)} />
         <Field label="Largest Winning Margin" type="number" value={form.largest_winning_margin} onChange={(v) => set("largest_winning_margin", v)} /><Field label="Previous Winning Margin" type="number" value={form.previous_winning_margin} onChange={(v) => set("previous_winning_margin", v)} />
-        <Field label="Party Won From" value={form.party_won_from} onChange={(v) => set("party_won_from", v)} /><Field label="Party Defeated" value={form.party_defeated} onChange={(v) => set("party_defeated", v)} />
+        <div><span className={lbl}>Party Won From</span><PartySelect value={form.party_won_from} onChange={(v) => set("party_won_from", v)} /></div>
+        <div><span className={lbl}>Party Defeated</span><PartySelect value={form.party_defeated} onChange={(v) => set("party_defeated", v)} /></div>
 
         {/* Voter data — auto-fetched from Voter Master by the selected Assembly ID
             (the single source of truth). Read-only here; never manually entered.
@@ -1524,8 +1526,8 @@ function CandidateElections({ candidateId, staged, onStagedChange, flash, fail, 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Field label="Times Won" type="number" value={form.times_won} onChange={(v) => setForm((f) => ({ ...f, times_won: v }))} />
             <Field label="Total Votes" type="number" value={form.total_votes} onChange={(v) => setForm((f) => ({ ...f, total_votes: v }))} />
-            <Field label="Party Won" value={form.party_won} onChange={(v) => setForm((f) => ({ ...f, party_won: v }))} />
-            <Field label="Party Defeated" value={form.party_defeated} onChange={(v) => setForm((f) => ({ ...f, party_defeated: v }))} />
+            <div><span className={lbl}>Party Won</span><PartySelect value={form.party_won} onChange={(v) => setForm((f) => ({ ...f, party_won: v }))} /></div>
+            <div><span className={lbl}>Party Defeated</span><PartySelect value={form.party_defeated} onChange={(v) => setForm((f) => ({ ...f, party_defeated: v }))} /></div>
           </div>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setForm(null)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
