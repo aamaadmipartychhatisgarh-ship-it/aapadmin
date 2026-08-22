@@ -23,6 +23,11 @@ const PLATFORM = {
   telegram:  { label: "Telegram",  icon: Send,          color: "#26A5E4" },
 };
 const POST_TYPE = ["post", "reel", "story", "video", "poster"];
+// Log a Post (BUG 2) exposes exactly these three post types.
+const LOG_POST_TYPES = [["photo", "Photo"], ["video", "Video"], ["reel", "Reel"]];
+const MIN_CONTENT_WORDS = 1000;
+const wordCount = (s) => (String(s || "").trim().match(/\S+/g) || []).length;
+const isValidUrl = (s) => { try { const u = new URL(String(s).trim()); return u.protocol === "http:" || u.protocol === "https:"; } catch { return false; } };
 const APPROVAL = {
   draft:    "bg-gray-100 text-gray-500",
   pending:  "bg-amber-100 text-amber-700",
@@ -438,82 +443,176 @@ function PerLsTab({ data }) {
   );
 }
 
-// ============================================================ NEW POST MODAL
+// ============================================================ LOG A POST MODAL
+// (BUG 2) Platform → Page (filtered) → Content (min 1000 words, live count) →
+// Date/Time → Screenshot (durable upload) → Post Type → Link (URL-validated) →
+// Status (Publish/Schedule). The complete record is saved to social_posts; the
+// screenshot goes through /api/uploads (durable DB-backed store) so it survives
+// refresh/redeploy. Guarded against duplicate submits.
 function PostModal({ pages, onClose, onSaved, editing }) {
+  const allPages = pages || [];
+  // On edit, seed the platform from the post's page so the page dropdown filters
+  // correctly and the saved page stays selected.
+  const editingPage = editing ? allPages.find((p) => String(p.id) === String(editing.page_id)) : null;
+  const [platform, setPlatform] = useState(editingPage?.platform || "facebook");
   const [form, setForm] = useState(editing ? {
     page_id: editing.page_id || "",
     title: editing.title || "",
     caption: editing.caption || "",
-    post_type: editing.post_type || "post",
+    post_type: editing.post_type || "photo",
     media_url: editing.media_url || "",
     external_url: editing.external_url || "",
     posted_at: editing.posted_at ? new Date(editing.posted_at).toISOString().slice(0, 16) : "",
     approval_status: editing.approval_status || "pending",
-    publish_status: editing.publish_status || "published",
+    publish_status: editing.publish_status === "scheduled" ? "scheduled" : "published",
     views: editing.views || 0, likes: editing.likes || 0,
     comments: editing.comments || 0, shares: editing.shares || 0,
     reach: editing.reach || 0,
     viral: editing.viral || 0,
   } : {
-    page_id: "", title: "", caption: "", post_type: "post",
+    page_id: "", title: "", caption: "", post_type: "photo",
     media_url: "", external_url: "", posted_at: new Date().toISOString().slice(0, 16),
     approval_status: "pending",
     publish_status: "published",
     views: 0, likes: 0, comments: 0, shares: 0, reach: 0,
   });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState("");
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
 
+  // Pages belonging to the chosen platform only (dynamic dropdown).
+  const platformPages = allPages.filter((p) => p.platform === platform);
+  const words = wordCount(form.caption);
+  const contentOk = words >= MIN_CONTENT_WORDS;
+  const linkOk = !form.external_url.trim() || isValidUrl(form.external_url);
+
+  function changePlatform(next) {
+    setPlatform(next);
+    // Clear the selected page if it no longer belongs to the new platform.
+    const stillValid = allPages.some((p) => String(p.id) === String(form.page_id) && p.platform === next);
+    if (!stillValid) setForm((f) => ({ ...f, page_id: "" }));
+  }
+
   async function uploadFile(e) {
     const f = e.target.files?.[0]; if (!f) return;
-    setUploading(true);
-    const fd = new FormData(); fd.append("file", f);
-    const r = await fetch("/api/uploads", { method: "POST", body: fd });
-    setUploading(false);
-    if (r.ok) setForm({ ...form, media_url: (await r.json()).url });
+    if (e.target) e.target.value = "";
+    setUploading(true); setError("");
+    try {
+      const fd = new FormData(); fd.append("file", f);
+      const r = await fetch("/api/uploads", { method: "POST", body: fd });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.message || "Screenshot upload failed.");
+      setForm((prev) => ({ ...prev, media_url: b.url }));
+    } catch (e2) { setError(e2.message || "Screenshot upload failed."); }
+    finally { setUploading(false); }
   }
+
   async function save() {
+    if (saving) return; // guard against a double Submit creating duplicate posts
+    setError(""); setOk("");
+    if (!form.page_id) { setError("Select a platform and page."); return; }
+    if (!contentOk) { setError(`Content must be at least ${MIN_CONTENT_WORDS} words (currently ${words}).`); return; }
+    if (!String(form.posted_at).trim()) { setError("Date & time is required."); return; }
+    if (!linkOk) { setError("Enter a valid URL (starting with http:// or https://) for the link."); return; }
     setSaving(true);
-    const url = editing ? `/api/social-management/posts/${editing.id}` : "/api/social-management/posts";
-    const method = editing ? "PUT" : "POST";
-    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    if (r.ok) onSaved(); else setSaving(false);
+    // Status: Publish = published now; Schedule = scheduled_at holds the chosen time.
+    const payload = {
+      ...form,
+      scheduled_at: form.publish_status === "scheduled" ? form.posted_at : null,
+    };
+    try {
+      const url = editing ? `/api/social-management/posts/${editing.id}` : "/api/social-management/posts";
+      const method = editing ? "PUT" : "POST";
+      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.message || "Could not save the post.");
+      setOk("Saved.");
+      onSaved();
+    } catch (e) { setError(e.message || "Could not save the post."); setSaving(false); }
   }
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  const lbl = "block text-xs font-semibold text-gray-500 mb-1";
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl p-6 space-y-3 max-h-[90vh] overflow-auto">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-gray-900">{editing ? "Edit Post" : "Log a Post"}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
-        <select className={inp} value={form.page_id} onChange={(e) => setForm({ ...form, page_id: e.target.value })}>
-          <option value="">Pick a page *</option>
-          {pages.map((p) => <option key={p.id} value={p.id}>{p.lok_sabha_name} · {PLATFORM[p.platform]?.label} · {p.handle}</option>)}
-        </select>
-        <input className={inp} placeholder="Title / topic" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <textarea className={inp} rows={3} placeholder="Caption / description" value={form.caption} onChange={(e) => setForm({ ...form, caption: e.target.value })} />
+
         <div className="grid grid-cols-2 gap-3">
-          <select className={inp} value={form.post_type} onChange={(e) => setForm({ ...form, post_type: e.target.value })}>
-            {POST_TYPE.map((t) => <option key={t} value={t}>{t}</option>)}
+          <div>
+            <label className={lbl}>Platform *</label>
+            <select className={inp} value={platform} onChange={(e) => changePlatform(e.target.value)}>
+              {Object.keys(PLATFORM).map((k) => <option key={k} value={k}>{PLATFORM[k].label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>Page Name *</label>
+            <select className={inp} value={form.page_id} onChange={(e) => setForm({ ...form, page_id: e.target.value })}>
+              <option value="">{platformPages.length ? "Select a page" : "No pages for this platform"}</option>
+              {platformPages.map((p) => <option key={p.id} value={p.id}>{p.handle}{p.lok_sabha_name ? ` · ${p.lok_sabha_name}` : ""}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <input className={inp} placeholder="Title / topic" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+
+        <div>
+          <label className={lbl}>Content * <span className="text-gray-400 font-normal">(minimum {MIN_CONTENT_WORDS} words)</span></label>
+          <textarea className={`${inp} ${form.caption && !contentOk ? "border-amber-400 focus:ring-amber-200" : ""}`} rows={6} placeholder="Write the full post content…" value={form.caption} onChange={(e) => setForm({ ...form, caption: e.target.value })} />
+          <div className={`text-[11px] mt-1 ${contentOk ? "text-emerald-600" : "text-amber-600"}`}>
+            {words} / {MIN_CONTENT_WORDS} words{contentOk ? " ✓" : ` — ${MIN_CONTENT_WORDS - words} more needed`}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={lbl}>Post Type</label>
+            <select className={inp} value={form.post_type} onChange={(e) => setForm({ ...form, post_type: e.target.value })}>
+              {LOG_POST_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>Date &amp; Time *</label>
+            <input type="datetime-local" className={inp} value={form.posted_at} onChange={(e) => setForm({ ...form, posted_at: e.target.value })} />
+          </div>
+        </div>
+
+        <div>
+          <label className={lbl}>Status</label>
+          <select className={inp} value={form.publish_status} onChange={(e) => setForm({ ...form, publish_status: e.target.value })}>
+            <option value="published">Publish (immediate)</option>
+            <option value="scheduled">Schedule</option>
           </select>
-          <input type="datetime-local" className={inp} value={form.posted_at} onChange={(e) => setForm({ ...form, posted_at: e.target.value })} />
         </div>
-        <select className={inp} value={form.publish_status} onChange={(e) => setForm({ ...form, publish_status: e.target.value })}>
-          <option value="published">Published</option>
-          <option value="scheduled">Scheduled</option>
-          <option value="failed">Failed</option>
-        </select>
-        <div className="flex items-center gap-2">
-          <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={uploadFile} />
-          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-1">
-            {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {form.media_url ? "Replace media" : "Attach media"}
-          </button>
-          {form.media_url && <a href={form.media_url} target="_blank" rel="noreferrer" className="text-xs text-[#164FA3] hover:underline">Open</a>}
+
+        <div>
+          <label className={lbl}>Screenshot</label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={uploadFile} />
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-1 disabled:opacity-50">
+              {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {form.media_url ? "Replace screenshot" : "Upload screenshot"}
+            </button>
+            {form.media_url && (
+              <span className="inline-flex items-center gap-2">
+                <img src={form.media_url} alt="" className="w-10 h-10 rounded object-cover border border-gray-200" />
+                <a href={form.media_url} target="_blank" rel="noreferrer" className="text-xs text-[#164FA3] hover:underline">Open</a>
+                <button type="button" onClick={() => setForm({ ...form, media_url: "" })} className="text-gray-400 hover:text-red-500"><X size={13} /></button>
+              </span>
+            )}
+          </div>
         </div>
-        <input className={inp} placeholder="External link (URL of the live post)" value={form.external_url} onChange={(e) => setForm({ ...form, external_url: e.target.value })} />
+
+        <div>
+          <label className={lbl}>Link <span className="text-gray-400 font-normal">(URL of the live post)</span></label>
+          <input className={`${inp} ${form.external_url && !linkOk ? "border-red-400 focus:ring-red-200" : ""}`} placeholder="https://…" value={form.external_url} onChange={(e) => setForm({ ...form, external_url: e.target.value })} />
+          {form.external_url && !linkOk && <div className="text-[11px] text-red-600 mt-1">Enter a valid URL starting with http:// or https://</div>}
+        </div>
+
         <details className="text-sm">
           <summary className="cursor-pointer text-gray-500 text-xs font-semibold uppercase tracking-wide">Add metrics (optional)</summary>
           <div className="grid grid-cols-3 gap-2 mt-2">
@@ -522,9 +621,13 @@ function PostModal({ pages, onClose, onSaved, editing }) {
             ))}
           </div>
         </details>
+
+        {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
+        {ok && <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{ok}</div>}
+
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={save} disabled={saving || !form.page_id} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : (editing ? "Save" : "Submit for approval")}</button>
+          <button onClick={save} disabled={saving || uploading || !form.page_id || !contentOk} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : (editing ? "Save" : "Submit")}</button>
         </div>
       </div>
     </div>
