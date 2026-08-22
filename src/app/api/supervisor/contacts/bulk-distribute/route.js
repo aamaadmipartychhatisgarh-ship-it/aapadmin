@@ -51,7 +51,10 @@ export async function POST(req) {
       return NextResponse.json({ message: "One or more selected callers are not in your territory." }, { status: 403 });
     }
 
-    const reassign = body.reassign !== false;
+    // Default FALSE (§8): preserve existing assignments unless the request
+    // EXPLICITLY opts in — pooling never silently steals another caller's
+    // contacts. Only unassigned pool contacts are handed out by default.
+    const reassign = body.reassign === true;
 
     // Explicit checkbox selection takes over targeting entirely — see the
     // admin route (src/app/api/contacts/bulk-distribute/route.js) for why

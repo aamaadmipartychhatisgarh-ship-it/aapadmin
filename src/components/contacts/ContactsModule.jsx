@@ -123,7 +123,10 @@ export default function ContactsModule({ session, mode }) {
   const [bulkTeam, setBulkTeam] = useState("");
   const [bulkMode, setBulkMode] = useState("even"); // even | perCaller
   const [perCaller, setPerCaller] = useState(100);
-  const [reassignOthers, setReassignOthers] = useState(true); // pull contacts off other callers
+  // §8: default OFF — pooling preserves existing assignments and only hands out
+  // unassigned pool contacts. Ticking it is an explicit opt-in to pull matching
+  // contacts off other callers.
+  const [reassignOthers, setReassignOthers] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   // Filter-independent status breakdown for the Assignment Summary — always
   // shows the full picture (Pending/Assigned/Pool/Done) regardless of which

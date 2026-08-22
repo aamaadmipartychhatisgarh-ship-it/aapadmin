@@ -65,9 +65,11 @@ export async function POST(req) {
       return NextResponse.json({ message: "One or more selected users are not callers." }, { status: 400 });
     }
 
-    // reassign (default true): pull matching contacts off other callers too.
-    // When false, only unassigned pool contacts are handed out.
-    const reassign = body.reassign !== false;
+    // reassign (default FALSE — §8): existing assignments must stay intact unless
+    // the caller EXPLICITLY opts in. Default preserves other callers' contacts —
+    // only unassigned pool contacts are handed out. Pass reassign:true to
+    // deliberately pull matching contacts off other callers.
+    const reassign = body.reassign === true;
 
     // Explicit checkbox selection takes over targeting entirely — status/geo/
     // designation/search filters are meaningless once the user has already
