@@ -95,7 +95,7 @@ function Body({ channelId }) {
                 </div>
               </div>
             </div>
-            <button onClick={() => setModal("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Schedule Debate</button>
+            <button onClick={() => setModal("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add / Schedule Debate</button>
           </div>
 
           {/* Upcoming debates */}
@@ -128,9 +128,11 @@ function Body({ channelId }) {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-left">
                       <tr>
-                        <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">When</th>
-                        <th className="px-4 py-3 font-semibold text-gray-600">Topic</th>
-                        <th className="px-4 py-3 font-semibold text-gray-600">Spokespersons</th>
+                        <th className="px-4 py-3 font-semibold text-gray-600">Title</th>
+                        <th className="px-4 py-3 font-semibold text-gray-600">Channel</th>
+                        <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
+                        <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Date / Time</th>
+                        <th className="px-4 py-3 font-semibold text-gray-600">Spokesperson</th>
                         <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                         <th className="px-4 py-3 font-semibold text-gray-600">Brief</th>
                         <th className="px-4 py-3"></th>
@@ -139,8 +141,10 @@ function Body({ channelId }) {
                     <tbody>
                       {debates.map((d) => (
                         <tr key={d.id} className="border-t border-gray-100 hover:bg-gray-50">
-                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtWhen(d)}</td>
                           <td className="px-4 py-3 font-medium text-gray-900">{d.topic}</td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{ch.name}</td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{ch.lok_sabha_name || <span className="text-gray-300">—</span>}</td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtWhen(d)}</td>
                           <td className="px-4 py-3 text-gray-600">{(d.spokespersons || []).length ? d.spokespersons.map((s) => s.name).join(", ") : <span className="text-gray-300">—</span>}</td>
                           <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${d.status === "aired" ? "bg-blue-100 text-blue-700" : d.status === "live" ? "bg-red-100 text-red-700" : d.status === "cancelled" ? "bg-gray-100 text-gray-400" : "bg-amber-100 text-amber-700"}`}>{d.status}</span></td>
                           <td className="px-4 py-3">{d.brief_pdf_url ? <a href={d.brief_pdf_url} target="_blank" rel="noreferrer" className="text-[#164FA3] hover:underline text-xs flex items-center gap-1"><FileText size={13} /> PDF</a> : <span className="text-gray-300">—</span>}</td>
