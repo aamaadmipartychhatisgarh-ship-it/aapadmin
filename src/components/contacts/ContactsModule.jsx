@@ -185,7 +185,7 @@ export default function ContactsModule({ session, mode }) {
   }, []);
 
   // Assignment Summary counts — independent of the active status pill.
-  useEffect(() => { if (!scopeLoading) loadCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, zoneId, lokSabhaId, districtId, assemblyIds, designationIds]);
+  useEffect(() => { if (!scopeLoading) loadCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo]);
   async function loadCounts() {
     const seq = ++countSeq.current;
     setCountsLoading(true);
@@ -195,6 +195,10 @@ export default function ContactsModule({ session, mode }) {
     if (districtId) base.set("district_id", districtId);
     if (assemblyIds.length) base.set("assembly_ids", assemblyIds.join(","));
     if (designationIds.length) base.set("designation_ids", designationIds.join(","));
+    // Caller-wise counts too (§8): the status counts must reflect the SAME
+    // caller + designation scope the list uses, so the badge count can never
+    // differ from the actual filtered/pooled records.
+    if (assignedTo) base.set("assigned_to", assignedTo);
     base.set("page_size", "1");
     const fetchCount = async (status) => {
       const p = new URLSearchParams(base);
