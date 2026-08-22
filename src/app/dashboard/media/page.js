@@ -714,12 +714,13 @@ function SpokespersonModal({ editing, onClose, onSaved }) {
 function AnalyticsTab({ data, filtered }) {
   const a = data.analytics;
   const ds = a.debateStats || { total: 0, done: 0, positive: 0, neutral: 0, negative: 0 };
+  const pcs = a.conferenceStats || { total: 0, done: 0, videos: 0 };
   return (
     <div className="space-y-6">
-      {/* Debate status cards — counts straight from the debates records
+      {/* News Channel status cards — counts straight from the debate records
           (respecting the date filter). Informational: no navigation. */}
       <div>
-        <h3 className="text-sm font-bold text-gray-700 mb-2">Debates</h3>
+        <h3 className="text-sm font-bold text-gray-700 mb-2">News Channel</h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <SumCard label="Total Debates Scheduled" value={ds.total} accent />
           <SumCard label="Total Debates Done" value={ds.done} />
@@ -743,12 +744,23 @@ function AnalyticsTab({ data, filtered }) {
       </div>
 
       <div>
-        <h3 className="text-sm font-bold text-gray-700 mb-2">Coverage</h3>
+        <h3 className="text-sm font-bold text-gray-700 mb-2">Newspaper</h3>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <SumCard label={filtered ? "Coverage (selected range)" : "Coverage (30d)"} value={a.counts?.coverage_total || 0} accent />
+          <SumCard label={filtered ? "Published (selected range)" : "Published (30d)"} value={a.counts?.coverage_total || 0} accent />
           <SumCard label="Positive" value={a.counts?.positive || 0} />
           <SumCard label="Neutral" value={a.counts?.neutral || 0} />
           <SumCard label="Negative" value={a.counts?.negative || 0} />
+        </div>
+      </div>
+
+      {/* Press Conference analytics (§11.3) — scheduled / done / videos uploaded,
+          all counted live from the press_conferences records. */}
+      <div>
+        <h3 className="text-sm font-bold text-gray-700 mb-2">Press Conference</h3>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <SumCard label="Total Press Conferences Scheduled" value={pcs.total} accent />
+          <SumCard label="Total Press Conferences Done" value={pcs.done} />
+          <SumCard label="Total Videos Uploaded" value={pcs.videos} />
         </div>
       </div>
 

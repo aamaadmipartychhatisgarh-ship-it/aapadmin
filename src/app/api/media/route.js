@@ -202,10 +202,27 @@ export async function GET(req) {
       negative: Number(dbg?.negative) || 0,
     };
 
+    // Press Conference analytics (§11.3): scheduled (all in range), done
+    // (status='completed'), and videos actually uploaded (video_url present) —
+    // counted from the real records under the same date window as the list.
+    const [pcg] = await query(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(pc.status = 'completed'), 0) AS done,
+              COALESCE(SUM(pc.video_url IS NOT NULL AND pc.video_url <> ''), 0) AS videos
+         FROM press_conferences pc
+        ${confWhere}`,
+      confFilter.params
+    );
+    const conferenceStats = {
+      total: Number(pcg?.total) || 0,
+      done: Number(pcg?.done) || 0,
+      videos: Number(pcg?.videos) || 0,
+    };
+
     return NextResponse.json({
       newspapers, newspaperStats, channels, spokespersons, journalists,
       recentNotes, upcomingDebates, conferences,
-      analytics: { counts, channelTone, topSpokespersons, debateStats },
+      analytics: { counts, channelTone, topSpokespersons, debateStats, conferenceStats },
     });
   } catch (err) {
     console.error("media GET error:", err);
