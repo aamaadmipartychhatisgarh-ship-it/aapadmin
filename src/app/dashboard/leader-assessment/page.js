@@ -1758,7 +1758,18 @@ function ComparisonTab({ b, onChange, flash, fail }) {
 
 function Recommendation({ b, ranked, onChange, flash, fail }) {
   const strongest = ranked.find((c) => c.rank === 1 && c.total > 0);
-  const seed = () => ({ mla_biggest_weakness: "", aap_biggest_strength: "", target_community: "", target_booth: "", main_issue: "", election_issue_1: "", election_issue_2: "", election_issue_3: "", ...(b.strategy || {}) });
+  const seed = () => {
+    const s = b.strategy || {};
+    return {
+      mla_biggest_weakness: "", aap_biggest_strength: "", target_community: "", target_booth: "", main_issue: "",
+      election_issue_1: "", election_issue_2: "", election_issue_3: "",
+      ...s,
+      // Candidate 1/2/3 kept as id strings for the <select> (or "" when unset).
+      candidate_1_id: s.candidate_1_id != null ? String(s.candidate_1_id) : "",
+      candidate_2_id: s.candidate_2_id != null ? String(s.candidate_2_id) : "",
+      candidate_3_id: s.candidate_3_id != null ? String(s.candidate_3_id) : "",
+    };
+  };
   const [form, setForm] = useState(seed);
   const [saving, setSaving] = useState(false);
   useEffect(() => { setForm(seed()); /* eslint-disable-next-line */ }, [b.assembly.id, b.strategy]);
@@ -1789,6 +1800,32 @@ function Recommendation({ b, ranked, onChange, flash, fail }) {
       </Card>
       <Card title="Election Strategy" icon={Target} right={<SaveBtn onClick={save} saving={saving} />}>
         <div className="space-y-3">
+          {/* Candidate 1/2/3 (B) — dropdowns of THIS assembly's existing candidates,
+              saved by candidate ID. The same candidate can't fill two slots. */}
+          <div>
+            <span className={lbl}><UserSquare2 size={12} className="inline mr-1" />Priority Candidates</span>
+            {(b.candidates || []).length === 0 ? (
+              <div className="text-xs text-gray-400">Add AAP candidates to this assembly to designate Candidate 1 / 2 / 3.</div>
+            ) : (
+              <div className="space-y-2">
+                {[1, 2, 3].map((n) => {
+                  const key = `candidate_${n}_id`;
+                  const others = [1, 2, 3].filter((m) => m !== n).map((m) => form[`candidate_${m}_id`]).filter(Boolean);
+                  return (
+                    <div key={n} className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-500 w-24 shrink-0">Candidate {n}</span>
+                      <select className={inp} value={form[key] ?? ""} onChange={(e) => set(key, e.target.value)}>
+                        <option value="">— none —</option>
+                        {(b.candidates || []).map((c) => (
+                          <option key={c.id} value={String(c.id)} disabled={others.includes(String(c.id))}>{c.name}{others.includes(String(c.id)) ? " (already selected)" : ""}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div><span className={lbl}><ShieldAlert size={12} className="inline mr-1" />MLA's Major Weakness</span><textarea rows={2} className={inp} value={form.mla_biggest_weakness ?? ""} onChange={(e) => set("mla_biggest_weakness", e.target.value)} /></div>
           <div><span className={lbl}><Star size={12} className="inline mr-1" />AAP Candidate's Major Strength</span><textarea rows={2} className={inp} value={form.aap_biggest_strength ?? ""} onChange={(e) => set("aap_biggest_strength", e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">

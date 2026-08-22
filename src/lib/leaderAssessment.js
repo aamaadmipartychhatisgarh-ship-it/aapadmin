@@ -254,6 +254,13 @@ export async function ensureLeaderAssessmentTables() {
   await ensureColumn("la_candidate_strategy", "election_issue_1", "TEXT NULL");
   await ensureColumn("la_candidate_strategy", "election_issue_2", "TEXT NULL");
   await ensureColumn("la_candidate_strategy", "election_issue_3", "TEXT NULL");
+  // Manually-designated priority candidates (Candidate 1/2/3) for the assembly,
+  // stored BY ID (referencing la_aap_candidates) — not by name. NULL when unset;
+  // no FK so deleting a candidate never cascades a strategy row away (the UI just
+  // stops resolving that slot to a name). Distinct from the auto ranking.
+  await ensureColumn("la_candidate_strategy", "candidate_1_id", "INT NULL");
+  await ensureColumn("la_candidate_strategy", "candidate_2_id", "INT NULL");
+  await ensureColumn("la_candidate_strategy", "candidate_3_id", "INT NULL");
   // One-time, non-destructive backfill: seed Election Issue 1 from the legacy
   // main_issue where issue 1 is still empty, so existing strategy text is not
   // lost when the UI switches to the three-issue layout. Never clears anything.
