@@ -33,10 +33,13 @@ export async function PUT(req, { params }) {
       if (Number(n) >= 3) return NextResponse.json({ message: "An assembly can have at most 3 AAP candidates." }, { status: 400 });
     }
 
-    const cols = ["photo_url=?", "name=?", "phone=?", "address=?", "date_of_birth=?", "caste=?", "net_worth=?", "business=?", "monthly_income=?", "education=?", "political_experience=?", "organization_experience=?", "previous_elections=?", "current_position=?"];
+    // organization_experience was removed from the Candidate form (§1.1). It is
+    // deliberately NOT in this UPDATE list, so any value existing candidates
+    // already have is preserved untouched rather than nulled out on an edit.
+    const cols = ["photo_url=?", "name=?", "phone=?", "address=?", "date_of_birth=?", "caste=?", "net_worth=?", "business=?", "monthly_income=?", "education=?", "political_experience=?", "previous_elections=?", "current_position=?"];
     const vals = [strOrNull(d.photo_url), name, strOrNull(d.phone), strOrNull(d.address), dateOrNull(d.date_of_birth),
       strOrNull(d.caste), strOrNull(d.net_worth), strOrNull(d.business), strOrNull(d.monthly_income),
-      strOrNull(d.education), strOrNull(d.political_experience), strOrNull(d.organization_experience), strOrNull(d.previous_elections), strOrNull(d.current_position)];
+      strOrNull(d.education), strOrNull(d.political_experience), strOrNull(d.previous_elections), strOrNull(d.current_position)];
     if (newAsmId != null) { cols.push("assembly_id=?"); vals.push(newAsmId); }
     vals.push(cid);
     const res = await query(`UPDATE la_aap_candidates SET ${cols.join(", ")} WHERE id=?`, vals);

@@ -364,7 +364,7 @@ function Overview({ flash, fail }) {
 
       {/* Overview status cards — part of "Other Overview sections", below the
           Search Card, selected assembly and Top Ranked sections. */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {/* MLA Data is the first metric: the actual number of unique assemblies
             that currently have a valid, linked MLA profile — same DISTINCT
             master-linked count as the MLA Data List (never Master-Data blindly,
@@ -387,8 +387,6 @@ function Overview({ flash, fail }) {
             with any pending candidate counts 0; 3 completed candidates count as 1.
             Auto-updates when candidate assessments change. */}
         <Stat label="Assembly Candidate" value={s?.total_completed_assemblies} />
-        <Stat label="With Candidates Data" value={s?.assemblies_with_candidates} />
-        <Stat label="Avg Candidate Score" value={s?.average_score != null ? `${s.average_score}/100` : null} />
       </div>
 
       <Card title="Assemblies" icon={Building2}>
@@ -562,7 +560,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
               )}
             </div>
             {/* RIGHT (previously the MLA position): now the AAP candidates. This
-                search-result card intentionally shows ONLY Age / Caste / Network
+                search-result card intentionally shows ONLY Age / Caste / Net Worth
                 per candidate (fuller details live in the candidate profile / Full
                 View). */}
             <div className="lg:col-span-2">
@@ -580,7 +578,7 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                         <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5">
                           <span>Age: <span className="text-gray-700 font-medium">{c.age != null ? c.age : "—"}</span></span>
                           <span>Caste: <span className="text-gray-700 font-medium">{c.caste || "—"}</span></span>
-                          <span>Network: <span className="text-gray-700 font-medium">{c.net_worth || "—"}</span></span>
+                          <span>Net Worth: <span className="text-gray-700 font-medium">{c.net_worth || "—"}</span></span>
                         </div>
                       </div>
                     </div>
@@ -1140,7 +1138,7 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
 // pre-selection needed. The assembly a candidate belongs to is chosen in the
 // form from the same master-linked assembly list used across the module, and the
 // list refreshes from the database immediately after every create/edit/remove.
-const EMPTY_CAND = { assembly_id: "", photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", net_worth: "", business: "", monthly_income: "", education: "", political_experience: "", organization_experience: "", previous_elections: "", current_position: "" };
+const EMPTY_CAND = { assembly_id: "", photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", net_worth: "", business: "", monthly_income: "", education: "", political_experience: "", previous_elections: "", current_position: "" };
 function CandidatesTab({ flash, fail }) {
   const [assemblies, setAssemblies] = useState([]);
   const [candidates, setCandidates] = useState([]);
@@ -1354,7 +1352,7 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
         <Field label="Net Worth" value={form.net_worth} onChange={(v) => set("net_worth", v)} /><Field label="Business" value={form.business} onChange={(v) => set("business", v)} />
         <Field label="Monthly Income" value={form.monthly_income} onChange={(v) => set("monthly_income", v)} /><Field label="Education" value={form.education} onChange={(v) => set("education", v)} />
         <Field label="Type / Current Position" value={form.current_position} onChange={(v) => set("current_position", v)} /><Field label="Political Experience" value={form.political_experience} onChange={(v) => set("political_experience", v)} />
-        <Field label="Organization Experience" value={form.organization_experience} onChange={(v) => set("organization_experience", v)} /><Field label="Previous Elections" value={form.previous_elections} onChange={(v) => set("previous_elections", v)} />
+        <Field label="Previous Elections" value={form.previous_elections} onChange={(v) => set("previous_elections", v)} />
         <Field label="Address" full value={form.address} onChange={(v) => set("address", v)} />
       </div>
 
@@ -1586,7 +1584,7 @@ function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
     ["Caste", c.caste], ["Type / Position", c.current_position],
     ["Net Worth", c.net_worth], ["Business", c.business],
     ["Monthly Income", c.monthly_income], ["Education", c.education],
-    ["Political Experience", c.political_experience], ["Organization Experience", c.organization_experience],
+    ["Political Experience", c.political_experience],
     ["Previous Elections", c.previous_elections], ["Address", c.address],
   ];
   return (
@@ -1945,12 +1943,11 @@ export function CasteMaster({ flash, fail }) {
           <div className="py-10 text-center text-sm text-gray-400">{castes.length === 0 ? "No castes yet. Click “Add Caste” to create the first one." : "No castes match your search."}</div>
         ) : (
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm min-w-[760px]">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
                   <th className="py-2 pr-3 w-16">ID</th>
                   <th className="py-2 pr-3">Name</th>
-                  <th className="py-2 pr-3">Polling Station</th>
                   <th className="py-2 pr-3 w-24">Status</th>
                   <th className="py-2 pr-3 w-20">Used</th>
                   <th className="py-2 pr-3 w-36">Created</th>
@@ -1963,7 +1960,6 @@ export function CasteMaster({ flash, fail }) {
                   <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50/60">
                     <td className="py-2.5 pr-3 text-gray-400 font-mono text-xs">#{c.id}</td>
                     <td className="py-2.5 pr-3 font-semibold text-gray-800">{c.name}</td>
-                    <td className="py-2.5 pr-3 text-gray-600">{c.polling_station_name || <span className="text-gray-300">—</span>}</td>
                     <td className="py-2.5 pr-3">
                       <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.is_active ? "Active" : "Deactivated"}</span>
                     </td>
@@ -1992,79 +1988,12 @@ export function CasteMaster({ flash, fail }) {
   );
 }
 
-// Merge freshly-fetched options into any pre-seeded list, de-duplicated by id.
-// Keeps the pre-seeded saved option (so an edited record's current value shows
-// immediately, even before the full list loads) and normalizes to { id, name }.
-function mergeOptions(prev, incoming) {
-  const byId = new Map();
-  for (const o of prev || []) {
-    if (o?.id != null) byId.set(Number(o.id), { id: Number(o.id), name: o.name || `#${o.id}` });
-  }
-  for (const o of incoming || []) {
-    if (o?.id != null) byId.set(Number(o.id), { id: Number(o.id), name: o.name || `#${o.id}` });
-  }
-  return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-// Searchable / scrollable single-select over id-keyed options ([{ id, name }]).
-// `value` is the id as a string (""=none); `onChange(idString)` fires on pick.
-// Used for the Polling Station picker so a long Master list stays usable.
-function IdSearchSelect({ value, options, onChange, placeholder = "Select…", emptyText = "No options found." }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const selected = (options || []).find((o) => String(o.id) === String(value));
-  const label = selected?.name || "";
-  const ql = q.trim().toLowerCase();
-  const list = (options || []).filter((o) => !ql || o.name.toLowerCase().includes(ql));
-
-  return (
-    <div className="relative w-full">
-      <button type="button" onClick={() => { setOpen((o) => !o); setQ(""); }} className={`${inp} flex items-center justify-between gap-2 text-left`}>
-        <span className={label ? "text-gray-800 truncate" : "text-gray-400"}>{label || placeholder}</span>
-        <ChevronDown size={15} className="text-gray-400 shrink-0" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
-          <div className="absolute z-[61] mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto">
-            <div className="p-2 sticky top-0 bg-white border-b border-gray-100">
-              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className={`${inp} text-sm py-1.5`} />
-            </div>
-            {list.length === 0 ? (
-              <div className="px-3 py-3 text-sm text-gray-400">{emptyText}</div>
-            ) : list.map((o) => (
-              <button key={o.id} type="button" onClick={() => { onChange(String(o.id)); setOpen(false); }} className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between gap-2 ${String(o.id) === String(value) ? "bg-blue-50/60 font-semibold text-[#164FA3]" : "text-gray-700"}`}>
-                <span className="truncate">{o.name}</span>
-                {String(o.id) === String(value) && <Check size={14} className="text-[#164FA3] shrink-0" />}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 function CasteEditor({ caste, existing, onClose, onSaved, fail }) {
   const isNew = !caste?.id;
   const [name, setName] = useState(caste?.name || "");
   const [active, setActive] = useState(caste?.is_active !== false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-  // Polling Station — required, chosen from the Polling Station Master
-  // (locations type='polling_station'). Store the id; keep the saved name so an
-  // edit shows the current value even before the option list loads.
-  const [psId, setPsId] = useState(caste?.polling_station_id != null ? String(caste.polling_station_id) : "");
-  const [psOptions, setPsOptions] = useState(caste?.polling_station_id != null ? [{ id: caste.polling_station_id, name: caste.polling_station_name || `#${caste.polling_station_id}` }] : []);
-  const [psLoading, setPsLoading] = useState(true);
-  useEffect(() => {
-    let alive = true;
-    api("/api/locations?type=polling_station")
-      .then((d) => { if (alive) setPsOptions((prev) => mergeOptions(prev, d.locations || [])); })
-      .catch(() => {})
-      .finally(() => { if (alive) setPsLoading(false); });
-    return () => { alive = false; };
-  }, []);
 
   // Live client-side duplicate hint (case-insensitive) so the admin sees the
   // clash before submitting; the server enforces it authoritatively too.
@@ -2075,9 +2004,8 @@ function CasteEditor({ caste, existing, onClose, onSaved, fail }) {
     const clean = name.replace(/\s+/g, " ").trim();
     if (!clean) { setErr("Caste / community name is required."); return; }
     if (dup) { setErr(`"${clean}" already exists in the caste master.`); return; }
-    if (!psId) { setErr("Please select a Polling Station."); return; }
     setSaving(true); setErr("");
-    const body = { name: clean, is_active: active, polling_station_id: Number(psId) };
+    const body = { name: clean, is_active: active };
     try {
       if (isNew) {
         await api("/api/leader-assessment/castes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -2096,11 +2024,6 @@ function CasteEditor({ caste, existing, onClose, onSaved, fail }) {
           <label className={lbl}>Caste Name <span className="text-red-500">*</span></label>
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Yadav, Sahu, Satnami…" className={inp} />
           {dup && <div className="text-[11px] text-amber-600 mt-1">This name already exists in the caste master.</div>}
-        </div>
-        <div>
-          <label className={lbl}>Polling Station <span className="text-red-500">*</span></label>
-          <IdSearchSelect value={psId} options={psOptions} onChange={setPsId} placeholder={psLoading ? "Loading polling stations…" : "Select a polling station"} emptyText="No polling stations found in Master Data." />
-          <p className="text-[11px] text-gray-400 mt-1">From the Polling Station Master (Master Data). Searchable.</p>
         </div>
         <label className="flex items-center gap-2 text-sm text-gray-700 select-none cursor-pointer">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="rounded border-gray-300" />
