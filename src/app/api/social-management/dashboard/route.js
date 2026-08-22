@@ -11,7 +11,7 @@ import { resolveRange } from "@/lib/reports/timeRanges";
 // aggregate route (src/app/api/social-management/route.js) — duplicated
 // rather than shared since that route doesn't export it, matching this
 // module's existing self-contained-per-route convention.
-export async function GET() {
+export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
@@ -34,8 +34,16 @@ export async function GET() {
       lsParams.push(u.scope_assembly_id);
     }
 
-    const { from: yesterday } = resolveRange("yesterday");
+    // Selected day for the Page-wise Daily Post Status (BUG 5): a ?date=YYYY-MM-DD
+    // calendar date, defaulting to TODAY (app/IST convention via resolveRange).
+    const dateParam = new URL(req.url).searchParams.get("date");
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(dateParam || "")
+      ? dateParam
+      : String(resolveRange("today").from).slice(0, 10);
 
+    // ALL active pages (LEFT JOIN → pages with zero posts on the day still appear
+    // with a 0 count), with that day's post breakdown. Page names come straight
+    // from the master (sp.handle); counts come from the real post records.
     const pages = await query(
       `SELECT sp.id, sp.platform, sp.handle, sp.lok_sabha_name,
               COUNT(p.id) AS total_posts,
@@ -49,8 +57,8 @@ export async function GET() {
               AND DATE(COALESCE(p.posted_at, p.scheduled_at, p.created_at)) = ?
         WHERE sp.is_active = 1 ${lsFilter}
         GROUP BY sp.id, sp.platform, sp.handle, sp.lok_sabha_name
-        ORDER BY sp.platform, sp.lok_sabha_name`,
-      [yesterday, ...lsParams]
+        ORDER BY sp.platform, sp.lok_sabha_name, sp.handle`,
+      [day, ...lsParams]
     );
 
     const cast = (p) => ({
@@ -58,6 +66,9 @@ export async function GET() {
       total_posts: Number(p.total_posts), scheduled_posts: Number(p.scheduled_posts),
       published_posts: Number(p.published_posts), failed_posts: Number(p.failed_posts),
       engagement: Number(p.views) + Number(p.likes) + Number(p.comments) + Number(p.shares),
+      // DONE = at least one PUBLISHED post that day. A scheduled-only day is NOT
+      // done (§8). Pages with zero posts are not done.
+      done: Number(p.published_posts) >= 1,
     });
     const rows = pages.map(cast);
 
@@ -99,6 +110,7 @@ export async function GET() {
     }), { pages: 0, total_posts: 0, scheduled_posts: 0, published_posts: 0, failed_posts: 0, engagement: 0 });
 
     return NextResponse.json({
+      date: day,
       headline,
       pages: rows,
       totals: {

@@ -41,15 +41,30 @@ function TotalsCard({ label, t, accent }) {
 // GET /api/social-management/dashboard (a dedicated endpoint separate from
 // the main aggregate route, so it can compute yesterday-scoped per-page
 // numbers without disturbing that route's existing shape).
+// Local YYYY-MM-DD for "today" (no Date-arg needed at module load).
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export default function SocialDashboardTab({ PLATFORM }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Selected day for the Page-wise Daily Post Status (BUG 5). Defaults to today;
+  // changing it re-fetches the day's per-page counts from the DB.
+  const [date, setDate] = useState(todayKey());
 
   useEffect(() => {
-    fetch("/api/social-management/dashboard").then((r) => (r.ok ? r.json() : null)).then(setData).finally(() => setLoading(false));
-  }, []);
+    let alive = true;
+    setLoading(true);
+    fetch(`/api/social-management/dashboard?date=${date}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (alive) setData(d); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [date]);
 
-  if (loading) return <div className="flex h-48 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
+  if (loading && !data) return <div className="flex h-48 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   if (!data) return <div className="p-8 text-center text-gray-400">Couldn't load the dashboard.</div>;
 
   const h = data.headline || { total_posts: 0, scheduled_posts: 0, followers: { facebook: 0, instagram: 0, twitter: 0 } };
@@ -71,18 +86,66 @@ export default function SocialDashboardTab({ PLATFORM }) {
         <HeadlineCards />
         <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
           <Share2 size={36} className="mx-auto text-gray-300 mb-3" />
-          No pages yet — add your first page in the Pages tab, then yesterday's stats will show up here automatically.
+          No pages yet — add your first page in the Pages tab, then the daily post status will show up here automatically.
         </div>
       </div>
     );
   }
 
+  const DAILY_PLATFORMS = ["facebook", "instagram", "twitter"];
+
   return (
     <div className="space-y-6">
       <HeadlineCards />
+
+      {/* Page-wise Daily Post Status (BUG 5) — every page from the master, grouped
+          by platform, for the selected day. Green = ≥1 published post; Red = none. */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Page-wise Daily Post Status</h2>
+            <p className="text-sm text-gray-500">Per page, for the selected day. <span className="text-emerald-600 font-medium">Done</span> = at least one published post; <span className="text-red-600 font-medium">Not done</span> = none.</p>
+          </div>
+          <label className="flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Date</span>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
+            {loading && <Loader2 size={14} className="animate-spin text-[#164FA3]" />}
+          </label>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {DAILY_PLATFORMS.map((key) => {
+            const meta = PLATFORM[key] || {};
+            const Icon = meta.icon || Share2;
+            const list = data.pages.filter((p) => p.platform === key);
+            return (
+              <div key={key} className="border border-gray-100 rounded-xl overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-100">
+                  <span className="w-6 h-6 rounded-md flex items-center justify-center text-white shrink-0" style={{ background: meta.color || "#999" }}><Icon size={13} /></span>
+                  <span className="font-semibold text-gray-800 text-sm">{meta.label || key}</span>
+                  <span className="text-xs text-gray-400">({list.length})</span>
+                </div>
+                {list.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-gray-400">No {meta.label || key} pages.</div>
+                ) : (
+                  <ul className="divide-y divide-gray-50">
+                    {list.map((p) => (
+                      <li key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                        <span className="flex-1 min-w-0 truncate font-medium text-gray-800" title={p.handle}>{p.handle}</span>
+                        <span className="text-xs text-gray-500 shrink-0 tabular-nums">{p.total_posts} Post{p.total_posts === 1 ? "" : "s"}</span>
+                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full shrink-0 ${p.done ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{p.done ? "Done" : "Not done"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div>
-        <h2 className="text-lg font-bold text-gray-900">Yesterday's Statistics</h2>
-        <p className="text-sm text-gray-500">Auto-calculated per page from the post log — no manual counting.</p>
+        <h2 className="text-lg font-bold text-gray-900">Daily Statistics</h2>
+        <p className="text-sm text-gray-500">Per-page totals for the selected day — auto-calculated from the post log.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
