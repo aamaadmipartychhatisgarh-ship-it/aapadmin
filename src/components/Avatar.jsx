@@ -3,6 +3,23 @@
 import { useState, useEffect } from "react";
 import { User } from "lucide-react";
 
+// Backward-compatible photo URL resolution. Legacy records may store a photo
+// reference in a non-rooted format (a bare filename, or "uploads/x.jpg" without
+// the leading slash) that an <img> can't resolve against the current page.
+// Normalize any such value to the canonical "/uploads/<file>" path (served by
+// the durable /api/media/[file] route via the next.config rewrite), while
+// leaving already-valid values (rooted paths, http(s)/data/blob URLs) untouched.
+// This makes existing stored photos display without touching the database.
+export function resolvePhotoUrl(src) {
+  if (!src || typeof src !== "string") return src || "";
+  const s = src.trim();
+  if (!s) return "";
+  if (/^(https?:|data:|blob:)/i.test(s)) return s; // absolute / inline / object URL
+  if (s.startsWith("/")) return s;                 // already rooted (e.g. /uploads/x.jpg)
+  // Bare filename or relative legacy path → route through /uploads/.
+  return "/uploads/" + s.replace(/^\.?\/*/, "").replace(/^uploads\//i, "");
+}
+
 // Initials from a name: first + last word's first letter (e.g. "Dilip Patkar" -> DP).
 export function initialsOf(name) {
   if (!name) return "";
@@ -26,7 +43,8 @@ export default function Avatar({ name, src, size = 64, square = false, className
   // failed/placeholder load until the component remounts.
   useEffect(() => { setErrored(false); }, [src]);
   const ini = initialsOf(name);
-  const showImg = src && !errored;
+  const resolvedSrc = resolvePhotoUrl(src);
+  const showImg = resolvedSrc && !errored;
   return (
     <div
       onClick={onClick}
@@ -36,7 +54,7 @@ export default function Avatar({ name, src, size = 64, square = false, className
     >
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={name || "avatar"} loading="lazy" decoding="async" onError={() => setErrored(true)} className="w-full h-full object-cover" />
+        <img src={resolvedSrc} alt={name || "avatar"} loading="lazy" decoding="async" onError={() => setErrored(true)} className="w-full h-full object-cover" />
       ) : ini ? (
         <span className={`font-bold leading-none ${textClassName}`} style={{ fontSize: Math.round(size * 0.38) }}>{ini}</span>
       ) : (

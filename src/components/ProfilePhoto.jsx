@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Plus, Camera, Upload, Eye, Trash2, X, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Loader2, CheckCircle2, RectangleHorizontal, RectangleVertical } from "lucide-react";
-import Avatar from "@/components/Avatar";
+import Avatar, { resolvePhotoUrl } from "@/components/Avatar";
 
 // ONE reusable profile-photo component for the whole app (Caller Dashboard,
 // Workers, Contacts, profile pages, active calling card, …). It shows the
@@ -175,7 +175,7 @@ export default function ProfilePhoto({
       {viewing && src && createPortal(
         <div className="fixed inset-0 z-[130] bg-black/80 flex items-center justify-center p-4" onClick={() => setViewing(false)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={src} alt={name || "photo"} className="max-w-[90vw] max-h-[90vh] rounded-xl object-contain" />
+          <img src={resolvePhotoUrl(src)} alt={name || "photo"} className="max-w-[90vw] max-h-[90vh] rounded-xl object-contain" />
           <button className="absolute top-4 right-4 text-white/80 hover:text-white" onClick={() => setViewing(false)}><X size={28} /></button>
         </div>,
         document.body

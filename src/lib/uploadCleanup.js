@@ -21,6 +21,10 @@ export async function deleteLocalUpload(url) {
     const id = ext ? name.slice(0, name.length - ext.length - 1) : name;
     await query("DELETE FROM worker_photos WHERE id = ?", [id]).catch(() => {});
     await query("DELETE FROM user_photos WHERE id = ?", [id]).catch(() => {});
+    // Also drop the durable Media store copy (profile photos now go there via
+    // /api/uploads), so replacing a photo doesn't leave its old blob orphaned.
+    // Only ever called on the REPLACED old url, never the current one.
+    await query("DELETE FROM media_files WHERE id = ?", [id]).catch(() => {});
 
     await unlink(path.join(process.cwd(), "public", "uploads", name));
   } catch {
