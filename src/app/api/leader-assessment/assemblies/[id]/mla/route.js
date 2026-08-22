@@ -71,7 +71,12 @@ export async function PUT(req, { params }) {
     const keys = Object.keys(cols);
     const [existing] = await query("SELECT id FROM la_mla_profiles WHERE assembly_id = ?", [id]);
     if (existing) {
-      await query(`UPDATE la_mla_profiles SET ${keys.map((k) => `${k}=?`).join(", ")} WHERE assembly_id=?`, [...keys.map((k) => cols[k]), id]);
+      // Data-integrity guard (§5.4): a partial update that does NOT include
+      // photo_url must never wipe an already-stored MLA photo. Only overwrite
+      // the photo when the client actually sent the field; otherwise leave the
+      // existing value in place.
+      const upKeys = d.photo_url === undefined ? keys.filter((k) => k !== "photo_url") : keys;
+      await query(`UPDATE la_mla_profiles SET ${upKeys.map((k) => `${k}=?`).join(", ")} WHERE assembly_id=?`, [...upKeys.map((k) => cols[k]), id]);
     } else {
       await query(`INSERT INTO la_mla_profiles (assembly_id, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [id, ...keys.map((k) => cols[k])]);
     }
