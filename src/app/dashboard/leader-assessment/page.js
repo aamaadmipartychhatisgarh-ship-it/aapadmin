@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, Fragment } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import { initialsOf } from "@/components/Avatar";
+import PartySelect, { usePartyMaster, PartyLogo, PartyBadge } from "@/components/PartySelect";
 import {
   LayoutDashboard, Building2, UserSquare2, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
@@ -542,7 +543,10 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                   </div>
                   <div className="grid grid-cols-1 gap-1.5 mt-3 text-left">
                     <MlaField label="Age" value={mla.age != null ? String(mla.age) : "—"} />
-                    <MlaField label="Party" value={mla.party || "—"} />
+                    <div className="flex justify-between text-sm gap-2 items-center">
+                      <span className="text-gray-400 shrink-0">Party</span>
+                      <span className="font-medium text-gray-700 truncate text-right min-w-0"><PartyBadge name={mla.party} /></span>
+                    </div>
                     <MlaField label="Caste" value={mla.caste || "—"} />
                     <MlaField label="Criminal Cases" value={mla.criminal_cases != null ? String(mla.criminal_cases) : "—"} />
                     <MlaField label="Net Worth" value={mla.net_worth || "—"} />
@@ -1065,7 +1069,8 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
           {initial && <span className="text-[11px] text-gray-400">One MLA per assembly — the assembly can't be changed here.</span>}
         </div>
         <Field label="Full Name *" full value={form.name} onChange={(v) => set("name", v)} error={errors.name} />
-        <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} /><Field label="Party" value={form.party} onChange={(v) => set("party", v)} />
+        <Field label="Phone" value={form.phone} onChange={(v) => set("phone", v)} />
+        <div><span className={lbl}>Party</span><PartySelect value={form.party} onChange={(v) => set("party", v)} /></div>
         <Field label="Date of Birth" type="date" value={form.date_of_birth} onChange={(v) => set("date_of_birth", v)} />
         <div><span className={lbl}>Age (auto)</span><div className={`${inp} bg-gray-50 text-gray-600`}>{age != null ? `${age} years` : "Age not available"}</div></div>
         <div>
@@ -1102,13 +1107,13 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
           <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-2">
             <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Competitor 1</div>
             <Field label="Competitor 1 Name" full value={form.competitor1_name} onChange={(v) => set("competitor1_name", v)} />
-            <Field label="Competitor 1 Party Name" full value={form.competitor1_party} onChange={(v) => set("competitor1_party", v)} />
+            <div><span className={lbl}>Competitor 1 Party</span><PartySelect value={form.competitor1_party} onChange={(v) => set("competitor1_party", v)} /></div>
             <Field label="Competitor 1 Votes" full type="number" value={form.competitor1_votes} onChange={(v) => set("competitor1_votes", v)} error={errors.competitor1_votes} />
           </div>
           <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-2">
             <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Competitor 2</div>
             <Field label="Competitor 2 Name" full value={form.competitor2_name} onChange={(v) => set("competitor2_name", v)} />
-            <Field label="Competitor 2 Party Name" full value={form.competitor2_party} onChange={(v) => set("competitor2_party", v)} />
+            <div><span className={lbl}>Competitor 2 Party</span><PartySelect value={form.competitor2_party} onChange={(v) => set("competitor2_party", v)} /></div>
             <Field label="Competitor 2 Votes" full type="number" value={form.competitor2_votes} onChange={(v) => set("competitor2_votes", v)} error={errors.competitor2_votes} />
           </div>
         </div>

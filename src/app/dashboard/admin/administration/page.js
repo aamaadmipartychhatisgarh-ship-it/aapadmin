@@ -13,6 +13,7 @@ import MasterDataSettings from "../settings/page";
 // Assessment module. Reuse the EXACT same components (same APIs, same records) —
 // no duplicate implementation.
 import { CasteMaster, PollingMaster } from "@/app/dashboard/leader-assessment/page";
+import PartyMaster from "@/components/PartyMaster";
 
 const TABS = [
   { key: "teams", label: "Teams" },
@@ -20,8 +21,9 @@ const TABS = [
   { key: "master", label: "Master Data" },
   { key: "castes", label: "Caste Master" },
   { key: "polling", label: "Polling Station Master" },
+  { key: "parties", label: "Party Master" },
 ];
-const ADMIN_MASTER_TABS = new Set(["castes", "polling"]);
+const ADMIN_MASTER_TABS = new Set(["castes", "polling", "parties"]);
 
 // The people-management hub — Teams and Users are tabs on one page rather
 // than separate routes. Worker Management (a third "Workers" tab here, plus
@@ -125,6 +127,7 @@ function Body({ session }) {
       {tab === "master" && canSeeUsers && <MasterDataSettings embedded />}
       {tab === "castes" && <CasteMaster flash={flash} fail={fail} />}
       {tab === "polling" && <PollingMaster flash={flash} fail={fail} />}
+      {tab === "parties" && <PartyMaster flash={flash} fail={fail} />}
     </div>
   );
 }
