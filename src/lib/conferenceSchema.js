@@ -14,10 +14,32 @@ export async function ensureConferenceSchema() {
     // The speaking spokesperson, stored by ID (the relationship), so the profile
     // (name + photo) is always retrieved live from the spokespersons master.
     await ensureColumn("press_conferences", "spokesperson_id", "INT NULL");
+    // Multiple spokespersons (§10.1) — CSV of spokesperson IDs. spokesperson_id
+    // is kept as the primary/first for backward compatibility; names + photos are
+    // resolved live from the spokespersons master.
+    await ensureColumn("press_conferences", "spokesperson_ids", "VARCHAR(500) NULL");
+    // Free-text Co-Spokesperson (§10.2) — a manually typed name, not a master ref.
+    await ensureColumn("press_conferences", "co_spokesperson", "VARCHAR(255) NULL");
+    // Persistent video reference (§10.3/§10.4) — a durable /uploads/... URL from
+    // the shared uploader, uploadable after the conference is marked Done.
+    await ensureColumn("press_conferences", "video_url", "VARCHAR(512) NULL");
     ensured = true;
   } catch (e) {
     console.error("[media] ensureConferenceSchema:", e?.message || e);
   }
+}
+
+// Accept an array (["1","2"]) or CSV ("1,2") of spokesperson ids and return a
+// clean, de-duplicated array of positive integers (order preserved). Shared by
+// the conference create/update routes and the media aggregate GET.
+export function normalizeSpokespersonIds(input) {
+  const raw = Array.isArray(input) ? input : String(input ?? "").split(",");
+  const out = [];
+  for (const v of raw) {
+    const s = String(v ?? "").trim();
+    if (/^\d+$/.test(s)) { const n = Number(s); if (n > 0 && !out.includes(n)) out.push(n); }
+  }
+  return out;
 }
 
 async function ensureColumn(table, column, def) {

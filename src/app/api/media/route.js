@@ -5,7 +5,7 @@ import { canAccessMedia } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensurePressNotesSchema } from "@/lib/pressNotesSchema";
 import { ensureNewsChannelsSeed } from "@/lib/newsChannelsSeed";
-import { ensureConferenceSchema } from "@/lib/conferenceSchema";
+import { ensureConferenceSchema, normalizeSpokespersonIds } from "@/lib/conferenceSchema";
 import { mediaDateFilter } from "@/lib/mediaDateFilter";
 
 // Aggregated GET for the Media hub page.
@@ -118,6 +118,13 @@ export async function GET(req) {
         ORDER BY pc.conference_date ${confFilter.clause ? "DESC" : "ASC"} LIMIT ${listLimit}`,
       confFilter.params
     );
+    // Resolve each conference's multiple spokespersons (§10.1) live from the
+    // spokespersons master, so names + photos always reflect the current record.
+    const spById = new Map(spokespersons.map((s) => [Number(s.id), s]));
+    for (const c of conferences) {
+      const ids = normalizeSpokespersonIds(c.spokesperson_ids ?? c.spokesperson_id);
+      c.spokespersons = ids.map((i) => spById.get(i)).filter(Boolean).map((s) => ({ id: s.id, name: s.name, photo_url: s.photo_url }));
+    }
 
     // Analytics: coverage count, channel tone breakdown, top topics, top
     // spokesperson — all responding to the SAME date filter (default: 30 days).

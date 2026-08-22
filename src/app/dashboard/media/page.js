@@ -5,7 +5,7 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessMedia } from "@/lib/permissions";
 import {
   LayoutDashboard, Newspaper, Tv, Mic, UserCheck, BarChart3, Upload, Plus, Loader2, X,
-  Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil, ChevronDown, Check, Search,
+  Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil, ChevronDown, Check, Search, Video,
 } from "lucide-react";
 import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 import FloatingPopover from "@/components/FloatingPopover";
@@ -598,7 +598,6 @@ function ChannelsTab({ data, onChange, flash }) {
 function ConferencesTab({ data, onChange, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [inviting, setInviting] = useState(null);
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -618,8 +617,13 @@ function ConferencesTab({ data, onChange, filtered }) {
                 <div className="text-xs text-gray-500 uppercase tracking-wide">{new Date(c.conference_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", weekday: "short" })}</div>
                 <h4 className="font-bold text-gray-900 mt-1">{c.title}</h4>
                 {c.venue && <div className="text-xs text-gray-500 mt-1">{c.venue}</div>}
-                {c.spokesperson_name && (
-                  <div className="mt-2 inline-flex items-center gap-1.5"><Avatar name={c.spokesperson_name} src={c.spokesperson_photo} size={22} /><span className="text-xs font-medium text-gray-700">{c.spokesperson_name}</span></div>
+                {/* Spokesperson(s) — supports multiple (§10.1); falls back to the
+                    single legacy spokesperson when the multi list is empty. */}
+                {(c.spokespersons?.length ? c.spokespersons : (c.spokesperson_name ? [{ id: "legacy", name: c.spokesperson_name, photo_url: c.spokesperson_photo }] : [])).map((s) => (
+                  <div key={s.id} className="mt-2 inline-flex items-center gap-1.5 mr-2"><Avatar name={s.name} src={s.photo_url} size={22} /><span className="text-xs font-medium text-gray-700">{s.name}</span></div>
+                ))}
+                {c.co_spokesperson && (
+                  <div className="mt-1 text-xs text-gray-500">Co-Spokesperson: <span className="font-medium text-gray-700">{c.co_spokesperson}</span></div>
                 )}
                 {c.file_url && (
                   <a href={c.file_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-[#164FA3] hover:underline">
@@ -629,12 +633,13 @@ function ConferencesTab({ data, onChange, filtered }) {
               </div>
               <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.status === "completed" ? "bg-emerald-100 text-emerald-700" : c.status === "cancelled" ? "bg-gray-100 text-gray-400" : "bg-amber-100 text-amber-700"}`}>{c.status}</span>
             </div>
-            <div className="flex items-center justify-between mt-4 text-xs">
-              <span className="text-gray-500"><strong className="text-gray-900">{c.invited}</strong> invited · <strong className="text-emerald-700">{c.attended}</strong> attended</span>
-              <div className="flex gap-2 items-center">
-                <button onClick={() => setEditing(c)} title="Edit conference" className="p-1 text-gray-400 hover:text-[#164FA3]"><Pencil size={13} /></button>
-                <button onClick={() => setInviting(c)} className="text-[#164FA3] font-semibold hover:underline">Manage invites →</button>
-              </div>
+            {c.video_url && (
+              <a href={c.video_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-[#164FA3] hover:underline">
+                <Video size={14} /> Watch conference video
+              </a>
+            )}
+            <div className="flex items-center justify-end mt-4 text-xs">
+              <button onClick={() => setEditing(c)} title="Edit conference" className="inline-flex items-center gap-1 text-[#164FA3] font-semibold hover:underline"><Pencil size={13} /> Edit</button>
             </div>
           </div>
         ))}
@@ -642,7 +647,6 @@ function ConferencesTab({ data, onChange, filtered }) {
 
       {showAdd && <ConferenceModal spokespersons={data.spokespersons} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); onChange(); }} />}
       {editing && <ConferenceModal editing={editing} spokespersons={data.spokespersons} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChange(); }} />}
-      {inviting && <InviteModal conference={inviting} journalists={data.journalists} onClose={() => setInviting(null)} onChange={onChange} />}
     </div>
   );
 }
@@ -845,10 +849,11 @@ function ChannelToneCard({ channels }) {
 // (mediaFileSniff). Used for the friendly "supported formats" hint, the
 // image-vs-document preview, and a lenient frontend pre-check.
 const UPLOAD_EXT_RE = /\.(jpe?g|png|webp|pdf|docx?)$/i;
+const VIDEO_EXT_RE = /\.(mp4|webm)$/i;
 const IMG_EXT_RE = /\.(jpe?g|png|webp)$/i;
 function extFromUrl(u = "") { return (String(u).split(".").pop() || "").toLowerCase(); }
 
-function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api/uploads", maxMB = 25 }) {
+function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api/uploads", maxMB = 25, extRe = UPLOAD_EXT_RE, formatMsg = "Unsupported format. Use JPG, JPEG, PNG, WEBP or PDF." }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [name, setName] = useState("");
@@ -861,8 +866,8 @@ function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api
     // Frontend validation (backend re-validates by magic bytes). Reject clearly
     // BEFORE uploading so a genuinely unsupported file gives an instant, precise
     // message — and a valid one never trips a false "upload failed".
-    if (!UPLOAD_EXT_RE.test(f.name || "")) {
-      setErr("Unsupported format. Use JPG, JPEG, PNG, WEBP or PDF.");
+    if (!extRe.test(f.name || "")) {
+      setErr(formatMsg);
       return;
     }
     if (f.size > maxMB * 1024 * 1024) { setErr(`File too large (max ${maxMB} MB).`); return; }
@@ -1240,25 +1245,33 @@ function ChannelSelect({ options, value, onChange }) {
 }
 
 function ConferenceModal({ onClose, onSaved, editing, spokespersons = [] }) {
+  // spokesperson_ids is an array of id strings (§10.1). Seed from the saved
+  // multi list when present, else fall back to the legacy single spokesperson.
+  const seedIds = editing
+    ? (Array.isArray(editing.spokespersons) && editing.spokespersons.length
+        ? editing.spokespersons.map((s) => String(s.id))
+        : (editing.spokesperson_id ? [String(editing.spokesperson_id)] : []))
+    : [];
   const [form, setForm] = useState(editing ? {
     title: editing.title || "",
     conference_date: editing.conference_date ? new Date(editing.conference_date).toISOString().slice(0, 16) : "",
     venue: editing.venue || "",
     agenda: editing.agenda || "",
     status: editing.status || "scheduled",
-    spokesperson_id: editing.spokesperson_id ? String(editing.spokesperson_id) : "",
-  } : { title: "", conference_date: "", venue: "AAP State Office, Raipur", agenda: "", spokesperson_id: "" });
+    spokesperson_ids: seedIds,
+    co_spokesperson: editing.co_spokesperson || "",
+    video_url: editing.video_url || "",
+  } : { title: "", conference_date: "", venue: "AAP State Office, Raipur", agenda: "", status: "scheduled", spokesperson_ids: [], co_spokesperson: "", video_url: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  // Active spokespersons for selection. When editing, include the saved
-  // spokesperson even if it's now inactive, so its name + photo still load.
+  // Active spokespersons for selection. When editing, include any saved
+  // spokespersons even if now inactive, so their names still load in the picker.
   const spokesOptions = (() => {
     const active = (spokespersons || []).filter((s) => s.is_active == null || Number(s.is_active) === 1);
-    if (editing?.spokesperson_id && !active.some((s) => String(s.id) === String(editing.spokesperson_id))) {
-      return [{ id: editing.spokesperson_id, name: editing.spokesperson_name || "Spokesperson", photo_url: editing.spokesperson_photo || null, is_active: 0 }, ...active];
-    }
-    return active;
+    const extra = (editing?.spokespersons || []).filter((s) => !active.some((a) => String(a.id) === String(s.id)));
+    return [...extra.map((s) => ({ id: s.id, name: s.name, photo_url: s.photo_url, is_active: 0 })), ...active];
   })();
+  const isDone = form.status === "completed";
   async function save() {
     setError("");
     if (!form.title.trim()) { setError("Title is required."); return; }
@@ -1285,8 +1298,12 @@ function ConferenceModal({ onClose, onSaved, editing, spokespersons = [] }) {
           data and the backend/API are unaffected. */}
       <textarea className={inp} rows={3} placeholder="Press Points" value={form.agenda} onChange={(e) => setForm({ ...form, agenda: e.target.value })} />
       <div>
-        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Spokesperson</label>
-        <SpokespersonSelect options={spokesOptions} value={form.spokesperson_id} onChange={(id) => setForm({ ...form, spokesperson_id: id })} />
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Spokesperson(s)</label>
+        <SpokespersonMultiSelect options={spokesOptions} value={form.spokesperson_ids} onChange={(ids) => setForm({ ...form, spokesperson_ids: ids })} />
+      </div>
+      <div>
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Co-Spokesperson</label>
+        <input className={inp} placeholder="Type a co-spokesperson name" value={form.co_spokesperson} onChange={(e) => setForm({ ...form, co_spokesperson: e.target.value })} />
       </div>
       {editing && (
         <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -1295,6 +1312,19 @@ function ConferenceModal({ onClose, onSaved, editing, spokespersons = [] }) {
           <option value="cancelled">Cancelled</option>
         </select>
       )}
+      {/* Video upload (§10.3/§10.4). Available anytime, and highlighted once the
+          conference is marked Completed so its recording can be attached. Stored
+          durably (/api/media/uploads → media_files) and referenced by video_url. */}
+      <div className={`rounded-xl border p-3 ${isDone ? "border-[#164FA3]/30 bg-[#164FA3]/5" : "border-gray-100 bg-gray-50/60"}`}>
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">
+          Conference Video {isDone && <span className="text-[#164FA3]">· upload the recording</span>}
+        </label>
+        <FileUpload value={form.video_url} onChange={(url) => setForm({ ...form, video_url: url })} accept="video/mp4,video/webm" endpoint="/api/media/uploads" maxMB={200} extRe={VIDEO_EXT_RE} formatMsg="Unsupported format. Use MP4 or WEBM video." />
+        {form.video_url && (
+          <video src={form.video_url} controls className="mt-2 w-full rounded-lg max-h-56 bg-black" />
+        )}
+        <p className="text-[11px] text-gray-400 mt-1">MP4 or WEBM, up to 200 MB. Saved permanently and available after refresh/re-login.</p>
+      </div>
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
       <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.title || !form.conference_date} />
     </Modal>

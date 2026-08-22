@@ -35,6 +35,7 @@ const TYPES = {
   pdf: "application/pdf",
   doc: "application/msword",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  mp4: "video/mp4", webm: "video/webm",
 };
 
 export async function GET(_req, { params }) {

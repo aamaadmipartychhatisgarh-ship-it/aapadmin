@@ -24,14 +24,17 @@ export async function POST(req) {
     if (!file || typeof file === "string") {
       return NextResponse.json({ message: "No file provided." }, { status: 400 });
     }
-    if (file.size > 25 * 1024 * 1024) {
-      return NextResponse.json({ message: "File too large (max 25 MB)." }, { status: 413 });
+    // Higher cap than images/docs so press-conference videos fit (§10.3). Very
+    // large blobs may exceed the DB's max_allowed_packet — the durable store is
+    // best-effort and the disk copy backs it up in that case.
+    if (file.size > 200 * 1024 * 1024) {
+      return NextResponse.json({ message: "File too large (max 200 MB)." }, { status: 413 });
     }
     const buffer = Buffer.from(await file.arrayBuffer());
     const sniffed = sniffMediaFile(buffer, file.name || "");
     if (!sniffed || !MEDIA_TYPES[sniffed]) {
       return NextResponse.json(
-        { message: "Unsupported file type. Use PDF, JPG, PNG, WEBP, DOC or DOCX." },
+        { message: "Unsupported file type. Use PDF, JPG, PNG, WEBP, DOC, DOCX, MP4 or WEBM." },
         { status: 415 }
       );
     }

@@ -10,6 +10,10 @@ export const MEDIA_TYPES = {
   "application/pdf": "pdf",
   "application/msword": "doc",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  // Video (press-conference recordings, §10.3). MP4/MOV share the ISO-BMFF
+  // "ftyp" header; WEBM is a Matroska/EBML container.
+  "video/mp4": "mp4",
+  "video/webm": "webm",
 };
 
 export function sniffMediaFile(buf, filename = "") {
@@ -18,6 +22,14 @@ export function sniffMediaFile(buf, filename = "") {
   // PDF: "%PDF"
   if (buf.length >= 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) {
     return "application/pdf";
+  }
+  // MP4 / MOV (ISO-BMFF): bytes 4-7 spell "ftyp".
+  if (buf.length >= 12 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70) {
+    return "video/mp4";
+  }
+  // WEBM / Matroska (EBML): 1A 45 DF A3
+  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
+    return "video/webm";
   }
   // Legacy .doc (OLE2 compound file): D0 CF 11 E0 A1 B1 1A E1
   if (buf.length >= 8 && buf[0] === 0xd0 && buf[1] === 0xcf && buf[2] === 0x11 && buf[3] === 0xe0 &&
