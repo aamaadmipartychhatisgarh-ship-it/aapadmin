@@ -5,7 +5,7 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessMedia } from "@/lib/permissions";
 import {
   LayoutDashboard, Newspaper, Tv, Mic, UserCheck, BarChart3, Upload, Plus, Loader2, X,
-  Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil, ChevronDown, Check,
+  Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil, ChevronDown, Check, Search,
 } from "lucide-react";
 import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 import FloatingPopover from "@/components/FloatingPopover";
