@@ -61,6 +61,37 @@ export async function GET() {
     });
     const rows = pages.map(cast);
 
+    // Headline metrics (BUG 4) — all-time across the scoped pages, independent of
+    // the yesterday window above. Refresh-safe (all from the DB), and they move as
+    // posts are added/edited and their status changes.
+    const [[postAgg]] = await query(
+      `SELECT COUNT(*) AS total_posts,
+              COALESCE(SUM(p.publish_status = 'scheduled'), 0) AS scheduled_posts
+         FROM social_posts p JOIN social_pages sp ON sp.id = p.page_id
+        WHERE sp.is_active = 1 ${lsFilter}`,
+      lsParams
+    );
+    // Follower totals per platform = SUM of that platform's page followers (the
+    // app's defined aggregation — never one page's number).
+    const folRows = await query(
+      `SELECT sp.platform, COALESCE(SUM(sp.followers), 0) AS followers
+         FROM social_pages sp
+        WHERE sp.is_active = 1 ${lsFilter}
+        GROUP BY sp.platform`,
+      lsParams
+    );
+    const byPlatform = {};
+    for (const r of folRows) byPlatform[r.platform] = Number(r.followers) || 0;
+    const headline = {
+      total_posts: Number(postAgg?.total_posts) || 0,
+      scheduled_posts: Number(postAgg?.scheduled_posts) || 0,
+      followers: {
+        facebook: byPlatform.facebook || 0,
+        instagram: byPlatform.instagram || 0,
+        twitter: byPlatform.twitter || 0,
+      },
+    };
+
     const totalsFor = (list) => list.reduce((t, p) => ({
       pages: t.pages + 1, total_posts: t.total_posts + p.total_posts,
       scheduled_posts: t.scheduled_posts + p.scheduled_posts, published_posts: t.published_posts + p.published_posts,
@@ -68,6 +99,7 @@ export async function GET() {
     }), { pages: 0, total_posts: 0, scheduled_posts: 0, published_posts: 0, failed_posts: 0, engagement: 0 });
 
     return NextResponse.json({
+      headline,
       pages: rows,
       totals: {
         facebook: totalsFor(rows.filter((p) => p.platform === "facebook")),

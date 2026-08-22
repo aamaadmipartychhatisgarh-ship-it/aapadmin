@@ -207,6 +207,7 @@ function OverviewTab({ data }) {
 // dropdown across the module reads from; nothing is hardcoded.
 function PagesTab({ data, onReload }) {
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
   const pages = data.pages || [];
   // Order the platform groups by the master PLATFORM map so all three always
   // show (even with zero pages), and each supports any number of pages (≥20).
@@ -240,13 +241,14 @@ function PagesTab({ data, onReload }) {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {items.map((p) => (
-                  <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 group">
                     <div className="flex items-center gap-2 mb-3">
                       <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={16} /></div>
                       <div className="flex-1 min-w-0">
                         <div className="font-bold text-gray-900 text-sm truncate">{p.handle}</div>
                         <div className="text-xs text-gray-500 truncate">{p.lok_sabha_name || "—"}</div>
                       </div>
+                      <button onClick={() => setEditing(p)} title="Edit page / followers" className="p-1.5 text-gray-300 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg opacity-0 group-hover:opacity-100"><Pencil size={13} /></button>
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div><div className="text-gray-400">Followers</div><div className="font-bold text-gray-900">{fmt(p.followers)}</div></div>
@@ -262,29 +264,37 @@ function PagesTab({ data, onReload }) {
       })}
 
       {adding && <PageModal onClose={() => setAdding(false)} onSaved={() => { setAdding(false); onReload?.(); }} />}
+      {editing && <PageModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onReload?.(); }} />}
     </div>
   );
 }
 
-// Add Page to the Social Media Master: pick a platform + type the page name.
-// Saved to social_pages via /api/social-management/pages (duplicate names per
-// platform are rejected server-side).
-function PageModal({ onClose, onSaved }) {
-  const [platform, setPlatform] = useState("facebook");
-  const [handle, setHandle] = useState("");
+// Add / Edit a page in the Social Media Master: platform + page name +
+// Followers (the admin follower-update mechanism, BUG 4). Add → POST, Edit →
+// PUT /api/social-management/pages/[id]. Duplicate names per platform are
+// rejected server-side.
+function PageModal({ onClose, onSaved, editing }) {
+  const isEdit = !!editing?.id;
+  const [platform, setPlatform] = useState(editing?.platform || "facebook");
+  const [handle, setHandle] = useState(editing?.handle || "");
+  const [followers, setFollowers] = useState(editing?.followers != null ? String(editing.followers) : "0");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   async function save() {
+    if (saving) return;
     const name = handle.replace(/\s+/g, " ").trim();
     if (!name) { setErr("Page name is required."); return; }
+    const fol = Math.max(0, Math.floor(Number(followers) || 0));
     setSaving(true); setErr("");
     try {
-      const r = await fetch("/api/social-management/pages", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform, handle: name }),
+      const url = isEdit ? `/api/social-management/pages/${editing.id}` : "/api/social-management/pages";
+      const method = isEdit ? "PUT" : "POST";
+      const r = await fetch(url, {
+        method, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, handle: name, followers: fol }),
       });
       const b = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(b.message || "Could not add the page.");
+      if (!r.ok) throw new Error(b.message || "Could not save the page.");
       onSaved();
     } catch (e) { setErr(e.message); setSaving(false); }
   }
@@ -292,7 +302,7 @@ function PageModal({ onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-gray-900">Add Page</h3>
+          <h3 className="font-bold text-gray-900">{isEdit ? "Edit Page" : "Add Page"}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
         <div>
@@ -304,6 +314,11 @@ function PageModal({ onClose, onSaved }) {
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">Page Name *</label>
           <input autoFocus value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="e.g. AAP Raipur Official" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Followers</label>
+          <input type="number" min="0" value={followers} onChange={(e) => setFollowers(e.target.value)} placeholder="0" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
+          <p className="text-[11px] text-gray-400 mt-1">Used by the dashboard follower totals (summed per platform).</p>
         </div>
         {err && <div className="text-sm text-red-600">{err}</div>}
         <div className="flex justify-end gap-2 pt-1">

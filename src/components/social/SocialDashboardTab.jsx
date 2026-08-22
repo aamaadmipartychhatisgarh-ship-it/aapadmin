@@ -9,6 +9,18 @@ const PUBLISH_COLOR = {
   failed: "bg-red-100 text-red-700",
 };
 
+function MetricCard({ label, value, accent, color }) {
+  return (
+    <div className={`rounded-2xl p-4 shadow-sm ${accent ? "bg-[#164FA3] text-white" : "bg-white border border-gray-100"}`}>
+      <div className="flex items-center gap-1.5 mb-2">
+        {color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />}
+        <div className={`text-xs font-semibold uppercase tracking-wide ${accent ? "text-blue-200" : "text-gray-400"}`}>{label}</div>
+      </div>
+      <div className={`text-3xl font-bold ${accent ? "" : "text-gray-900"}`}>{value}</div>
+    </div>
+  );
+}
+
 function TotalsCard({ label, t, accent }) {
   return (
     <div className={`rounded-2xl p-4 shadow-sm ${accent ? "bg-[#164FA3] text-white" : "bg-white border border-gray-100"}`}>
@@ -40,17 +52,34 @@ export default function SocialDashboardTab({ PLATFORM }) {
   if (loading) return <div className="flex h-48 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   if (!data) return <div className="p-8 text-center text-gray-400">Couldn't load the dashboard.</div>;
 
+  const h = data.headline || { total_posts: 0, scheduled_posts: 0, followers: { facebook: 0, instagram: 0, twitter: 0 } };
+  const nfmt = (n) => Number(n || 0).toLocaleString("en-IN");
+  // The 5 headline cards (BUG 4) — always shown, straight from the DB.
+  const HeadlineCards = () => (
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <MetricCard label="Total Posts" value={nfmt(h.total_posts)} accent />
+      <MetricCard label="Total Scheduled Posts" value={nfmt(h.scheduled_posts)} />
+      <MetricCard label="Instagram Followers" value={nfmt(h.followers.instagram)} color="#E4405F" />
+      <MetricCard label="Facebook Followers" value={nfmt(h.followers.facebook)} color="#1877F2" />
+      <MetricCard label="Twitter/X Followers" value={nfmt(h.followers.twitter)} color="#000000" />
+    </div>
+  );
+
   if (data.pages.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
-        <Share2 size={36} className="mx-auto text-gray-300 mb-3" />
-        No pages yet — add your first page in the Pages tab, then yesterday's stats will show up here automatically.
+      <div className="space-y-6">
+        <HeadlineCards />
+        <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
+          <Share2 size={36} className="mx-auto text-gray-300 mb-3" />
+          No pages yet — add your first page in the Pages tab, then yesterday's stats will show up here automatically.
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      <HeadlineCards />
       <div>
         <h2 className="text-lg font-bold text-gray-900">Yesterday's Statistics</h2>
         <p className="text-sm text-gray-500">Auto-calculated per page from the post log — no manual counting.</p>
