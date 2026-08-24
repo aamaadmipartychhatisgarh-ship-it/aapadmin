@@ -4,8 +4,8 @@ import { useEffect, useState, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessSocial } from "@/lib/permissions";
 import {
-  Share2, Loader2, Plus, X, Upload, CheckCircle2, XCircle, Eye, Heart,
-  TrendingUp, AlertCircle, Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil,
+  Share2, Loader2, Plus, X, Upload, CheckCircle2, XCircle,
+  Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil,
   Bird,
 } from "lucide-react";
 import SocialDashboardTab from "@/components/social/SocialDashboardTab";
@@ -140,74 +140,61 @@ function Kpi({ label, value, accent, highlight }) {
 }
 
 // ============================================================ OVERVIEW
+// Unified Overview (PROMPT 7): exactly three platform columns — Instagram,
+// Facebook, Twitter/X — each listing its registered Pages straight from the
+// Social Media Pages Master (data.pages, i.e. social_pages). Counts (e.g. the
+// "11" Instagram/Facebook pages) are derived live from the fetched rows, never
+// hardcoded: add a page and it appears here, remove one and it's gone. Only the
+// three supported platforms are shown; LinkedIn/WhatsApp/Telegram cannot appear
+// because they aren't in PLATFORM and aren't allowed in social_pages.
+const OVERVIEW_ORDER = ["instagram", "facebook", "twitter"];
+
 function OverviewTab({ data }) {
-  // Per-platform rollup
-  const byPlatform = {};
-  data.pages.forEach((p) => {
-    if (!byPlatform[p.platform]) byPlatform[p.platform] = { pages: 0, followers: 0, views: 0 };
-    byPlatform[p.platform].pages++;
-    byPlatform[p.platform].followers += Number(p.followers) || 0;
-    byPlatform[p.platform].views += Number(p.total_views) || 0;
+  const columns = OVERVIEW_ORDER.filter((k) => PLATFORM[k]).map((key) => {
+    const pages = data.pages.filter((p) => p.platform === key);
+    const followers = pages.reduce((s, p) => s + (Number(p.followers) || 0), 0);
+    return { key, meta: PLATFORM[key], pages, followers };
   });
-  // Platform performance — pages that haven't posted in 14d
-  const stale = data.pages.filter((p) => !p.last_posted_at || (Date.now() - new Date(p.last_posted_at).getTime()) > 14 * 86400000);
-  const viralPosts = data.recentPosts.filter((p) => p.viral).slice(0, 5);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h3 className="font-bold text-gray-900 mb-4">Platform Performance</h3>
-        <div className="space-y-3">
-          {Object.entries(byPlatform).map(([k, v]) => {
-            const meta = PLATFORM[k]; const Icon = meta.icon;
-            return (
-              <div key={k} className="flex items-center justify-between border-b border-gray-100 pb-3 last:border-0">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white" style={{ background: meta.color }}><Icon size={15} /></div>
-                  <span className="font-medium text-gray-800">{meta.label}</span>
-                </div>
-                <div className="text-right text-xs text-gray-500">
-                  <div><strong className="text-gray-900">{v.pages}</strong> pages · <strong className="text-gray-900">{fmt(v.followers)}</strong> followers</div>
-                </div>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {columns.map(({ key, meta, pages, followers }) => {
+        const Icon = meta.icon;
+        return (
+          <div key={key} className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col">
+            {/* Column header — platform + live page count + total followers */}
+            <div className="flex items-center gap-2.5 p-4 border-b border-gray-100">
+              <span className="w-9 h-9 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={18} /></span>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-gray-900">{meta.label}</div>
+                <div className="text-xs text-gray-400">{pages.length} page{pages.length === 1 ? "" : "s"} · {fmt(followers)} followers</div>
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><TrendingUp size={16} className="text-[#FCB712]" /> Viral Posts</h3>
-        {viralPosts.length === 0 ? <p className="text-gray-400 text-sm">No viral posts yet.</p> : (
-          <ul className="space-y-2">
-            {viralPosts.map((p) => (
-              <li key={p.id} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2 last:border-0">
-                <div className="min-w-0">
-                  <div className="font-medium text-gray-900 truncate max-w-[16rem]">{p.caption || "(no content)"}</div>
-                  <div className="text-xs text-gray-400">{PLATFORM[p.platform]?.label} · {p.lok_sabha_name || "—"}</div>
+            </div>
+            {/* Registered pages for this platform */}
+            <div className="p-3 space-y-2 max-h-[560px] overflow-auto">
+              {pages.length === 0 ? (
+                <div className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-xl p-4 text-center">No {meta.label} pages yet.</div>
+              ) : pages.map((p) => (
+                <div key={p.id} className="flex items-center gap-2.5 rounded-xl border border-gray-100 px-3 py-2 hover:bg-gray-50">
+                  {p.photo_url ? (
+                    <Avatar name={p.handle} src={p.photo_url} size={34} square className="border border-gray-200 shrink-0" />
+                  ) : (
+                    <span className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={15} /></span>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-gray-900 text-sm truncate">{p.handle}</div>
+                    <div className="text-xs text-gray-400 truncate">{p.lok_sabha_name || "—"}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-bold text-gray-900">{fmt(p.followers)}</div>
+                    <div className="text-[10px] text-gray-400 uppercase tracking-wide">Followers</div>
+                  </div>
                 </div>
-                <span className="text-xs text-gray-500 flex items-center gap-1"><Eye size={12} /> {fmt(p.views)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 lg:col-span-2">
-        <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><AlertCircle size={16} className="text-amber-600" /> Pages that haven't posted in 14+ days ({stale.length})</h3>
-        {stale.length === 0 ? <p className="text-gray-400 text-sm">All pages are active.</p> : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-72 overflow-auto">
-            {stale.slice(0, 30).map((p) => {
-              const meta = PLATFORM[p.platform]; const Icon = meta.icon;
-              return (
-                <div key={p.id} className="flex items-center gap-2 text-sm border border-gray-100 rounded-lg px-2.5 py-2">
-                  <Icon size={14} style={{ color: meta.color }} />
-                  <span className="flex-1 truncate"><strong className="text-gray-900">{p.lok_sabha_name}</strong> <span className="text-gray-400">{p.handle}</span></span>
-                </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        )}
-      </div>
+        );
+      })}
     </div>
   );
 }
