@@ -698,6 +698,7 @@ function MlaManager({ flash, fail }) {
   const [editingAssessment, setEditingAssessment] = useState(null); // mla (full assessment edit)
   const [version, setVersion] = useState(0);             // bumped after an edit to refresh the inline view
   const [q, setQ] = useState("");                        // MLA-list search
+  const [showPhotoAudit, setShowPhotoAudit] = useState(false);
 
   const loadAssemblies = useCallback(async () => {
     try { const d = await api("/api/leader-assessment/assemblies"); setAssemblies(d.assemblies || []); } catch { /* surfaced by MLA load */ }
@@ -744,7 +745,12 @@ function MlaManager({ flash, fail }) {
         title="MLA Profiles"
         icon={UserSquare2}
         sub="Every sitting MLA. Create a profile, then score them with Add Assessment."
-        right={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={16} /> Create MLA Profile</button>}
+        right={
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowPhotoAudit(true)} title="Check & repair photo storage" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold"><Database size={15} /> Photo Audit</button>
+            <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={16} /> Create MLA Profile</button>
+          </div>
+        }
       >
         {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={loadMlas} /> : mlas.length === 0 ? (
           <Empty msg="No MLA profiles yet." action={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Create MLA Profile</button>} />
@@ -818,7 +824,88 @@ function MlaManager({ flash, fail }) {
         />
       )}
       {editingAssessmentLive && <MlaAssessmentEditModal mla={editingAssessmentLive} onClose={() => setEditingAssessment(null)} onChange={afterEdit} flash={flash} fail={fail} />}
+      {showPhotoAudit && <PhotoAuditModal onClose={() => setShowPhotoAudit(false)} onRepaired={() => { loadMlas(); }} flash={flash} fail={fail} />}
     </div>
+  );
+}
+
+// Photo persistence audit + repair (Leader Assessment). Reports where every
+// stored MLA/Candidate photo's bytes actually live (durable store, legacy tables,
+// disk, or nowhere) and can make disk-only files durable in one click — the exact
+// diagnosis + safe repair for "photos uploaded but not showing", without deleting
+// or re-creating any record.
+function PhotoAuditModal({ onClose, onRepaired, flash, fail }) {
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setReport(await api("/api/leader-assessment/photo-audit")); }
+    catch (e) { fail?.(e.message); setReport(null); }
+    finally { setLoading(false); }
+  }, [fail]);
+  useEffect(() => { load(); }, [load]);
+
+  async function repair() {
+    setBusy(true);
+    try {
+      const d = await api("/api/leader-assessment/photo-audit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "backfill_disk" }) });
+      flash?.(d.message || "Repair complete.");
+      await load();
+      onRepaired?.();
+    } catch (e) { fail?.(e.message); } finally { setBusy(false); }
+  }
+
+  const s = report?.summary;
+  return (
+    <Modal title="Photo Storage Audit" onClose={onClose} wide>
+      {loading ? <LoadingBlock /> : !s ? <Empty msg="Could not run the audit." /> : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-gray-100 p-3"><div className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Photo references</div><div className="text-2xl font-bold text-gray-900">{s.total_references}</div></div>
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3"><div className="text-[11px] font-bold uppercase tracking-wide text-emerald-600">Displaying</div><div className="text-2xl font-bold text-emerald-700">{s.resolvable}</div></div>
+            <div className="rounded-xl border border-red-100 bg-red-50/50 p-3"><div className="text-[11px] font-bold uppercase tracking-wide text-red-600">Missing bytes</div><div className="text-2xl font-bold text-red-700">{s.missing}</div></div>
+          </div>
+          <div className="text-xs text-gray-500 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+            <span>Durable store: <strong className="text-gray-800">{s.by_store.media_files}</strong></span>
+            <span>Legacy (user/worker): <strong className="text-gray-800">{s.by_store.user_photos + s.by_store.worker_photos}</strong></span>
+            <span>External URL: <strong className="text-gray-800">{s.by_store.external}</strong></span>
+            <span>Disk-only (at risk): <strong className="text-amber-700">{s.by_store.disk_only}</strong></span>
+            <span>Nowhere (lost): <strong className="text-red-700">{s.by_store.nowhere}</strong></span>
+          </div>
+
+          {s.backfillable_from_disk > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <strong>{s.backfillable_from_disk}</strong> photo(s) are still on disk but not yet in the durable store — they will vanish on the next redeploy. Click <em>Make durable</em> to save them permanently now.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm text-gray-600">Every resolvable photo is already in durable storage — nothing to back-fill.</div>
+          )}
+
+          {s.missing > 0 && (
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1">Profiles whose photo bytes are gone (need re-upload)</div>
+              <div className="max-h-40 overflow-auto rounded-xl border border-gray-100 divide-y divide-gray-50">
+                {report.missing.map((m, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
+                    <span className="font-medium text-gray-700 truncate">{m.name || "(unnamed)"}<span className="text-gray-400 ml-1">· {m.kind}</span></span>
+                    <span className="text-gray-400 font-mono truncate max-w-[45%]" title={m.photo_url}>{m.photo_url}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">Their bytes are no longer in storage (uploaded before durable storage was enabled). The reference is kept — re-upload the photo on that profile to restore it. Nothing was deleted.</p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100">Close</button>
+            <button onClick={repair} disabled={busy || s.backfillable_from_disk === 0} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+              {busy && <Loader2 size={15} className="animate-spin" />} Make disk photos durable
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 // Inline (expanded-row) read view of an MLA's complete assessment: the
