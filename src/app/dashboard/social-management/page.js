@@ -185,9 +185,15 @@ function OverviewTab({ data }) {
                     <div className="font-semibold text-gray-900 text-sm truncate">{p.handle}</div>
                     <div className="text-xs text-gray-400 truncate">{p.lok_sabha_name || "—"}</div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-sm font-bold text-gray-900">{fmt(p.followers)}</div>
-                    <div className="text-[10px] text-gray-400 uppercase tracking-wide">Followers</div>
+                  <div className="flex items-stretch gap-3 shrink-0 text-right">
+                    <div>
+                      <div className="text-sm font-bold text-gray-900">{fmt(p.followers)}</div>
+                      <div className="text-[10px] text-gray-400 uppercase tracking-wide">Followers</div>
+                    </div>
+                    <div className="border-l border-gray-100 pl-3">
+                      <div className="text-sm font-bold text-gray-900">{p.today_posts ?? 0}</div>
+                      <div className="text-[10px] text-gray-400 uppercase tracking-wide whitespace-nowrap">Today's Posts</div>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -258,8 +264,8 @@ function PagesTab({ data, onReload }) {
                       <button onClick={() => setEditing(p)} title="Edit page / followers" className="p-1.5 text-gray-300 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg opacity-0 group-hover:opacity-100"><Pencil size={13} /></button>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div><div className="text-gray-400">Followers</div><div className="font-bold text-gray-900">{fmt(p.followers)}</div></div>
-                      <div><div className="text-gray-400">Posts</div><div className="font-bold text-gray-900">{p.post_count}</div></div>
+                      <div><div className="text-gray-400">Total Followers</div><div className="font-bold text-gray-900">{fmt(p.followers)}</div></div>
+                      <div><div className="text-gray-400">Today's Posts</div><div className="font-bold text-gray-900">{p.today_posts ?? 0}</div></div>
                     </div>
                   </div>
                 ))}

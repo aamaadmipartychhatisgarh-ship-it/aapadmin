@@ -38,6 +38,7 @@ export async function GET() {
     const pages = await query(
       `SELECT sp.*, u.username AS manager_name,
               (SELECT COUNT(*) FROM social_posts p WHERE p.page_id = sp.id AND p.approval_status='approved') AS post_count,
+              (SELECT COUNT(*) FROM social_posts p WHERE p.page_id = sp.id AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE()) AS today_posts,
               (SELECT COALESCE(SUM(p.views),0)  FROM social_posts p WHERE p.page_id = sp.id) AS total_views,
               (SELECT COALESCE(SUM(p.reach),0)  FROM social_posts p WHERE p.page_id = sp.id) AS total_reach,
               (SELECT MAX(p.posted_at)          FROM social_posts p WHERE p.page_id = sp.id) AS last_posted_at
