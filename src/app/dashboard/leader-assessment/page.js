@@ -307,9 +307,16 @@ function Overview({ flash, fail }) {
           of searching, selecting, opening Full View, or a background refresh.
           Options come only from the master-backed list; the picked id drives the
           result panel that renders BELOW — never in place of — this card. */}
-      <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
-        <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
-      </Card>
+      {/* Sticky within the scrolling main area: the card stays pinned at the top
+          while results and the rest of the Overview scroll UNDER it, so it never
+          moves below the results or "jumps" on scroll. Full-bleed opaque backing
+          (page bg) hides content passing behind it; z-30 keeps it under the
+          sidebar (z-50) and modals (z-70), and below the fixed header. */}
+      <div className="sticky top-0 z-30 -mx-4 lg:-mx-8 px-4 lg:px-8 pt-1 pb-2 bg-[#f4f6f8]">
+        <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
+          <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
+        </Card>
+      </div>
       {/* Search result / selected assembly — a SEPARATE container directly BELOW
           the Search Card. key={pickedId} cleanly remounts it when another assembly
           is searched, so only the result changes while the card stays put. */}
