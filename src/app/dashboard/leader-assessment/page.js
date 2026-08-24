@@ -948,18 +948,24 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
           come from the saved MLA assessment (mla.assessment). */}
       <div>
         <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">10-Parameter Assessment</div>
-        <div className="overflow-x-auto -mx-1 px-1">
-          <div className="flex items-stretch gap-2 min-w-max">
-            {PARAMS.map((p, i) => {
-              const v = mla.assessment?.[p.key];
-              return (
-                <div key={p.key} className="shrink-0 w-[112px] rounded-xl border border-gray-100 bg-gray-50/60 px-2.5 py-2 text-center">
-                  <div className="text-[10px] font-semibold text-gray-400 leading-tight truncate" title={p.label}><span className="text-gray-300">{i + 1}</span> {p.label}</div>
-                  <div className="mt-1 text-sm font-bold text-gray-900">{v != null ? v : "—"}<span className="text-gray-400 font-normal text-xs">/10</span></div>
-                </div>
-              );
-            })}
-          </div>
+        {/* Portrait / vertical layout — each of the 10 parameters is its own row
+            (number · label · score), so all ten read top-to-bottom with no
+            horizontal scrolling and stay responsive on small screens. Scores come
+            straight from the saved MLA assessment (mla.assessment); nothing here
+            changes the data or the order. */}
+        <div className="space-y-1.5">
+          {PARAMS.map((p, i) => {
+            const v = mla.assessment?.[p.key];
+            const pct = Math.max(0, Math.min(100, (Number(v) || 0) * 10));
+            return (
+              <div key={p.key} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2">
+                <span className="text-[11px] font-bold text-gray-300 w-5 shrink-0 text-right">{i + 1}</span>
+                <span className="text-sm font-medium text-gray-700 flex-1 min-w-0">{p.label}</span>
+                <div className="hidden sm:block w-28 h-1.5 rounded-full bg-gray-200 overflow-hidden shrink-0"><div className="h-full bg-[#164FA3]" style={{ width: `${pct}%` }} /></div>
+                <span className="text-sm font-bold text-gray-900 w-14 text-right shrink-0">{v != null ? v : "—"}<span className="text-gray-400 font-normal text-xs">/10</span></span>
+              </div>
+            );
+          })}
         </div>
         <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-700">Total Score</span>
