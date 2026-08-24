@@ -35,9 +35,11 @@ const APPROVAL = {
   rejected: "bg-red-100 text-red-700",
 };
 
+// Dashboard and Overview are merged into ONE unified section (PROMPT 6): the
+// "Dashboard" tab renders the dashboard metrics followed by the overview
+// panels. No separate Overview tab.
 const TABS = [
   { k: "dashboard", l: "Dashboard" },
-  { k: "overview", l: "Overview" },
   { k: "pages", l: "Pages" },
   { k: "approvals", l: "Approvals" },
   { k: "log", l: "Post Log" },
@@ -108,8 +110,15 @@ function Body() {
         ))}
       </div>
 
-      {tab === "dashboard" && <SocialDashboardTab PLATFORM={PLATFORM} />}
-      {tab === "overview"  && <OverviewTab data={data} />}
+      {/* Unified Dashboard / Overview (PROMPT 6) — dashboard metrics + overview
+          panels in one section. "overview" is accepted as a fallback so any old
+          deep-link lands on the same unified view instead of a blank tab. */}
+      {(tab === "dashboard" || tab === "overview") && (
+        <div className="space-y-6">
+          <SocialDashboardTab PLATFORM={PLATFORM} />
+          <OverviewTab data={data} />
+        </div>
+      )}
       {tab === "pages"     && <PagesTab data={data} onReload={load} />}
       {tab === "approvals" && <ApprovalsTab data={data} setStatus={setStatus} onEdit={setEditing} />}
       {tab === "log"       && <LogTab data={data} onEdit={setEditing} />}
