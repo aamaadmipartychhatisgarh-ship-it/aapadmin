@@ -4,25 +4,22 @@ import { useEffect, useState, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessSocial } from "@/lib/permissions";
 import {
-  Share2, Loader2, Plus, X, Upload, CheckCircle2, XCircle, Eye, Heart, MessageCircle,
-  TrendingUp, AlertCircle, Clock, ThumbsUp, Camera, PlayCircle, ChevronRight, FileText, Pencil,
-  Bird, Briefcase, Send,
+  Share2, Loader2, Plus, X, Upload, CheckCircle2, XCircle, Eye, Heart,
+  TrendingUp, AlertCircle, Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil,
+  Bird,
 } from "lucide-react";
 import SocialDashboardTab from "@/components/social/SocialDashboardTab";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar from "@/components/Avatar";
 
-// Adding a further platform later is one more entry here (icon + brand
-// color) plus one more enum value in social_pages.platform (see
-// scripts/expand-social-platform-enum.mjs) — no other redesign needed.
+// The Social Media Master supports exactly these three networks (kept in sync
+// with ALLOWED_PLATFORMS in the pages API and the social_pages.platform enum).
+// Adding a further platform later is one more entry here (icon + brand color)
+// plus one more allowed value server-side — no other redesign needed.
 const PLATFORM = {
   facebook:  { label: "Facebook",  icon: ThumbsUp,      color: "#1877F2" },
   instagram: { label: "Instagram", icon: Camera,        color: "#E4405F" },
-  whatsapp:  { label: "WhatsApp",  icon: MessageCircle, color: "#25D366" },
-  youtube:   { label: "YouTube",   icon: PlayCircle,    color: "#FF0000" },
   twitter:   { label: "Twitter/X", icon: Bird,          color: "#000000" },
-  linkedin:  { label: "LinkedIn",  icon: Briefcase,     color: "#0A66C2" },
-  telegram:  { label: "Telegram",  icon: Send,          color: "#26A5E4" },
 };
 const POST_TYPE = ["post", "reel", "story", "video", "poster"];
 // Log a Post (BUG 2) exposes exactly these three post types.
@@ -260,10 +257,9 @@ function PagesTab({ data, onReload }) {
                       </div>
                       <button onClick={() => setEditing(p)} title="Edit page / followers" className="p-1.5 text-gray-300 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg opacity-0 group-hover:opacity-100"><Pencil size={13} /></button>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
                       <div><div className="text-gray-400">Followers</div><div className="font-bold text-gray-900">{fmt(p.followers)}</div></div>
                       <div><div className="text-gray-400">Posts</div><div className="font-bold text-gray-900">{p.post_count}</div></div>
-                      <div><div className="text-gray-400">Views</div><div className="font-bold text-gray-900">{fmt(p.total_views)}</div></div>
                     </div>
                   </div>
                 ))}
