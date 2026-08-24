@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
+import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { districtWorkerStats } from "@/lib/districtStats";
 
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!session || (!isOversight(session) && !(await userCanAccessPageKey(session, "rankings")))) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
 
     // Worker Membership Ranking — callers ranked by how many DISTINCT members
     // (contacts) they have registered. A "valid membership" is a contact the

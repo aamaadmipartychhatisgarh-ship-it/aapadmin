@@ -27,8 +27,8 @@ function canAccess(module, role) {
   return OVERSIGHT_ROLES.includes(role);
 }
 
-export function accessibleModules(session) {
-  const role = roleOf(session);
+export function accessibleModules(session, roleOverride) {
+  const role = roleOverride || roleOf(session);
   return MODULES.filter((m) => canAccess(m, role)).map((m) => ({
     key: m.key, label: m.label, icon: m.icon, geo: !!m.geo,
   }));
@@ -163,11 +163,15 @@ function buildWhere(module, session, body) {
 // opts.exportAll — skip pagination and fetch up to MAX_EXPORT_ROWS in one
 // shot (Export/Print use this so the file matches every filtered row, not
 // just whatever page happens to be on screen — the old CSV button's bug).
-export async function runReport({ moduleKey, session, body, opts = {} }) {
+export async function runReport({ moduleKey, session, body, opts = {}, roleOverride }) {
   const module = getModule(moduleKey);
   if (!module) return { error: "Unknown module", status: 404 };
 
-  const role = roleOf(session);
+  // Module-access role: a user admitted to Reports via an explicit page grant
+  // (roleOverride) is checked against the granted-equivalent role; geo scoping
+  // inside buildWhere still uses the real session, so their data stays bounded
+  // to their own territory.
+  const role = roleOverride || roleOf(session);
   if (!canAccess(module, role)) return { error: "Forbidden", status: 403 };
 
   const from = `FROM ${module.table} ${module.alias} ${module.joins || ""}`;

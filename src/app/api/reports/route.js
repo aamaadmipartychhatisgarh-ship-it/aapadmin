@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 // GET /api/reports                 → { modules, timePresets, users }
 // GET /api/reports?module=calls    → full meta (columns, filters, groupBy) for one module
 export async function GET(req) {
-  const { session, error } = await guard();
+  const { session, error, roleOverride } = await guard();
   if (error) return error;
 
   const { searchParams } = new URL(req.url);
@@ -20,7 +20,7 @@ export async function GET(req) {
     const module = getModule(moduleKey);
     if (!module) return Response.json({ message: "Unknown module" }, { status: 404 });
     // Enforce per-module access before revealing its meta.
-    if (!accessibleModules(session).some((m) => m.key === moduleKey)) {
+    if (!accessibleModules(session, roleOverride).some((m) => m.key === moduleKey)) {
       return Response.json({ message: "Forbidden" }, { status: 403 });
     }
     return Response.json({ meta: await moduleMeta(module) });
@@ -30,7 +30,7 @@ export async function GET(req) {
     "SELECT id, username, role FROM users WHERE is_active = 1 ORDER BY username"
   );
   return Response.json({
-    modules: accessibleModules(session),
+    modules: accessibleModules(session, roleOverride),
     timePresets: TIME_PRESETS,
     users,
   });
@@ -39,7 +39,7 @@ export async function GET(req) {
 // POST /api/reports  { module, time, date_from, date_to, filters, geo, search,
 //                      group_by, columns, sort, page, pageSize }
 export async function POST(req) {
-  const { session, error } = await guard();
+  const { session, error, roleOverride } = await guard();
   if (error) return error;
 
   let body;
@@ -47,7 +47,7 @@ export async function POST(req) {
   if (!body.module) return Response.json({ message: "module is required" }, { status: 400 });
 
   try {
-    const result = await runReport({ moduleKey: body.module, session, body });
+    const result = await runReport({ moduleKey: body.module, session, body, roleOverride });
     if (result.error) return Response.json({ message: result.error }, { status: result.status || 400 });
     return Response.json(result);
   } catch (e) {

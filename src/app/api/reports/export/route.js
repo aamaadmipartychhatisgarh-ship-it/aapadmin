@@ -44,7 +44,7 @@ async function renderPdf(element) {
 // the FULL filtered result (up to the engine's export cap), so the file
 // matches every row the filters select, not just whatever page is on screen.
 export async function POST(req) {
-  const { session, error } = await guard();
+  const { session, error, roleOverride } = await guard();
   if (error) return error;
 
   const { searchParams } = new URL(req.url);
@@ -104,7 +104,7 @@ export async function POST(req) {
     // the full set.
     const opts = { exportAll: true };
     if (format === "pdf") opts.maxRows = PDF_MAX_ROWS;
-    const result = await runReport({ moduleKey: body.module, session, body, opts });
+    const result = await runReport({ moduleKey: body.module, session, body, opts, roleOverride });
     if (result.error) return Response.json({ message: result.error }, { status: result.status || 400 });
     console.log(
       "[reports] detail export",

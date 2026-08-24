@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -15,6 +15,8 @@ import SectionTabs from "@/components/SectionTabs";
 import FloatingPopover from "@/components/FloatingPopover";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 import { primaryItems } from "@/lib/navGroups";
+import { PAGES, baselinePagesForRole, pageKeyForPath } from "@/lib/pages";
+import { usePageAccess } from "@/components/usePageAccess";
 import { VIEW_AS_KEY, getDashboardViewAs, getViewAsUser, setViewAsUser } from "@/lib/dashboardView";
 
 async function handleSignOut() {
@@ -97,6 +99,15 @@ const VIEW_OPTIONS = [
   { key: "caller", name: "Caller Dashboard", homeHref: "/dashboard/workspace", icon: Headphones },
 ];
 
+// Maps a page-registry icon name (see src/lib/pages.js) to its lucide component,
+// so a page GRANTED to a user can be appended to their sidebar with the right
+// icon. Any unmapped name falls back to a generic file icon.
+const PAGE_ICONS = {
+  LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp,
+  MessageSquare, ClipboardList, Gauge, Newspaper, Share2, FileText, BarChart3,
+  Trophy, CalendarClock, Flag, UserCog, GraduationCap,
+};
+
 export default function DashboardLayout({ children }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
@@ -122,6 +133,10 @@ export default function DashboardLayout({ children }) {
   // → the Avatar falls back to a clean default DP.
   const supervisorUser = allUsers.find((u) => normalizeRole(u.role) === ROLES.SUPERVISOR) || null;
   const [callerSubmenuOpen, setCallerSubmenuOpen] = useState(false);
+  // Effective page access for the signed-in user (baseline role pages ∪ any
+  // Super-Admin-granted pages) — the same source the backend and page guards
+  // use, so a GRANTED page shows up in this user's sidebar (BUG 14).
+  const { pages: allowedPageKeys } = usePageAccess();
   useEffect(() => {
     setViewAsState(getDashboardViewAs());
     setVAUser(getViewAsUser());
@@ -300,6 +315,24 @@ export default function DashboardLayout({ children }) {
   } else {
     // Caller (and legacy 'user'/'agent') — the calling workspace
     navItems = CALLER_NAV;
+  }
+
+  // BUG 14 — append any page the Super Admin has explicitly GRANTED to this
+  // user that isn't already in their role's nav. We add ONLY grants beyond the
+  // role baseline (allowed − baseline), so a role's normal menu is unchanged
+  // when it has no extra grants. Skipped while previewing another role (a Super
+  // Admin's own effective access is every page, which must not leak into a
+  // Caller/Supervisor preview nav).
+  if (!previewing && allowedPageKeys) {
+    const baseline = new Set(baselinePagesForRole(canonical));
+    const presentKeys = new Set(navItems.map((i) => pageKeyForPath(i.href)).filter(Boolean));
+    for (const key of allowedPageKeys) {
+      if (baseline.has(key) || presentKeys.has(key)) continue;
+      const pg = PAGES.find((p) => p.key === key);
+      if (!pg) continue;
+      navItems = [...navItems, { name: pg.label, href: pg.href, icon: PAGE_ICONS[pg.icon] || FileText }];
+      presentKeys.add(key);
+    }
   }
 
   // Every role gets a profile link — appended once here instead of in each

@@ -14,6 +14,7 @@ import MasterDataSettings from "../settings/page";
 // no duplicate implementation.
 import { CasteMaster, PollingMaster } from "@/app/dashboard/leader-assessment/page";
 import PartyMaster from "@/components/PartyMaster";
+import PageAccessManager from "@/components/PageAccessManager";
 
 const TABS = [
   { key: "teams", label: "Teams" },
@@ -22,8 +23,11 @@ const TABS = [
   { key: "castes", label: "Caste Master" },
   { key: "polling", label: "Polling Station Master" },
   { key: "parties", label: "Party Master" },
+  { key: "page_access", label: "Page Access" },
 ];
 const ADMIN_MASTER_TABS = new Set(["castes", "polling", "parties"]);
+// Super-Admin-only tabs (BUG 14 — Page Access Management, §12).
+const SUPER_ONLY_TABS = new Set(["page_access"]);
 
 // The people-management hub — Teams and Users are tabs on one page rather
 // than separate routes. Worker Management (a third "Workers" tab here, plus
@@ -56,6 +60,7 @@ function Body({ session }) {
       const t = new URLSearchParams(window.location.search).get("tab");
       if (ADMIN_MASTER_TABS.has(t)) return t;
       if ((t === "users" || t === "master") && canSeeUsers) return t;
+      if (SUPER_ONLY_TABS.has(t) && canSeeUsers) return t;
     }
     return "teams";
   });
@@ -72,6 +77,7 @@ function Body({ session }) {
     const t = searchParams.get("tab");
     if (ADMIN_MASTER_TABS.has(t)) setTab(t);
     else if ((t === "users" || t === "master") && canSeeUsers) setTab(t);
+    else if (SUPER_ONLY_TABS.has(t) && canSeeUsers) setTab(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, canSeeUsers]);
 
@@ -90,7 +96,7 @@ function Body({ session }) {
   // the Super Admin sidebar into this Administration tab.
   // Caste Master + Polling Station Master are available to any oversight user who
   // can reach this page (same gate their APIs use).
-  const visibleTabs = TABS.filter((t) => t.key === "teams" || ADMIN_MASTER_TABS.has(t.key) || ((t.key === "users" || t.key === "master") && canSeeUsers));
+  const visibleTabs = TABS.filter((t) => t.key === "teams" || ADMIN_MASTER_TABS.has(t.key) || ((t.key === "users" || t.key === "master") && canSeeUsers) || (SUPER_ONLY_TABS.has(t.key) && canSeeUsers));
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -128,6 +134,7 @@ function Body({ session }) {
       {tab === "castes" && <CasteMaster flash={flash} fail={fail} />}
       {tab === "polling" && <PollingMaster flash={flash} fail={fail} />}
       {tab === "parties" && <PartyMaster flash={flash} fail={fail} />}
+      {tab === "page_access" && canSeeUsers && <PageAccessManager />}
     </div>
   );
 }
