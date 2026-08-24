@@ -22,6 +22,13 @@ const PLATFORM = {
   instagram: { label: "Instagram", icon: Camera,        color: "#E4405F" },
   twitter:   { label: "Twitter/X", icon: Bird,          color: "#000000" },
 };
+// A page has NOT completed today's post when its live today_posts count (from
+// Log a Post, dated to today) is 0 → drives the RED "pending" state (PROMPT 9).
+// Derived from the actual DB count, never a manually set flag; the moment a
+// valid post is logged today the count becomes > 0 and the page returns to
+// normal on the next refetch.
+const noPostToday = (p) => !(Number(p?.today_posts) > 0);
+
 const POST_TYPE = ["post", "reel", "story", "video", "poster"];
 // Log a Post (BUG 2) exposes exactly these three post types.
 const LOG_POST_TYPES = [["photo", "Photo"], ["video", "Video"], ["reel", "Reel"]];
@@ -182,8 +189,13 @@ function OverviewTab({ data }) {
                     <span className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={15} /></span>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 text-sm truncate">{p.handle}</div>
-                    <div className="text-xs text-gray-400 truncate">{p.lok_sabha_name || "—"}</div>
+                    <div className={`font-semibold text-sm truncate flex items-center gap-1.5 ${noPostToday(p) ? "text-red-600" : "text-gray-900"}`}>
+                      {noPostToday(p) && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Today's post not completed" />}
+                      <span className="truncate">{p.handle}</span>
+                    </div>
+                    <div className={`text-xs truncate ${noPostToday(p) ? "text-red-500 font-medium" : "text-gray-400"}`}>
+                      {noPostToday(p) ? "Today's post not completed" : (p.lok_sabha_name || "—")}
+                    </div>
                   </div>
                   <div className="flex items-stretch gap-3 shrink-0 text-right">
                     <div>
@@ -258,8 +270,13 @@ function PagesTab({ data, onReload }) {
                         <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={16} /></div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <div className="font-bold text-gray-900 text-sm truncate">{p.handle}</div>
-                        <div className="text-xs text-gray-500 truncate">{p.lok_sabha_name || "—"}</div>
+                        <div className={`font-bold text-sm truncate flex items-center gap-1.5 ${noPostToday(p) ? "text-red-600" : "text-gray-900"}`}>
+                          {noPostToday(p) && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Today's post not completed" />}
+                          <span className="truncate">{p.handle}</span>
+                        </div>
+                        <div className={`text-xs truncate ${noPostToday(p) ? "text-red-500 font-medium" : "text-gray-500"}`}>
+                          {noPostToday(p) ? "Today's post not completed" : (p.lok_sabha_name || "—")}
+                        </div>
                       </div>
                       <button onClick={() => setEditing(p)} title="Edit page / followers" className="p-1.5 text-gray-300 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg opacity-0 group-hover:opacity-100"><Pencil size={13} /></button>
                     </div>
