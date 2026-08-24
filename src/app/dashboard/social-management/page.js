@@ -24,8 +24,8 @@ const PLATFORM = {
 const POST_TYPE = ["post", "reel", "story", "video", "poster"];
 // Log a Post (BUG 2) exposes exactly these three post types.
 const LOG_POST_TYPES = [["photo", "Photo"], ["video", "Video"], ["reel", "Reel"]];
-const MIN_CONTENT_WORDS = 1000;
-const wordCount = (s) => (String(s || "").trim().match(/\S+/g) || []).length;
+// Content is unlimited long-form text — NO word/character maximum and no
+// minimum beyond being non-empty (1 word through 10,000+ words are all valid).
 const isValidUrl = (s) => { try { const u = new URL(String(s).trim()); return u.protocol === "http:" || u.protocol === "https:"; } catch { return false; } };
 const APPROVAL = {
   draft:    "bg-gray-100 text-gray-500",
@@ -168,8 +168,8 @@ function OverviewTab({ data }) {
           <ul className="space-y-2">
             {viralPosts.map((p) => (
               <li key={p.id} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2 last:border-0">
-                <div>
-                  <div className="font-medium text-gray-900">{p.title || "(untitled)"}</div>
+                <div className="min-w-0">
+                  <div className="font-medium text-gray-900 truncate max-w-[16rem]">{p.caption || "(no content)"}</div>
                   <div className="text-xs text-gray-400">{PLATFORM[p.platform]?.label} · {p.lok_sabha_name || "—"}</div>
                 </div>
                 <span className="text-xs text-gray-500 flex items-center gap-1"><Eye size={12} /> {fmt(p.views)}</span>
@@ -368,7 +368,7 @@ function ApprovalsTab({ data, setStatus, onEdit }) {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-left">
             <tr>
-              <th className="px-4 py-3 font-semibold text-gray-600">Title</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Content</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Page</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Submitted</th>
@@ -381,7 +381,7 @@ function ApprovalsTab({ data, setStatus, onEdit }) {
               const Icon = meta.icon || Share2;
               return (
                 <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{p.title || <em className="text-gray-400">(untitled)</em>}</td>
+                  <td className="px-4 py-3 text-gray-700 max-w-[24rem]"><div className="text-xs whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{p.caption || <em className="text-gray-400">(no content)</em>}</div></td>
                   <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{p.post_type}</span></td>
                   <td className="px-4 py-3 text-gray-600 text-xs"><Icon size={12} style={{ color: meta.color }} className="inline mr-1" />{p.lok_sabha_name} · {p.handle}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{new Date(p.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
@@ -466,7 +466,7 @@ function LogTab({ data, onEdit }) {
               <th className="px-4 py-3 font-semibold text-gray-600">Platform</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Page</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Content</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Shot</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Post Access</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Link</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
@@ -486,10 +486,9 @@ function LogTab({ data, onEdit }) {
                   <td className="px-4 py-3 whitespace-nowrap"><Icon size={14} style={{ color: meta.color }} className="inline mr-1" />{meta.label || p.platform}</td>
                   <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{p.handle || "—"}</td>
                   <td className="px-4 py-3 text-gray-700 max-w-[22rem]">
-                    {p.title && <div className="font-medium text-gray-900 truncate">{p.title}</div>}
-                    {/* Preview only — full content is never lost; it opens intact in
-                        Edit. Clamp visually without mangling the stored text. */}
-                    <div className="text-xs text-gray-500 line-clamp-2" title={p.caption || ""}>{p.caption || <span className="text-gray-300">(no content)</span>}</div>
+                    {/* Full content, never truncated — line breaks/formatting
+                        preserved; a very long post scrolls within the cell. */}
+                    <div className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{p.caption || <span className="text-gray-300">(no content)</span>}</div>
                   </td>
                   <td className="px-4 py-3">
                     {p.media_url ? (
@@ -553,11 +552,12 @@ function PerLsTab({ data }) {
 }
 
 // ============================================================ LOG A POST MODAL
-// (BUG 2) Platform → Page (filtered) → Content (min 1000 words, live count) →
-// Date/Time → Screenshot (durable upload) → Post Type → Link (URL-validated) →
-// Status (Publish/Schedule). The complete record is saved to social_posts; the
-// screenshot goes through /api/uploads (durable DB-backed store) so it survives
-// refresh/redeploy. Guarded against duplicate submits.
+// Platform → Page (filtered) → Content (primary field, unlimited long-form text,
+// no word/char limit) → Date/Time → Screenshot (durable upload) → Post Type →
+// Link (URL-validated) → Status (Publish/Schedule). The complete record is saved
+// to social_posts (caption is LONGTEXT, never truncated); the screenshot goes
+// through /api/uploads (durable DB-backed store) so it survives refresh/redeploy.
+// Guarded against duplicate submits.
 function PostModal({ pages, onClose, onSaved, editing }) {
   const allPages = pages || [];
   // On edit, seed the platform from the post's page so the page dropdown filters
@@ -566,7 +566,6 @@ function PostModal({ pages, onClose, onSaved, editing }) {
   const [platform, setPlatform] = useState(editingPage?.platform || "facebook");
   const [form, setForm] = useState(editing ? {
     page_id: editing.page_id || "",
-    title: editing.title || "",
     caption: editing.caption || "",
     post_type: editing.post_type || "photo",
     media_url: editing.media_url || "",
@@ -579,7 +578,7 @@ function PostModal({ pages, onClose, onSaved, editing }) {
     reach: editing.reach || 0,
     viral: editing.viral || 0,
   } : {
-    page_id: "", title: "", caption: "", post_type: "photo",
+    page_id: "", caption: "", post_type: "photo",
     media_url: "", external_url: "", posted_at: new Date().toISOString().slice(0, 16),
     approval_status: "pending",
     publish_status: "published",
@@ -593,8 +592,9 @@ function PostModal({ pages, onClose, onSaved, editing }) {
 
   // Pages belonging to the chosen platform only (dynamic dropdown).
   const platformPages = allPages.filter((p) => p.platform === platform);
-  const words = wordCount(form.caption);
-  const contentOk = words >= MIN_CONTENT_WORDS;
+  // Content is the primary field: required (non-empty) but with NO word/char
+  // limit — 1 word or 10,000+ words are equally valid.
+  const contentOk = form.caption.trim().length > 0;
   const linkOk = !form.external_url.trim() || isValidUrl(form.external_url);
 
   function changePlatform(next) {
@@ -622,7 +622,7 @@ function PostModal({ pages, onClose, onSaved, editing }) {
     if (saving) return; // guard against a double Submit creating duplicate posts
     setError(""); setOk("");
     if (!form.page_id) { setError("Select a platform and page."); return; }
-    if (!contentOk) { setError(`Content must be at least ${MIN_CONTENT_WORDS} words (currently ${words}).`); return; }
+    if (!contentOk) { setError("Content is required."); return; }
     if (!String(form.posted_at).trim()) { setError("Date & time is required."); return; }
     if (!linkOk) { setError("Enter a valid URL (starting with http:// or https://) for the link."); return; }
     setSaving(true);
@@ -668,14 +668,9 @@ function PostModal({ pages, onClose, onSaved, editing }) {
           </div>
         </div>
 
-        <input className={inp} placeholder="Title / topic" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-
         <div>
-          <label className={lbl}>Content * <span className="text-gray-400 font-normal">(minimum {MIN_CONTENT_WORDS} words)</span></label>
-          <textarea className={`${inp} ${form.caption && !contentOk ? "border-amber-400 focus:ring-amber-200" : ""}`} rows={6} placeholder="Write the full post content…" value={form.caption} onChange={(e) => setForm({ ...form, caption: e.target.value })} />
-          <div className={`text-[11px] mt-1 ${contentOk ? "text-emerald-600" : "text-amber-600"}`}>
-            {words} / {MIN_CONTENT_WORDS} words{contentOk ? " ✓" : ` — ${MIN_CONTENT_WORDS - words} more needed`}
-          </div>
+          <label className={lbl}>Content *</label>
+          <textarea className={inp} rows={8} placeholder="Write the full post content… (no length limit)" value={form.caption} onChange={(e) => setForm({ ...form, caption: e.target.value })} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">

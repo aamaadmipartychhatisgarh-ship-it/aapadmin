@@ -3,11 +3,14 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensureSocialPostSchema } from "@/lib/socialPostSchema";
 
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // Ensure caption is LONGTEXT so edited content is stored in full.
+    await ensureSocialPostSchema();
     const { id } = await params;
     const d = await req.json();
     const fields = ["title", "caption", "post_type", "media_url", "external_url",
