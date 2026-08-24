@@ -92,14 +92,14 @@ function Body() {
         </button>
       </div>
 
-      {/* Main Dashboard strip */}
+      {/* Search cards (PROMPT 5) — exactly four, all from live DB records:
+          today's FB/IG post counts (from logged posts) and FB/IG follower
+          totals (from the pages' Followers Master). */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi label="Total Followers" value={fmt(o.total_followers)} accent />
-        <Kpi label="Total Views" value={fmt(o.total_views)} />
-        <Kpi label="Active Pages" value={o.active_pages || 0} />
-        <Kpi label="Viral Posts" value={o.viral_posts || 0} />
-        <Kpi label="Pending Approval" value={o.pending_posts || 0} highlight={Number(o.pending_posts) > 0} />
-        <Kpi label="Today Uploads" value={o.today_uploads || 0} />
+        <Kpi label="Today's Total Post — Facebook" value={fmt(o.fb_today_posts || 0)} accent />
+        <Kpi label="Today's Total Post — Instagram" value={fmt(o.ig_today_posts || 0)} accent />
+        <Kpi label="Facebook Total Followers" value={fmt(o.fb_followers || 0)} />
+        <Kpi label="Instagram Total Followers" value={fmt(o.ig_followers || 0)} />
       </div>
 
       <div className="flex gap-2 flex-wrap border-b border-gray-200">

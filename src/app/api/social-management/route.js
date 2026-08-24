@@ -86,15 +86,27 @@ export async function GET() {
       lsParams
     );
 
+    // Search-card metrics. The four platform cards (PROMPT 5) come straight
+    // from the live records — today's Facebook/Instagram post counts from the
+    // actual logged posts (social_posts joined to their page's platform, dated
+    // to CURDATE), and the per-platform follower totals summed from the pages'
+    // Followers Master (social_pages.followers). Nothing hardcoded; each refetch
+    // reflects the current DB state. Legacy aggregate fields are kept for other
+    // consumers.
+    const f = lsFilter.replace(/sp\./g, "sp2.");
     const [[overview]] = await query(
       `SELECT COALESCE(SUM(followers),0) AS total_followers,
               COUNT(*) AS active_pages,
-              (SELECT COALESCE(SUM(p.views),0) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE 1=1 ${lsFilter.replace(/sp\./g, "sp2.")}) AS total_views,
-              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE viral = 1 ${lsFilter.replace(/sp\./g, "sp2.")}) AS viral_posts,
-              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE approval_status='pending' ${lsFilter.replace(/sp\./g, "sp2.")}) AS pending_posts,
-              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE DATE(COALESCE(posted_at, p.created_at)) = CURDATE() ${lsFilter.replace(/sp\./g, "sp2.")}) AS today_uploads
+              (SELECT COALESCE(SUM(p.views),0) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE 1=1 ${f}) AS total_views,
+              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE viral = 1 ${f}) AS viral_posts,
+              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE approval_status='pending' ${f}) AS pending_posts,
+              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE DATE(COALESCE(posted_at, p.created_at)) = CURDATE() ${f}) AS today_uploads,
+              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE sp2.platform='facebook'  AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE() ${f}) AS fb_today_posts,
+              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE sp2.platform='instagram' AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE() ${f}) AS ig_today_posts,
+              (SELECT COALESCE(SUM(sp2.followers),0) FROM social_pages sp2 WHERE sp2.is_active=1 AND sp2.platform='facebook'  ${f}) AS fb_followers,
+              (SELECT COALESCE(SUM(sp2.followers),0) FROM social_pages sp2 WHERE sp2.is_active=1 AND sp2.platform='instagram' ${f}) AS ig_followers
          FROM social_pages sp WHERE is_active = 1 ${lsFilter}`,
-      [...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams]
+      [...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams]
     ).then((r) => [r]);
 
     return NextResponse.json({ pages, recentPosts, pending, perLs, overview });
