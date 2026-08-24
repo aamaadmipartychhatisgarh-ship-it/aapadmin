@@ -38,7 +38,11 @@ export async function POST(req, { params }) {
     }
 
     const [contact] = await query(
-      "SELECT id, person_name, phone_number, address, photo_url, assembly_id FROM contacts WHERE id = ?",
+      `SELECT c.id, c.person_name, c.phone_number, c.address, c.photo_url, c.assembly_id,
+              dsg.name AS designation_name
+         FROM contacts c
+         LEFT JOIN designations dsg ON dsg.id = c.designation_id
+        WHERE c.id = ?`,
       [id]
     );
     if (!contact) return NextResponse.json({ message: "Contact not found." }, { status: 404 });
@@ -76,9 +80,13 @@ export async function POST(req, { params }) {
     if (dup) {
       return NextResponse.json({ ok: true, already: true, target, id: dup.id, message: `"${dup.name}" is already a candidate (converted earlier).` });
     }
+    // current_position is the candidate's "Current Designation" (BUG #5), so carry
+    // the contact's designation straight into it. District / Lok Sabha are NOT
+    // stored on the candidate — they derive from the mapped assembly's place in
+    // the location tree — so mapping the assembly maps them implicitly.
     const res = await query(
-      "INSERT INTO la_aap_candidates (assembly_id, name, phone, address, photo_url, source_contact_id) VALUES (?, ?, ?, ?, ?, ?)",
-      [la.id, name, contact.phone_number || null, contact.address || null, contact.photo_url || null, id]
+      "INSERT INTO la_aap_candidates (assembly_id, name, phone, address, photo_url, current_position, source_contact_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [la.id, name, contact.phone_number || null, contact.address || null, contact.photo_url || null, contact.designation_name || null, id]
     );
     return NextResponse.json({ ok: true, target, id: res.insertId, message: `"${name}" added as a Candidate.` }, { status: 201 });
   } catch (e) {
