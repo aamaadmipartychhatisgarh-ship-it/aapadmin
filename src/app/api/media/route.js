@@ -56,7 +56,8 @@ export async function GET(req) {
     );
 
     const channels = await query(
-      `SELECT nc.*, ls.name AS lok_sabha_name
+      `SELECT nc.*, ls.name AS lok_sabha_name,
+              (SELECT COUNT(*) FROM debates d WHERE d.channel_id = nc.id) AS total_debates
          FROM news_channels nc
          LEFT JOIN locations ls ON ls.id = nc.lok_sabha_id AND ls.type = 'lok_sabha'
         ORDER BY nc.sort_order, nc.name`

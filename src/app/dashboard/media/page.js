@@ -22,7 +22,8 @@ const TABS = [
   { k: "channels", l: "News Channels", icon: Tv },
   { k: "conferences", l: "Press Conferences", icon: Mic },
   { k: "spokespersons", l: "Spokespersons", icon: UserCheck },
-  { k: "analytics", l: "Analytics", icon: BarChart3 },
+  // Analytics is no longer a separate tab — it's merged into the Dashboard tab
+  // (BUG #12 Part B) so there is ONE Media Dashboard page with dashboard + analytics.
 ];
 
 function Body() {
@@ -66,7 +67,7 @@ function Body() {
   // conferences, analytics). It's hidden on the Dashboard ("Yesterday's
   // Performance", period-fixed) and the Spokespersons master tab, which aren't
   // date-scoped. The Channels tab hosts the Debates list, so it's included.
-  const showFilter = ["newspapers", "channels", "conferences", "analytics"].includes(tab);
+  const showFilter = ["dashboard", "newspapers", "channels", "conferences"].includes(tab);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -93,12 +94,22 @@ function Body() {
         </div>
       )}
 
-      {tab === "dashboard" && <MediaDashboardTab onOpenTab={setTab} />}
+      {/* ONE Media Dashboard page: the dashboard summary AND the full analytics
+          (News Channel / Newspaper / Press Conference), merged (BUG #12 Part B).
+          Both read the same /api/media data source — no duplicate analytics page. */}
+      {tab === "dashboard" && (
+        <div className="space-y-8">
+          <MediaDashboardTab onOpenTab={setTab} />
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2"><BarChart3 size={18} className="text-[#164FA3]" /> Media Analytics</h2>
+            <AnalyticsTab data={data} filtered={filterActive} />
+          </div>
+        </div>
+      )}
       {tab === "newspapers" && <NewspapersTab data={data} onChange={load} flash={setToast} filtered={filterActive} />}
       {tab === "channels" && <ChannelsTab data={data} onChange={load} flash={setToast} filtered={filterActive} />}
       {tab === "conferences" && <ConferencesTab data={data} onChange={load} filtered={filterActive} />}
       {tab === "spokespersons" && <SpokespersonsTab data={data} onChange={load} />}
-      {tab === "analytics" && <AnalyticsTab data={data} filtered={filterActive} />}
     </div>
   );
 }
@@ -461,25 +472,25 @@ function fmtDebateWhen(start) {
 // page (by channel ID). It shows basic info (name, Lok Sabha, tone) and this
 // channel's nearest upcoming debate with a real-time proximity colour. Schedule
 // Debate / Debate List now live on the detail page (not an inline menu here).
-function ChannelCard({ ch, debates, now, tone, onOpen }) {
+function ChannelCard({ ch, debates, now, tone, onOpen, onSchedule }) {
   const { nearest, start, more } = channelUpcoming(ch.id, debates, now);
   const vis = proximityVisual(start, now, nearest?.status);
   const speakers = (nearest?.spokespersons || []).map((s) => s.name).filter(Boolean);
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(ch)}
+    <div
       style={vis.style}
-      className={`w-full text-left bg-white rounded-2xl border shadow-sm p-4 transition-colors hover:shadow-md ${vis.tone === "none" ? "border-gray-100" : ""}`}
-      title={`Open ${ch.name}`}
+      className={`bg-white rounded-2xl border shadow-sm p-4 flex flex-col transition-shadow hover:shadow-md ${vis.tone === "none" ? "border-gray-100" : ""}`}
     >
       <div className="flex items-center justify-between gap-2">
         <Tv className={vis.tone === "live" ? "text-red-600" : "text-[#164FA3]"} size={20} />
         {vis.label && <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${vis.tone === "live" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{vis.label}</span>}
       </div>
-      <div className="font-bold text-gray-900 text-sm mt-2 truncate hover:text-[#164FA3]" title={ch.name}>{ch.name}</div>
-      {ch.lok_sabha_name && <div className="text-[11px] font-medium text-gray-400 truncate" title={ch.lok_sabha_name}>{ch.lok_sabha_name}</div>}
-      <span className={`mt-1 inline-block text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${tone[ch.tone] || tone.unknown}`}>{ch.tone}</span>
+      {/* Channel name opens the channel's Debate List page. */}
+      <button type="button" onClick={() => onOpen(ch)} className="font-bold text-gray-900 text-sm mt-2 truncate text-left hover:text-[#164FA3] hover:underline" title={`Open ${ch.name}`}>{ch.name}</button>
+      <div className="text-[11px] font-medium text-gray-500 truncate">Lok Sabha: <span className="text-gray-700">{ch.lok_sabha_name || "—"}</span></div>
+      <span className={`mt-1 inline-block w-fit text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${tone[ch.tone] || tone.unknown}`}>{ch.tone}</span>
+      {/* Total Debate — the real count of every debate on this channel (from DB). */}
+      <div className="mt-2 text-xs font-semibold text-gray-700">Total Debate: <span className="text-[#164FA3]">{Number(ch.total_debates) || 0}</span></div>
 
       {nearest ? (
         <div className="mt-3 pt-3 border-t border-gray-200/70 space-y-0.5">
@@ -494,7 +505,14 @@ function ChannelCard({ ch, debates, now, tone, onOpen }) {
       ) : (
         <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-400">No upcoming debate.</div>
       )}
-    </button>
+
+      {/* Actions — Schedule Debate opens the existing Debate modal for THIS
+          channel; Debate List opens the channel's dedicated list page. */}
+      <div className="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+        <button type="button" onClick={() => onSchedule(ch)} className="flex-1 inline-flex items-center justify-center gap-1 bg-[#164FA3] hover:bg-blue-800 text-white text-xs font-semibold px-2 py-1.5 rounded-lg"><Plus size={13} /> Schedule Debate</button>
+        <button type="button" onClick={() => onOpen(ch)} className="flex-1 inline-flex items-center justify-center gap-1 border border-gray-200 text-gray-700 hover:bg-gray-50 text-xs font-semibold px-2 py-1.5 rounded-lg">Debate List</button>
+      </div>
+    </div>
   );
 }
 
@@ -565,12 +583,14 @@ function ChannelModal({ onClose, onSaved }) {
 function ChannelsTab({ data, onChange, flash }) {
   const router = useRouter();
   const [showAddChannel, setShowAddChannel] = useState(false);
+  const [scheduleFor, setScheduleFor] = useState(null); // channel to schedule a debate for
   const now = useNow(60000);
   const TONE = { supportive: "bg-emerald-100 text-emerald-700", neutral: "bg-gray-100 text-gray-600", opposing: "bg-red-100 text-red-700", unknown: "bg-amber-100 text-amber-700" };
 
-  // Clicking a channel opens its dedicated page (by channel ID). Schedule Debate
-  // and the Debate List live there — not inline on this main page.
+  // Debate List → the channel's dedicated page (by ID). Schedule Debate → the
+  // existing shared DebateModal, pre-set to this channel (no duplicate form).
   const openChannel = (ch) => router.push(`/dashboard/media/channels/${ch.id}`);
+  const scheduleDebate = (ch) => setScheduleFor(ch);
 
   return (
     <div className="space-y-6">
@@ -585,11 +605,20 @@ function ChannelsTab({ data, onChange, flash }) {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {data.channels.map((c) => (
-          <ChannelCard key={c.id} ch={c} debates={data.upcomingDebates} now={now} tone={TONE} onOpen={openChannel} />
+          <ChannelCard key={c.id} ch={c} debates={data.upcomingDebates} now={now} tone={TONE} onOpen={openChannel} onSchedule={scheduleDebate} />
         ))}
       </div>
 
       {showAddChannel && <ChannelModal onClose={() => setShowAddChannel(false)} onSaved={(msg) => { setShowAddChannel(false); onChange(); flash?.(msg); }} />}
+      {scheduleFor && (
+        <DebateModal
+          defaultChannelId={scheduleFor.id}
+          channels={data.channels}
+          spokespersons={data.spokespersons}
+          onClose={() => setScheduleFor(null)}
+          onSaved={() => { setScheduleFor(null); onChange(); flash?.("Debate scheduled."); }}
+        />
+      )}
     </div>
   );
 }
