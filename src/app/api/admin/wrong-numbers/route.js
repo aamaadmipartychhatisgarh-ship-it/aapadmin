@@ -77,7 +77,7 @@ export async function GET(req) {
               COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               lz.name AS zone_name, lls.name AS lok_sabha_name, ld.name AS district_name,
               la.name AS assembly_name, lw.name AS ward_name,
-              w.photo_url AS photo_url,
+              COALESCE(c.photo_url, w.photo_url) AS photo_url,
               ${detailCols}
               (SELECT COUNT(*) FROM calls x WHERE x.contact_id = c.id) AS attempts,
               (SELECT COUNT(*) FROM calls x JOIN call_statuses cs2 ON cs2.id = x.status_id

@@ -182,7 +182,10 @@ export async function POST(req) {
           ...row,
           ward_name: nameRows[0]?.ward_name ?? null,
           district_name: nameRows[0]?.district_name ?? null,
-          photo_url: nameRows[0]?.photo_url ?? null,
+          // Canonical source of truth: the contact's OWN photo first, the linked
+          // worker's photo only as a fallback (same resolution the Contacts list
+          // uses), so every caller sees the identical photo for a given contact.
+          photo_url: row.photo_url ?? nameRows[0]?.photo_url ?? null,
           locked_by_user_id: userId,
         },
       });
