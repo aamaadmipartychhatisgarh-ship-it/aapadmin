@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { scopeFilterSync } from "@/lib/permissions";
-import { userCanAccessPageKey } from "@/lib/pageAccess";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { districtWorkerStats } from "@/lib/districtStats";
 
@@ -10,9 +10,9 @@ import { districtWorkerStats } from "@/lib/districtStats";
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    // Oversight roles, OR a user the Super Admin explicitly granted the
-    // "analytics" page (BUG 14). Both UI and this API read the same source.
-    if (!session || (!isSupervisor(session) && !(await userCanAccessPageKey(session, "analytics")))) {
+    // Normal users: oversight only. Page-restricted users: only if "analytics"
+    // is one of their assigned pages (role ignored). Same source as the UI.
+    if (!(await pageAllowed(session, "analytics", session && isSupervisor(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 

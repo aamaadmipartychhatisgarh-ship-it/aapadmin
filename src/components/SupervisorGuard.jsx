@@ -20,9 +20,12 @@ export default function SupervisorGuard({ children, allow }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
-  const { pages, loading: accessLoading } = usePageAccess();
+  const { pages, restricted, loading: accessLoading } = usePageAccess();
 
-  const roleAllowed = (s) => isOversight(s) || (allow ? allow(s) : false);
+  // A page-restricted user's role no longer admits them anywhere — only their
+  // assigned pages do (Page Access override model). Non-restricted users keep
+  // the normal role check.
+  const roleAllowed = (s) => !restricted && (isOversight(s) || (allow ? allow(s) : false));
   const pageKey = pageKeyForPath(pathname);
   const grantAllowed = !!(pageKey && pages && pages.includes(pageKey));
   const permitted = (s) => roleAllowed(s) || grantAllowed;

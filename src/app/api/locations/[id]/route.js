@@ -2,7 +2,7 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
-import { userCanAccessPageKey } from "@/lib/pageAccess";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
 // PUT: rename a location and/or move it under a different parent
@@ -10,7 +10,7 @@ import { query } from "@/lib/db";
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || (!isAdmin(session) && !(await userCanAccessPageKey(session, "master_data")))) {
+    if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
@@ -40,7 +40,7 @@ export async function PUT(req, { params }) {
 export async function DELETE(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || (!isAdmin(session) && !(await userCanAccessPageKey(session, "master_data")))) {
+    if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;

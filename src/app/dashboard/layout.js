@@ -15,7 +15,7 @@ import SectionTabs from "@/components/SectionTabs";
 import FloatingPopover from "@/components/FloatingPopover";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 import { primaryItems } from "@/lib/navGroups";
-import { PAGES, baselinePagesForRole, pageKeyForPath } from "@/lib/pages";
+import { PAGES, pageKeyForPath } from "@/lib/pages";
 import { usePageAccess } from "@/components/usePageAccess";
 import { VIEW_AS_KEY, getDashboardViewAs, getViewAsUser, setViewAsUser } from "@/lib/dashboardView";
 
@@ -136,7 +136,7 @@ export default function DashboardLayout({ children }) {
   // Effective page access for the signed-in user (baseline role pages ∪ any
   // Super-Admin-granted pages) — the same source the backend and page guards
   // use, so a GRANTED page shows up in this user's sidebar (BUG 14).
-  const { pages: allowedPageKeys } = usePageAccess();
+  const { pages: allowedPageKeys, restricted: pageRestricted } = usePageAccess();
   useEffect(() => {
     setViewAsState(getDashboardViewAs());
     setVAUser(getViewAsUser());
@@ -163,6 +163,19 @@ export default function DashboardLayout({ children }) {
   useEffect(() => {
     setMobileNavOpen(false);
   }, [pathname]);
+
+  // Page Access route gate — a page-restricted user who navigates (or types a
+  // URL) to a page they aren't assigned is bounced to their first assigned page.
+  // Backend/API checks enforce the same limit; this is the client-side UX half.
+  // pageRestricted is always false for Super Admins, so previews are unaffected.
+  useEffect(() => {
+    if (!pageRestricted || !allowedPageKeys) return;
+    const key = pageKeyForPath(pathname);
+    if (key && !allowedPageKeys.includes(key)) {
+      const firstPg = allowedPageKeys.map((k) => PAGES.find((p) => p.key === k)).find(Boolean);
+      router.replace(firstPg?.href || "/dashboard/profile");
+    }
+  }, [pathname, pageRestricted, allowedPageKeys, router]);
   // Load the caller list for the Super Admin's "Caller Dashboard" submenu.
   useEffect(() => {
     if (normalizeRole(session?.user?.role) !== ROLES.SUPER_ADMIN) return;
@@ -317,22 +330,16 @@ export default function DashboardLayout({ children }) {
     navItems = CALLER_NAV;
   }
 
-  // BUG 14 — append any page the Super Admin has explicitly GRANTED to this
-  // user that isn't already in their role's nav. We add ONLY grants beyond the
-  // role baseline (allowed − baseline), so a role's normal menu is unchanged
-  // when it has no extra grants. Skipped while previewing another role (a Super
-  // Admin's own effective access is every page, which must not leak into a
-  // Caller/Supervisor preview nav).
-  if (!previewing && allowedPageKeys) {
-    const baseline = new Set(baselinePagesForRole(canonical));
-    const presentKeys = new Set(navItems.map((i) => pageKeyForPath(i.href)).filter(Boolean));
-    for (const key of allowedPageKeys) {
-      if (baseline.has(key) || presentKeys.has(key)) continue;
-      const pg = PAGES.find((p) => p.key === key);
-      if (!pg) continue;
-      navItems = [...navItems, { name: pg.label, href: pg.href, icon: PAGE_ICONS[pg.icon] || FileText }];
-      presentKeys.add(key);
-    }
+  // Page Access OVERRIDE — a page-restricted user (one the Super Admin has
+  // assigned specific pages to) gets a sidebar of EXACTLY those pages, nothing
+  // role-derived. Assigning "Page A" therefore shows only Page A; My Calls /
+  // Workspace / Contacts / Reports etc. never appear. Non-restricted users keep
+  // their normal role nav. Skipped while previewing another role.
+  if (!previewing && pageRestricted && allowedPageKeys) {
+    navItems = allowedPageKeys
+      .map((key) => PAGES.find((p) => p.key === key))
+      .filter(Boolean)
+      .map((pg) => ({ name: pg.label, href: pg.href, icon: PAGE_ICONS[pg.icon] || FileText }));
   }
 
   // Every role gets a profile link — appended once here instead of in each

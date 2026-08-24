@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
-import { userCanAccessPageKey } from "@/lib/pageAccess";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { districtWorkerStats } from "@/lib/districtStats";
 
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || (!isOversight(session) && !(await userCanAccessPageKey(session, "rankings")))) {
+    if (!(await pageAllowed(session, "rankings", session && isOversight(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 

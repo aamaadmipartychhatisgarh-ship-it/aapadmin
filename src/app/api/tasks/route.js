@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight, scopeFilterSync } from "@/lib/permissions";
+import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query, getPool } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
@@ -24,6 +25,10 @@ export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // Page-restricted users reach Tasks only if "tasks" is one of their pages.
+    if (await isPageRestricted(session) && !(await userCanAccessPageKey(session, "tasks"))) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
     // A previewing Super Admin's "My Tasks" resolves to the impersonated
     // caller's tasks (never spoofable — verified server-side).
     const { userId: actingUserId, impersonating } = await resolveActingUserId(session);

@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "social", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
     // Latest snapshot per platform (totals) + 30-day trend.
     const latest = await query(

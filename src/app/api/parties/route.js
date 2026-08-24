@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
-import { userCanAccessPageKey } from "@/lib/pageAccess";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensurePartiesTable, normalizePartyName } from "@/lib/parties";
 
@@ -29,8 +29,9 @@ export async function GET() {
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    // Oversight, OR a user granted the Party Master page (PROMPT 10 Part A).
-    if (!session || (!isOversight(session) && !(await userCanAccessPageKey(session, "party_master")))) {
+    // Normal users: oversight. Page-restricted users: only if Party Master is one
+    // of their assigned pages (role ignored).
+    if (!(await pageAllowed(session, "party_master", session && isOversight(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     await ensurePartiesTable();

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { isAdmin, scopeFilterSync } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
@@ -33,7 +34,7 @@ function idList(raw) {
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isSupervisor(session)) {
+    if (!(await pageAllowed(session, "contacts", session && isSupervisor(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
@@ -193,7 +194,7 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    if (!(await pageAllowed(session, "contacts", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const data = await req.json().catch(() => ({}));

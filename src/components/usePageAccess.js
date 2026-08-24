@@ -18,13 +18,13 @@ async function load() {
     inflight = fetch("/api/my-pages", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { pages: [] }))
       .then((d) => {
-        cache = { pages: Array.isArray(d.pages) ? d.pages : [] };
+        cache = { pages: Array.isArray(d.pages) ? d.pages : [], restricted: !!d.restricted };
         inflight = null;
         listeners.forEach((fn) => fn(cache));
         return cache;
       })
       .catch(() => {
-        cache = { pages: [] };
+        cache = { pages: [], restricted: false };
         inflight = null;
         listeners.forEach((fn) => fn(cache));
         return cache;
@@ -53,6 +53,7 @@ export function usePageAccess() {
   }, []);
   return {
     pages: state?.pages || null, // null while loading
+    restricted: !!state?.restricted,
     loading: !state,
     has: (key) => !!state?.pages?.includes(key),
   };

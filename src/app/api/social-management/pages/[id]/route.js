@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     await ensureSocialPageSchema();
     const { id } = await params;
     const d = await req.json();
@@ -44,7 +45,7 @@ export async function PUT(req, { params }) {
 export async function DELETE(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
     await query("DELETE FROM social_pages WHERE id = ?", [id]);
     return NextResponse.json({ ok: true });

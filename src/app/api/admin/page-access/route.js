@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isSuperAdmin, normalizeRole, roleLabel, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { ensurePagePermissionsSchema } from "@/lib/pageAccess";
+import { ensurePagePermissionsSchema, setUserPages } from "@/lib/pageAccess";
 import { PAGES, PAGE_KEYS, isValidPageKey, getPage, baselinePagesForRole } from "@/lib/pages";
 
 // BUG 14 — Page Access Management (Super Admin only).
@@ -143,6 +143,40 @@ export async function POST(req) {
     return NextResponse.json({ message: `Access to ${getPage(pageKey)?.label || pageKey} granted to ${target.username}.` }, { status: 201 });
   } catch (err) {
     console.error("page-access POST error:", err);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}
+
+// Set a user's ENTIRE page assignment to an exact set (multi-select save).
+// Body: { user_id, page_keys: string[] }. Replaces prior assignments — pages
+// not in the list are removed, so saving [] clears all assignments (the user
+// reverts to their normal role access).
+export async function PUT(req) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!guard(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    await ensurePagePermissionsSchema();
+
+    const body = await req.json().catch(() => ({}));
+    const userId = Number(body.user_id);
+    const pageKeys = Array.isArray(body.page_keys) ? body.page_keys.map((k) => String(k)) : null;
+    if (!Number.isInteger(userId) || userId <= 0 || pageKeys === null) {
+      return NextResponse.json({ message: "user_id and page_keys[] are required." }, { status: 400 });
+    }
+    const [target] = await query(`SELECT id, username, role FROM users WHERE id = ?`, [userId]);
+    if (!target) return NextResponse.json({ message: "User not found." }, { status: 404 });
+    if (normalizeRole(target.role) === ROLES.SUPER_ADMIN) {
+      return NextResponse.json({ message: "Super Admin already has access to every page." }, { status: 400 });
+    }
+
+    const final = await setUserPages(userId, pageKeys, session.user.id);
+    await logAudit(session, {
+      action: "page_access.set", entityType: "page_permission", entityId: userId,
+      details: { user_id: userId, username: target.username, pages: final },
+    });
+    return NextResponse.json({ message: `Updated page access for ${target.username}.`, pages: final });
+  } catch (err) {
+    console.error("page-access PUT error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

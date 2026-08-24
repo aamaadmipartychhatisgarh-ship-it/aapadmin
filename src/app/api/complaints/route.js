@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
 // Callers log complaints (heard live on calls); oversight roles review and
@@ -11,7 +12,7 @@ const canUseComplaints = (session) => isOversight(session) || isCaller(session);
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canUseComplaints(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "complaints", session && canUseComplaints(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const statusF = searchParams.get("status");
     const typeF = searchParams.get("type");
@@ -56,7 +57,7 @@ export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
     // Logging is caller-only; admins/supervisors review complaints, they don't create them.
-    if (!session || !isCaller(session)) {
+    if (!(await pageAllowed(session, "complaints", session && isCaller(session)))) {
       return NextResponse.json({ message: "Only callers can log complaints" }, { status: 403 });
     }
     const d = await req.json();

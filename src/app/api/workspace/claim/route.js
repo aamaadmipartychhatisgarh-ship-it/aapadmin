@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
+import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { getPool } from "@/lib/db";
 import { zoneMatch } from "@/lib/assignmentRules";
@@ -17,6 +18,10 @@ export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    // Page-restricted users reach My Workspace only if "workspace" is assigned.
+    if (await isPageRestricted(session) && !(await userCanAccessPageKey(session, "workspace"))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { userId, impersonating } = await resolveActingUserId(session);

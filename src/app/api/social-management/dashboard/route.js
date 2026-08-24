@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { normalizeRole, ROLES, canAccessSocial } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { resolveRange } from "@/lib/reports/timeRanges";
 
@@ -14,7 +15,7 @@ import { resolveRange } from "@/lib/reports/timeRanges";
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
     const role = normalizeRole(session.user.role);
     const u = session.user;

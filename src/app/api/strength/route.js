@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
-import { userCanAccessPageKey } from "@/lib/pageAccess";
+import { pageAllowed } from "@/lib/pageAccess";
 import { districtWorkerStats } from "@/lib/districtStats";
 
 // District Strength Ranking. Every worker/percentage figure comes from the ONE
@@ -13,7 +13,7 @@ import { districtWorkerStats } from "@/lib/districtStats";
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || (!isOversight(session) && !(await userCanAccessPageKey(session, "strength")))) {
+    if (!(await pageAllowed(session, "strength", session && isOversight(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 

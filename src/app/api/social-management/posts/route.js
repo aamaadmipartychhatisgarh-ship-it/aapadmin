@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureSocialPostSchema } from "@/lib/socialPostSchema";
 
@@ -9,7 +10,7 @@ import { ensureSocialPostSchema } from "@/lib/socialPostSchema";
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     // Ensure caption is LONGTEXT so content is stored in full (no truncation).
     await ensureSocialPostSchema();
     const d = await req.json();

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessMedia } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensurePressNotesSchema } from "@/lib/pressNotesSchema";
 import { ensureNewsChannelsSeed } from "@/lib/newsChannelsSeed";
@@ -12,7 +13,7 @@ import { mediaDateFilter } from "@/lib/mediaDateFilter";
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "media", session && canAccessMedia(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
 
     // Global Media Center date filter — applied to every date-based section
     // (coverage / debates / conferences + their analytics) against the real DB

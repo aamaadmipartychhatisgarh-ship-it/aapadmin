@@ -59,17 +59,16 @@ export default function Page() {
 function Body({ session }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const oversight = isOversight(session);
-  // Users / Master Data / Page Access kept their prior Super-Admin visibility.
-  const canSeeUsers = isSuperAdmin(session);
-
-  // Effective page access (role baseline ∪ Super-Admin grants). Baseline is
-  // resolved synchronously so oversight/super users see their tabs instantly;
-  // grants for other users arrive from /api/my-pages.
-  const { pages: accessKeys, loading: accessLoading } = usePageAccess();
+  // Effective page access. For a page-restricted user (≥1 assigned page) access
+  // is EXACTLY the assigned pages — their role (oversight/super) is ignored, so
+  // Teams / Users / Page Access and any role-baseline master tabs are hidden
+  // unless explicitly assigned. Non-restricted users keep their role visibility.
+  const { pages: accessKeys, restricted, loading: accessLoading } = usePageAccess();
+  const oversight = !restricted && isOversight(session);
+  const canSeeUsers = !restricted && isSuperAdmin(session);
   const baseline = new Set(baselinePagesForRole(normalizeRole(session?.user?.role)));
   const effective = new Set(accessKeys || []);
-  const canPage = (key) => baseline.has(key) || effective.has(key);
+  const canPage = (key) => restricted ? effective.has(key) : (baseline.has(key) || effective.has(key));
   const canTab = (tabKey) => {
     if (tabKey === "teams") return oversight;
     if (tabKey === "users" || tabKey === "page_access") return canSeeUsers;
@@ -77,9 +76,9 @@ function Body({ session }) {
     return pk ? canPage(pk) : false;
   };
   const visibleTabs = TABS.filter((t) => canTab(t.key));
-  // Access is "decided" for oversight immediately; for a grant-only user we
-  // must wait for /api/my-pages before concluding they have nothing here.
-  const decided = oversight || canSeeUsers || !accessLoading;
+  // Wait for /api/my-pages before deciding — restriction status flips role
+  // visibility, so we must not render (or redirect) on the pre-load default.
+  const decided = !accessLoading;
 
   const [tab, setTab] = useState(() => {
     if (typeof window !== "undefined") {

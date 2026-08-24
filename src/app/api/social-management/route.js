@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { normalizeRole, ROLES, canAccessSocial } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 
@@ -9,7 +10,7 @@ import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     // Make sure the DP column exists so `sp.*` below returns photo_url.
     await ensureSocialPageSchema();
 

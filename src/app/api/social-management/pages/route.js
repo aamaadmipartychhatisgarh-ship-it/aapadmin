@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 
@@ -13,7 +14,7 @@ export const ALLOWED_PLATFORMS = ["facebook", "instagram", "twitter"];
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     await ensureSocialPageSchema();
     const d = await req.json();
     // Platform is restricted to the three supported networks (Social Media

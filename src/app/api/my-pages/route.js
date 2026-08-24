@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { getEffectivePageKeys } from "@/lib/pageAccess";
+import { getEffectivePageKeys, isPageRestricted } from "@/lib/pageAccess";
 
 // BUG 14 — the caller's OWN effective page access (baseline role pages ∪ any
 // explicit grants), computed server-side from the DB. This is the single
@@ -13,8 +13,9 @@ export async function GET() {
     const session = await getServerSession(authOptions);
     if (!session?.user) return NextResponse.json({ pages: [] }, { status: 401 });
     const keys = await getEffectivePageKeys(session.user.id, session.user.role);
+    const restricted = await isPageRestricted(session);
     return NextResponse.json(
-      { pages: [...keys] },
+      { pages: [...keys], restricted },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
   } catch (err) {

@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, isSuperAdmin } from "@/lib/permissions";
-import { userCanAccessPageKey } from "@/lib/pageAccess";
+import { userCanAccessPageKey, isPageRestricted } from "@/lib/pageAccess";
 import { NextResponse } from "next/server";
 import { ensureLeaderAssessmentTables } from "@/lib/leaderAssessment";
 
@@ -16,11 +16,20 @@ import { ensureLeaderAssessmentTables } from "@/lib/leaderAssessment";
 // Super-Admin-only.
 export async function guard({ superAdminOnly = false, allowPageKeys = [] } = {}) {
   const session = await getServerSession(authOptions);
-  let permitted = !!session && isOversight(session);
-  if (session && !permitted && allowPageKeys.length) {
-    for (const k of allowPageKeys) {
-      // eslint-disable-next-line no-await-in-loop
-      if (await userCanAccessPageKey(session, k)) { permitted = true; break; }
+  let permitted = false;
+  if (session) {
+    // Page-restricted users: role ignored — admitted only if they were assigned
+    // the Leader Assessment page (general routes) or one of this route's
+    // allowPageKeys (e.g. caste_master / polling_master). Non-restricted users:
+    // the normal oversight rule, unchanged.
+    if (await isPageRestricted(session)) {
+      const keys = ["leader_assessment", ...allowPageKeys];
+      for (const k of keys) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await userCanAccessPageKey(session, k)) { permitted = true; break; }
+      }
+    } else {
+      permitted = isOversight(session);
     }
   }
   if (!permitted) {

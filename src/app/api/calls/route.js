@@ -2,6 +2,7 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
+import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn } from "@/lib/contactExtras";
@@ -11,6 +12,11 @@ export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
+      return Response.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    // Page-restricted users reach My Calls only if "calls" is one of their
+    // assigned pages (assigning some other page must not unlock it).
+    if (await isPageRestricted(session) && !(await userCanAccessPageKey(session, "calls"))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 

@@ -2,7 +2,7 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
-import { userCanAccessPageKey } from "@/lib/pageAccess";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 
@@ -48,7 +48,7 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || (!isAdmin(session) && !(await userCanAccessPageKey(session, "master_data")))) {
+    if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 

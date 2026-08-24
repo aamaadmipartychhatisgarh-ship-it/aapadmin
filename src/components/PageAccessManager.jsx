@@ -44,29 +44,48 @@ export default function PageAccessManager() {
   }, []);
   useEffect(() => { reload(); }, [reload]);
 
-  // Grant form state
-  const [selPage, setSelPage] = useState("");
+  // Multi-select assignment state: pick a user, then select any number of pages.
   const [selUser, setSelUser] = useState("");
-  const [granting, setGranting] = useState(false);
+  const [selPages, setSelPages] = useState([]); // array of page keys
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
-  async function grant() {
-    if (!selPage || !selUser) { fail("Select both a page and a user."); return; }
-    setGranting(true);
+  // When the chosen user changes, preload their currently-assigned pages so the
+  // multi-select opens on their real saved selection (edit flow).
+  function chooseUser(id) {
+    setSelUser(id);
+    setDirty(false);
+    if (!id) { setSelPages([]); return; }
+    const grants = grantsByUser.get(Number(id));
+    setSelPages(grants ? [...grants] : []);
+  }
+  function togglePage(key) {
+    setDirty(true);
+    setSelPages((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+  function removePage(key) {
+    setDirty(true);
+    setSelPages((prev) => prev.filter((k) => k !== key));
+  }
+
+  async function saveAssignment() {
+    if (!selUser) { fail("Select a user first."); return; }
+    setSaving(true);
     try {
       const r = await fetch("/api/admin/page-access", {
-        method: "POST",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: Number(selUser), page_key: selPage }),
+        body: JSON.stringify({ user_id: Number(selUser), page_keys: selPages }),
       });
       const d = await r.json();
-      if (!r.ok) { fail(d.message || "Could not grant access."); return; }
-      flash(d.message || "Access granted.");
-      setSelPage(""); setSelUser("");
+      if (!r.ok) { fail(d.message || "Could not save."); return; }
+      flash(d.message || "Saved.");
+      setDirty(false);
       await reload();
     } catch {
-      fail("Could not grant access.");
+      fail("Could not save page access.");
     } finally {
-      setGranting(false);
+      setSaving(false);
     }
   }
 
@@ -99,9 +118,15 @@ export default function PageAccessManager() {
     (role, key) => (pageByKey.get(key)?.baseline_roles || []).includes(role),
     [pageByKey]
   );
-  // Effective access for a grantable user (role baseline ∪ explicit grants).
+  // Effective access (OVERRIDE model): a user with ≥1 assigned page sees EXACTLY
+  // those pages; a user with none falls back to their role baseline.
+  const isGranted = useCallback((u, key) => !!grantsByUser.get(u.id)?.has(key), [grantsByUser]);
   const userHasPage = useCallback(
-    (u, key) => roleHasPage(u.role, key) || !!grantsByUser.get(u.id)?.has(key),
+    (u, key) => {
+      const grants = grantsByUser.get(u.id);
+      if (grants && grants.size > 0) return grants.has(key);
+      return roleHasPage(u.role, key);
+    },
     [roleHasPage, grantsByUser]
   );
 
@@ -117,48 +142,69 @@ export default function PageAccessManager() {
         </div>
       )}
 
-      {/* Grant panel — Select Page → Select User → Grant Access */}
+      {/* Assignment panel — Select User → multi-select Pages → Save.
+          Saving persists EXACTLY the selected pages for that user (override):
+          a user with ≥1 assigned page sees only those pages; clearing all
+          selections reverts them to their normal role access. */}
       <div className={`${card} p-5`}>
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-1">
           <ShieldCheck size={18} className="text-[#164FA3]" />
-          <h3 className="text-base font-bold text-gray-900">Grant Page Access</h3>
+          <h3 className="text-base font-bold text-gray-900">Assign Pages to a User</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1">Select Page</label>
-            <select className={inp} value={selPage} onChange={(e) => setSelPage(e.target.value)}>
-              <option value="">— Choose a page —</option>
-              {data.pages.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1">Select User</label>
-            <select className={inp} value={selUser} onChange={(e) => setSelUser(e.target.value)}>
-              <option value="">— Choose a user —</option>
-              {data.users.map((u) => (
-                <option key={u.id} value={u.id}>{u.username} · {u.role_label}</option>
-              ))}
-            </select>
-          </div>
-          <button onClick={grant} disabled={granting || !selPage || !selUser} className={`${btn} bg-[#164FA3] text-white hover:bg-[#123f85] w-full md:w-auto justify-center`}>
-            {granting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Grant Access
-          </button>
+        <p className="text-xs text-gray-500 mb-4">Select a user, tick every page they should have, then Save. Assigning pages restricts the user to exactly those pages — no other module is added automatically.</p>
+
+        <div className="max-w-md mb-4">
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Select User</label>
+          <select className={inp} value={selUser} onChange={(e) => chooseUser(e.target.value)}>
+            <option value="">— Choose a user —</option>
+            {data.users.map((u) => (
+              <option key={u.id} value={u.id}>{u.username} · {u.role_label}</option>
+            ))}
+          </select>
         </div>
-        {selPage && selUser && (() => {
-          const u = userById.get(Number(selUser));
-          if (u && userHasPage(u, selPage)) {
-            const viaRole = roleHasPage(u.role, selPage);
-            return (
-              <p className="mt-3 text-xs text-amber-700 flex items-center gap-1.5">
-                <AlertCircle size={13} />
-                {viaRole
-                  ? `${u.username} already has this page through their ${u.role_label} role.`
-                  : `${u.username} already has access to this page.`}
-              </p>
-            );
-          }
-          return null;
-        })()}
+
+        {selUser && (
+          <>
+            {/* Selected pages as removable tags */}
+            <div className="mb-3">
+              <div className="text-xs font-semibold text-gray-500 mb-1.5">Selected pages ({selPages.length})</div>
+              {selPages.length === 0 ? (
+                <div className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg px-3 py-2">
+                  None selected — this user will use their normal role access.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {selPages.map((k) => (
+                    <span key={k} className="inline-flex items-center gap-1 bg-blue-50 text-[#164FA3] border border-blue-100 rounded-full pl-2.5 pr-1 py-0.5 text-xs font-semibold">
+                      {pageByKey.get(k)?.label || k}
+                      <button onClick={() => removePage(k)} className="hover:bg-blue-100 rounded-full p-0.5" aria-label={`Remove ${k}`}><X size={12} /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Full multi-select checkbox grid of every page */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-72 overflow-auto border border-gray-100 rounded-lg p-2">
+              {data.pages.map((p) => {
+                const checked = selPages.includes(p.key);
+                return (
+                  <label key={p.key} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer text-sm ${checked ? "bg-blue-50 text-[#164FA3] font-medium" : "text-gray-700 hover:bg-gray-50"}`}>
+                    <input type="checkbox" checked={checked} onChange={() => togglePage(p.key)} className="accent-[#164FA3]" />
+                    <span className="truncate">{p.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-3 mt-4">
+              <button onClick={saveAssignment} disabled={saving || !dirty} className={`${btn} bg-[#164FA3] text-white hover:bg-[#123f85] justify-center`}>
+                {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Save Access
+              </button>
+              {dirty && <span className="text-xs text-amber-600">Unsaved changes</span>}
+            </div>
+          </>
+        )}
       </div>
 
       {/* View switcher */}
@@ -179,8 +225,8 @@ export default function PageAccessManager() {
       </div>
 
       {view === "all" && <GrantsTable data={data} pageByKey={pageByKey} onRevoke={revoke} />}
-      {view === "by_user" && <ByUser data={data} userHasPage={userHasPage} roleHasPage={roleHasPage} onRevoke={revoke} />}
-      {view === "by_page" && <ByPage data={data} userHasPage={userHasPage} roleHasPage={roleHasPage} onRevoke={revoke} />}
+      {view === "by_user" && <ByUser data={data} userHasPage={userHasPage} isGranted={isGranted} onRevoke={revoke} />}
+      {view === "by_page" && <ByPage data={data} userHasPage={userHasPage} isGranted={isGranted} onRevoke={revoke} />}
     </div>
   );
 }
@@ -256,7 +302,7 @@ function GrantsTable({ data, pageByKey, onRevoke }) {
 }
 
 // ---- By User: pick a user, see every page ✓/✗ ------------------------------
-function ByUser({ data, userHasPage, roleHasPage, onRevoke }) {
+function ByUser({ data, userHasPage, isGranted, onRevoke }) {
   const [userId, setUserId] = useState("");
   const u = data.users.find((x) => String(x.id) === String(userId));
   return (
@@ -280,17 +326,16 @@ function ByUser({ data, userHasPage, roleHasPage, onRevoke }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {data.pages.map((p) => {
               const has = userHasPage(u, p.key);
-              const viaRole = roleHasPage(u.role, p.key);
+              const granted = isGranted(u, p.key);
               return (
                 <div key={p.key} className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border ${has ? "border-emerald-100 bg-emerald-50/50" : "border-gray-100 bg-gray-50/50"}`}>
                   <span className="flex items-center gap-2 text-sm">
                     {has ? <Check size={15} className="text-emerald-600" /> : <X size={15} className="text-gray-300" />}
                     <span className={has ? "text-gray-900" : "text-gray-400"}>{p.label}</span>
                   </span>
-                  {has && (viaRole
-                    ? <span className="text-[10px] font-semibold text-gray-400 uppercase">Role</span>
-                    : <button onClick={() => onRevoke(u.id, p.key)} className="text-[11px] font-semibold text-red-600 hover:text-red-700">Remove</button>
-                  )}
+                  {granted
+                    ? <button onClick={() => onRevoke(u.id, p.key)} className="text-[11px] font-semibold text-red-600 hover:text-red-700">Remove</button>
+                    : has && <span className="text-[10px] font-semibold text-gray-400 uppercase">Role</span>}
                 </div>
               );
             })}
@@ -302,7 +347,7 @@ function ByUser({ data, userHasPage, roleHasPage, onRevoke }) {
 }
 
 // ---- By Page: pick a page, see which users have access ---------------------
-function ByPage({ data, userHasPage, roleHasPage, onRevoke }) {
+function ByPage({ data, userHasPage, isGranted, onRevoke }) {
   const [key, setKey] = useState("");
   const page = data.pages.find((p) => p.key === key);
   const users = page ? data.users.filter((u) => userHasPage(u, key)) : [];
@@ -324,7 +369,7 @@ function ByPage({ data, userHasPage, roleHasPage, onRevoke }) {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {users.map((u) => {
-                const viaRole = roleHasPage(u.role, key);
+                const granted = isGranted(u, key);
                 return (
                   <div key={u.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-gray-100 bg-gray-50/50">
                     <span className="flex items-center gap-2 min-w-0">
@@ -334,9 +379,9 @@ function ByPage({ data, userHasPage, roleHasPage, onRevoke }) {
                         <span className="block text-[11px] text-gray-500">{u.role_label}</span>
                       </span>
                     </span>
-                    {viaRole
-                      ? <span className="text-[10px] font-semibold text-gray-400 uppercase shrink-0">Role</span>
-                      : <button onClick={() => onRevoke(u.id, key)} className="text-[11px] font-semibold text-red-600 hover:text-red-700 shrink-0">Remove</button>}
+                    {granted
+                      ? <button onClick={() => onRevoke(u.id, key)} className="text-[11px] font-semibold text-red-600 hover:text-red-700 shrink-0">Remove</button>
+                      : <span className="text-[10px] font-semibold text-gray-400 uppercase shrink-0">Role</span>}
                   </div>
                 );
               })}

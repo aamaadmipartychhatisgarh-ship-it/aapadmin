@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns } from "@/lib/contactExtras";
 
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) {
+    if (!(await pageAllowed(session, "wrong_numbers", session && isOversight(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     if (!(await hasWrongNumberColumn())) {
