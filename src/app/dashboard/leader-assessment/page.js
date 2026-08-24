@@ -118,6 +118,20 @@ function useActiveCastes() {
   return castes;
 }
 
+// Designations from the SAME master the Contacts → Designation dropdown uses
+// (GET /api/designations → [{ id, name }]). Loaded live, so a designation added
+// there automatically appears in Create Candidate too. Read-only here — this
+// never changes Contacts' designation behaviour.
+function useDesignations() {
+  const [designations, setDesignations] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    api("/api/designations").then((d) => { if (alive) setDesignations(d.designations || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return designations;
+}
+
 export default function Page() {
   return <SupervisorGuard><Body /></SupervisorGuard>;
 }
@@ -1430,6 +1444,7 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
   const [showElections, setShowElections] = useState(false);
   const [electionsDraft, setElectionsDraft] = useState([]); // staged rows for a NEW candidate
   const casteOptions = useActiveCastes();
+  const designationOptions = useDesignations();
   const set = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => (e[k] ? { ...e, [k]: undefined } : e)); };
   const age = ageOf(form.date_of_birth);
   async function persistPhoto(blob) {
@@ -1490,7 +1505,20 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
         </div>
         <Field label="Net Worth" value={form.net_worth} onChange={(v) => set("net_worth", v)} /><Field label="Business" value={form.business} onChange={(v) => set("business", v)} />
         <Field label="Monthly Income" value={form.monthly_income} onChange={(v) => set("monthly_income", v)} /><Field label="Education" value={form.education} onChange={(v) => set("education", v)} />
-        <Field label="Type / Current Position" value={form.current_position} onChange={(v) => set("current_position", v)} /><Field label="Political Experience" value={form.political_experience} onChange={(v) => set("political_experience", v)} />
+        <div>
+          <span className={lbl}>Current Designation</span>
+          {/* Same designation master as Contacts → Designation (/api/designations).
+              Stored on current_position by NAME, so existing saved values keep
+              showing; a legacy value not in the master is preserved as an option. */}
+          <select className={inp} value={form.current_position || ""} onChange={(e) => set("current_position", e.target.value)}>
+            <option value="">— Select designation —</option>
+            {form.current_position && !designationOptions.some((d) => d.name === form.current_position) && (
+              <option value={form.current_position}>{form.current_position}</option>
+            )}
+            {designationOptions.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+          </select>
+        </div>
+        <Field label="Political Experience" value={form.political_experience} onChange={(v) => set("political_experience", v)} />
         <Field label="Previous Elections" value={form.previous_elections} onChange={(v) => set("previous_elections", v)} />
         <Field label="Address" full value={form.address} onChange={(v) => set("address", v)} />
       </div>
@@ -1720,7 +1748,7 @@ function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
   const rows = [
     ["Assembly", c.assembly_name], ["District", c.district],
     ["Phone", c.phone],
-    ["Caste", c.caste], ["Type / Position", c.current_position],
+    ["Caste", c.caste], ["Current Designation", c.current_position],
     ["Net Worth", c.net_worth], ["Business", c.business],
     ["Monthly Income", c.monthly_income], ["Education", c.education],
     ["Political Experience", c.political_experience],
