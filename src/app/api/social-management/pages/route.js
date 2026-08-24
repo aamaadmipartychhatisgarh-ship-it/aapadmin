@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 
 // The Social Media Master supports exactly these three networks (BUG 1). Kept in
 // sync with the PLATFORM map in the social-management UI and the
@@ -13,6 +14,7 @@ export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    await ensureSocialPageSchema();
     const d = await req.json();
     // Platform is restricted to the three supported networks (Social Media
     // Master, BUG 1). Handle = the page name.
@@ -38,11 +40,14 @@ export async function POST(req) {
       const [ls] = await query("SELECT name FROM locations WHERE id = ?", [d.lok_sabha_id]);
       lokSabhaName = ls?.name || null;
     }
+    // DP (photo_url) is a durable /uploads/<uuid> URL from the shared uploader;
+    // empty/missing → NULL (no DP).
+    const photoUrl = typeof d.photo_url === "string" && d.photo_url.trim() ? d.photo_url.trim() : null;
     const res = await query(
-      `INSERT INTO social_pages (lok_sabha_id, lok_sabha_name, platform, handle, url, followers, managed_by_user_id, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+      `INSERT INTO social_pages (lok_sabha_id, lok_sabha_name, platform, handle, url, followers, managed_by_user_id, photo_url, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [d.lok_sabha_id || null, lokSabhaName, platform, handle, d.url || null,
-       Number(d.followers) || 0, d.managed_by_user_id || null]
+       Number(d.followers) || 0, d.managed_by_user_id || null, photoUrl]
     );
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {

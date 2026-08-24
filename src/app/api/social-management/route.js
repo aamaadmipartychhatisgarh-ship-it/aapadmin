@@ -3,12 +3,15 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { normalizeRole, ROLES, canAccessSocial } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 
 // Aggregate data for the Social Management page (overview + per-LS rollups).
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // Make sure the DP column exists so `sp.*` below returns photo_url.
+    await ensureSocialPageSchema();
 
     // Social pages are keyed by lok_sabha_id. Scope per role:
     //   zone_admin     → pages whose LS is in the zone

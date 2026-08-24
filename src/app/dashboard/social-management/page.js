@@ -9,6 +9,8 @@ import {
   Bird, Briefcase, Send,
 } from "lucide-react";
 import SocialDashboardTab from "@/components/social/SocialDashboardTab";
+import ProfilePhoto from "@/components/ProfilePhoto";
+import Avatar from "@/components/Avatar";
 
 // Adding a further platform later is one more entry here (icon + brand
 // color) plus one more enum value in social_pages.platform (see
@@ -243,7 +245,15 @@ function PagesTab({ data, onReload }) {
                 {items.map((p) => (
                   <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 group">
                     <div className="flex items-center gap-2 mb-3">
-                      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={16} /></div>
+                      {/* DP thumbnail when the page has one, else the platform badge. */}
+                      {p.photo_url ? (
+                        <div className="relative shrink-0">
+                          <Avatar name={p.handle} src={p.photo_url} size={36} square className="border border-gray-200" />
+                          <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-white ring-2 ring-white" style={{ background: meta.color }}><Icon size={9} /></span>
+                        </div>
+                      ) : (
+                        <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={16} /></div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="font-bold text-gray-900 text-sm truncate">{p.handle}</div>
                         <div className="text-xs text-gray-500 truncate">{p.lok_sabha_name || "—"}</div>
@@ -278,6 +288,11 @@ function PageModal({ onClose, onSaved, editing }) {
   const [platform, setPlatform] = useState(editing?.platform || "facebook");
   const [handle, setHandle] = useState(editing?.handle || "");
   const [followers, setFollowers] = useState(editing?.followers != null ? String(editing.followers) : "0");
+  // DP (page photo). ProfilePhoto uploads the bytes to the durable store
+  // (/api/uploads) as soon as the user picks/crops one and hands back a
+  // permanent URL; Remove sets it back to null. The chosen value is persisted
+  // to social_pages.photo_url when the page is saved below.
+  const [photoUrl, setPhotoUrl] = useState(editing?.photo_url || null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   async function save() {
@@ -291,7 +306,9 @@ function PageModal({ onClose, onSaved, editing }) {
       const method = isEdit ? "PUT" : "POST";
       const r = await fetch(url, {
         method, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform, handle: name, followers: fol }),
+        // Always send photo_url so a changed DP is saved, a removed DP (null)
+        // clears only that column, and an untouched DP is preserved on edit.
+        body: JSON.stringify({ platform, handle: name, followers: fol, photo_url: photoUrl ?? null }),
       });
       const b = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(b.message || "Could not save the page.");
@@ -304,6 +321,18 @@ function PageModal({ onClose, onSaved, editing }) {
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-gray-900">{isEdit ? "Edit Page" : "Add Page"}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        {/* Page DP — upload / change / remove. The current DP is shown when
+            editing; the "+" menu offers Upload / Take Photo / View / Remove. */}
+        <div className="flex flex-col items-center gap-1.5">
+          <ProfilePhoto
+            name={handle || "Page"}
+            src={photoUrl}
+            size={84}
+            square
+            onChange={(u) => setPhotoUrl(u || null)}
+          />
+          <span className="text-[11px] text-gray-400">{photoUrl ? "Page DP — use “+” to change or remove" : "Add a page DP (optional)"}</span>
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">Platform *</label>

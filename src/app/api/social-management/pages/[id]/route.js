@@ -3,11 +3,13 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessSocial(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    await ensureSocialPageSchema();
     const { id } = await params;
     const d = await req.json();
     // If the name/platform is being edited, keep page names unique per platform.
@@ -23,7 +25,10 @@ export async function PUT(req, { params }) {
         if (dup) return NextResponse.json({ message: `"${handle}" already exists under ${platform}.` }, { status: 409 });
       }
     }
-    const fields = ["lok_sabha_id", "lok_sabha_name", "platform", "handle", "url", "followers", "managed_by_user_id", "is_active"];
+    // photo_url included so the DP can be changed (new URL) or removed
+    // (null → clears ONLY the DP column, never the row) without touching any
+    // other page data.
+    const fields = ["lok_sabha_id", "lok_sabha_name", "platform", "handle", "url", "followers", "managed_by_user_id", "photo_url", "is_active"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
