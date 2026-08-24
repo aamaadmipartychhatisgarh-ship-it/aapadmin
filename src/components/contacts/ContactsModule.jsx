@@ -333,22 +333,45 @@ export default function ContactsModule({ session, mode }) {
   }
 
   // Recall contacts from callers' workspaces — back to the pool, nothing deleted.
+  // Respects the SAME scope the list shows: an explicit checkbox selection recalls
+  // exactly those contacts; otherwise the active caller + designation + geo +
+  // status + search filters decide, so recalling "designation X" removes ONLY the
+  // matching contacts, never the caller's whole assignment (BUG #10).
   async function bulkRecall() {
     setMessage(""); setError("");
-    const target = bulkCallers.length > 0
+    const hasSelection = selectedIds.size > 0;
+    const desigNames = designations.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
+    const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
+    const callerLabel = bulkCallers.length > 0
       ? `${bulkCallers.length} selected caller(s)`
-      : (cfg.territoryScoped ? "ALL callers in your territory" : "ALL callers");
-    if (!confirm(`Remove assigned contacts from ${target}? Contacts stay in the database and return to the pool; completed calls are not touched.`)) return;
+      : (assignedTo ? "the selected caller" : (cfg.territoryScoped ? "callers in your territory" : "callers"));
+    const scope = hasSelection
+      ? `${selectedIds.size} selected contact(s)`
+      : `${filter !== "all" ? filter + " " : ""}contacts${desigLabel} from ${callerLabel}`;
+    if (!confirm(`Return ${scope} to the pool? Only these contacts are affected — every other designation and caller stays assigned. Contacts stay in the database; completed calls are not touched.`)) return;
     setBulkBusy(true);
     try {
       const r = await fetch(cfg.bulkUnassignUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ caller_ids: bulkCallers }),
+        body: JSON.stringify({
+          caller_ids: bulkCallers,
+          ...(hasSelection ? { contact_ids: [...selectedIds] } : {
+            assigned_to: assignedTo || undefined,
+            status: filter,
+            zone_id: zoneId || undefined,
+            lok_sabha_id: lokSabhaId || undefined,
+            district_id: districtId || undefined,
+            assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
+            designation_ids: designationIds.length ? designationIds.join(",") : undefined,
+            search: search || undefined,
+          }),
+        }),
       });
       const d = await r.json();
       if (!r.ok) { setError(d.message || "Recall failed"); return; }
-      setMessage(`Removed ${d.unassigned} contact(s) from ${target} — they are back in the pool.`);
+      setMessage(`Returned ${d.unassigned} contact(s) to the pool. Other assignments are unchanged.`);
+      setSelectedIds(new Set());
       load();
       loadCounts();
     } catch {
