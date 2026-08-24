@@ -66,6 +66,19 @@ export const PAGES = [
     roles: [ROLES.STATE_ADMIN, ROLES.ZONE_ADMIN, ROLES.DISTRICT_ADMIN, ROLES.ASSEMBLY_ADMIN] },
   { key: "administration", label: "Administration", href: "/dashboard/admin/administration", prefixes: ["/dashboard/admin/administration"], icon: "UserCog",
     roles: [...OVERSIGHT] },
+  // Administration sub-pages (PROMPT 10 Part A). These are TABS on the
+  // Administration route, not standalone routes, so they carry NO url prefix
+  // (tab: true) — pageKeyForPath never resolves to them. Access is enforced by
+  // the Administration page (tab visibility + entry) and by each master's own
+  // API. Grantable through Page Access exactly like any other page.
+  { key: "master_data", label: "Master Data", href: "/dashboard/admin/administration?tab=master", prefixes: [], tab: true, icon: "Database",
+    roles: [ROLES.SUPER_ADMIN] },
+  { key: "caste_master", label: "Caste Master", href: "/dashboard/admin/administration?tab=castes", prefixes: [], tab: true, icon: "UserCheck",
+    roles: [...OVERSIGHT] },
+  { key: "polling_master", label: "Polling Station Master", href: "/dashboard/admin/administration?tab=polling", prefixes: [], tab: true, icon: "ClipboardList",
+    roles: [...OVERSIGHT] },
+  { key: "party_master", label: "Party Master", href: "/dashboard/admin/administration?tab=parties", prefixes: [], tab: true, icon: "Flag",
+    roles: [...OVERSIGHT] },
   { key: "training", label: "Training", href: "/dashboard/training", prefixes: ["/dashboard/training"], icon: "GraduationCap",
     roles: [...OVERSIGHT, ROLES.CALLER] },
 ];

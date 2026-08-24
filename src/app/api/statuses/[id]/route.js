@@ -2,12 +2,13 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    if (!session || (!isAdmin(session) && !(await userCanAccessPageKey(session, "master_data")))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
@@ -28,7 +29,7 @@ export async function PUT(req, { params }) {
 export async function DELETE(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    if (!session || (!isAdmin(session) && !(await userCanAccessPageKey(session, "master_data")))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;

@@ -26,7 +26,7 @@ async function loadAssembly(id) {
 // live-counted booths/stations from the master tree (auto_*). has_data:false when
 // nothing is stored yet (UI shows "No polling data available").
 export async function GET(_req, { params }) {
-  const { error } = await guard();
+  const { error } = await guard({ allowPageKeys: ["polling_master"] });
   if (error) return error;
   try {
     const { id } = await params;
@@ -47,7 +47,7 @@ export async function GET(_req, { params }) {
 //   • Male + Female must not exceed Total Voters (when the relevant values exist).
 //   • UNIQUE assembly_id → exactly one record per assembly (no duplicates).
 export async function PUT(req, { params }) {
-  const { error } = await guard();
+  const { error } = await guard({ allowPageKeys: ["polling_master"] });
   if (error) return error;
   try {
     const { id } = await params;

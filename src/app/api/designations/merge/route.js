@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 
@@ -14,7 +15,7 @@ import { logAudit } from "@/lib/audit";
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    if (!session || (!isAdmin(session) && !(await userCanAccessPageKey(session, "master_data")))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 

@@ -70,23 +70,6 @@ export async function GET() {
       lsParams
     );
 
-    // Per-Lok-Sabha rollup — same scope.
-    const perLs = await query(
-      `SELECT sp.lok_sabha_name AS name,
-              COUNT(DISTINCT sp.id) AS pages,
-              COALESCE(SUM(sp.followers), 0) AS followers,
-              (SELECT COUNT(*) FROM social_posts p
-                 WHERE p.page_id IN (SELECT id FROM social_pages WHERE lok_sabha_id = sp.lok_sabha_id)
-                   AND p.approval_status = 'approved') AS posts,
-              (SELECT COALESCE(SUM(p.views), 0) FROM social_posts p
-                 WHERE p.page_id IN (SELECT id FROM social_pages WHERE lok_sabha_id = sp.lok_sabha_id)) AS views
-         FROM social_pages sp
-        WHERE sp.lok_sabha_id IS NOT NULL ${lsFilter}
-        GROUP BY sp.lok_sabha_id, sp.lok_sabha_name
-        ORDER BY views DESC`,
-      lsParams
-    );
-
     // Search-card metrics. The four platform cards (PROMPT 5) come straight
     // from the live records — today's Facebook/Instagram post counts from the
     // actual logged posts (social_posts joined to their page's platform, dated
@@ -110,7 +93,7 @@ export async function GET() {
       [...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams]
     ).then((r) => [r]);
 
-    return NextResponse.json({ pages, recentPosts, pending, perLs, overview });
+    return NextResponse.json({ pages, recentPosts, pending, overview });
   } catch (err) {
     console.error("social-management GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

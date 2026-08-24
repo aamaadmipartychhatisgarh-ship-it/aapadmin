@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 // assembly with no polling record comes back with null figures + has_data:false so
 // the UI can show "No polling data available" instead of a fake 0.
 export async function GET(req) {
-  const { error } = await guard();
+  const { error } = await guard({ allowPageKeys: ["polling_master"] });
   if (error) return error;
   try {
     await syncAssemblies();

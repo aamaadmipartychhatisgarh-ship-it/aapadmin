@@ -50,7 +50,6 @@ const TABS = [
   { k: "pages", l: "Pages" },
   { k: "approvals", l: "Approvals" },
   { k: "log", l: "Post Log" },
-  { k: "per_ls", l: "Per Lok Sabha" },
 ];
 
 export default function Page() {
@@ -129,7 +128,6 @@ function Body() {
       {tab === "pages"     && <PagesTab data={data} onReload={load} />}
       {tab === "approvals" && <ApprovalsTab data={data} setStatus={setStatus} onEdit={setEditing} />}
       {tab === "log"       && <LogTab data={data} onEdit={setEditing} />}
-      {tab === "per_ls"    && <PerLsTab data={data} />}
 
       {showAdd && <PostModal pages={data.pages} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {editing && <PostModal editing={editing} pages={data.pages} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
@@ -543,36 +541,6 @@ function LogTab({ data, onEdit }) {
 }
 
 // ============================================================ PER-LS
-function PerLsTab({ data }) {
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-      <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-left">
-          <tr>
-            <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 text-right">Pages</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 text-right">Followers</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 text-right">Posts</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 text-right">Total Views</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.perLs.map((r) => (
-            <tr key={r.name} className="border-t border-gray-100 hover:bg-gray-50">
-              <td className="px-4 py-3 font-medium text-gray-900">{r.name}</td>
-              <td className="px-4 py-3 text-right text-gray-700">{r.pages}</td>
-              <td className="px-4 py-3 text-right text-gray-700">{fmt(r.followers)}</td>
-              <td className="px-4 py-3 text-right text-gray-700">{r.posts}</td>
-              <td className="px-4 py-3 text-right text-gray-900 font-bold">{fmt(r.views)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      </div>
-    </div>
-  );
-}
 
 // ============================================================ LOG A POST MODAL
 // Platform → Page (filtered) → Content (primary field, unlimited long-form text,

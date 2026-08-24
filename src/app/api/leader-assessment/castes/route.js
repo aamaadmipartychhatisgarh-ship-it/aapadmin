@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 // Each caste carries: id (Unique ID), name, is_active (Status), created_at,
 // updated_at, and a live usage count (how many social-profile rows reference it).
 export async function GET(req) {
-  const { error } = await guard();
+  const { error } = await guard({ allowPageKeys: ["caste_master"] });
   if (error) return error;
   try {
     const { searchParams } = new URL(req.url);
@@ -58,7 +58,7 @@ export async function GET(req) {
 // rejected with a clear message instead of creating a second record. New castes
 // are active by default.
 export async function POST(req) {
-  const { error } = await guard();
+  const { error } = await guard({ allowPageKeys: ["caste_master"] });
   if (error) return error;
   try {
     const d = await req.json().catch(() => ({}));

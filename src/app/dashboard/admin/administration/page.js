@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, UserCog, CheckCircle2, AlertCircle } from "lucide-react";
-import { isOversight, isSuperAdmin } from "@/lib/permissions";
+import { isOversight, isSuperAdmin, normalizeRole } from "@/lib/permissions";
+import { baselinePagesForRole } from "@/lib/pages";
+import { usePageAccess } from "@/components/usePageAccess";
 import PageHeader from "@/components/PageHeader";
 import TeamsTab from "./TeamsTab";
 import UsersTab from "./UsersTab";
@@ -25,9 +27,16 @@ const TABS = [
   { key: "parties", label: "Party Master" },
   { key: "page_access", label: "Page Access" },
 ];
-const ADMIN_MASTER_TABS = new Set(["castes", "polling", "parties"]);
-// Super-Admin-only tabs (BUG 14 — Page Access Management, §12).
-const SUPER_ONLY_TABS = new Set(["page_access"]);
+// The four master-data admin tabs are grantable through Page Access (PROMPT 10
+// Part A); each maps to a stable page key. Visibility here and the tab's own API
+// read from the SAME effective access (role baseline ∪ Super-Admin grant), so a
+// removed user can neither see the tab nor load its data.
+const TAB_PAGE_KEY = {
+  master: "master_data",
+  castes: "caste_master",
+  polling: "polling_master",
+  parties: "party_master",
+};
 
 // The people-management hub — Teams and Users are tabs on one page rather
 // than separate routes. Worker Management (a third "Workers" tab here, plus
@@ -40,27 +49,42 @@ export default function Page() {
   const router = useRouter();
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isOversight(session)) router.push("/dashboard");
-  }, [status, session, router]);
-  if (status !== "authenticated" || !isOversight(session)) {
+  }, [status, router]);
+  if (status !== "authenticated") {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <Body session={session} />;
 }
 
 function Body({ session }) {
-  // Users kept its original isSuperAdmin-only visibility (the only tier with
-  // it in the sidebar before) — this gate neither loosens nor tightens what
-  // existed for Users. Teams is visible to anyone who reached this page (the
-  // outer gate above is already isOversight).
-  const canSeeUsers = isSuperAdmin(session);
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const oversight = isOversight(session);
+  // Users / Master Data / Page Access kept their prior Super-Admin visibility.
+  const canSeeUsers = isSuperAdmin(session);
+
+  // Effective page access (role baseline ∪ Super-Admin grants). Baseline is
+  // resolved synchronously so oversight/super users see their tabs instantly;
+  // grants for other users arrive from /api/my-pages.
+  const { pages: accessKeys, loading: accessLoading } = usePageAccess();
+  const baseline = new Set(baselinePagesForRole(normalizeRole(session?.user?.role)));
+  const effective = new Set(accessKeys || []);
+  const canPage = (key) => baseline.has(key) || effective.has(key);
+  const canTab = (tabKey) => {
+    if (tabKey === "teams") return oversight;
+    if (tabKey === "users" || tabKey === "page_access") return canSeeUsers;
+    const pk = TAB_PAGE_KEY[tabKey];
+    return pk ? canPage(pk) : false;
+  };
+  const visibleTabs = TABS.filter((t) => canTab(t.key));
+  // Access is "decided" for oversight immediately; for a grant-only user we
+  // must wait for /api/my-pages before concluding they have nothing here.
+  const decided = oversight || canSeeUsers || !accessLoading;
+
   const [tab, setTab] = useState(() => {
     if (typeof window !== "undefined") {
       const t = new URLSearchParams(window.location.search).get("tab");
-      if (ADMIN_MASTER_TABS.has(t)) return t;
-      if ((t === "users" || t === "master") && canSeeUsers) return t;
-      if (SUPER_ONLY_TABS.has(t) && canSeeUsers) return t;
+      if (t && TABS.some((x) => x.key === t)) return t;
     }
     return "teams";
   });
@@ -68,18 +92,23 @@ function Body({ session }) {
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 3500); return () => clearTimeout(id); }, [toast]);
   const flash = (m) => setToast({ kind: "ok", text: m });
   const fail = (m) => setToast({ kind: "err", text: m });
-  // The lazy initializer above only covers a hard page load. A client-side
-  // redirect (the old /dashboard/admin/workers URLs bouncing here with
-  // ?tab=teams — see next.config.mjs) mounts this component before
-  // window.location has caught up, so also react to router-tracked search
-  // params directly.
+
+  // Honor ?tab= when that tab is actually permitted for this user.
   useEffect(() => {
     const t = searchParams.get("tab");
-    if (ADMIN_MASTER_TABS.has(t)) setTab(t);
-    else if ((t === "users" || t === "master") && canSeeUsers) setTab(t);
-    else if (SUPER_ONLY_TABS.has(t) && canSeeUsers) setTab(t);
+    if (t && canTab(t)) setTab(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, canSeeUsers]);
+  }, [searchParams, accessLoading]);
+
+  // Once access is decided, keep the active tab on something the user may see;
+  // if they can see nothing here at all, bounce them out (covers a removed user
+  // hitting a tab's URL directly — §"cannot open the page directly").
+  useEffect(() => {
+    if (!decided) return;
+    if (visibleTabs.length === 0) { router.push("/dashboard"); return; }
+    if (!visibleTabs.some((t) => t.key === tab)) setTab(visibleTabs[0].key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decided, visibleTabs.map((t) => t.key).join(","), tab]);
 
   // Default landing tab is Teams — but if there are no teams yet and this
   // user can also see Users, land there instead so the default view isn't
@@ -92,11 +121,11 @@ function Body({ session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Master Data (like Users) is shown to super admins here — it was moved off
-  // the Super Admin sidebar into this Administration tab.
-  // Caste Master + Polling Station Master are available to any oversight user who
-  // can reach this page (same gate their APIs use).
-  const visibleTabs = TABS.filter((t) => t.key === "teams" || ADMIN_MASTER_TABS.has(t.key) || ((t.key === "users" || t.key === "master") && canSeeUsers) || (SUPER_ONLY_TABS.has(t.key) && canSeeUsers));
+  // A grant-only user whose access hasn't resolved yet — show a spinner rather
+  // than briefly flashing an empty page or a wrong redirect.
+  if (!decided) {
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -128,13 +157,13 @@ function Body({ session }) {
         </div>
       )}
 
-      {tab === "teams" && <TeamsTab session={session} />}
-      {tab === "users" && canSeeUsers && <UsersTab session={session} />}
-      {tab === "master" && canSeeUsers && <MasterDataSettings embedded />}
-      {tab === "castes" && <CasteMaster flash={flash} fail={fail} />}
-      {tab === "polling" && <PollingMaster flash={flash} fail={fail} />}
-      {tab === "parties" && <PartyMaster flash={flash} fail={fail} />}
-      {tab === "page_access" && canSeeUsers && <PageAccessManager />}
+      {tab === "teams" && canTab("teams") && <TeamsTab session={session} />}
+      {tab === "users" && canTab("users") && <UsersTab session={session} />}
+      {tab === "master" && canPage("master_data") && <MasterDataSettings embedded />}
+      {tab === "castes" && canPage("caste_master") && <CasteMaster flash={flash} fail={fail} />}
+      {tab === "polling" && canPage("polling_master") && <PollingMaster flash={flash} fail={fail} />}
+      {tab === "parties" && canPage("party_master") && <PartyMaster flash={flash} fail={fail} />}
+      {tab === "page_access" && canTab("page_access") && <PageAccessManager />}
     </div>
   );
 }

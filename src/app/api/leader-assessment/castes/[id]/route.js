@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 // GET /api/leader-assessment/castes/[id] — a single caste (with usage count).
 export async function GET(_req, { params }) {
-  const { error } = await guard();
+  const { error } = await guard({ allowPageKeys: ["caste_master"] });
   if (error) return error;
   try {
     const { id } = await params;
@@ -39,7 +39,7 @@ export async function GET(_req, { params }) {
 //     social-profile rows keep their caste_id + name and stay valid; the caste
 //     simply stops appearing for new selections. Reactivating brings it back.
 export async function PUT(req, { params }) {
-  const { error } = await guard();
+  const { error } = await guard({ allowPageKeys: ["caste_master"] });
   if (error) return error;
   try {
     const { id } = await params;

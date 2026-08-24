@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
+import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensurePartiesTable, normalizePartyName } from "@/lib/parties";
 
@@ -16,7 +17,10 @@ const noStore = { "Cache-Control": "no-store, no-cache, must-revalidate, private
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // Oversight, OR a user granted the Party Master page (PROMPT 10 Part A).
+    if (!session || (!isOversight(session) && !(await userCanAccessPageKey(session, "party_master")))) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
     await ensurePartiesTable();
     const { id } = await params;
     if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid party id." }, { status: 400 });
