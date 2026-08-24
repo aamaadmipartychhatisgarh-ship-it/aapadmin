@@ -11,6 +11,7 @@ import {
 import SocialDashboardTab from "@/components/social/SocialDashboardTab";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar from "@/components/Avatar";
+import FollowersMondayReminder from "@/components/social/FollowersMondayReminder";
 
 // The Social Media Master supports exactly these three networks (kept in sync
 // with ALLOWED_PLATFORMS in the pages API and the social_pages.platform enum).
@@ -78,6 +79,9 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Monday "update Followers" reminder — Social users/admins only (this
+          page is already gated to them), once per Monday. */}
+      <FollowersMondayReminder />
       <div className="flex justify-between items-end gap-4 flex-wrap">
         <div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Social Media Command Center</h1>
