@@ -7,7 +7,7 @@ import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
 import PersonDetailModal from "@/components/PersonDetailModal";
-import { isCaller, normalizeRole, ROLES } from "@/lib/permissions";
+import { isCaller, isSuperAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -859,6 +859,7 @@ export default function ContactsModule({ session, mode }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">Address</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
+                {isSuperAdmin(session) && <th className="px-4 py-3 font-semibold text-gray-600">Convert</th>}
                 <th className="px-4 py-3 font-semibold text-gray-600 text-right">Actions</th>
               </tr>
             </thead>
@@ -910,6 +911,9 @@ export default function ContactsModule({ session, mode }) {
                       {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
                     </select>
                   </td>
+                  {isSuperAdmin(session) && (
+                    <td className="px-4 py-3"><ConvertControl contact={c} onDone={setMessage} onFail={setError} /></td>
+                  )}
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     <button onClick={() => setTaskFor(c)} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded-lg font-medium">
                       <ClipboardList size={14} /> Task
@@ -1084,6 +1088,42 @@ function ContactTaskModal({ contact, users, onClose, onSaved }) {
 // the modal is handed a new `contact` prop (initial open, and every
 // Prev/Next/save-and-advance step, since the modal stays mounted). Geography
 // fields are only included when the caller may edit them (see canEditGeo).
+// Convert control (Super Admin) — turns a contact into a Candidate or
+// Spokesperson from its existing data. The contact is never changed or removed;
+// the backend links the new record to the contact id and refuses to create a
+// duplicate on a second click.
+function ConvertControl({ contact, onDone, onFail }) {
+  const [busy, setBusy] = useState(false);
+  async function convert(target) {
+    const label = target === "candidate" ? "Candidate" : "Spokesperson";
+    if (!confirm(`Convert "${contact.person_name}" into a ${label}?\n\nThe contact stays exactly as it is — this only creates a new ${label} record from its details.`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/contacts/${contact.id}/convert`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || "Conversion failed.");
+      onDone?.(d.message || `Converted to ${label}.`);
+    } catch (e) { onFail?.(e.message || "Conversion failed."); }
+    finally { setBusy(false); }
+  }
+  return (
+    <select
+      value=""
+      disabled={busy}
+      onChange={(e) => { const v = e.target.value; e.target.value = ""; if (v) convert(v); }}
+      className="text-xs border border-gray-200 rounded px-2 py-1 bg-white disabled:opacity-50"
+      title="Convert this contact"
+    >
+      <option value="">{busy ? "Converting…" : "Convert…"}</option>
+      <option value="candidate">Candidate</option>
+      <option value="spokesperson">Spokesperson</option>
+    </select>
+  );
+}
+
 function contactToForm(contact, canEditGeo) {
   const base = {
     person_name: contact.person_name || "",
