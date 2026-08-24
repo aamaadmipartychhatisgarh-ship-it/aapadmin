@@ -668,9 +668,7 @@ function SpokespersonsTab({ data, onChange }) {
           <div key={s.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 relative group">
             <button onClick={() => setEditing(s)} title="Edit" className="absolute top-3 right-3 p-1.5 text-gray-300 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg opacity-0 group-hover:opacity-100"><Pencil size={13} /></button>
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-[#164FA3] text-white flex items-center justify-center font-bold text-lg shrink-0">
-                {s.name[0]?.toUpperCase()}
-              </div>
+              <Avatar name={s.name} src={s.photo_url} size={48} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
               <div className="flex-1">
                 <div className="font-bold text-gray-900">{s.name}</div>
                 {s.expertise && <div className="text-xs text-gray-500">{s.expertise}</div>}
