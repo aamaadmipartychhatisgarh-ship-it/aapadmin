@@ -10,6 +10,7 @@ import { notWrongNumberClause } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
+import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 
 // Columns the `contacts` table actually has in this deployment — detected once
 // and cached, so the create path never references a column a given environment
@@ -37,6 +38,8 @@ export async function GET(req) {
     if (!(await pageAllowed(session, "contacts", session && isSupervisor(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
+    // The multi-designation join table must exist before the list query reads it.
+    await ensureContactDesignationsSchema();
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
@@ -170,9 +173,11 @@ export async function GET(req) {
               COALESCE(cz.name, lz.name) AS zone_name,
               COALESCE(cls.name, lls.name) AS lok_sabha_name,
               la.name AS assembly_name,
-              -- Mirror Add Workers: show the worker's position (source of truth)
-              -- when linked; fall back to the contact's own designation otherwise.
-              COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+              -- Designation display prefers the contact's OWN designation set
+              -- (multi, PROMPT 5), then the worker's position, then the single
+              -- legacy designation. designation_ids (CSV) preloads the edit form.
+              COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+              ${DESIGNATION_IDS_SQL} AS designation_ids,
               -- Contacts have their own native photo_url now; COALESCE only
               -- covers rows from before that column existed whose backfill
               -- (scripts/add-contact-photo-url.mjs) somehow missed them.
@@ -213,6 +218,11 @@ export async function POST(req) {
     if (!person_name?.trim() || !phone_number?.trim()) {
       return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
+    // Multi-designation (PROMPT 5): accept designation_ids[]; the legacy single
+    // designation_id is treated as one entry. The primary column keeps the FIRST
+    // (or null when none) — no default is ever assigned.
+    const designationIds = parseDesignationIds(data.designation_ids ?? (designation_id ? [designation_id] : []));
+    const primaryDesignation = designationIds[0] || null;
     // Reject a duplicate mobile up front with a clear message (the uniq_phone
     // index is the race-safe backstop, surfaced via contactWriteError below).
     if (await phoneAlreadyRegistered(phone_number)) return duplicatePhoneResponse();
@@ -223,7 +233,7 @@ export async function POST(req) {
       person_name: person_name.trim(),
       phone_number: phone_number.trim(),
       address: address || null,
-      designation_id: designation_id || null,
+      designation_id: primaryDesignation,
       // Full location hierarchy (Zone → Lok Sabha → District → Assembly → Block).
       zone_id: zone_id || null,
       lok_sabha_id: lok_sabha_id || null,
@@ -246,6 +256,8 @@ export async function POST(req) {
       `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
       vals
     );
+    // Save the full designation set against the new contact.
+    await syncContactDesignations(res.insertId, designationIds);
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {
     return contactWriteError(err, "contacts POST");

@@ -66,20 +66,38 @@ function workerDesignationPart(designation_ids) {
 export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids } = {}) {
   const geo = { zone_id, lok_sabha_id, district_id, assembly_ids };
 
+  // A contact matches a designation filter if ANY of its OWN designations
+  // (the multi-value contact_designations join, PROMPT 5) is selected — this
+  // covers both legacy single-designation contacts (backfilled into the join)
+  // and new multi-designation ones, on either the worker or the own branch.
+  const desExists = designation_ids?.length
+    ? {
+        clause: `EXISTS (SELECT 1 FROM contact_designations cd WHERE cd.contact_id = c.id AND cd.designation_id IN (${designation_ids.map(() => "?").join(",")}))`,
+        params: [...designation_ids],
+      }
+    : null;
+
   // Worker-side (person truth).
   const wGeo = geoParts("w", geo);
   const wDes = workerDesignationPart(designation_ids);
   const workerConds = [...wGeo.parts];
   const workerParams = [...wGeo.params];
-  if (wDes) { workerConds.push(wDes.clause); workerParams.push(...wDes.params); }
+  if (wDes || desExists) {
+    // Match by the worker's multi-role position text OR the contact's own
+    // designation set.
+    const clauses = [];
+    if (wDes) { clauses.push(wDes.clause); workerParams.push(...wDes.params); }
+    if (desExists) { clauses.push(desExists.clause); workerParams.push(...desExists.params); }
+    workerConds.push(`(${clauses.join(" OR ")})`);
+  }
 
   // Contact-own fallback (for contacts with no worker link).
   const cGeo = geoParts("c", geo);
   const ownConds = [...cGeo.parts];
   const ownParams = [...cGeo.params];
   if (designation_ids?.length) {
-    ownConds.push(`c.designation_id IN (${designation_ids.map(() => "?").join(",")})`);
-    ownParams.push(...designation_ids);
+    ownConds.push(`(c.designation_id IN (${designation_ids.map(() => "?").join(",")}) OR ${desExists.clause})`);
+    ownParams.push(...designation_ids, ...desExists.params);
   }
 
   if (workerConds.length === 0) return { where: "", params: [], needsWorkerJoin: false };

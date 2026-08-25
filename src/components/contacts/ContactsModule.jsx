@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, AlertTriangle, Camera } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
+import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
@@ -1193,7 +1194,8 @@ function contactToForm(contact, canEditGeo) {
     person_name: contact.person_name || "",
     phone_number: contact.phone_number || "",
     address: contact.address || "",
-    designation_id: contact.designation_id || "",
+    // Multi-designation (PROMPT 5): preload every currently-assigned designation.
+    designation_ids: parseDesignationIdList(contact.designation_ids ?? contact.designation_id),
     photo_url: contact.photo_url || "",
   };
   if (!canEditGeo) return base;
@@ -1313,7 +1315,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
       person_name: form.person_name,
       phone_number: form.phone_number,
       address: form.address,
-      designation_id: form.designation_id || null,
+      designation_ids: form.designation_ids || [], // full multi-designation set
       photo_url: form.photo_url || null,
       ...(canEditGeo ? {
         zone_id: form.zone_id || null,
@@ -1375,10 +1377,10 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
         <input className={inp} placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className={inp} placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
         <input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-        <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
-          <option value="">No designation</option>
-          {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Designation(s)</label>
+          <DesignationMultiSelect options={designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
+        </div>
         {/* Location hierarchy — same field set, order and dependent cascade as
             Add Contact (Zone → Lok Sabha → District → Assembly → Block). Admins
             edit it freely; each existing value is pre-selected. */}
@@ -1443,7 +1445,7 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
   const districtLocked = !!(territory && territory.district); // district/assembly anchor → fixed
   const zoneLevel = !!(territory && territory.level === "zone"); // may pick a district in-zone
   const [form, setForm] = useState({
-    person_name: "", phone_number: "", address: "", designation_id: "", photo_url: "",
+    person_name: "", phone_number: "", address: "", designation_ids: [], photo_url: "",
     // Full location hierarchy. For a supervisor the levels their territory fixes
     // are pre-filled (and shown locked); the rest cascade from what's chosen.
     zone_id: territory?.zone ? String(territory.zone.id) : "",
@@ -1551,10 +1553,10 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className={`w-full border rounded-lg px-3 py-2 text-sm ${phoneDup ? "border-red-400 ring-1 ring-red-300 bg-red-50" : "border-gray-200"}`} placeholder="Phone number *" value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-        <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
-          <option value="">No designation</option>
-          {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-        </select>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Designation(s)</label>
+          <DesignationMultiSelect options={designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
+        </div>
         {/* Location hierarchy: Zone → Lok Sabha → District → Assembly → Block.
             Admin picks freely; a supervisor's territory-fixed levels are shown
             locked and only the levels below their anchor are selectable. */}

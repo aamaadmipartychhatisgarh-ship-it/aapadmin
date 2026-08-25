@@ -11,6 +11,7 @@ import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
+import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 
 // Supervisor-scoped mirror of GET /api/contacts (src/app/api/contacts/route.js)
 // — same filters, same shape, same pagination — but gated to the strict
@@ -28,6 +29,7 @@ export async function GET(req) {
     if (!session || !isSupervisorRole(session)) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
+    await ensureContactDesignationsSchema();
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
@@ -133,7 +135,8 @@ export async function GET(req) {
               COALESCE(cz.name, lz.name) AS zone_name,
               COALESCE(cls.name, lls.name) AS lok_sabha_name,
               la.name AS assembly_name,
-              COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+              COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+              ${DESIGNATION_IDS_SQL} AS designation_ids,
               -- Contacts have their own native photo_url now; COALESCE only
               -- covers rows whose backfill (scripts/add-contact-photo-url.mjs)
               -- somehow missed them.
@@ -201,6 +204,7 @@ export async function POST(req) {
     if (!person_name?.trim() || !phone_number?.trim()) {
       return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
+    const designationIds = parseDesignationIds(data.designation_ids ?? (designation_id ? [designation_id] : []));
     // Reject a duplicate mobile up front with a clear message (the uniq_phone
     // index is the race-safe backstop, surfaced via contactWriteError below).
     if (await phoneAlreadyRegistered(phone_number)) return duplicatePhoneResponse();
@@ -276,7 +280,7 @@ export async function POST(req) {
     add("person_name", person_name.trim());
     add("phone_number", phone_number.trim());
     add("address", address || null);
-    add("designation_id", designation_id || null);
+    add("designation_id", designationIds[0] || null); // primary = first (multi below)
     add("photo_url", photo_url || null);
     for (const [col, val] of Object.entries(geo)) add(col, val);
     add("assigned_to_user_id", assigned_to_user_id || null);
@@ -289,6 +293,7 @@ export async function POST(req) {
       `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
       vals
     );
+    await syncContactDesignations(res.insertId, designationIds);
     await logAudit(session, { action: "contact.create", entityType: "contact", entityId: res.insertId, details: { supervisor: true, territory: territory?.level || null } });
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {

@@ -8,6 +8,7 @@ import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { resolveContactCard } from "@/lib/contactCard";
+import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
 
 // Supervisor-scoped mirror of PUT /api/contacts/[id] — assign/reassign a
 // contact and edit its details, but ONLY within the supervisor's own
@@ -48,6 +49,14 @@ export async function PUT(req, { params }) {
     }
     const { id } = await params;
     const data = await req.json();
+
+    // Multi-designation (PROMPT 5): sync the join table below; keep the legacy
+    // primary column aligned to the first id.
+    let designationIds = null;
+    if ("designation_ids" in data) {
+      designationIds = parseDesignationIds(data.designation_ids);
+      data.designation_id = designationIds[0] || null;
+    }
 
     // Editing may keep the contact's OWN mobile but must not collide with a
     // DIFFERENT contact's number — exceptId excludes this contact.
@@ -129,6 +138,7 @@ export async function PUT(req, { params }) {
     if ("assigned_to_user_id" in data && data.assigned_to_user_id) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
     }
+    if (designationIds !== null) await syncContactDesignations(id, designationIds);
     await logAudit(session, { action: "contact.update", entityType: "contact", entityId: id, details: { supervisor: true, fields: Object.keys(data) } });
     // Fully-resolved record (all display names) so the client shows fresh data.
     updated = await resolveContactCard(id);

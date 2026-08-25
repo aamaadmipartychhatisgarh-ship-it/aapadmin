@@ -8,6 +8,7 @@ import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { resolveContactCard } from "@/lib/contactCard";
+import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
 
 // GET /api/contacts/[id] — fetch ONE contact by its unique database id, with the
 // same resolved fields the workspace edit form needs (ward/district names +
@@ -88,6 +89,16 @@ export async function PUT(req, { params }) {
       }
     }
     const data = await req.json();
+
+    // Multi-designation (PROMPT 5): when designation_ids[] is present, the join
+    // table is fully synced below and the legacy primary column is kept aligned
+    // to the FIRST id (or null). Adding/removing one only changes the set — the
+    // others stay.
+    let designationIds = null;
+    if ("designation_ids" in data) {
+      designationIds = parseDesignationIds(data.designation_ids);
+      data.designation_id = designationIds[0] || null; // primary mirrors first
+    }
 
     // Editing may keep the contact's OWN mobile (same row) but must not collide
     // with a DIFFERENT contact's number — exceptId excludes this contact.
@@ -174,6 +185,9 @@ export async function PUT(req, { params }) {
     } finally {
       conn.release();
     }
+
+    // Sync the full designation set (add/remove keeps the rest; empty clears).
+    if (designationIds !== null) await syncContactDesignations(id, designationIds);
 
     if (admin && "assigned_to_user_id" in data && data.assigned_to_user_id) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });

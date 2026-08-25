@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { X, Phone, MapPin, Activity, Users as UsersIcon, User, Pencil, Loader2, Building2, Hash, Home, StickyNote, Calendar, Clock, Award } from "lucide-react";
 import { initialsOf } from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
+import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
 
 // Popup shown when a user clicks a person's name or photo in a list/table.
 //   type="contact" data={rowObject}  — a Contacts row. This mode is a full
@@ -173,7 +174,7 @@ function ContactView({ contact: c }) {
 const emptyForm = (c, canEditGeo) => ({
   person_name: c?.person_name || "",
   phone_number: c?.phone_number || "",
-  designation_id: c?.designation_id || "",
+  designation_ids: parseDesignationIdList(c?.designation_ids ?? c?.designation_id),
   address: c?.address || "",
   remarks: c?.remarks || "",
   assigned_to_user_id: c?.assigned_to_user_id || "",
@@ -236,7 +237,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
     const body = {
       person_name: form.person_name.trim(),
       phone_number: form.phone_number.trim(),
-      designation_id: form.designation_id || null,
+      designation_ids: form.designation_ids || [],
       address: form.address,
       remarks: form.remarks,
       assigned_to_user_id: form.assigned_to_user_id || null,
@@ -259,8 +260,11 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       // Keep the edit form open with all fields intact so only the mobile needs
       // fixing; a 409 flags the duplicate-number case for the field highlight.
       if (!r.ok) { setError(d.message || "Save failed"); if (r.status === 409) setPhoneDup(true); setSaving(false); return; }
-      // Resolve display names client-side so the view + table update instantly.
-      const desig = designations.find((x) => String(x.id) === String(form.designation_id));
+      // Resolve display names client-side so the view + table update instantly
+      // (fallback only — the server's d.contact is preferred below).
+      const desigNames = (form.designation_ids || [])
+        .map((id) => designations.find((x) => String(x.id) === String(id))?.name)
+        .filter(Boolean).join(", ");
       const caller = users.find((x) => String(x.id) === String(form.assigned_to_user_id));
       const zone = zones.find((x) => String(x.id) === String(form.zone_id));
       const ls = lokSabhas.find((x) => String(x.id) === String(form.lok_sabha_id));
@@ -268,7 +272,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       const asm = assemblies.find((x) => String(x.id) === String(form.assembly_id));
       const merged = {
         ...contact, ...body,
-        designation_name: desig?.name || (form.designation_id ? contact.designation_name : null),
+        designation_name: desigNames || null,
         assigned_to_username: caller?.username || null,
         ...(canEditGeo ? {
           zone_name: zone?.name || (form.zone_id ? contact.zone_name : null),
@@ -298,11 +302,8 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         <Field label="Mobile Number *"><input className={phoneDup ? `${inp} border-red-400 ring-1 ring-red-300 bg-red-50` : inp} value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} /></Field>
         {/* Address follows Phone, matching the Add Contact field order. */}
         <Field label="Address" full><input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
-        <Field label="Designation">
-          <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
-            <option value="">No designation</option>
-            {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+        <Field label="Designation(s)" full>
+          <DesignationMultiSelect options={designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
         </Field>
         {canEditGeo && (
           <>

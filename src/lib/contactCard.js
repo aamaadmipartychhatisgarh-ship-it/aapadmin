@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 
 // Resolve ONE contact into the exact shape the Contacts list renders — every
 // derived display field (zone / lok sabha / district / assembly / block names,
@@ -16,7 +17,11 @@ export async function resolveContactCard(id) {
             COALESCE(cz.name, lz.name) AS zone_name,
             COALESCE(cls.name, lls.name) AS lok_sabha_name,
             la.name AS assembly_name,
-            COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+            -- Designation display prefers the contact's OWN designation set
+            -- (multi, PROMPT 5); falls back to the linked worker's position or
+            -- the single legacy designation.
+            COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+            ${DESIGNATION_IDS_SQL} AS designation_ids,
             COALESCE(c.photo_url, w.photo_url) AS photo_url
        FROM contacts c
        LEFT JOIN workers w ON w.id = c.worker_id
