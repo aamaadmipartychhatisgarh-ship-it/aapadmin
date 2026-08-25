@@ -901,18 +901,23 @@ export default function ContactsModule({ session, mode }) {
                 <th className="px-4 py-3 w-8">
                   <input type="checkbox" checked={pageFullySelected} onChange={toggleSelectPage} aria-label="Select all on this page" />
                 </th>
+                {/* Fixed logical column order (PROMPT 3): Name · Phone · Designation
+                    · Zone · Lok Sabha · District · Assembly · Block · Address ·
+                    Status · Assigned To · Convert · Action. Header and every row
+                    cell below follow this exact sequence. */}
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Phone Number</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Zone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Block</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Address</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
                 {isSuperAdmin(session) && <th className="px-4 py-3 font-semibold text-gray-600">Convert</th>}
-                <th className="px-4 py-3 font-semibold text-gray-600 text-right">Actions</th>
+                <th className="px-4 py-3 font-semibold text-gray-600 text-right">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -941,8 +946,9 @@ export default function ContactsModule({ session, mode }) {
                   <td className="px-4 py-3 text-gray-600">{c.designation_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.zone_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.lok_sabha_name || "—"}</td>
-                  <td className="px-4 py-3 text-gray-600">{c.assembly_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.district_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{c.assembly_name || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{c.ward_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 max-w-[220px]"><div className="truncate" title={c.address || ""}>{c.address || "—"}</div></td>
                   <td className="px-4 py-3">
                     {c.is_completed ? (
