@@ -164,18 +164,11 @@ export default function DashboardLayout({ children }) {
     setMobileNavOpen(false);
   }, [pathname]);
 
-  // Page Access route gate — a page-restricted user who navigates (or types a
-  // URL) to a page they aren't assigned is bounced to their first assigned page.
-  // Backend/API checks enforce the same limit; this is the client-side UX half.
-  // pageRestricted is always false for Super Admins, so previews are unaffected.
-  useEffect(() => {
-    if (!pageRestricted || !allowedPageKeys) return;
-    const key = pageKeyForPath(pathname);
-    if (key && !allowedPageKeys.includes(key)) {
-      const firstPg = allowedPageKeys.map((k) => PAGES.find((p) => p.key === k)).find(Boolean);
-      router.replace(firstPg?.href || "/dashboard/profile");
-    }
-  }, [pathname, pageRestricted, allowedPageKeys, router]);
+  // Page Access route gate is enforced by RENDER-BLOCKING below (accessBlocked +
+  // <AccessDenied/>), not a redirect — so an unauthorized page is never rendered
+  // for a page-restricted user, even for a frame. Backend/API checks enforce the
+  // identical limit. pageRestricted is always false for Super Admins and for
+  // unmanaged users, so neither previews nor normal role users are affected.
   // Load the caller list for the Super Admin's "Caller Dashboard" submenu.
   useEffect(() => {
     if (normalizeRole(session?.user?.role) !== ROLES.SUPER_ADMIN) return;
@@ -373,6 +366,20 @@ export default function DashboardLayout({ children }) {
   const sectionTabItems = inSupervisorView
     ? navItems.filter((i) => !HIDE_SUPERVISOR_TABS.has(i.href))
     : navItems;
+
+  // Page Access ENFORCEMENT (client half). For a page-restricted (managed) user,
+  // resolve the current path to its page key and block the render entirely when
+  // that key is not in their assigned set — the unauthorized page never mounts.
+  // Super Admins and unmanaged users have pageRestricted=false, so this is inert
+  // for them (their existing role behaviour is untouched, §8). Ungated/utility
+  // paths (profile, admin hub) resolve to a null key and are always allowed.
+  const currentPageKey = pageKeyForPath(pathname);
+  const accessBlocked =
+    !previewing && pageRestricted && Array.isArray(allowedPageKeys) &&
+    !!currentPageKey && !allowedPageKeys.includes(currentPageKey);
+  const firstAllowedPage = (allowedPageKeys || [])
+    .map((k) => PAGES.find((p) => p.key === k)).find(Boolean);
+  const accessFallbackHref = firstAllowedPage?.href || "/dashboard/profile";
 
   return (
     <div className="h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
@@ -663,9 +670,11 @@ export default function DashboardLayout({ children }) {
             links (replaces what the old sidebar accordion used to reveal) */}
         <SectionTabs items={sectionTabItems} pathname={pathname} />
 
-        {/* Scrollable Main Content */}
+        {/* Scrollable Main Content — a page-restricted user on an unassigned
+            page gets a hard Access Denied screen instead of the page (the
+            unauthorized page is never rendered). */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8 relative">
-          {children}
+          {accessBlocked ? <AccessDenied fallbackHref={accessFallbackHref} /> : children}
         </main>
 
         {/* Footer */}
@@ -675,7 +684,34 @@ export default function DashboardLayout({ children }) {
         </footer>
 
       </div>
-      
+
+    </div>
+  );
+}
+
+// Shown in place of a page when a page-restricted user reaches a page they were
+// not assigned. The page itself is never rendered — this replaces it — so both
+// the sidebar (hidden item) and the route (this screen) enforce the same limit,
+// alongside the backend/API 401/403 for the same page. A link takes them to
+// their first assigned page (or profile if they have none).
+function AccessDenied({ fallbackHref }) {
+  return (
+    <div className="flex h-full min-h-[60vh] items-center justify-center">
+      <div className="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow-sm p-8 text-center">
+        <div className="w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto mb-4">
+          <Shield size={26} />
+        </div>
+        <h2 className="text-lg font-bold text-gray-900">Access Denied</h2>
+        <p className="text-sm text-gray-500 mt-2">
+          You don’t have permission to view this page. Your access is limited to the pages assigned to you.
+        </p>
+        <Link
+          href={fallbackHref}
+          className="inline-flex items-center justify-center gap-2 mt-6 h-10 px-5 rounded-lg bg-[#164FA3] text-white text-sm font-semibold hover:bg-[#123f85]"
+        >
+          Go to an allowed page
+        </Link>
+      </div>
     </div>
   );
 }

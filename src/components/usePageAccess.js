@@ -41,6 +41,18 @@ export function refreshPageAccess() {
   return load();
 }
 
+// §11 — pick up permission changes for a user who is ALREADY logged in without
+// needing a full reload or re-login: revalidate whenever the tab regains focus
+// or becomes visible again. Registered ONCE at module scope (not per consumer),
+// so there is a single listener regardless of how many components use the hook.
+// my-pages is no-store, so the refetch always returns the latest saved access.
+if (typeof window !== "undefined" && !window.__pageAccessRevalidateBound) {
+  window.__pageAccessRevalidateBound = true;
+  const revalidate = () => { if (document.visibilityState !== "hidden") refreshPageAccess(); };
+  window.addEventListener("focus", revalidate);
+  document.addEventListener("visibilitychange", revalidate);
+}
+
 export function usePageAccess() {
   const [state, setState] = useState(cache);
   useEffect(() => {
