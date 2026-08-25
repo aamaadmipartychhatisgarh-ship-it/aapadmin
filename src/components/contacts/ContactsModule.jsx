@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, AlertTriangle, Camera } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, AlertTriangle, Camera, Network } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
 import ActionBar from "@/components/ActionBar";
@@ -646,6 +646,7 @@ export default function ContactsModule({ session, mode }) {
           // Add Contact stays its own primary button, immediately to the right
           // of the ⋮ (ActionBar renders the menu first, then the primary).
           <ActionBar items={[
+            { key: "hierarchy", label: "Designation Hierarchy", icon: Network, menuOnly: true, onClick: () => { window.location.href = "/dashboard/admin/contacts-hierarchy"; } },
             cfg.canImport && { key: "import", label: "Import Excel", icon: Upload, menuOnly: true, onClick: () => setShowImport(true) },
             { key: "export", label: exporting ? "Exporting…" : "Export CSV", icon: Download, loading: exporting, menuOnly: true, onClick: exportCsv },
             cfg.canImport && { key: "upload", label: uploading ? "Uploading…" : "Upload", icon: Upload, loading: uploading, menuOnly: true, onClick: () => fileRef.current?.click() },
