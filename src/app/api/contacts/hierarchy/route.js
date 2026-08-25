@@ -23,7 +23,19 @@ const LEVEL_EXPR = {
   assembly: "la.name",
   block: "lw.name",
 };
-const MAX_PEOPLE = 4000; // safety cap for one view
+// Each contact's location ID at a given level (contact's own column, or derived
+// up the district hierarchy for zone / lok sabha).
+const LEVEL_ID_EXPR = {
+  zone: "COALESCE(c.zone_id, lz.id)",
+  lok_sabha: "COALESCE(c.lok_sabha_id, lls.id)",
+  district: "c.district_id",
+  assembly: "c.assembly_id",
+  block: "c.ward_id",
+};
+// The location master `type` for each level (block = ward).
+const LOC_TYPE = { zone: "zone", lok_sabha: "lok_sabha", district: "district", assembly: "assembly", block: "ward" };
+const MAX_PEOPLE = 8000; // safety cap for one view
+const SHOW_ALL_EMPTY_MAX = 60; // list every location (even empty) up to this many
 
 export async function GET(req) {
   try {
@@ -73,68 +85,77 @@ export async function GET(req) {
       return NextResponse.json({ level: "state", state_name: "State", designations, total: totalPeople });
     }
 
-    let where = " WHERE 1=1";
-    const params = [];
-    where += await notWrongNumberClause("c");
-    // Only people who hold the chosen designation (own single OR the multi set).
-    if (hasDesignation) {
-      where += ` AND (c.designation_id = ? OR EXISTS (SELECT 1 FROM contact_designations cd WHERE cd.contact_id = c.id AND cd.designation_id = ?))`;
-      params.push(designationId, designationId);
-    }
-    // Role geo scope — same as the Contacts list, so a supervisor only sees their
-    // territory, admins see all.
+    // ---- ZONE / LOK SABHA / DISTRICT / ASSEMBLY / BLOCK ---------------------
+    // Per-location designation matrix (PROMPT 8+): list every location of the
+    // level, and under each show every designation with the people (Name +
+    // Photo ONLY) who hold it in that location — blank when unfilled.
     const scope = scopeFilterSync(session.user, "c");
-    where += " " + scope.where;
-    params.push(...scope.params);
+    const notWrong = await notWrongNumberClause("c");
+    const levelIdExpr = LEVEL_ID_EXPR[level];
 
-    const rows = await query(
-      `SELECT c.id, c.person_name, c.phone_number, c.address,
-              ${groupExpr} AS group_name,
-              COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designations,
+    // 1) Designation master (optionally narrowed by the dropdown).
+    const designations = await query(
+      `SELECT id, name FROM designations ${hasDesignation ? "WHERE id = ?" : ""}
+        ORDER BY (sort_order IS NULL), sort_order, name`,
+      hasDesignation ? [designationId] : []
+    );
+
+    // 2) All locations of this level from the master.
+    const masterLocs = await query(
+      `SELECT id, name FROM locations WHERE type = ? ORDER BY name LIMIT ${SHOW_ALL_EMPTY_MAX * 20}`,
+      [LOC_TYPE[level]]
+    );
+
+    // 3) Every (person × designation) with the person's location id at this level.
+    const desFilter = hasDesignation ? " AND cd.designation_id = ?" : "";
+    const peopleRows = await query(
+      `SELECT ${levelIdExpr} AS loc_id, cd.designation_id,
+              c.id AS contact_id, c.person_name,
               COALESCE(c.photo_url, w.photo_url) AS photo_url
          FROM contacts c
+         JOIN contact_designations cd ON cd.contact_id = c.id
          LEFT JOIN workers w ON w.id = c.worker_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lls ON lls.id = ld.parent_id
          LEFT JOIN locations lz ON lz.id = lls.parent_id
-         LEFT JOIN locations cz ON cz.id = c.zone_id
-         LEFT JOIN locations cls ON cls.id = c.lok_sabha_id
-         LEFT JOIN locations la ON la.id = c.assembly_id
-         LEFT JOIN locations lw ON lw.id = c.ward_id
-         LEFT JOIN designations dsg ON dsg.id = c.designation_id
-        ${where}
-        ORDER BY group_name IS NULL, group_name, c.person_name
-        LIMIT ${MAX_PEOPLE + 1}`,
-      params
+        WHERE 1=1 ${notWrong}${desFilter} ${scope.where}
+        ORDER BY c.person_name
+        LIMIT ${MAX_PEOPLE}`,
+      hasDesignation ? [designationId, ...scope.params] : [...scope.params]
     );
 
-    const capped = rows.length > MAX_PEOPLE;
-    const people = capped ? rows.slice(0, MAX_PEOPLE) : rows;
-
-    // Group by the resolved level name (JS keeps the query simple + returns the
-    // people arrays the UI needs).
-    const map = new Map();
-    for (const r of people) {
-      const name = r.group_name || "Unassigned";
-      if (!map.has(name)) map.set(name, []);
-      map.get(name).push({
-        id: r.id,
-        person_name: r.person_name,
-        phone_number: r.phone_number,
-        address: r.address,
-        designations: r.designations,
-        photo_url: r.photo_url,
-      });
+    // grouped: loc_id → (designation_id → people[]).
+    const grouped = new Map();
+    let totalPeople = 0;
+    for (const r of peopleRows) {
+      const loc = r.loc_id ?? 0; // 0 = no location at this level
+      if (!grouped.has(loc)) grouped.set(loc, new Map());
+      const byDes = grouped.get(loc);
+      if (!byDes.has(r.designation_id)) byDes.set(r.designation_id, []);
+      byDes.get(r.designation_id).push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url });
+      totalPeople++;
     }
-    const groups = [...map.entries()]
-      .map(([name, ppl]) => ({ name, count: ppl.length, people: ppl }))
-      .sort((a, b) => (a.name === "Unassigned" ? 1 : b.name === "Unassigned" ? -1 : a.name.localeCompare(b.name)));
+
+    // Which locations to show: every master location when few enough (so empty
+    // zones still appear, §"display all available Zones"); otherwise only those
+    // that actually have people (keeps big levels usable).
+    const showAllEmpty = masterLocs.length <= SHOW_ALL_EMPTY_MAX;
+    let locs = showAllEmpty ? masterLocs : masterLocs.filter((l) => grouped.has(l.id));
+    // Contacts with no location at this level → an "Unassigned" group at the end.
+    if (grouped.has(0)) locs = [...locs, { id: 0, name: "Unassigned" }];
+
+    const buildDesignations = (locId) => {
+      const byDes = grouped.get(locId);
+      return designations.map((d) => ({ id: d.id, name: d.name, people: byDes?.get(d.id) || [] }));
+    };
+    const groups = locs.map((l) => ({ id: l.id, name: l.name, designations: buildDesignations(l.id) }));
 
     return NextResponse.json({
       level,
-      total: people.length,
+      total: totalPeople,
       groups,
-      capped,
+      capped: peopleRows.length >= MAX_PEOPLE,
+      matrix: true,
     });
   } catch (err) {
     console.error("contacts hierarchy error:", err);

@@ -107,68 +107,36 @@ function Body() {
               <span className="font-bold text-gray-900">{data?.state_name || "State"}</span>
               <span className="text-xs text-gray-400">— designations at the State level</span>
             </div>
-            <div className="divide-y divide-gray-50">
-              {stateDesignations.map((d) => (
-                <div key={d.id} className="flex items-start gap-4 px-4 py-3">
-                  <div className="w-56 shrink-0 font-semibold text-gray-800 text-sm pt-1">{d.name}</div>
-                  <div className="flex-1 min-w-0">
-                    {d.people.length === 0 ? (
-                      <span className="text-xs text-gray-300 italic">— not assigned —</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-x-5 gap-y-2">
-                        {d.people.map((p) => (
-                          <span key={p.id} className="inline-flex items-center gap-2">
-                            <Avatar name={p.person_name} src={p.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
-                            <span className="text-sm text-gray-900">{p.person_name}</span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <DesignationMatrix designations={stateDesignations} />
           </div>
         )
       ) : loading ? (
         <div className="flex h-40 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
       ) : groups.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center text-gray-400">
-          No people match this {levelLabel} / designation selection.
+          No {levelLabel.toLowerCase()}s to show for this selection.
         </div>
       ) : (
+        // Per-location designation matrix (PROMPT 8+): one collapsible card per
+        // location; each shows every designation with its assigned people or blank.
         <div className="space-y-3">
           {groups.map((g) => {
-            const expanded = open[g.name] ?? groups.length <= 3; // auto-expand small result sets
+            const count = g.designations.reduce((s, d) => s + d.people.length, 0);
+            const expanded = open[g.id] ?? groups.length <= 4;
             return (
-              <div key={g.name} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div key={g.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                 <button
-                  onClick={() => setOpen((o) => ({ ...o, [g.name]: !expanded }))}
+                  onClick={() => setOpen((o) => ({ ...o, [g.id]: !expanded }))}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left"
                 >
                   <ChevronRight size={16} className={`text-gray-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
                   <MapPin size={16} className="text-[#164FA3]" />
-                  <span className="font-bold text-gray-900">{g.name}</span>
+                  <span className="font-bold text-gray-900">{levelLabel}: {g.name}</span>
                   <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-gray-500 bg-gray-100 rounded-full px-2.5 py-1">
-                    <UsersIcon size={12} /> {g.count}
+                    <UsersIcon size={12} /> {count} assigned
                   </span>
                 </button>
-                {expanded && (
-                  <div className="border-t border-gray-100 divide-y divide-gray-50">
-                    {g.people.map((p) => (
-                      <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
-                        <Avatar name={p.person_name} src={p.photo_url} size={34} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium text-gray-900 truncate">{p.person_name}</div>
-                          <div className="text-xs text-gray-500 truncate">{p.designations || "—"}</div>
-                        </div>
-                        <a href={`tel:${p.phone_number}`} className="inline-flex items-center gap-1 text-xs font-mono text-gray-600 hover:text-[#164FA3] shrink-0">
-                          <Phone size={12} /> {p.phone_number}
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {expanded && <div className="border-t border-gray-100"><DesignationMatrix designations={g.designations} /></div>}
               </div>
             );
           })}
@@ -178,6 +146,34 @@ function Body() {
       <div className="text-xs text-gray-400">
         <Link href="/dashboard/admin/contacts" className="hover:underline">← Back to Contacts</Link>
       </div>
+    </div>
+  );
+}
+
+// Designation → Person(s) rows. Assigned = Avatar + Name ONLY (no phone/address/
+// status/etc.). Unassigned = the designation with a blank "— not assigned —".
+function DesignationMatrix({ designations }) {
+  return (
+    <div className="divide-y divide-gray-50">
+      {designations.map((d) => (
+        <div key={d.id} className="flex items-start gap-4 px-4 py-3">
+          <div className="w-56 shrink-0 font-semibold text-gray-800 text-sm pt-1">{d.name}</div>
+          <div className="flex-1 min-w-0">
+            {d.people.length === 0 ? (
+              <span className="text-xs text-gray-300 italic">— not assigned —</span>
+            ) : (
+              <div className="flex flex-wrap gap-x-5 gap-y-2">
+                {d.people.map((p) => (
+                  <span key={p.id} className="inline-flex items-center gap-2">
+                    <Avatar name={p.person_name} src={p.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
+                    <span className="text-sm text-gray-900">{p.person_name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
