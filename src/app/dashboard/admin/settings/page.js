@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X, Search } from "lucide-react";
+import { DESIGNATION_LEVELS, designationLevelLabel } from "@/lib/designationLevels";
 
 // `embedded` hides the standalone page header so this same component can render
 // as the "Master Data" tab inside Administration (native tab look) while the
@@ -13,7 +14,9 @@ export default function MasterDataSettings({ embedded = false }) {
 
   const [designations, setDesignations] = useState([]);
   const [newDesignation, setNewDesignation] = useState("");
+  const [newDesigLevel, setNewDesigLevel] = useState(""); // PROMPT 13 — mandatory level
   const [desigLoading, setDesigLoading] = useState(false);
+  const [desigError, setDesigError] = useState("");
 
   useEffect(() => {
     fetchStatuses();
@@ -45,14 +48,19 @@ export default function MasterDataSettings({ embedded = false }) {
 
   const handleAddDesignation = async (e) => {
     e.preventDefault();
+    setDesigError("");
+    if (!newDesigLevel) { setDesigError("Please select a Level."); return; }
+    if (!newDesignation.trim()) { setDesigError("Please enter a Designation name."); return; }
     setDesigLoading(true);
     try {
       const res = await fetch("/api/designations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newDesignation }),
+        body: JSON.stringify({ name: newDesignation.trim(), level: newDesigLevel }),
       });
-      if (res.ok) { setNewDesignation(""); fetchDesignations(); }
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { setNewDesignation(""); setNewDesigLevel(""); fetchDesignations(); }
+      else setDesigError(d.message || "Failed to add designation");
     } finally { setDesigLoading(false); }
   };
 
@@ -85,7 +93,7 @@ export default function MasterDataSettings({ embedded = false }) {
           onChanged={fetchStatuses}
         />
 
-        {/* Designations */}
+        {/* Designations — PROMPT 13: each carries a mandatory hierarchy Level. */}
         <ListCard
           icon={Users}
           title="Designations"
@@ -94,9 +102,13 @@ export default function MasterDataSettings({ embedded = false }) {
           value={newDesignation}
           setValue={setNewDesignation}
           loading={desigLoading}
-          placeholder="New designation name…"
+          placeholder="Designation name…"
           apiBase="/api/designations"
           onChanged={fetchDesignations}
+          levelOptions={DESIGNATION_LEVELS}
+          level={newDesigLevel}
+          setLevel={setNewDesigLevel}
+          addError={desigError}
         />
       </div>
 
@@ -260,9 +272,10 @@ function MergeDesignations({ onChanged }) {
   );
 }
 
-function ListCard({ icon: Icon, title, items, onSubmit, value, setValue, loading, placeholder, apiBase, onChanged }) {
+function ListCard({ icon: Icon, title, items, onSubmit, value, setValue, loading, placeholder, apiBase, onChanged, levelOptions, level, setLevel, addError }) {
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
+  const [editLevel, setEditLevel] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -272,7 +285,7 @@ function ListCard({ icon: Icon, title, items, onSubmit, value, setValue, loading
     const r = await fetch(`${apiBase}/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editName.trim() }),
+      body: JSON.stringify({ name: editName.trim(), ...(levelOptions ? { level: editLevel } : {}) }),
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok) { setEditingId(null); onChanged(); }
@@ -297,20 +310,36 @@ function ListCard({ icon: Icon, title, items, onSubmit, value, setValue, loading
         <h2 className="font-bold text-lg">{title}</h2>
       </div>
       <div className="p-6 border-b border-gray-100 bg-gray-50">
-        <form onSubmit={onSubmit} className="flex gap-3">
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            required
-            placeholder={placeholder}
-            className="flex-1 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-4 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none"
-          />
-          <button type="submit" disabled={loading} className="bg-[#FCB712] text-[#164FA3] px-4 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2">
-            <Plus size={16} /> Add
-          </button>
+        <form onSubmit={onSubmit} className="space-y-3">
+          {levelOptions && (
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Level <span className="text-red-500">*</span></label>
+              <select
+                value={level}
+                onChange={(e) => setLevel(e.target.value)}
+                required
+                className="w-full bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-3 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none"
+              >
+                <option value="">Select level…</option>
+                {levelOptions.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              required
+              placeholder={placeholder}
+              className="flex-1 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-4 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none"
+            />
+            <button type="submit" disabled={loading} className="bg-[#FCB712] text-[#164FA3] px-4 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2 disabled:opacity-50">
+              <Plus size={16} /> Add
+            </button>
+          </div>
         </form>
-        {error && <div className="mt-3 bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-xs">{error}</div>}
+        {(addError || error) && <div className="mt-3 bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-xs">{addError || error}</div>}
       </div>
       <div className="flex-1 overflow-auto p-2">
         <ul className="divide-y divide-gray-100">
@@ -325,14 +354,29 @@ function ListCard({ icon: Icon, title, items, onSubmit, value, setValue, loading
                     autoFocus
                     className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
                   />
+                  {levelOptions && (
+                    <select
+                      value={editLevel}
+                      onChange={(e) => setEditLevel(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]"
+                    >
+                      <option value="">— level —</option>
+                      {levelOptions.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+                    </select>
+                  )}
                   <button onClick={() => saveEdit(s.id)} disabled={busy} title="Save" className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={16} /></button>
                   <button onClick={() => setEditingId(null)} title="Cancel" className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
                 </>
               ) : (
                 <>
                   <span className="font-medium text-gray-700 flex-1">{s.name}</span>
+                  {levelOptions && (
+                    s.level
+                      ? <span className="text-[10px] uppercase font-bold tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-1 rounded-full">{designationLevelLabel(s.level) || s.level}</span>
+                      : <span className="text-[10px] uppercase font-bold tracking-wide text-amber-700 bg-amber-100 px-2 py-1 rounded-full">No level</span>
+                  )}
                   <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">ID: {s.id}</span>
-                  <button onClick={() => { setEditingId(s.id); setEditName(s.name); setError(""); }} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
+                  <button onClick={() => { setEditingId(s.id); setEditName(s.name); setEditLevel(s.level || ""); setError(""); }} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
                   <button onClick={() => remove(s)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={14} /></button>
                 </>
               )}
