@@ -89,6 +89,28 @@ export default function PageAccessManager() {
     }
   }
 
+  // Revert a user to normal role-based access (removes Page-Access management).
+  async function resetToRole() {
+    if (!selUser) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/api/admin/page-access", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: Number(selUser), reset: true }),
+      });
+      const d = await r.json();
+      if (!r.ok) { fail(d.message || "Could not reset."); return; }
+      flash(d.message || "Reverted to role access.");
+      setSelPages([]); setDirty(false);
+      await reload();
+    } catch {
+      fail("Could not reset.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function revoke(user_id, page_key) {
     try {
       const r = await fetch("/api/admin/page-access", {
@@ -121,10 +143,11 @@ export default function PageAccessManager() {
   // Effective access (OVERRIDE model): a user with ≥1 assigned page sees EXACTLY
   // those pages; a user with none falls back to their role baseline.
   const isGranted = useCallback((u, key) => !!grantsByUser.get(u.id)?.has(key), [grantsByUser]);
+  // Effective access mirrors the backend: a MANAGED user (u.managed) has exactly
+  // their assigned pages (even zero); an unmanaged user falls back to role.
   const userHasPage = useCallback(
     (u, key) => {
-      const grants = grantsByUser.get(u.id);
-      if (grants && grants.size > 0) return grants.has(key);
+      if (u.managed) return !!grantsByUser.get(u.id)?.has(key);
       return roleHasPage(u.role, key);
     },
     [roleHasPage, grantsByUser]
@@ -158,13 +181,23 @@ export default function PageAccessManager() {
           <select className={inp} value={selUser} onChange={(e) => chooseUser(e.target.value)}>
             <option value="">— Choose a user —</option>
             {data.users.map((u) => (
-              <option key={u.id} value={u.id}>{u.username} · {u.role_label}</option>
+              <option key={u.id} value={u.id}>{u.username} — {u.role_label}</option>
             ))}
           </select>
         </div>
 
-        {selUser && (
+        {selUser && (() => {
+          const u = userById.get(Number(selUser));
+          return (
           <>
+            {/* Current DB state for this user (§18) */}
+            {u && (
+              <div className={`mb-3 text-xs rounded-lg px-3 py-2 border ${u.managed ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-amber-50 border-amber-100 text-amber-800"}`}>
+                {u.managed
+                  ? <>Managed by Page Access — this user can access <strong>exactly</strong> the pages saved below (role defaults do not apply).</>
+                  : <>Not yet managed — currently on <strong>{u.role_label}</strong> role defaults. Saving switches them to explicit page access (only the pages you pick).</>}
+              </div>
+            )}
             {/* Selected pages as removable tags */}
             <div className="mb-3">
               <div className="text-xs font-semibold text-gray-500 mb-1.5">Selected pages ({selPages.length})</div>
@@ -197,14 +230,20 @@ export default function PageAccessManager() {
               })}
             </div>
 
-            <div className="flex items-center gap-3 mt-4">
+            <div className="flex items-center gap-3 mt-4 flex-wrap">
               <button onClick={saveAssignment} disabled={saving || !dirty} className={`${btn} bg-[#164FA3] text-white hover:bg-[#123f85] justify-center`}>
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Save Access
               </button>
+              {u?.managed && (
+                <button onClick={resetToRole} disabled={saving} className={`${btn} border border-gray-200 text-gray-600 hover:bg-gray-50 justify-center`}>
+                  Reset to role default
+                </button>
+              )}
               {dirty && <span className="text-xs text-amber-600">Unsaved changes</span>}
             </div>
           </>
-        )}
+          );
+        })()}
       </div>
 
       {/* View switcher */}

@@ -4,20 +4,20 @@ import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath 
 
 // Page Access Management backend.
 //
-// Model (OVERRIDE, not additive):
+// Model (OVERRIDE, not additive) — a user is either MANAGED or not:
 //   • Super Admin  → every page, always (can never be locked out).
-//   • A user with ONE OR MORE assigned pages is "page-restricted": their access
-//     is EXACTLY the assigned pages — their role's default modules are
-//     suppressed. Assigning "Page A" therefore grants Page A and nothing else;
-//     it never pulls in My Calls / Workspace / Contacts / Reports / etc.
-//   • A user with ZERO assigned pages keeps their normal role-based access
-//     (unchanged) — so existing users who were never assigned a page are wholly
-//     unaffected.
+//   • MANAGED user (the Super Admin has saved a Page-Access config for them,
+//     even an empty one): access is EXACTLY their assigned pages — role default
+//     modules are fully suppressed. Assigning "Page A" grants Page A and nothing
+//     else; removing every page leaves them with NO pages (role defaults do NOT
+//     reappear).
+//   • UNMANAGED user (never configured through Page Access): normal role-based
+//     access, unchanged — so existing users who were never touched keep working.
 //
-// This one rule is the single source of truth for navigation, client route
-// guards and backend/API authorization, so what a user sees always matches what
-// the server allows. Removing a page revokes it (and its features) immediately
-// on the next load; there is no fallback/inheritance that re-adds modules.
+// "Managed" is tracked by a row in page_access_config, written on every save
+// (including an empty save), so the empty state is respected and never silently
+// falls back to the role. This one rule is the single source of truth for
+// navigation, client route guards and backend/API authorization.
 
 let ensured = false;
 export async function ensurePagePermissionsSchema() {
@@ -36,10 +36,42 @@ export async function ensurePagePermissionsSchema() {
          KEY idx_page (page_key)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    // Marks a user as "managed by Page Access" — present ⇒ their access is
+    // exactly their page_permissions rows (even zero), so an empty config is
+    // respected and never falls back to role defaults.
+    await query(
+      `CREATE TABLE IF NOT EXISTS page_access_config (
+         user_id INT PRIMARY KEY,
+         updated_by INT NULL,
+         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+    );
     ensured = true;
   } catch (e) {
     console.error("[pageAccess] ensure schema:", e?.message || e);
   }
+}
+
+// Mark a user as Page-Access managed (idempotent). Called on every save.
+export async function markManaged(userId, by) {
+  await ensurePagePermissionsSchema();
+  await query(
+    `INSERT INTO page_access_config (user_id, updated_by) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`,
+    [userId, by ?? null]
+  );
+}
+// Is this user managed by Page Access (has a saved config, possibly empty)?
+export async function isUserManaged(userId) {
+  if (!userId) return false;
+  await ensurePagePermissionsSchema();
+  const rows = await query(`SELECT 1 FROM page_access_config WHERE user_id = ? LIMIT 1`, [userId]);
+  return rows.length > 0;
+}
+// Remove a user's managed marker → they revert to normal role-based access.
+export async function clearManaged(userId) {
+  await ensurePagePermissionsSchema();
+  await query(`DELETE FROM page_access_config WHERE user_id = ?`, [userId]);
 }
 
 function isSuper(role) {
@@ -55,30 +87,23 @@ export async function getUserGrantKeys(userId) {
   return new Set(rows.map((r) => r.page_key).filter(isValidPageKey));
 }
 
-// Is this user page-restricted (has ≥1 explicit page assignment)? Super Admin
-// is never restricted. A restricted user's access is EXACTLY their assigned
-// pages; a non-restricted user falls back to their role.
+// Is this user page-restricted (managed by Page Access)? Super Admin never is.
+// A managed user's access is EXACTLY their assigned pages (even zero); an
+// unmanaged user falls back to their role.
 export async function isPageRestricted(session) {
   if (!session?.user) return false;
   if (isSuper(roleOf(session))) return false;
-  const grants = await getUserGrantKeys(session.user.id);
-  return grants.size > 0;
-}
-export async function isUserRestricted(userId, role) {
-  if (isSuper(role)) return false;
-  const grants = await getUserGrantKeys(userId);
-  return grants.size > 0;
+  return isUserManaged(session.user.id);
 }
 
 // Effective accessible page keys for a user (OVERRIDE model).
 //   Super Admin → every registered page.
-//   ≥1 assignment → exactly the assigned pages.
-//   0 assignments → the role's baseline pages (unchanged legacy behaviour).
+//   Managed     → exactly the assigned pages (may be empty → no pages).
+//   Unmanaged   → the role's baseline pages (unchanged legacy behaviour).
 export async function getEffectivePageKeys(userId, role) {
   const canonical = normalizeRole(role);
   if (isSuper(canonical)) return new Set(PAGE_KEYS);
-  const grants = await getUserGrantKeys(userId);
-  if (grants.size > 0) return new Set(grants);
+  if (await isUserManaged(userId)) return new Set(await getUserGrantKeys(userId));
   return new Set(baselinePagesForRole(canonical));
 }
 
@@ -88,9 +113,10 @@ export async function userCanAccessPageKey(session, pageKey) {
   if (!isValidPageKey(pageKey)) return false;
   const role = roleOf(session);
   if (isSuper(role)) return true;
-  const grants = await getUserGrantKeys(session.user.id);
-  if (grants.size > 0) return grants.has(pageKey);           // restricted → assigned only
-  return baselinePagesForRole(role).includes(pageKey);        // unrestricted → role baseline
+  if (await isUserManaged(session.user.id)) {                 // managed → assigned only
+    return (await getUserGrantKeys(session.user.id)).has(pageKey);
+  }
+  return baselinePagesForRole(role).includes(pageKey);        // unmanaged → role baseline
 }
 
 // Convenience for API routes: authorize by URL path (maps path→page key first).
@@ -111,8 +137,9 @@ export async function userCanAccessPath(session, pathname) {
 export async function pageAllowed(session, pageKey, roleOk) {
   if (!session?.user) return false;
   if (isSuper(roleOf(session))) return true;
-  const grants = await getUserGrantKeys(session.user.id);
-  if (grants.size > 0) return isValidPageKey(pageKey) && grants.has(pageKey);
+  if (await isUserManaged(session.user.id)) {
+    return isValidPageKey(pageKey) && (await getUserGrantKeys(session.user.id)).has(pageKey);
+  }
   return !!roleOk;
 }
 
@@ -121,6 +148,9 @@ export async function pageAllowed(session, pageKey, roleOk) {
 // the final set. Unknown keys are ignored.
 export async function setUserPages(userId, pageKeys, grantedBy) {
   await ensurePagePermissionsSchema();
+  // Mark managed FIRST so even an empty save (revoke-all) is respected and the
+  // user does not fall back to role defaults.
+  await markManaged(userId, grantedBy);
   const wanted = [...new Set((pageKeys || []).filter(isValidPageKey))];
   const existing = await getUserGrantKeys(userId);
   const toAdd = wanted.filter((k) => !existing.has(k));

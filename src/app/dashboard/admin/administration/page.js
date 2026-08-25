@@ -25,7 +25,7 @@ const TABS = [
   { key: "castes", label: "Caste Master" },
   { key: "polling", label: "Polling Station Master" },
   { key: "parties", label: "Party Master" },
-  { key: "page_access", label: "Page Access" },
+  { key: "page_access", label: "Pages Access" },
 ];
 // The four master-data admin tabs are grantable through Page Access (PROMPT 10
 // Part A); each maps to a stable page key. Visibility here and the tab's own API

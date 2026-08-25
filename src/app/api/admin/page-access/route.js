@@ -4,8 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isSuperAdmin, normalizeRole, roleLabel, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { ensurePagePermissionsSchema, setUserPages } from "@/lib/pageAccess";
-import { PAGES, PAGE_KEYS, isValidPageKey, getPage, baselinePagesForRole } from "@/lib/pages";
+import { ensurePagePermissionsSchema, setUserPages, markManaged, clearManaged } from "@/lib/pageAccess";
+import { PAGES, PAGE_KEYS, isValidPageKey, getPage } from "@/lib/pages";
 
 // BUG 14 — Page Access Management (Super Admin only).
 //   GET    → registry of pages, grantable users, and all current grants
@@ -31,6 +31,10 @@ export async function GET() {
     const users = await query(
       `SELECT id, username, role, photo_url, is_active FROM users ORDER BY username`
     );
+    // Which users are Page-Access managed (their access = exactly their grants,
+    // even if empty). Used so the UI shows the true DB state, not role defaults.
+    const managedRows = await query(`SELECT user_id FROM page_access_config`);
+    const managedSet = new Set(managedRows.map((r) => r.user_id));
     const grantable = users
       .filter((u) => normalizeRole(u.role) !== ROLES.SUPER_ADMIN)
       .map((u) => ({
@@ -40,6 +44,7 @@ export async function GET() {
         role_label: roleLabel(u.role),
         photo_url: u.photo_url ?? null,
         is_active: u.is_active,
+        managed: managedSet.has(u.id),
       }));
 
     const grantRows = await query(
@@ -106,15 +111,8 @@ export async function POST(req) {
       return NextResponse.json({ message: "Super Admin already has access to every page." }, { status: 400 });
     }
 
-    // If the role already holds this page by baseline, an explicit grant is
-    // redundant — say so instead of creating a needless record.
-    if (baselinePagesForRole(normalizeRole(target.role)).includes(pageKey)) {
-      return NextResponse.json(
-        { message: `${target.username} already has access to this page through their role.` },
-        { status: 409 }
-      );
-    }
-
+    // (Under the managed/override model a role baseline never auto-grants, so a
+    // page in the role's baseline is still a meaningful explicit assignment.)
     const existing = await query(
       `SELECT id FROM page_permissions WHERE user_id = ? AND page_key = ?`,
       [userId, pageKey]
@@ -135,6 +133,8 @@ export async function POST(req) {
       }
       throw e;
     }
+    // Granting a page puts the user under Page-Access management.
+    await markManaged(userId, session.user.id);
 
     await logAudit(session, {
       action: "page_access.grant", entityType: "page_permission", entityId: userId,
@@ -159,14 +159,27 @@ export async function PUT(req) {
 
     const body = await req.json().catch(() => ({}));
     const userId = Number(body.user_id);
+    const reset = body.reset === true;
     const pageKeys = Array.isArray(body.page_keys) ? body.page_keys.map((k) => String(k)) : null;
-    if (!Number.isInteger(userId) || userId <= 0 || pageKeys === null) {
+    if (!Number.isInteger(userId) || userId <= 0 || (pageKeys === null && !reset)) {
       return NextResponse.json({ message: "user_id and page_keys[] are required." }, { status: 400 });
     }
     const [target] = await query(`SELECT id, username, role FROM users WHERE id = ?`, [userId]);
     if (!target) return NextResponse.json({ message: "User not found." }, { status: 404 });
     if (normalizeRole(target.role) === ROLES.SUPER_ADMIN) {
       return NextResponse.json({ message: "Super Admin already has access to every page." }, { status: 400 });
+    }
+
+    // Reset → remove the managed marker AND all grants, reverting the user to
+    // their normal role-based access (the escape hatch from Page-Access control).
+    if (reset) {
+      await setUserPages(userId, [], session.user.id); // clears grants (also marks managed)
+      await clearManaged(userId);                       // then unmanage → role default
+      await logAudit(session, {
+        action: "page_access.reset", entityType: "page_permission", entityId: userId,
+        details: { user_id: userId, username: target.username },
+      });
+      return NextResponse.json({ message: `${target.username} reverted to role-based access.`, pages: [], reset: true });
     }
 
     const final = await setUserPages(userId, pageKeys, session.user.id);
