@@ -1017,9 +1017,11 @@ export default function ContactsModule({ session, mode }) {
           onNext={() => editStep(1)}
           onClose={() => setEditingIndex(null)}
           onSaved={(updated) => {
+            // Optimistic: show the server's fresh, fully-resolved record at once.
             setContacts((prev) => prev.map((c, i) => (i === editingIndex ? { ...c, ...updated } : c)));
             loadCounts(); // refresh Address / Photo counts after an edit (PROMPT 2)
-            if (editingHasNext) editStep(1); else setEditingIndex(null);
+            if (editingHasNext) editStep(1);
+            else { setEditingIndex(null); load(); } // re-sync list + search/filter on close
           }}
         />
       )}
@@ -1037,9 +1039,12 @@ export default function ContactsModule({ session, mode }) {
           users={users}
           designations={designations}
           onSaved={(updated) => {
-            // Reflect the change instantly in the modal AND the table row.
+            // Reflect the change instantly in the modal AND the table row with
+            // the server's fully-resolved record, then re-sync the list so
+            // search/filter immediately use the updated value (no stale copy).
             setViewingContact(updated);
             setContacts((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+            load();
             loadCounts();
             setError("");
             setMessage("Contact updated successfully.");
@@ -1327,7 +1332,10 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
     const data = await r.json();
     setSaving(false);
     if (!r.ok) { setError(data.message || "Save failed"); return; }
-    onSaved({ ...contact, ...body });
+    // Use the server's fully-resolved record (fresh display names) so the list
+    // never keeps stale zone/district/assembly/designation labels. Fall back to
+    // a local merge only if the API somehow didn't return the record.
+    onSaved(data.contact || { ...contact, ...body });
   }
 
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white";

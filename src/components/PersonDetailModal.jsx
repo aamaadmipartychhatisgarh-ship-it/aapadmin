@@ -278,7 +278,10 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         } : {}),
         updated_at: new Date().toISOString(),
       };
-      onSaved(merged);
+      // Prefer the server's fully-resolved record (correct for EVERY field,
+      // including Block/ward_name and cases the client option lists don't cover)
+      // so the list/search show the exact saved data with no stale labels.
+      onSaved(d.contact || merged);
     } catch {
       setError("Save failed — network error.");
       setSaving(false);

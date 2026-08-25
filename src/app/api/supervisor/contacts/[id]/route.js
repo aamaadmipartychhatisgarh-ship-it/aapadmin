@@ -7,6 +7,7 @@ import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
+import { resolveContactCard } from "@/lib/contactCard";
 
 // Supervisor-scoped mirror of PUT /api/contacts/[id] — assign/reassign a
 // contact and edit its details, but ONLY within the supervisor's own
@@ -113,10 +114,6 @@ export async function PUT(req, { params }) {
         [...vals, ...scope.params]
       );
       affected = result.affectedRows;
-      if (affected > 0) {
-        const [rows] = await conn.query("SELECT * FROM contacts WHERE id = ?", [id]);
-        updated = rows[0];
-      }
       await conn.commit();
     } catch (e) {
       await conn.rollback();
@@ -133,6 +130,8 @@ export async function PUT(req, { params }) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
     }
     await logAudit(session, { action: "contact.update", entityType: "contact", entityId: id, details: { supervisor: true, fields: Object.keys(data) } });
+    // Fully-resolved record (all display names) so the client shows fresh data.
+    updated = await resolveContactCard(id);
     return NextResponse.json({ ok: true, contact: updated });
   } catch (err) {
     console.error("supervisor contacts PUT error:", err);

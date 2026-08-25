@@ -7,6 +7,7 @@ import { query, getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
+import { resolveContactCard } from "@/lib/contactCard";
 
 // GET /api/contacts/[id] — fetch ONE contact by its unique database id, with the
 // same resolved fields the workspace edit form needs (ward/district names +
@@ -30,22 +31,11 @@ export async function GET(_req, { params }) {
       if (!mine) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const [contact] = await query("SELECT * FROM contacts WHERE id = ?", [id]);
+    // Fully-resolved single record (all display names) — same shape the list
+    // and the PUT response use, so every surface reads identical data.
+    const contact = await resolveContactCard(id);
     if (!contact) return NextResponse.json({ message: "Contact not found." }, { status: 404 });
-    const [names] = await query(
-      `SELECT (SELECT name FROM locations WHERE id = ?) AS ward_name,
-              (SELECT name FROM locations WHERE id = ?) AS district_name,
-              (SELECT photo_url FROM workers WHERE id = ?) AS photo_url`,
-      [contact.ward_id ?? null, contact.district_id ?? null, contact.worker_id ?? null]
-    );
-    return NextResponse.json({
-      contact: {
-        ...contact,
-        ward_name: names?.ward_name ?? null,
-        district_name: names?.district_name ?? null,
-        photo_url: names?.photo_url ?? null,
-      },
-    });
+    return NextResponse.json({ contact });
   } catch (err) {
     console.error("contact GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
@@ -177,8 +167,6 @@ export async function PUT(req, { params }) {
       await conn.beginTransaction();
       vals.push(id);
       await conn.query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
-      const [rows] = await conn.query("SELECT * FROM contacts WHERE id = ?", [id]);
-      updated = rows[0];
       await conn.commit();
     } catch (e) {
       await conn.rollback();
@@ -190,7 +178,10 @@ export async function PUT(req, { params }) {
     if (admin && "assigned_to_user_id" in data && data.assigned_to_user_id) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
     }
-    // Return the latest saved record so the client never shows stale data.
+    // Return the FULLY-RESOLVED record (all *_name display fields, assigned-to
+    // username, resolved photo) — the exact shape the list renders — so the
+    // client replaces its row with fresh data and never shows a stale name.
+    updated = await resolveContactCard(id);
     return NextResponse.json({ ok: true, contact: updated });
   } catch (err) {
     console.error("contacts PUT error:", err);
