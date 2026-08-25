@@ -40,6 +40,39 @@ export async function GET(req) {
     const designationId = parseInt(searchParams.get("designation_id"), 10);
     const hasDesignation = Number.isInteger(designationId) && designationId > 0;
 
+    // ---- STATE level: a designation-wise matrix (PROMPT 7) --------------------
+    // Every designation from the master, each with the people who hold it
+    // state-wide — Person Name + Photo ONLY (no phone/address/status/etc.). A
+    // designation with nobody assigned still appears, with a blank person area.
+    if (level === "state") {
+      const scope = scopeFilterSync(session.user, "c");
+      const notWrong = await notWrongNumberClause("c");
+      const desWhere = hasDesignation ? "WHERE d.id = ?" : "";
+      const rows = await query(
+        `SELECT d.id AS designation_id, d.name AS designation_name, d.sort_order,
+                c.id AS contact_id, c.person_name,
+                COALESCE(c.photo_url, w.photo_url) AS photo_url
+           FROM designations d
+           LEFT JOIN contact_designations cd ON cd.designation_id = d.id
+           LEFT JOIN contacts c ON c.id = cd.contact_id ${notWrong} ${scope.where}
+           LEFT JOIN workers w ON w.id = c.worker_id
+          ${desWhere}
+          ORDER BY (d.sort_order IS NULL), d.sort_order, d.name, c.person_name`,
+        hasDesignation ? [...scope.params, designationId] : [...scope.params]
+      );
+      const byDes = new Map();
+      for (const r of rows) {
+        if (!byDes.has(r.designation_id)) {
+          byDes.set(r.designation_id, { id: r.designation_id, name: r.designation_name, people: [] });
+        }
+        // Person-name Only + Photo. Skip the LEFT-JOIN "no contact" placeholder row.
+        if (r.contact_id) byDes.get(r.designation_id).people.push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url });
+      }
+      const designations = [...byDes.values()];
+      const totalPeople = designations.reduce((s, d) => s + d.people.length, 0);
+      return NextResponse.json({ level: "state", state_name: "State", designations, total: totalPeople });
+    }
+
     let where = " WHERE 1=1";
     const params = [];
     where += await notWrongNumberClause("c");

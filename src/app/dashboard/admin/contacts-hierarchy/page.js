@@ -47,7 +47,9 @@ function Body() {
     return () => { alive = false; };
   }, [level, designationId]);
 
+  const isState = level === "state";
   const groups = data?.groups || [];
+  const stateDesignations = data?.designations || [];
   const total = data?.total || 0;
   const levelLabel = LEVELS.find((l) => l.key === level)?.label || level;
 
@@ -79,6 +81,8 @@ function Body() {
         </div>
         <div className="ml-auto text-sm text-gray-500">
           {loading ? <span className="inline-flex items-center gap-1.5"><Loader2 size={14} className="animate-spin" /> Loading…</span>
+            : isState
+            ? <span><strong className="text-gray-900">{stateDesignations.length}</strong> designation{stateDesignations.length === 1 ? "" : "s"} · <strong className="text-gray-900">{total.toLocaleString()}</strong> assigned</span>
             : <span><strong className="text-gray-900">{total.toLocaleString()}</strong> {total === 1 ? "person" : "people"} · <strong className="text-gray-900">{groups.length}</strong> {levelLabel}{groups.length === 1 ? "" : "s"}</span>}
         </div>
       </div>
@@ -89,7 +93,44 @@ function Body() {
         </div>
       )}
 
-      {loading ? (
+      {/* STATE level (PROMPT 7) — designation-wise matrix: each designation with
+          its assigned people (Name + Photo ONLY); unassigned = blank. */}
+      {isState ? (
+        loading ? (
+          <div className="flex h-40 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
+        ) : stateDesignations.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center text-gray-400">No designations configured.</div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50">
+              <MapPin size={16} className="text-[#164FA3]" />
+              <span className="font-bold text-gray-900">{data?.state_name || "State"}</span>
+              <span className="text-xs text-gray-400">— designations at the State level</span>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {stateDesignations.map((d) => (
+                <div key={d.id} className="flex items-start gap-4 px-4 py-3">
+                  <div className="w-56 shrink-0 font-semibold text-gray-800 text-sm pt-1">{d.name}</div>
+                  <div className="flex-1 min-w-0">
+                    {d.people.length === 0 ? (
+                      <span className="text-xs text-gray-300 italic">— not assigned —</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-x-5 gap-y-2">
+                        {d.people.map((p) => (
+                          <span key={p.id} className="inline-flex items-center gap-2">
+                            <Avatar name={p.person_name} src={p.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
+                            <span className="text-sm text-gray-900">{p.person_name}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      ) : loading ? (
         <div className="flex h-40 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
       ) : groups.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center text-gray-400">
