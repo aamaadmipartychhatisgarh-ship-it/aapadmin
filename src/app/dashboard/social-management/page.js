@@ -442,39 +442,57 @@ function fmtDateTime(v) {
   return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} · ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+// A post's destinations, with a legacy fallback for any pre-destinations row.
+function postDests(p) {
+  if (p.destinations && p.destinations.length) return p.destinations;
+  if (p.page_id) return [{ platform: p.platform, page_name: p.handle, post_link: p.external_url, page_id: p.page_id }];
+  return [];
+}
+
 function LogTab({ data, onEdit }) {
   const posts = data.recentPosts || [];
   const [date, setDate] = useState("");     // "" = all dates
   const [q, setQ] = useState("");
   const [platform, setPlatform] = useState("");
+  const [pageId, setPageId] = useState(""); // §13 page filter
 
   const needle = q.trim().toLowerCase();
-  // All filtering runs over the real post records (posted_at / caption / handle),
-  // never a separate list — same rows Log a Post created.
+  // Filtering runs over the real records + their destinations (a post matches a
+  // platform/page filter if ANY of its destinations does).
   const shown = posts.filter((p) => {
+    const dests = postDests(p);
     if (date && postDateKey(p) !== date) return false;
-    if (platform && p.platform !== platform) return false;
-    if (needle && !`${p.title || ""} ${p.caption || ""} ${p.handle || ""} ${p.lok_sabha_name || ""}`.toLowerCase().includes(needle)) return false;
+    if (platform && !dests.some((d) => d.platform === platform)) return false;
+    if (pageId && !dests.some((d) => String(d.page_id) === String(pageId))) return false;
+    if (needle) {
+      const hay = `${p.caption || ""} ${dests.map((d) => d.page_name || "").join(" ")}`.toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
     return true;
   });
+  // Pages to offer in the page filter (only ones that appear as destinations).
+  const filterPages = (data.pages || []).filter((pg) => !platform || pg.platform === platform);
 
   return (
     <div className="space-y-3">
-      {/* Filter bar — pinned above the list; a calendar date filter over the
-          actual DB Date & Time, plus platform + text search. */}
+      {/* Filter bar — date (over the real DB Date & Time) + platform + page + text. */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3 flex flex-wrap items-center gap-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 inline-flex items-center gap-1"><Clock size={13} /> Date</span>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
-        <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30">
+        <select value={platform} onChange={(e) => { setPlatform(e.target.value); setPageId(""); }} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30">
           <option value="">All platforms</option>
           {Object.keys(PLATFORM).map((k) => <option key={k} value={k}>{PLATFORM[k].label}</option>)}
         </select>
-        <div className="relative flex-1 min-w-[180px]">
+        <select value={pageId} onChange={(e) => setPageId(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30">
+          <option value="">All pages</option>
+          {filterPages.map((pg) => <option key={pg.id} value={pg.id}>{PLATFORM[pg.platform]?.label} · {pg.handle}</option>)}
+        </select>
+        <div className="relative flex-1 min-w-[160px]">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search content / page…" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
         </div>
         <span className="text-xs text-gray-500">{shown.length} post{shown.length === 1 ? "" : "s"}</span>
-        {(date || platform || needle) && (
-          <button onClick={() => { setDate(""); setPlatform(""); setQ(""); }} className="text-xs text-gray-500 hover:text-red-600 inline-flex items-center gap-1"><X size={13} /> Clear</button>
+        {(date || platform || pageId || needle) && (
+          <button onClick={() => { setDate(""); setPlatform(""); setPageId(""); setQ(""); }} className="text-xs text-gray-500 hover:text-red-600 inline-flex items-center gap-1"><X size={13} /> Clear</button>
         )}
       </div>
 
@@ -484,32 +502,45 @@ function LogTab({ data, onEdit }) {
           <thead className="bg-gray-50 text-left">
             <tr>
               <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Date &amp; Time</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Platform</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Page</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Content</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Destinations (Page → Link)</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Post Access</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Link</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Format</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {shown.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">{posts.length === 0 ? "No posts yet — use “Log a Post”." : "No posts match the selected filters."}</td></tr>
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400 text-sm">{posts.length === 0 ? "No posts yet — use “Log a Post”." : "No posts match the selected filters."}</td></tr>
             ) : shown.map((p) => {
-              const meta = PLATFORM[p.platform] || {};
-              const Icon = meta.icon || Share2;
               const scheduled = p.publish_status === "scheduled";
+              const dests = postDests(p);
               return (
                 <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
                   <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">{fmtDateTime(p.posted_at || p.created_at)}</td>
-                  <td className="px-4 py-3 whitespace-nowrap"><Icon size={14} style={{ color: meta.color }} className="inline mr-1" />{meta.label || p.platform}</td>
-                  <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{p.handle || "—"}</td>
-                  <td className="px-4 py-3 text-gray-700 max-w-[22rem]">
-                    {/* Full content, never truncated — line breaks/formatting
-                        preserved; a very long post scrolls within the cell. */}
+                  <td className="px-4 py-3 text-gray-700 max-w-[20rem]">
                     <div className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{p.caption || <span className="text-gray-300">(no content)</span>}</div>
+                  </td>
+                  {/* All destinations for this post — every platform/page + its own link (§12) */}
+                  <td className="px-4 py-3 min-w-[16rem]">
+                    {dests.length === 0 ? <span className="text-gray-300 text-xs">—</span> : (
+                      <div className="space-y-1">
+                        {dests.map((d) => {
+                          const meta = PLATFORM[d.platform] || {};
+                          const Icon = meta.icon || Share2;
+                          return (
+                            <div key={`${p.id}-${d.page_id}`} className="flex items-center gap-1.5 text-xs">
+                              <Icon size={12} style={{ color: meta.color }} className="shrink-0" />
+                              <span className="text-gray-700 truncate max-w-[9rem]">{d.page_name || `#${d.page_id}`}</span>
+                              {d.post_link
+                                ? <a href={d.post_link} target="_blank" rel="noreferrer" className="text-[#164FA3] hover:underline inline-flex items-center gap-0.5 shrink-0"><ChevronRight size={11} /> Link</a>
+                                : <span className="text-gray-300 shrink-0">no link</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {p.media_url ? (
@@ -517,9 +548,6 @@ function LogTab({ data, onEdit }) {
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
                   <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 capitalize">{p.post_type}</span></td>
-                  <td className="px-4 py-3">
-                    {p.external_url ? <a href={p.external_url} target="_blank" rel="noreferrer" className="text-[#164FA3] hover:underline text-xs inline-flex items-center gap-1"><ChevronRight size={12} /> Open</a> : <span className="text-gray-300 text-xs">—</span>}
-                  </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full ${scheduled ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{scheduled ? "Scheduled" : "Published"}</span>
                     {p.approval_status && p.approval_status !== "approved" && (
@@ -549,180 +577,339 @@ function LogTab({ data, onEdit }) {
 // to social_posts (caption is LONGTEXT, never truncated); the screenshot goes
 // through /api/uploads (durable DB-backed store) so it survives refresh/redeploy.
 // Guarded against duplicate submits.
-function PostModal({ pages, onClose, onSaved, editing }) {
-  const allPages = pages || [];
-  // On edit, seed the platform from the post's page so the page dropdown filters
-  // correctly and the saved page stays selected.
-  const editingPage = editing ? allPages.find((p) => String(p.id) === String(editing.page_id)) : null;
-  const [platform, setPlatform] = useState(editingPage?.platform || "facebook");
-  const [form, setForm] = useState(editing ? {
-    page_id: editing.page_id || "",
-    caption: editing.caption || "",
-    post_type: editing.post_type || "photo",
-    media_url: editing.media_url || "",
-    external_url: editing.external_url || "",
-    posted_at: editing.posted_at ? new Date(editing.posted_at).toISOString().slice(0, 16) : "",
-    approval_status: editing.approval_status || "pending",
-    publish_status: editing.publish_status === "scheduled" ? "scheduled" : "published",
-    views: editing.views || 0, likes: editing.likes || 0,
-    comments: editing.comments || 0, shares: editing.shares || 0,
-    reach: editing.reach || 0,
-    viral: editing.viral || 0,
-  } : {
-    page_id: "", caption: "", post_type: "photo",
-    media_url: "", external_url: "", posted_at: new Date().toISOString().slice(0, 16),
-    approval_status: "pending",
-    publish_status: "published",
-    views: 0, likes: 0, comments: 0, shares: 0, reach: 0,
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [ok, setOk] = useState("");
-  const fileRef = useRef(null);
-  const [uploading, setUploading] = useState(false);
+const INP = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+const LBL = "block text-xs font-semibold text-gray-500 mb-1";
 
-  // Pages belonging to the chosen platform only (dynamic dropdown).
-  const platformPages = allPages.filter((p) => p.platform === platform);
-  // Content is the primary field: required (non-empty) but with NO word/char
-  // limit — 1 word or 10,000+ words are equally valid.
-  const contentOk = form.caption.trim().length > 0;
-  const linkOk = !form.external_url.trim() || isValidUrl(form.external_url);
-
-  function changePlatform(next) {
-    setPlatform(next);
-    // Clear the selected page if it no longer belongs to the new platform.
-    const stillValid = allPages.some((p) => String(p.id) === String(form.page_id) && p.platform === next);
-    if (!stillValid) setForm((f) => ({ ...f, page_id: "" }));
+// Build a fresh empty post block. Destinations live in `dest` keyed by page id:
+//   dest = { [pageId]: { platform, link } }   ·   platforms = [selected keys]
+function emptyBlock() {
+  return {
+    caption: "", post_type: "photo", media_url: "",
+    posted_at: new Date().toISOString().slice(0, 16),
+    publish_status: "published", approval_status: "pending",
+    platforms: [], dest: {},
+    views: 0, likes: 0, comments: 0, shares: 0, reach: 0, viral: 0,
+    uploading: false,
+  };
+}
+// Rebuild a block from an existing post (edit) — repopulates every destination
+// with its own saved link (§10).
+function blockFromEditing(editing) {
+  const dest = {};
+  const platforms = [];
+  for (const d of editing.destinations || []) {
+    dest[d.page_id] = { platform: d.platform, link: d.post_link || "" };
+    if (d.platform && !platforms.includes(d.platform)) platforms.push(d.platform);
   }
+  // Fallback for any legacy post that somehow has no destination rows.
+  if (Object.keys(dest).length === 0 && editing.page_id) {
+    dest[editing.page_id] = { platform: editing.platform, link: editing.external_url || "" };
+    if (editing.platform) platforms.push(editing.platform);
+  }
+  return {
+    caption: editing.caption || "", post_type: editing.post_type || "photo",
+    media_url: editing.media_url || "",
+    posted_at: editing.posted_at ? new Date(editing.posted_at).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+    publish_status: editing.publish_status === "scheduled" ? "scheduled" : "published",
+    approval_status: editing.approval_status || "pending",
+    platforms, dest,
+    views: editing.views || 0, likes: editing.likes || 0, comments: editing.comments || 0,
+    shares: editing.shares || 0, reach: editing.reach || 0, viral: editing.viral || 0,
+    uploading: false,
+  };
+}
 
+// Destination selector for ONE post block: platform multi-select → per-platform
+// page checkboxes → Selected Pages list, each with its OWN link + Remove.
+function DestinationPicker({ allPages, block, patch }) {
+  const { platforms, dest } = block;
+
+  function togglePlatform(k) {
+    if (platforms.includes(k)) {
+      const nextDest = { ...dest };
+      for (const id of Object.keys(nextDest)) if (nextDest[id].platform === k) delete nextDest[id];
+      patch({ platforms: platforms.filter((p) => p !== k), dest: nextDest });
+    } else {
+      patch({ platforms: [...platforms, k] });
+    }
+  }
+  function togglePage(pg) {
+    const next = { ...dest };
+    if (next[pg.id]) delete next[pg.id];
+    else next[pg.id] = { platform: pg.platform, link: "" }; // no duplicate — keyed by id (§9)
+    patch({ dest: next });
+  }
+  function setLink(id, link) { patch({ dest: { ...dest, [id]: { ...dest[id], link } } }); }
+  function removePage(id) { const n = { ...dest }; delete n[id]; patch({ dest: n }); }
+
+  const entries = Object.entries(dest);
+
+  return (
+    <div className="space-y-3">
+      {/* Platform multi-select (only the supported networks) */}
+      <div>
+        <label className={LBL}>Select Platform * <span className="text-gray-400 font-normal">(multi-select)</span></label>
+        <div className="flex flex-wrap gap-2">
+          {Object.keys(PLATFORM).map((k) => {
+            const on = platforms.includes(k);
+            const Icon = PLATFORM[k].icon;
+            return (
+              <button type="button" key={k} onClick={() => togglePlatform(k)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border ${on ? "text-white border-transparent" : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"}`}
+                style={on ? { background: PLATFORM[k].color } : undefined}>
+                <Icon size={14} /> {PLATFORM[k].label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Per-platform page checkboxes — only pages of the selected platforms */}
+      {platforms.map((k) => {
+        const pagesForK = allPages.filter((p) => p.platform === k);
+        const Icon = PLATFORM[k].icon;
+        return (
+          <div key={k} className="border border-gray-100 rounded-lg p-2.5">
+            <div className="flex items-center gap-1.5 mb-1.5 text-sm font-semibold text-gray-700">
+              <Icon size={14} style={{ color: PLATFORM[k].color }} /> {PLATFORM[k].label}
+            </div>
+            {pagesForK.length === 0 ? (
+              <div className="text-xs text-gray-400">No {PLATFORM[k].label} pages yet.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                {pagesForK.map((pg) => (
+                  <label key={pg.id} className="flex items-center gap-2 text-sm text-gray-700 px-1.5 py-1 rounded hover:bg-gray-50 cursor-pointer">
+                    <input type="checkbox" checked={!!dest[pg.id]} onChange={() => togglePage(pg)} className="accent-[#164FA3]" />
+                    <span className="truncate">{pg.handle}{pg.lok_sabha_name ? ` · ${pg.lok_sabha_name}` : ""}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Selected Pages — each with its OWN independent link (§4/§5/§11) */}
+      {entries.length > 0 && (
+        <div>
+          <label className={LBL}>Selected Pages ({entries.length}) — paste each page's post link</label>
+          <div className="space-y-2">
+            {entries.map(([id, v]) => {
+              const pg = allPages.find((p) => String(p.id) === String(id));
+              const meta = PLATFORM[v.platform] || {};
+              const Icon = meta.icon || Share2;
+              const bad = v.link && !isValidUrl(v.link);
+              return (
+                <div key={id} className="flex items-center gap-2 border border-gray-100 rounded-lg px-2.5 py-2">
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-600 shrink-0 min-w-[8.5rem]">
+                    <Icon size={13} style={{ color: meta.color }} /> {meta.label} — <span className="text-gray-900 truncate">{pg?.handle || `#${id}`}</span>
+                  </span>
+                  <input
+                    className={`flex-1 border rounded-lg px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30 ${bad ? "border-red-400" : "border-gray-200"}`}
+                    placeholder={`Paste ${meta.label || ""} ${pg?.handle || ""} post link`}
+                    value={v.link}
+                    onChange={(e) => setLink(id, e.target.value)}
+                  />
+                  <button type="button" onClick={() => removePage(id)} className="text-gray-400 hover:text-red-600 shrink-0" title="Remove this page"><X size={15} /></button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One editable post (content + fields + destinations). Used once for Single
+// Post / Edit, and repeated for Multiple Post.
+function PostBlock({ block, patch, allPages, index, total, onRemove }) {
+  const fileRef = useRef(null);
   async function uploadFile(e) {
     const f = e.target.files?.[0]; if (!f) return;
     if (e.target) e.target.value = "";
-    setUploading(true); setError("");
+    patch({ uploading: true });
     try {
       const fd = new FormData(); fd.append("file", f);
       const r = await fetch("/api/uploads", { method: "POST", body: fd });
       const b = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(b.message || "Screenshot upload failed.");
-      setForm((prev) => ({ ...prev, media_url: b.url }));
-    } catch (e2) { setError(e2.message || "Screenshot upload failed."); }
-    finally { setUploading(false); }
+      patch({ media_url: b.url, uploading: false });
+    } catch { patch({ uploading: false }); }
   }
-
-  async function save() {
-    if (saving) return; // guard against a double Submit creating duplicate posts
-    setError(""); setOk("");
-    if (!form.page_id) { setError("Select a platform and page."); return; }
-    if (!contentOk) { setError("Content is required."); return; }
-    if (!String(form.posted_at).trim()) { setError("Date & time is required."); return; }
-    if (!linkOk) { setError("Enter a valid URL (starting with http:// or https://) for the link."); return; }
-    setSaving(true);
-    // Status: Publish = published now; Schedule = scheduled_at holds the chosen time.
-    const payload = {
-      ...form,
-      scheduled_at: form.publish_status === "scheduled" ? form.posted_at : null,
-    };
-    try {
-      const url = editing ? `/api/social-management/posts/${editing.id}` : "/api/social-management/posts";
-      const method = editing ? "PUT" : "POST";
-      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const b = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(b.message || "Could not save the post.");
-      setOk("Saved.");
-      onSaved();
-    } catch (e) { setError(e.message || "Could not save the post."); setSaving(false); }
-  }
-  const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
-  const lbl = "block text-xs font-semibold text-gray-500 mb-1";
-
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl p-6 space-y-3 max-h-[90vh] overflow-auto">
+    <div className={total > 1 ? "border border-gray-200 rounded-xl p-4 space-y-3" : "space-y-3"}>
+      {total > 1 && (
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-gray-900">{editing ? "Edit Post" : "Log a Post"}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+          <span className="text-sm font-bold text-gray-800">Post {index + 1}</span>
+          <button type="button" onClick={onRemove} className="text-xs text-red-600 hover:text-red-700 inline-flex items-center gap-1"><X size={13} /> Remove post</button>
         </div>
+      )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={lbl}>Platform *</label>
-            <select className={inp} value={platform} onChange={(e) => changePlatform(e.target.value)}>
-              {Object.keys(PLATFORM).map((k) => <option key={k} value={k}>{PLATFORM[k].label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={lbl}>Page Name *</label>
-            <select className={inp} value={form.page_id} onChange={(e) => setForm({ ...form, page_id: e.target.value })}>
-              <option value="">{platformPages.length ? "Select a page" : "No pages for this platform"}</option>
-              {platformPages.map((p) => <option key={p.id} value={p.id}>{p.handle}{p.lok_sabha_name ? ` · ${p.lok_sabha_name}` : ""}</option>)}
-            </select>
-          </div>
-        </div>
+      <div>
+        <label className={LBL}>Content *</label>
+        <textarea className={INP} rows={total > 1 ? 4 : 7} placeholder="Write the full post content… (no length limit)" value={block.caption} onChange={(e) => patch({ caption: e.target.value })} />
+      </div>
 
+      <DestinationPicker allPages={allPages} block={block} patch={patch} />
+
+      <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className={lbl}>Content *</label>
-          <textarea className={inp} rows={8} placeholder="Write the full post content… (no length limit)" value={form.caption} onChange={(e) => setForm({ ...form, caption: e.target.value })} />
+          <label className={LBL}>Post Format</label>
+          <select className={INP} value={block.post_type} onChange={(e) => patch({ post_type: e.target.value })}>
+            {LOG_POST_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
         </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className={lbl}>Post Type</label>
-            <select className={inp} value={form.post_type} onChange={(e) => setForm({ ...form, post_type: e.target.value })}>
-              {LOG_POST_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={lbl}>Date &amp; Time *</label>
-            <input type="datetime-local" className={inp} value={form.posted_at} onChange={(e) => setForm({ ...form, posted_at: e.target.value })} />
-          </div>
-        </div>
-
         <div>
-          <label className={lbl}>Status</label>
-          <select className={inp} value={form.publish_status} onChange={(e) => setForm({ ...form, publish_status: e.target.value })}>
+          <label className={LBL}>Date &amp; Time *</label>
+          <input type="datetime-local" className={INP} value={block.posted_at} onChange={(e) => patch({ posted_at: e.target.value })} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={LBL}>Status</label>
+          <select className={INP} value={block.publish_status} onChange={(e) => patch({ publish_status: e.target.value })}>
             <option value="published">Publish (immediate)</option>
             <option value="scheduled">Schedule</option>
           </select>
         </div>
-
         <div>
-          <label className={lbl}>Screenshot</label>
+          <label className={LBL}>Screenshot</label>
           <div className="flex items-center gap-2 flex-wrap">
             <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={uploadFile} />
-            <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-1 disabled:opacity-50">
-              {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {form.media_url ? "Replace screenshot" : "Upload screenshot"}
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={block.uploading} className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 inline-flex items-center gap-1 disabled:opacity-50">
+              {block.uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {block.media_url ? "Replace" : "Upload"}
             </button>
-            {form.media_url && (
-              <span className="inline-flex items-center gap-2">
-                <img src={form.media_url} alt="" className="w-10 h-10 rounded object-cover border border-gray-200" />
-                <a href={form.media_url} target="_blank" rel="noreferrer" className="text-xs text-[#164FA3] hover:underline">Open</a>
-                <button type="button" onClick={() => setForm({ ...form, media_url: "" })} className="text-gray-400 hover:text-red-500"><X size={13} /></button>
+            {block.media_url && (
+              <span className="inline-flex items-center gap-1">
+                <img src={block.media_url} alt="" className="w-8 h-8 rounded object-cover border border-gray-200" />
+                <button type="button" onClick={() => patch({ media_url: "" })} className="text-gray-400 hover:text-red-500"><X size={13} /></button>
               </span>
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        <div>
-          <label className={lbl}>Link <span className="text-gray-400 font-normal">(URL of the live post)</span></label>
-          <input className={`${inp} ${form.external_url && !linkOk ? "border-red-400 focus:ring-red-200" : ""}`} placeholder="https://…" value={form.external_url} onChange={(e) => setForm({ ...form, external_url: e.target.value })} />
-          {form.external_url && !linkOk && <div className="text-[11px] text-red-600 mt-1">Enter a valid URL starting with http:// or https://</div>}
+// Validate a block and return its API payload, or throw an Error with a message.
+function buildPayload(block) {
+  if (!block.caption.trim()) throw new Error("Content is required.");
+  if (!String(block.posted_at).trim()) throw new Error("Date & time is required.");
+  const entries = Object.entries(block.dest);
+  if (entries.length === 0) throw new Error("Select at least one platform and page.");
+  const destinations = [];
+  for (const [id, v] of entries) {
+    if (v.link && !isValidUrl(v.link)) throw new Error("One of the page links is not a valid URL (must start with http:// or https://).");
+    destinations.push({ page_id: Number(id), platform: v.platform, post_link: v.link.trim() || null });
+  }
+  return {
+    caption: block.caption, post_type: block.post_type, media_url: block.media_url || null,
+    posted_at: block.posted_at, approval_status: block.approval_status,
+    publish_status: block.publish_status,
+    scheduled_at: block.publish_status === "scheduled" ? block.posted_at : null,
+    views: Number(block.views) || 0, likes: Number(block.likes) || 0,
+    comments: Number(block.comments) || 0, shares: Number(block.shares) || 0,
+    reach: Number(block.reach) || 0, viral: block.viral ? 1 : 0,
+    destinations,
+  };
+}
+
+function PostModal({ pages, onClose, onSaved, editing }) {
+  const allPages = pages || [];
+  const isEdit = !!editing;
+  // Single vs Multiple (§1) — Multiple lets you queue several independent posts.
+  const [postType, setPostType] = useState("single");
+  const [blocks, setBlocks] = useState(() => (isEdit ? [blockFromEditing(editing)] : [emptyBlock()]));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const multiple = !isEdit && postType === "multiple";
+  const patchBlock = (i, p) => setBlocks((bs) => bs.map((b, idx) => (idx === i ? { ...b, ...p } : b)));
+  const addBlock = () => setBlocks((bs) => [...bs, emptyBlock()]);
+  const removeBlock = (i) => setBlocks((bs) => bs.filter((_, idx) => idx !== i));
+
+  function switchType(t) {
+    setPostType(t);
+    // Single keeps just the first block; Multiple keeps all (start with 1).
+    if (t === "single") setBlocks((bs) => [bs[0] || emptyBlock()]);
+  }
+
+  async function save() {
+    if (saving) return;
+    setError("");
+    let payloads;
+    try {
+      payloads = (multiple ? blocks : [blocks[0]]).map(buildPayload);
+    } catch (e) { setError(e.message); return; }
+    setSaving(true);
+    try {
+      if (isEdit) {
+        const r = await fetch(`/api/social-management/posts/${editing.id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payloads[0]),
+        });
+        const b = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(b.message || "Could not save the post.");
+      } else {
+        // Each block is its own independent post record (§1/§7) — saved in order.
+        for (let i = 0; i < payloads.length; i++) {
+          // eslint-disable-next-line no-await-in-loop
+          const r = await fetch("/api/social-management/posts", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payloads[i]),
+          });
+          // eslint-disable-next-line no-await-in-loop
+          const b = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(`Post ${i + 1}: ${b.message || "could not be saved."}`);
+        }
+      }
+      onSaved();
+    } catch (e) { setError(e.message || "Could not save."); setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 space-y-4 max-h-[92vh] overflow-auto">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-gray-900">{isEdit ? "Edit Post" : "Log a Post"}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
 
-        <details className="text-sm">
-          <summary className="cursor-pointer text-gray-500 text-xs font-semibold uppercase tracking-wide">Add metrics (optional)</summary>
-          <div className="grid grid-cols-3 gap-2 mt-2">
-            {["views", "likes", "comments", "shares", "reach"].map((m) => (
-              <input key={m} type="number" placeholder={m} className={inp} value={form[m]} onChange={(e) => setForm({ ...form, [m]: e.target.value })} />
-            ))}
+        {/* Post Type (Single / Multiple) — add mode only (§1) */}
+        {!isEdit && (
+          <div>
+            <label className={LBL}>Post Type</label>
+            <div className="flex gap-2">
+              {[["single", "Single Post"], ["multiple", "Multiple Post"]].map(([v, l]) => (
+                <button key={v} type="button" onClick={() => switchType(v)}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border ${postType === v ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            {multiple && <p className="text-[11px] text-gray-400 mt-1">Each post below is saved as its own independent record with its own destinations.</p>}
           </div>
-        </details>
+        )}
+
+        {blocks.map((b, i) => (
+          <PostBlock key={i} block={b} patch={(p) => patchBlock(i, p)} allPages={allPages}
+            index={i} total={blocks.length} onRemove={() => removeBlock(i)} />
+        ))}
+
+        {multiple && (
+          <button type="button" onClick={addBlock} className="w-full border border-dashed border-gray-300 rounded-lg py-2 text-sm font-semibold text-[#164FA3] hover:bg-blue-50 inline-flex items-center justify-center gap-1">
+            <Plus size={15} /> Add another post
+          </button>
+        )}
 
         {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
-        {ok && <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{ok}</div>}
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={save} disabled={saving || uploading || !form.page_id || !contentOk} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : (editing ? "Save" : "Submit")}</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-1.5">
+            {saving && <Loader2 size={15} className="animate-spin" />}{isEdit ? "Save" : (multiple ? `Submit ${blocks.length} Post${blocks.length === 1 ? "" : "s"}` : "Submit Post")}
+          </button>
         </div>
       </div>
     </div>

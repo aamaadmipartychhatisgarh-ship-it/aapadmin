@@ -5,14 +5,17 @@ import { normalizeRole, ROLES, canAccessSocial } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
+import { ensureSocialPostSchema } from "@/lib/socialPostSchema";
+import { destinationsByPost } from "@/lib/socialDestinations";
 
 // Aggregate data for the Social Management page (overview + per-LS rollups).
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-    // Make sure the DP column exists so `sp.*` below returns photo_url.
+    // Make sure the DP column + destinations table exist.
     await ensureSocialPageSchema();
+    await ensureSocialPostSchema();
 
     // Social pages are keyed by lok_sabha_id. Scope per role:
     //   zone_admin     → pages whose LS is in the zone
@@ -38,8 +41,8 @@ export async function GET() {
 
     const pages = await query(
       `SELECT sp.*, u.username AS manager_name,
-              (SELECT COUNT(*) FROM social_posts p WHERE p.page_id = sp.id AND p.approval_status='approved') AS post_count,
-              (SELECT COUNT(*) FROM social_posts p WHERE p.page_id = sp.id AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE()) AS today_posts,
+              (SELECT COUNT(DISTINCT d.post_id) FROM social_post_destinations d JOIN social_posts p ON p.id = d.post_id WHERE d.page_id = sp.id AND p.approval_status='approved') AS post_count,
+              (SELECT COUNT(DISTINCT d.post_id) FROM social_post_destinations d JOIN social_posts p ON p.id = d.post_id WHERE d.page_id = sp.id AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE()) AS today_posts,
               (SELECT COALESCE(SUM(p.views),0)  FROM social_posts p WHERE p.page_id = sp.id) AS total_views,
               (SELECT COALESCE(SUM(p.reach),0)  FROM social_posts p WHERE p.page_id = sp.id) AS total_reach,
               (SELECT MAX(p.posted_at)          FROM social_posts p WHERE p.page_id = sp.id) AS last_posted_at
@@ -86,13 +89,18 @@ export async function GET() {
               (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE viral = 1 ${f}) AS viral_posts,
               (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE approval_status='pending' ${f}) AS pending_posts,
               (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE DATE(COALESCE(posted_at, p.created_at)) = CURDATE() ${f}) AS today_uploads,
-              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE sp2.platform='facebook'  AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE() ${f}) AS fb_today_posts,
-              (SELECT COUNT(*) FROM social_posts p JOIN social_pages sp2 ON sp2.id=p.page_id WHERE sp2.platform='instagram' AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE() ${f}) AS ig_today_posts,
+              (SELECT COUNT(DISTINCT d.post_id) FROM social_post_destinations d JOIN social_pages sp2 ON sp2.id=d.page_id JOIN social_posts p ON p.id=d.post_id WHERE sp2.platform='facebook'  AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE() ${f}) AS fb_today_posts,
+              (SELECT COUNT(DISTINCT d.post_id) FROM social_post_destinations d JOIN social_pages sp2 ON sp2.id=d.page_id JOIN social_posts p ON p.id=d.post_id WHERE sp2.platform='instagram' AND DATE(COALESCE(p.posted_at, p.created_at)) = CURDATE() ${f}) AS ig_today_posts,
               (SELECT COALESCE(SUM(sp2.followers),0) FROM social_pages sp2 WHERE sp2.is_active=1 AND sp2.platform='facebook'  ${f}) AS fb_followers,
               (SELECT COALESCE(SUM(sp2.followers),0) FROM social_pages sp2 WHERE sp2.is_active=1 AND sp2.platform='instagram' ${f}) AS ig_followers
          FROM social_pages sp WHERE is_active = 1 ${lsFilter}`,
       [...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams]
     ).then((r) => [r]);
+
+    // Attach each post's platform/page destinations (with per-page links) so the
+    // Post List can show every destination, and Edit can repopulate them (§10/§12).
+    const dmap = await destinationsByPost(recentPosts.map((p) => p.id));
+    for (const p of recentPosts) p.destinations = dmap[p.id] || [];
 
     return NextResponse.json({ pages, recentPosts, pending, overview });
   } catch (err) {
