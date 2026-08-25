@@ -6,6 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { ensureContactDesignationsSchema, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,7 @@ export async function GET(req) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     await ensureContactDesignationsSchema();
+    await ensureDesignationLevelColumn(query); // PROMPT 14 — designations.level
 
     const { searchParams } = new URL(req.url);
     const level = String(searchParams.get("level") || "district").toLowerCase();
@@ -59,7 +61,12 @@ export async function GET(req) {
     if (level === "state") {
       const scope = scopeFilterSync(session.user, "c");
       const notWrong = await notWrongNumberClause("c");
-      const desWhere = hasDesignation ? "WHERE d.id = ?" : "";
+      // Only State-level designations (PROMPT 14). Legacy rows with no level yet
+      // (level IS NULL) still show so nothing disappears before migration.
+      const desConds = ["(d.level = 'state' OR d.level IS NULL)"];
+      const desParams = [];
+      if (hasDesignation) { desConds.push("d.id = ?"); desParams.push(designationId); }
+      const desWhere = "WHERE " + desConds.join(" AND ");
       const rows = await query(
         `SELECT d.id AS designation_id, d.name AS designation_name, d.sort_order,
                 c.id AS contact_id, c.person_name,
@@ -70,7 +77,7 @@ export async function GET(req) {
            LEFT JOIN workers w ON w.id = c.worker_id
           ${desWhere}
           ORDER BY (d.sort_order IS NULL), d.sort_order, d.name, c.person_name`,
-        hasDesignation ? [...scope.params, designationId] : [...scope.params]
+        [...scope.params, ...desParams]
       );
       const byDes = new Map();
       for (const r of rows) {
@@ -93,12 +100,20 @@ export async function GET(req) {
     const notWrong = await notWrongNumberClause("c");
     const levelIdExpr = LEVEL_ID_EXPR[level];
 
-    // 1) Designation master (optionally narrowed by the dropdown).
+    // 1) Designation master for THIS level only (PROMPT 14) — a designation is
+    //    associated with a hierarchy level, so e.g. the District view lists only
+    //    District-level designations. Legacy rows with no level (NULL) still show
+    //    at every level so nothing disappears before they are assigned one.
+    //    Optionally narrowed further by the Designation dropdown.
+    const desConds = ["(level = ? OR level IS NULL)"];
+    const desParams = [level];
+    if (hasDesignation) { desConds.push("id = ?"); desParams.push(designationId); }
     const designations = await query(
-      `SELECT id, name FROM designations ${hasDesignation ? "WHERE id = ?" : ""}
+      `SELECT id, name, level FROM designations WHERE ${desConds.join(" AND ")}
         ORDER BY (sort_order IS NULL), sort_order, name`,
-      hasDesignation ? [designationId] : []
+      desParams
     );
+    const allowedDes = new Set(designations.map((d) => d.id));
 
     // 2) All locations of this level from the master.
     const masterLocs = await query(
@@ -128,6 +143,9 @@ export async function GET(req) {
     const grouped = new Map();
     let totalPeople = 0;
     for (const r of peopleRows) {
+      // Only count/group people whose designation belongs to THIS level, so the
+      // totals match the level-filtered matrix (no over-count from other levels).
+      if (!allowedDes.has(r.designation_id)) continue;
       const loc = r.loc_id ?? 0; // 0 = no location at this level
       if (!grouped.has(loc)) grouped.set(loc, new Map());
       const byDes = grouped.get(loc);
