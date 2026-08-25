@@ -62,7 +62,17 @@ export async function GET() {
       };
     }
 
-    const newspapersPublished = await countBy("pn.coverage_date", "pn.kind = ?", ["newspaper_scan"]);
+    // Newspaper Published (BUG 15) — a published newspaper record is a press_note
+    // ATTACHED TO A NEWSPAPER (newspaper_id set). This is the app's own definition
+    // of "published" (the per-newspaper published-list counts exactly these), and
+    // it is content-type agnostic: the Newspapers form now saves kinds like
+    // "newspaper_coverage" / "news_article", NOT the legacy "newspaper_scan" the
+    // old filter looked for — which is why the count read low/zero. We also keep
+    // any legacy "newspaper_scan" rows that predate newspaper_id. Dated by
+    // coverage_date (the publication date), so Yesterday/Week/Month are accurate.
+    const newspapersPublished = await countBy(
+      "pn.coverage_date", "(pn.newspaper_id IS NOT NULL OR pn.kind = ?)", ["newspaper_scan"]
+    );
     const mediaCoverageTotal = await countBy("pn.coverage_date", null);
     const pressNotesReleased = await countBy("pn.coverage_date", "pn.kind = ?", ["press_note"]);
 
