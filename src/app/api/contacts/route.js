@@ -77,6 +77,17 @@ export async function GET(req) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);
     }
+    // Count-card filters (PROMPT 2): contacts with a real Address value, and
+    // contacts that actually have a stored photo. Address = non-NULL and not
+    // blank after trimming. Photo = a non-empty resolved photo_url (the same
+    // COALESCE(contact, linked-worker) the list displays), so it reflects the
+    // true stored/displayed photo state — never a blank/placeholder.
+    if (searchParams.get("has_address") === "1") {
+      where += " AND c.address IS NOT NULL AND TRIM(c.address) <> ''";
+    }
+    if (searchParams.get("has_photo") === "1") {
+      where += " AND COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) IS NOT NULL";
+    }
     // Duplicates: phone_number is UNIQUE, so duplicates are the same number saved
     // in different formats (+91/0 prefix, spaces). Match on the last 10 digits.
     if (duplicates === "1") {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, AlertTriangle } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, AlertTriangle, Camera } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -131,7 +131,7 @@ export default function ContactsModule({ session, mode }) {
   // Filter-independent status breakdown for the Assignment Summary — always
   // shows the full picture (Pending/Assigned/Pool/Done) regardless of which
   // status pill is currently active, scoped by the same geo/designation filters.
-  const [counts, setCounts] = useState({ pending: 0, assigned: 0, pool: 0, done: 0 });
+  const [counts, setCounts] = useState({ pending: 0, assigned: 0, pool: 0, done: 0, address: 0, photo: 0 });
   const [countsLoading, setCountsLoading] = useState(true);
   // Bulk checkbox selection — an explicit set of contact ids. Empty means
   // "act on everything matching the current filters" (the original,
@@ -206,11 +206,20 @@ export default function ContactsModule({ session, mode }) {
       const r = await fetch(`${cfg.listUrl}?${p}`, { cache: "no-store" });
       return r.ok ? (await r.json()).total ?? 0 : 0;
     };
-    const [pending, assigned, pool, done] = await Promise.all([
+    // Address / Photo counts (PROMPT 2) — across the SAME scope, independent of
+    // the status pill: total contacts that have a real address / a stored photo.
+    const fetchFlag = async (flag) => {
+      const p = new URLSearchParams(base);
+      p.set(flag, "1");
+      const r = await fetch(`${cfg.listUrl}?${p}`, { cache: "no-store" });
+      return r.ok ? (await r.json()).total ?? 0 : 0;
+    };
+    const [pending, assigned, pool, done, address, photo] = await Promise.all([
       fetchCount("pending"), fetchCount("assigned"), fetchCount("pool"), fetchCount("done"),
+      fetchFlag("has_address"), fetchFlag("has_photo"),
     ]);
     if (seq !== countSeq.current) return;
-    setCounts({ pending, assigned, pool, done });
+    setCounts({ pending, assigned, pool, done, address, photo });
     setCountsLoading(false);
   }
 
@@ -664,6 +673,26 @@ export default function ContactsModule({ session, mode }) {
       {message && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex items-center gap-2"><CheckCircle2 size={16} />{message}</div>}
       {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3">{error}</div>}
 
+      {/* Top count cards (PROMPT 2) — live from the DB for the current scope.
+          Address Count = contacts with a real address; Photo Update Count =
+          contacts that have a stored photo. Both update on the same reload as
+          the rest (add / edit address / upload / remove photo). */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {[
+          { label: "Total Contacts", value: total, Icon: UserCheck, tint: "text-[#164FA3]", live: false },
+          { label: "Address Count", value: counts.address, Icon: MapPin, tint: "text-emerald-600", live: true },
+          { label: "Photo Update Count", value: counts.photo, Icon: Camera, tint: "text-amber-600", live: true },
+        ].map((s) => (
+          <div key={s.label} className="bg-white rounded-2xl border border-gray-200 shadow-sm px-4 py-3 flex items-center gap-3">
+            <span className={`w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center ${s.tint}`}><s.Icon size={18} /></span>
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{s.label}</div>
+              <div className="text-xl font-bold text-gray-900">{s.live && countsLoading ? "…" : Number(s.value || 0).toLocaleString()}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <CollapsibleSection title="Search & Filters">
       <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
@@ -983,6 +1012,7 @@ export default function ContactsModule({ session, mode }) {
           onClose={() => setEditingIndex(null)}
           onSaved={(updated) => {
             setContacts((prev) => prev.map((c, i) => (i === editingIndex ? { ...c, ...updated } : c)));
+            loadCounts(); // refresh Address / Photo counts after an edit (PROMPT 2)
             if (editingHasNext) editStep(1); else setEditingIndex(null);
           }}
         />

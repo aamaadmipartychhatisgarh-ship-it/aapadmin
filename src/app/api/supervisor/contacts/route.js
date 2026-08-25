@@ -57,6 +57,13 @@ export async function GET(req) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);
     }
+    // Address / Photo count-card filters (PROMPT 2) — mirror of the admin route.
+    if (searchParams.get("has_address") === "1") {
+      where += " AND c.address IS NOT NULL AND TRIM(c.address) <> ''";
+    }
+    if (searchParams.get("has_photo") === "1") {
+      where += " AND COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) IS NOT NULL";
+    }
     if (duplicates === "1") {
       where += ` AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) IN (
         SELECT p FROM (
