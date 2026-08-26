@@ -22,9 +22,11 @@ export async function POST(req) {
     if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const d = await req.json();
     if (!d.name) return NextResponse.json({ message: "Name required" }, { status: 400 });
+    // photo_url (BUG 26) — a durable /api/uploads reference (media_files LONGBLOB),
+    // so the spokesperson photo survives redeploys and is shown everywhere.
     const res = await query(
-      `INSERT INTO spokespersons (name, mobile, expertise, languages) VALUES (?, ?, ?, ?)`,
-      [d.name, d.mobile || null, d.expertise || null, d.languages || null]
+      `INSERT INTO spokespersons (name, mobile, expertise, languages, photo_url) VALUES (?, ?, ?, ?, ?)`,
+      [d.name, d.mobile || null, d.expertise || null, d.languages || null, d.photo_url || null]
     );
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {

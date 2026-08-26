@@ -826,8 +826,8 @@ function SpokespersonsTab({ data, onChange }) {
 function SpokespersonModal({ editing, onClose, onSaved }) {
   const [form, setForm] = useState(editing ? {
     name: editing.name || "", mobile: editing.mobile || "",
-    languages: editing.languages || "",
-  } : { name: "", mobile: "", languages: "" });
+    languages: editing.languages || "", photo_url: editing.photo_url || "",
+  } : { name: "", mobile: "", languages: "", photo_url: "" });
   const [saving, setSaving] = useState(false);
   async function save() {
     setSaving(true);
@@ -841,6 +841,25 @@ function SpokespersonModal({ editing, onClose, onSaved }) {
       <input className={inp} placeholder="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
       <input className={inp} placeholder="Mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
       <input className={inp} placeholder="Languages (e.g. Hindi, English)" value={form.languages} onChange={(e) => setForm({ ...form, languages: e.target.value })} />
+      {/* Photo (BUG 26) — durable /api/uploads storage (media_files LONGBLOB) so
+          it survives refresh, re-login and redeploys, and shows wherever this
+          spokesperson is used (cards, debate/press-conference dropdowns). The
+          live Avatar previews the current/updated photo; Remove clears only it. */}
+      <div>
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Photo</label>
+        <div className="flex items-center gap-3">
+          <Avatar name={form.name || "?"} src={form.photo_url} size={52} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
+          <FileUpload
+            value={form.photo_url}
+            onChange={(url) => setForm({ ...form, photo_url: url })}
+            endpoint="/api/uploads"
+            accept="image/*"
+            extRe={IMG_EXT_RE}
+            formatMsg="Unsupported image. Use JPG, JPEG, PNG or WEBP."
+          />
+        </div>
+        <p className="text-[10px] text-gray-400 mt-1">JPG, JPEG, PNG or WEBP — stored permanently.</p>
+      </div>
       <ModalActions onClose={onClose} onSave={save} saving={saving} disabled={!form.name} />
     </Modal>
   );
