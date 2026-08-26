@@ -48,8 +48,10 @@ export const PAGES = [
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
   { key: "media", label: "Media", href: "/dashboard/media", prefixes: ["/dashboard/media"], icon: "Newspaper",
     roles: [...OVERSIGHT, ROLES.PRESS_MEDIA, ROLES.MEDIA_USER] },
-  { key: "social", label: "Social Media", href: "/dashboard/social", prefixes: ["/dashboard/social"], icon: "Share2",
-    roles: [...OVERSIGHT, ROLES.SOCIAL_MEDIA] },
+  // BUG 17 — the "Social Media" (War Room) page was removed entirely. Only the
+  // Social Command centre (social_management) remains. No "social" page key
+  // exists anymore, so it can't be granted in Page Access, appears in no nav,
+  // and any stale page_permissions row for it is ignored (invalid key).
   { key: "social_management", label: "Social Command", href: "/dashboard/social-management", prefixes: ["/dashboard/social-management"], icon: "Share2",
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SOCIAL_MEDIA] },
   { key: "reports", label: "Reports", href: "/dashboard/reports", prefixes: ["/dashboard/reports"], icon: "FileText",

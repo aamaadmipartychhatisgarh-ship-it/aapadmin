@@ -32,7 +32,6 @@ async function handleSignOut() {
 const DASHBOARD_SWITCHER = [
   { name: "My Profile", href: "/dashboard/profile", icon: User },
   { name: "Media Center", href: "/dashboard/media", icon: Newspaper },
-  { name: "Social Media", href: "/dashboard/social", icon: Share2 },
   { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
 ];
 
@@ -58,7 +57,6 @@ const SUPERVISOR_NAV = [
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
   { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
   { name: "Media", href: "/dashboard/media", icon: Newspaper },
-  { name: "Social Media", href: "/dashboard/social", icon: Share2 },
   // Reports is a collapsible parent — Area Reports is nested beneath it as a
   // child page (supervisor dashboard only). Analytics is intentionally NOT
   // listed here (removed from the supervisor sidebar); its page/route/API stay
@@ -211,7 +209,6 @@ export default function DashboardLayout({ children }) {
       { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
@@ -229,7 +226,6 @@ export default function DashboardLayout({ children }) {
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
-      { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
@@ -248,7 +244,6 @@ export default function DashboardLayout({ children }) {
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
-      { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
     ],
     [ROLES.DISTRICT_ADMIN]: [
@@ -312,9 +307,9 @@ export default function DashboardLayout({ children }) {
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
     ];
   } else if (canonical === ROLES.SOCIAL_MEDIA) {
-    // Social media staff: war room + command center.
+    // Social media staff: the Social Command centre (the standalone "Social
+    // Media" war-room page was removed — BUG 17).
     navItems = [
-      { name: "Social Media", href: "/dashboard/social", icon: Share2 },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
     ];

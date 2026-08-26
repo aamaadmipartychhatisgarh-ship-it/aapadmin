@@ -50,7 +50,7 @@ export default function WorkspacePage() {
       // The workspace is for callers only. Send oversight roles to their landing page.
       router.push(isAdmin(session) ? "/dashboard/admin" : "/dashboard/supervisor");
     } else if (status === "authenticated" && (isPressMedia(session) || isSocialMedia(session))) {
-      router.push(isPressMedia(session) ? "/dashboard/media" : "/dashboard/social");
+      router.push(isPressMedia(session) ? "/dashboard/media" : "/dashboard/social-management");
     }
   }, [status, session, router]);
 

@@ -29,7 +29,7 @@ export default function UserDashboard() {
     } else if (status === "authenticated" && !previewing && (isPressMedia(session) || isMediaUser(session))) {
       router.push("/dashboard/media");
     } else if (status === "authenticated" && !previewing && isSocialMedia(session)) {
-      router.push("/dashboard/social");
+      router.push("/dashboard/social-management");
     } else if (status === "authenticated") {
       // The caller's own stats — /api/me/stats resolves the impersonated caller
       // server-side (see actAs.js), so a previewing Super Admin sees the
