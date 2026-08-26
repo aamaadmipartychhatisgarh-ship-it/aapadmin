@@ -5,7 +5,7 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessMedia } from "@/lib/permissions";
 import {
   LayoutDashboard, Newspaper, Tv, Mic, UserCheck, BarChart3, Upload, Plus, Loader2, X,
-  Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil, ChevronDown, Check, Search, Video,
+  Calendar, FileText, MessageCircle, CheckCircle2, TrendingUp, Eye, Pencil, ChevronDown, Check, Search, Video, Trash2,
 } from "lucide-react";
 import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 import FloatingPopover from "@/components/FloatingPopover";
@@ -192,7 +192,21 @@ function NewspapersTab({ data, onChange, flash }) {
   const router = useRouter();
   const [showAdd, setShowAdd] = useState(false);
   const [showAddNewspaper, setShowAddNewspaper] = useState(false);
+  const [editNewspaper, setEditNewspaper] = useState(null); // newspaper being edited (BUG 21)
   const [uploadFor, setUploadFor] = useState(null); // newspaper id to pre-select on Upload
+
+  // BUG 21 — delete a newspaper. Confirm first; the backend blocks deletion when
+  // the newspaper still has publications (so published records are never lost).
+  async function deleteNewspaper(np) {
+    if (!confirm(`Delete the newspaper “${np.name}”?\n\nThis removes only the newspaper. Its published records are never deleted — if any exist, deletion is blocked until they're removed or reassigned.`)) return;
+    try {
+      const r = await fetch(`/api/media/newspapers/${np.id}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { flash?.(d.message || "Could not delete the newspaper."); return; }
+      flash?.("Newspaper deleted.");
+      onChange();
+    } catch { flash?.("Could not delete the newspaper. Please try again."); }
+  }
   // Dedicated Lok Sabha-wise search over the newspaper cards. "" = no filter;
   // "__all__" = papers mapped to All Lok Sabha; otherwise a specific Lok Sabha id.
   const [lokSearch, setLokSearch] = useState("");
@@ -264,13 +278,14 @@ function NewspapersTab({ data, onChange, flash }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {shownCards.map((np) => (
-            <NewspaperCard key={np.id} np={np} onUpload={uploadForNewspaper} onViewList={viewListFor} />
+            <NewspaperCard key={np.id} np={np} onUpload={uploadForNewspaper} onViewList={viewListFor} onEdit={setEditNewspaper} onDelete={deleteNewspaper} />
           ))}
         </div>
       )}
 
       {showAdd && <PressNoteModal newspapers={data.newspapers} defaultNewspaperId={uploadFor} onClose={() => { setShowAdd(false); setUploadFor(null); }} onSaved={(msg) => { setShowAdd(false); setUploadFor(null); onChange(); flash?.(msg); }} />}
       {showAddNewspaper && <NewspaperModal onClose={() => setShowAddNewspaper(false)} onSaved={(msg) => { setShowAddNewspaper(false); onChange(); flash?.(msg); }} />}
+      {editNewspaper && <NewspaperModal editing={editNewspaper} onClose={() => setEditNewspaper(null)} onSaved={(msg) => { setEditNewspaper(null); onChange(); flash?.(msg); }} />}
     </div>
   );
 }
@@ -280,9 +295,13 @@ function NewspapersTab({ data, onChange, flash }) {
 // the single source of truth — so updates to that master flow through here
 // automatically; nothing is hardcoded. An "All" option maps the newspaper to
 // every constituency (stored as a flag, not a fake Lok Sabha row).
-function NewspaperModal({ onClose, onSaved }) {
-  const [name, setName] = useState("");
-  const [lokSabha, setLokSabha] = useState(""); // "" | "all" | "<id>"
+function NewspaperModal({ onClose, onSaved, editing }) {
+  const isEdit = !!editing;
+  const [name, setName] = useState(editing?.name || "");
+  // Prefill the Lok Sabha mapping from the newspaper being edited.
+  const [lokSabha, setLokSabha] = useState(
+    editing ? (editing.lok_sabha_all ? "all" : (editing.lok_sabha_id ? String(editing.lok_sabha_id) : "")) : ""
+  ); // "" | "all" | "<id>"
   const [options, setOptions] = useState([]);
   const [loadingLs, setLoadingLs] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -308,18 +327,20 @@ function NewspaperModal({ onClose, onSaved }) {
       ? { name: clean, lok_sabha_all: true }
       : { name: clean, lok_sabha_id: Number(lokSabha) };
     try {
-      const r = await fetch("/api/media/newspapers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const url = isEdit ? `/api/media/newspapers/${editing.id}` : "/api/media/newspapers";
+      const method = isEdit ? "PUT" : "POST";
+      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(d.message || "Could not add the newspaper."); setSaving(false); return; }
-      onSaved("Newspaper added successfully.");
+      if (!r.ok) { setError(d.message || (isEdit ? "Could not update the newspaper." : "Could not add the newspaper.")); setSaving(false); return; }
+      onSaved(isEdit ? "Newspaper updated successfully." : "Newspaper added successfully.");
     } catch {
-      setError("Could not add the newspaper. Please try again.");
+      setError(isEdit ? "Could not update the newspaper. Please try again." : "Could not add the newspaper. Please try again.");
       setSaving(false);
     }
   }
 
   return (
-    <Modal title="Add Newspaper" onClose={onClose}>
+    <Modal title={isEdit ? "Edit Newspaper" : "Add Newspaper"} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Newspaper Name <span className="text-red-500">*</span></label>
@@ -337,7 +358,7 @@ function NewspaperModal({ onClose, onSaved }) {
         {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-2">{saving ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : "Add Newspaper"}</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-2">{saving ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : (isEdit ? "Save Changes" : "Add Newspaper")}</button>
         </div>
       </div>
     </Modal>
@@ -355,16 +376,19 @@ function SentimentBadge({ s }) {
 // Name, Lok Sabha Name, Total Published (live DB count), and Upload / Published
 // List actions. `np` comes from newspaperStats (real DB record: id, name,
 // lok_sabha_all, lok_sabha_name, total).
-function NewspaperCard({ np, onUpload, onViewList }) {
+function NewspaperCard({ np, onUpload, onViewList, onEdit, onDelete }) {
   const lokSabha = np.lok_sabha_all ? "All Lok Sabha" : (np.lok_sabha_name || "—");
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-3 h-full">
       <div className="flex items-center gap-2.5 min-w-0">
         <div className="w-7 h-7 rounded-lg bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center shrink-0"><Newspaper size={15} /></div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="font-bold text-gray-900 text-sm truncate" title={np.name}>{np.name}</div>
           <div className="text-[11px] font-medium text-gray-400 truncate" title={lokSabha}>{lokSabha}</div>
         </div>
+        {/* Edit / Delete for every newspaper (BUG 21) */}
+        {onEdit && <button onClick={() => onEdit(np)} title="Edit newspaper" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg shrink-0"><Pencil size={14} /></button>}
+        {onDelete && <button onClick={() => onDelete(np)} title="Delete newspaper" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={14} /></button>}
       </div>
       <div className="rounded-xl bg-gray-50 px-3 py-2">
         <div className="text-2xl font-bold text-gray-900 tabular-nums leading-none">{Number(np.total) || 0}</div>
