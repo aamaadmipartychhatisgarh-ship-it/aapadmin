@@ -718,6 +718,7 @@ function winningMargin(mlaVotes, comp1Votes) {
 // one-per-assembly (unique), so no duplicates are created; the list refreshes
 // immediately after any save with no browser refresh.
 function MlaManager({ flash, fail }) {
+  const { byName: partyByName } = usePartyMaster(); // live party logos by name (BUG 29)
   const [assemblies, setAssemblies] = useState([]);
   const [mlas, setMlas] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -810,7 +811,7 @@ function MlaManager({ flash, fail }) {
                         </td>
                         <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{m.assembly_name || "—"}</td>
                         <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{m.district || "—"}</td>
-                        <td className="px-3 py-2.5 text-gray-700">{m.party || "—"}</td>
+                        <td className="px-3 py-2.5 text-gray-700">{m.party ? <PartyLogo name={m.party} byName={partyByName} size={18} /> : "—"}</td>
                         <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={m.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{m.total}/100</span></div></td>
                         <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${m.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{m.assessment_done ? "Assessed" : "Pending"}</span></td>
                         <td className="px-3 py-2.5 text-right whitespace-nowrap">
