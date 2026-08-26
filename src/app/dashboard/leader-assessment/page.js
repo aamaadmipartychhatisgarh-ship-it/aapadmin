@@ -316,18 +316,27 @@ function Overview({ flash, fail }) {
   const s = data?.stats;
   return (
     <div className="space-y-5">
-      {/* SEARCH CARD — a PERMANENT top-level block: it is the first child here and
-          is rendered UNCONDITIONALLY (never behind the loading/error/selection
-          gates below), so it can never move, hide, or be replaced as a side effect
-          of searching, selecting, opening Full View, or a background refresh.
-          Options come only from the master-backed list; the picked id drives the
-          result panel that renders BELOW — never in place of — this card. */}
-      {/* Sticky within the scrolling main area: the card stays pinned at the top
-          while results and the rest of the Overview scroll UNDER it, so it never
-          moves below the results or "jumps" on scroll. Full-bleed opaque backing
-          (page bg) hides content passing behind it; z-30 keeps it under the
-          sidebar (z-50) and modals (z-70), and below the fixed header. */}
-      <div className="sticky top-0 z-30 -mx-4 lg:-mx-8 px-4 lg:px-8 pt-1 pb-2 bg-[#f4f6f8]">
+      {/* BUG 30 — the two metric cards are the FIRST thing on the dashboard, above
+          Find an Assembly. Rendered unconditionally (outside the load/error gate)
+          so they appear on initial load; values fill in from `data.stats` when it
+          arrives (Stat shows N/A until then). Calculations/counts are UNCHANGED —
+          only the position moved. Two rows of two = the two named cards, in order:
+            Row 1 — MLA Data · Total Candidate
+            Row 2 — Candidate Assessment Done (Assessment) · Assembly Candidate. */}
+      <div className="grid grid-cols-2 gap-3">
+        <Stat label="MLA Data" value={s?.assemblies_with_mla} />
+        <Stat label="Total Candidate" value={s?.total_candidates} />
+        <Stat label="Candidate Assessment Done" value={s?.assessments_completed} />
+        <Stat label="Assembly Candidate" value={s?.total_completed_assemblies} />
+      </div>
+
+      {/* SEARCH CARD — a PERMANENT top-level block: rendered UNCONDITIONALLY (never
+          behind the loading/error/selection gates below), so it can never hide or
+          be replaced as a side effect of searching, selecting, opening Full View,
+          or a background refresh. Options come only from the master-backed list;
+          the picked id drives the result panel that renders BELOW — never in place
+          of — this card. BUG 30: NOT sticky/frozen — it scrolls with the page. */}
+      <div>
         <Card title="Find an Assembly" icon={Search} sub="Search any assembly by name to load its assessment. Assemblies come from Master Data.">
           <AssemblyCombobox assemblies={assemblies} value={pickedId} onPick={setPickedId} />
         </Card>
@@ -385,32 +394,8 @@ function Overview({ flash, fail }) {
         </Card>
       </div>
 
-      {/* Overview status cards — part of "Other Overview sections", below the
-          Search Card, selected assembly and Top Ranked sections. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {/* MLA Data is the first metric: the actual number of unique assemblies
-            that currently have a valid, linked MLA profile — same DISTINCT
-            master-linked count as the MLA Data List (never Master-Data blindly,
-            never empty/duplicate profiles). Updates on MLA create/edit/delete. */}
-        <Stat label="MLA Data" value={s?.assemblies_with_mla} />
-        {/* Total Candidate is the second metric: the candidate-wise total of all
-            valid candidate records across every assembly (COUNT of la_aap_candidates,
-            each counted once) — NOT assembly-wise, not assumed 3/assembly, not
-            hardcoded. Updates on candidate create/delete/update. */}
-        <Stat label="Total Candidate" value={s?.total_candidates} />
-        {/* Candidate Assessment Done is the third metric: individual candidates
-            whose FULL 10-parameter assessment is complete (all 10 scores > 0) —
-            not merely an assessment record existing, not partial, not total-score
-            only. Recomputed live from the scores on every load. */}
-        <Stat label="Candidate Assessment Done" value={s?.assessments_completed} />
-        {/* Assembly Candidate is the fourth metric — ASSEMBLY-WISE (never per
-            candidate): the number of unique assemblies counted once when EVERY
-            candidate in the assembly has a complete 10-parameter assessment (the
-            shared assemblyComplete rule = total_completed_assemblies). An assembly
-            with any pending candidate counts 0; 3 completed candidates count as 1.
-            Auto-updates when candidate assessments change. */}
-        <Stat label="Assembly Candidate" value={s?.total_completed_assemblies} />
-      </div>
+      {/* Overview status cards moved to the TOP of the dashboard (BUG 30) — see the
+          two-row Stat grid above Find an Assembly. Counts/logic unchanged. */}
 
       <Card title="Assemblies" icon={Building2}>
         {assemblies.length === 0 ? <Empty msg="No assemblies yet. Add one on the Assemblies tab." /> : (
