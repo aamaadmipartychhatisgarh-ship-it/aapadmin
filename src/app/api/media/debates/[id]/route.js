@@ -10,7 +10,7 @@ export async function PUT(req, { params }) {
     if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
     const d = await req.json();
-    const fields = ["channel_id", "topic", "debate_date", "debate_time", "brief_pdf_url", "talking_points", "opposition_counter", "status", "viral_score"];
+    const fields = ["channel_id", "lok_sabha_id", "topic", "debate_date", "debate_time", "brief_pdf_url", "talking_points", "opposition_counter", "status", "viral_score"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     const hasSpokes = Array.isArray(d.spokesperson_ids);

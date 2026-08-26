@@ -1348,8 +1348,13 @@ function SpokespersonSelect({ options, value, onChange }) {
 }
 
 export function DebateModal({ channels, spokespersons, onClose, onSaved, editing, defaultChannelId }) {
+  // BUG 23 — Schedule Debate is opened from a channel, so the Channel is already
+  // known. It's locked (no dropdown) and shown read-only; channel_id is stored.
+  const lockedChannelId = editing?.channel_id ? String(editing.channel_id) : (defaultChannelId ? String(defaultChannelId) : "");
+  const lockedChannel = (channels || []).find((c) => String(c.id) === lockedChannelId) || null;
   const [form, setForm] = useState(editing ? {
     channel_id: editing.channel_id || "", topic: editing.topic || "",
+    lok_sabha_id: editing.lok_sabha_id ? String(editing.lok_sabha_id) : (lockedChannel?.lok_sabha_id ? String(lockedChannel.lok_sabha_id) : ""),
     debate_date: editing.debate_date ? editing.debate_date.slice(0, 10) : "",
     debate_time: editing.debate_time ? editing.debate_time.slice(0, 5) : "20:00",
     brief_pdf_url: editing.brief_pdf_url || "",
@@ -1357,7 +1362,23 @@ export function DebateModal({ channels, spokespersons, onClose, onSaved, editing
     status: editing.status || "scheduled",
     viral_score: editing.viral_score || 0,
     spokesperson_ids: (editing.spokespersons || []).map((s) => s.id),
-  } : { channel_id: defaultChannelId ? String(defaultChannelId) : "", topic: "", debate_date: "", debate_time: "20:00", brief_pdf_url: "", talking_points: "", spokesperson_ids: [] });
+  } : {
+    channel_id: lockedChannelId, topic: "",
+    // Default the debate's Lok Sabha to the channel's mapped constituency; still
+    // editable from the Master dropdown.
+    lok_sabha_id: lockedChannel?.lok_sabha_id ? String(lockedChannel.lok_sabha_id) : "",
+    debate_date: "", debate_time: "20:00", brief_pdf_url: "", talking_points: "", spokesperson_ids: [],
+  });
+  // Lok Sabha options — live from the existing Master Data, never hardcoded.
+  const [lokOptions, setLokOptions] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/locations?type=lok_sabha")
+      .then((r) => r.json())
+      .then((d) => { if (alive) setLokOptions(d.locations || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function save() {
@@ -1383,7 +1404,18 @@ export function DebateModal({ channels, spokespersons, onClose, onSaved, editing
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Channel</label>
-          <ChannelSelect options={channels} value={form.channel_id} onChange={(id) => setForm({ ...form, channel_id: id })} />
+          <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-800 flex items-center gap-2" title="This debate is scheduled for this channel">
+            <Tv size={15} className="text-[#164FA3] shrink-0" />
+            <span className="font-medium truncate">{lockedChannel?.name || "Selected channel"}</span>
+            <span className="ml-auto text-[10px] uppercase tracking-wide text-gray-400">Selected</span>
+          </div>
+        </div>
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Lok Sabha</label>
+          <select className={inp} value={form.lok_sabha_id} onChange={(e) => setForm({ ...form, lok_sabha_id: e.target.value })}>
+            <option value="">— Select Lok Sabha —</option>
+            {lokOptions.map((o) => <option key={o.id} value={String(o.id)}>{o.name}</option>)}
+          </select>
         </div>
         <div>
           <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Date *</label>

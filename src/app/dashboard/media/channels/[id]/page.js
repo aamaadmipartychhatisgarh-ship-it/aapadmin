@@ -83,7 +83,9 @@ function Body({ channelId }) {
         <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-700 text-sm">{error} <button onClick={load} className="ml-2 font-semibold underline">Retry</button></div>
       ) : ch ? (
         <>
-          {/* Channel header — name, Lok Sabha, tone + the ONLY Schedule Debate button */}
+          {/* Channel header — name, Lok Sabha, tone. Debate List only VIEWS/manages
+              existing debates (BUG 23): scheduling happens from the channel card
+              (Schedule Debate), so there is no Add/Schedule button here. */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-start justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center"><Tv size={24} /></div>
@@ -95,7 +97,6 @@ function Body({ channelId }) {
                 </div>
               </div>
             </div>
-            <button onClick={() => setModal("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add / Schedule Debate</button>
           </div>
 
           {/* Upcoming debates */}

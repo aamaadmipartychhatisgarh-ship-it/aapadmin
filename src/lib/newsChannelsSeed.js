@@ -28,6 +28,9 @@ export async function ensureNewsChannelsSeed() {
     // A channel maps to a Lok Sabha (locations.id where type='lok_sabha'). Added
     // idempotently for existing DBs; NULL on legacy rows (they keep working).
     await ensureColumn("news_channels", "lok_sabha_id", "INT NULL");
+    // BUG 23 — each debate also records its Lok Sabha (chosen on Schedule Debate
+    // from the Lok Sabha Master). Nullable so legacy debates keep working.
+    await ensureColumn("debates", "lok_sabha_id", "INT NULL");
     const [{ n } = { n: 0 }] = await query("SELECT COUNT(*) AS n FROM news_channels");
     if (Number(n) === 0) {
       for (let i = 0; i < DEFAULT_CHANNELS.length; i++) {
