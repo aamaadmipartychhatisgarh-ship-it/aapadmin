@@ -230,6 +230,11 @@ function NewspapersTab({ data, onChange, flash }) {
   // Filter the cards by the selected Lok Sabha using the ID relationship (never
   // the display name). No new list is created — the same cards are filtered.
   const allCards = data.newspaperStats || [];
+  // BUG 22 — the green indicator scales each newspaper's OWN published count
+  // against the busiest newspaper (a single consistent scale across all cards),
+  // computed live from the DB counts. Uses ALL newspapers (not the filtered
+  // view) so a card's shade is stable regardless of the Lok Sabha filter.
+  const maxTotal = allCards.reduce((m, c) => Math.max(m, Number(c.total) || 0), 0);
   const shownCards = allCards.filter((np) => {
     if (!lokSearch) return true;
     if (lokSearch === "__all__") return !!np.lok_sabha_all;
@@ -278,7 +283,7 @@ function NewspapersTab({ data, onChange, flash }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {shownCards.map((np) => (
-            <NewspaperCard key={np.id} np={np} onUpload={uploadForNewspaper} onViewList={viewListFor} onEdit={setEditNewspaper} onDelete={deleteNewspaper} />
+            <NewspaperCard key={np.id} np={np} maxTotal={maxTotal} onUpload={uploadForNewspaper} onViewList={viewListFor} onEdit={setEditNewspaper} onDelete={deleteNewspaper} />
           ))}
         </div>
       )}
@@ -376,8 +381,26 @@ function SentimentBadge({ s }) {
 // Name, Lok Sabha Name, Total Published (live DB count), and Upload / Published
 // List actions. `np` comes from newspaperStats (real DB record: id, name,
 // lok_sabha_all, lok_sabha_name, total).
-function NewspaperCard({ np, onUpload, onViewList, onEdit, onDelete }) {
+// Green publication indicator (BUG 22): width + shade scale with this
+// newspaper's OWN published count relative to the busiest newspaper. Derived,
+// never a hardcoded green. ratio in [0,1] → light green (low) to strong green
+// (high); an empty ratio stays at the light end (used only when count > 0).
+function greenForRatio(ratio) {
+  const r = Math.max(0, Math.min(1, ratio || 0));
+  const lightness = 78 - r * 46; // 78% (light) → 32% (strong)
+  const saturation = 45 + r * 32; // 45% → 77%
+  return `hsl(146, ${saturation}%, ${lightness}%)`;
+}
+
+function NewspaperCard({ np, maxTotal, onUpload, onViewList, onEdit, onDelete }) {
   const lokSabha = np.lok_sabha_all ? "All Lok Sabha" : (np.lok_sabha_name || "—");
+  const count = Number(np.total) || 0;
+  const max = Number(maxTotal) || 0;
+  const ratio = max > 0 ? count / max : 0; // this newspaper vs the busiest one
+  const pct = Math.round(ratio * 100);
+  const indicatorTitle = count === 0
+    ? "No publications yet"
+    : `${count} publication${count === 1 ? "" : "s"}${max > 0 ? ` · ${pct}% of the most-published newspaper` : ""}`;
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col gap-3 h-full">
       <div className="flex items-center gap-2.5 min-w-0">
@@ -391,8 +414,21 @@ function NewspaperCard({ np, onUpload, onViewList, onEdit, onDelete }) {
         {onDelete && <button onClick={() => onDelete(np)} title="Delete newspaper" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg shrink-0"><Trash2 size={14} /></button>}
       </div>
       <div className="rounded-xl bg-gray-50 px-3 py-2">
-        <div className="text-2xl font-bold text-gray-900 tabular-nums leading-none">{Number(np.total) || 0}</div>
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mt-1">Total Published</div>
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="text-2xl font-bold text-gray-900 tabular-nums leading-none">{count}</div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Total Published</div>
+        </div>
+        {/* Dynamic green indicator — proportional to this newspaper's own count
+            (§1/§2/§7). Width scales with the ratio; the shade deepens with it. */}
+        <div className="mt-2 h-2 rounded-full bg-gray-200 overflow-hidden" title={indicatorTitle}>
+          <div
+            className="h-full rounded-full transition-all duration-300"
+            style={{ width: count > 0 ? `${Math.max(pct, 6)}%` : "0%", background: greenForRatio(ratio) }}
+          />
+        </div>
+        <div className="mt-1 text-[10px] text-gray-400" title={indicatorTitle}>
+          {count === 0 ? "No publications yet" : (max > 0 ? `${pct}% of the busiest newspaper` : `${count} published`)}
+        </div>
       </div>
       <div className="mt-auto flex items-center gap-2">
         <button onClick={() => onUpload(np)} className="flex-1 inline-flex items-center justify-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-2 rounded-lg text-xs font-semibold"><Upload size={13} /> Upload</button>
