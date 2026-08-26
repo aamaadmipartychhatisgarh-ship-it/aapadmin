@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, Fragment } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar, { initialsOf } from "@/components/Avatar";
-import PartySelect, { usePartyMaster, PartyLogo, PartyBadge } from "@/components/PartySelect";
+import PartySelect, { usePartyMaster, PartyLogo, PartyBadge, partyLogoFor } from "@/components/PartySelect";
 import {
   LayoutDashboard, Building2, UserSquare2, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
@@ -271,6 +271,7 @@ function AssemblyHeader({ a, status }) {
 
 // ------------------------------- OVERVIEW ---------------------------------
 function Overview({ flash, fail }) {
+  const { byName: partyByName } = usePartyMaster(); // live party logos by name (BUG 28)
   const [data, setData] = useState(null);
   const [assemblies, setAssemblies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -428,7 +429,11 @@ function Overview({ flash, fail }) {
                     <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{a.candidate_count}/3</span></td>
                     <td className="px-3 py-2.5 text-gray-700">
                       {a.top_candidate ? (
-                        <div className="flex items-center gap-2 min-w-0"><Avatar name={a.top_candidate} src={a.top_candidate_photo_url} size={30} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-[10px]" /><span className="truncate">{a.top_candidate}</span></div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          {/* Order (BUG 28): Party Logo → Candidate Photo → Name */}
+                          <PartyLogoSlot party={a.top_candidate_party} partyByName={partyByName} size={18} />
+                          <Avatar name={a.top_candidate} src={a.top_candidate_photo_url} size={30} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-[10px]" /><span className="truncate">{a.top_candidate}</span>
+                        </div>
                       ) : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-3 py-2.5 font-semibold">{a.top_score != null ? `${a.top_score}/100` : <span className="text-gray-300">—</span>}</td>
@@ -516,6 +521,7 @@ function AssemblyCombobox({ assemblies, value, onPick }) {
 // first); RIGHT = the sitting MLA. A prominent "Full View" button opens the
 // complete assessment.
 function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
+  const { byName: partyByName } = usePartyMaster(); // live party logos by name (BUG 28)
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -605,6 +611,8 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                   {top3.map((c, i) => (
                     <div key={c.id} className="flex items-center gap-3 border border-gray-100 rounded-xl p-2.5">
                       <span className={`w-6 text-center font-bold shrink-0 ${i < 3 ? RANK_COLOR[i] : "text-gray-400"}`}>{i + 1}</span>
+                      {/* Order (BUG 28): Party Logo → Candidate Photo → Name */}
+                      <PartyLogoSlot party={c.party} partyByName={partyByName} size={26} />
                       <ProfilePhoto name={c.name} src={c.photo_url} size={48} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div>
@@ -612,7 +620,6 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                           <span>Age: <span className="text-gray-700 font-medium">{c.age != null ? c.age : "—"}</span></span>
                           <span>Caste: <span className="text-gray-700 font-medium">{c.caste || "—"}</span></span>
                           <span>Net Worth: <span className="text-gray-700 font-medium">{c.net_worth || "—"}</span></span>
-                          {c.party && <span className="inline-flex items-center gap-1">Party: <span className="text-gray-700 font-medium"><PartyBadge name={c.party} size={14} /></span></span>}
                         </div>
                       </div>
                       {/* Actual assessment score — the live 10-parameter total
@@ -1292,6 +1299,19 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
 // pre-selection needed. The assembly a candidate belongs to is chosen in the
 // form from the same master-linked assembly list used across the module, and the
 // list refreshes from the database immediately after every create/edit/remove.
+// BUG 28 — the Party Logo slot that leads every Assembly List candidate display
+// (order: Party Logo → Candidate Photo → Candidate Name). The logo resolves live
+// from Party Master by the candidate's OWN party name (never an unrelated one).
+// A party with no logo shows the initials placeholder; a candidate with no party
+// shows a neutral slot so the layout/order stays identical everywhere.
+function PartyLogoSlot({ party, partyByName, size = 20 }) {
+  if (!party) return <span className="rounded bg-gray-100 border border-gray-200 shrink-0" style={{ width: size, height: size }} title="No party" />;
+  return (
+    <Avatar name={party} src={partyLogoFor(partyByName, party)} size={size} square
+      className="bg-gray-100 border border-gray-200 shrink-0" textClassName="text-gray-500 text-[9px]" title={party} />
+  );
+}
+
 const EMPTY_CAND = { assembly_id: "", photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", business: "", monthly_income: "", education: "", political_experience: "", previous_elections: "", current_position: "" };
 function CandidatesTab({ flash, fail }) {
   const { byName: partyByName } = usePartyMaster(); // live party logos by name (BUG 27)
@@ -1373,13 +1393,15 @@ function CandidatesTab({ flash, fail }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-500"><tr>{[sortBy === "score" ? "#" : "", "Candidate", "Assembly", "District", "Party", "Type / Category", "Status", "Assessment Score", ""].map((h, i) => <th key={i} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+              <thead className="bg-gray-50 text-left text-gray-500"><tr>{[sortBy === "score" ? "#" : "", "Candidate", "Assembly", "District", "Type / Category", "Status", "Assessment Score", ""].map((h, i) => <th key={i} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {view.map((c, idx) => (
                   <tr key={c.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2.5 text-gray-400 font-bold w-8">{sortBy === "score" ? idx + 1 : ""}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2.5 min-w-0">
+                        {/* Order (BUG 28): Party Logo → Candidate Photo → Name */}
+                        <PartyLogoSlot party={c.party} partyByName={partyByName} size={22} />
                         <ProfilePhoto name={c.name} src={c.photo_url} size={34} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
                         <div className="min-w-0">
                           <div className="font-semibold text-gray-900 truncate">{c.name}</div>
@@ -1390,7 +1412,6 @@ function CandidatesTab({ flash, fail }) {
                     </td>
                     <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{c.assembly_name || "—"}</td>
                     <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{c.district || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{c.party ? <PartyLogo name={c.party} byName={partyByName} size={18} /> : "—"}</td>
                     <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3] whitespace-nowrap">{c.current_position || "AAP Candidate"}</span></td>
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Completed" : "Pending"}</span></td>
                     <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={c.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{c.total}/100</span></div></td>

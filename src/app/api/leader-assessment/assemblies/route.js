@@ -46,7 +46,7 @@ export async function GET(req) {
     let cands = [];
     if (ids.length) {
       cands = await query(
-        `SELECT c.id, c.assembly_id, c.name, c.photo_url, s.*
+        `SELECT c.id, c.assembly_id, c.name, c.photo_url, c.party, s.*
            FROM la_aap_candidates c
            LEFT JOIN la_candidate_assessments s ON s.candidate_id = c.id
           WHERE c.assembly_id IN (${ids.map(() => "?").join(",")})`,
@@ -59,7 +59,7 @@ export async function GET(req) {
       (candsByAsm[c.assembly_id] ||= []).push(c);
       const total = assessmentTotal(c);
       const cur = topByAsm[c.assembly_id];
-      if (!cur || total > cur.total) topByAsm[c.assembly_id] = { name: c.name, total, photo_url: c.photo_url || null };
+      if (!cur || total > cur.total) topByAsm[c.assembly_id] = { name: c.name, total, photo_url: c.photo_url || null, party: c.party || null };
     }
     // Live worker count per assembly: resolved from real users/workers keyed by
     // the assembly's district_id (never stored, so it auto-updates as workers
@@ -82,6 +82,7 @@ export async function GET(req) {
         mla_photo_url: r.mla_photo_url || null,
         top_candidate: topByAsm[r.id]?.name || null,
         top_candidate_photo_url: topByAsm[r.id]?.photo_url || null,
+        top_candidate_party: topByAsm[r.id]?.party || null,
         top_score: topByAsm[r.id]?.total ?? null,
         // THE assembly completion status (same rule everywhere): all its
         // candidates have a complete 10-parameter assessment. Computed live from
