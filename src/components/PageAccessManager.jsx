@@ -49,6 +49,7 @@ export default function PageAccessManager() {
   const [selPages, setSelPages] = useState([]); // array of page keys
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [pageQ, setPageQ] = useState(""); // search filter over the page list
 
   // When the chosen user changes, preload their currently-assigned pages so the
   // multi-select opens on their real saved selection (edit flow).
@@ -217,18 +218,39 @@ export default function PageAccessManager() {
               )}
             </div>
 
-            {/* Full multi-select checkbox grid of every page */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-72 overflow-auto border border-gray-100 rounded-lg p-2">
-              {data.pages.map((p) => {
-                const checked = selPages.includes(p.key);
-                return (
-                  <label key={p.key} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer text-sm ${checked ? "bg-blue-50 text-[#164FA3] font-medium" : "text-gray-700 hover:bg-gray-50"}`}>
-                    <input type="checkbox" checked={checked} onChange={() => togglePage(p.key)} className="accent-[#164FA3]" />
-                    <span className="truncate">{p.label}</span>
-                  </label>
-                );
-              })}
-            </div>
+            {/* Every registered page — searchable, with a live count so the list
+                can never silently fall short of the registry (the source of
+                truth). */}
+            {(() => {
+              const q = pageQ.trim().toLowerCase();
+              const shown = q ? data.pages.filter((p) => `${p.label} ${p.key}`.toLowerCase().includes(q)) : data.pages;
+              return (
+                <>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="relative flex-1">
+                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input className={`${inp} pl-8`} placeholder="Search pages…" value={pageQ} onChange={(e) => setPageQ(e.target.value)} />
+                    </div>
+                    <span className="text-xs text-gray-500 whitespace-nowrap">
+                      {q ? <>{shown.length} of <strong className="text-gray-900">{data.pages.length}</strong></> : <><strong className="text-gray-900">{data.pages.length}</strong> pages</>}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-72 overflow-auto border border-gray-100 rounded-lg p-2">
+                    {shown.length === 0 ? (
+                      <div className="col-span-full text-xs text-gray-400 px-2 py-3 text-center">No pages match “{pageQ.trim()}”.</div>
+                    ) : shown.map((p) => {
+                      const checked = selPages.includes(p.key);
+                      return (
+                        <label key={p.key} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer text-sm ${checked ? "bg-blue-50 text-[#164FA3] font-medium" : "text-gray-700 hover:bg-gray-50"}`}>
+                          <input type="checkbox" checked={checked} onChange={() => togglePage(p.key)} className="accent-[#164FA3]" />
+                          <span className="truncate" title={p.key}>{p.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
 
             <div className="flex items-center gap-3 mt-4 flex-wrap">
               <button onClick={saveAssignment} disabled={saving || !dirty} className={`${btn} bg-[#164FA3] text-white hover:bg-[#123f85] justify-center`}>

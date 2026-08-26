@@ -73,7 +73,10 @@ export const PAGES = [
   // (tab: true) — pageKeyForPath never resolves to them. Access is enforced by
   // the Administration page (tab visibility + entry) and by each master's own
   // API. Grantable through Page Access exactly like any other page.
-  { key: "master_data", label: "Master Data", href: "/dashboard/admin/administration?tab=master", prefixes: [], tab: true, icon: "Database",
+  // Master Data also has a standalone route (/dashboard/admin/settings) that
+  // renders the SAME component as the Administration "master" tab — gate it here
+  // so the route is protected under the same key (no separate list).
+  { key: "master_data", label: "Master Data", href: "/dashboard/admin/administration?tab=master", prefixes: ["/dashboard/admin/settings"], tab: true, icon: "Database",
     roles: [ROLES.SUPER_ADMIN] },
   { key: "caste_master", label: "Caste Master", href: "/dashboard/admin/administration?tab=castes", prefixes: [], tab: true, icon: "UserCheck",
     roles: [...OVERSIGHT] },
@@ -81,6 +84,22 @@ export const PAGES = [
     roles: [...OVERSIGHT] },
   { key: "party_master", label: "Party Master", href: "/dashboard/admin/administration?tab=parties", prefixes: [], tab: true, icon: "Flag",
     roles: [...OVERSIGHT] },
+  // Administration people-management. Teams and Users are Administration tabs
+  // AND have standalone routes (/dashboard/admin/teams, /dashboard/admin/users);
+  // register the routes so Page Access can grant them and the routes are
+  // protected. (The tabs' own visibility is still enforced by the Admin page.)
+  { key: "teams", label: "Teams", href: "/dashboard/admin/teams", prefixes: ["/dashboard/admin/teams"], icon: "Users",
+    roles: [...OVERSIGHT] },
+  { key: "users", label: "Users", href: "/dashboard/admin/users", prefixes: ["/dashboard/admin/users"], icon: "UserCog",
+    roles: [ROLES.SUPER_ADMIN] },
+  // Audit Log — the admin activity trail.
+  { key: "audit", label: "Audit Log", href: "/dashboard/admin/audit", prefixes: ["/dashboard/admin/audit"], icon: "FileText",
+    roles: [...ADMIN] },
+  // Supervisor Dashboard — one module covering the Overview + Live, Alerts,
+  // Areas, Attendance, Callers, Follow-Ups, Remarks and Sentiment sub-pages
+  // (they share the /dashboard/supervisor prefix; Contacts keeps its own key).
+  { key: "supervisor", label: "Supervisor Dashboard", href: "/dashboard/supervisor", prefixes: ["/dashboard/supervisor"], icon: "Users",
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
   { key: "training", label: "Training", href: "/dashboard/training", prefixes: ["/dashboard/training"], icon: "GraduationCap",
     roles: [...OVERSIGHT, ROLES.CALLER] },
 ];
