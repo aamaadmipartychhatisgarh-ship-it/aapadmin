@@ -536,7 +536,7 @@ function fmtDebateWhen(start) {
 // page (by channel ID). It shows basic info (name, Lok Sabha, tone) and this
 // channel's nearest upcoming debate with a real-time proximity colour. Schedule
 // Debate / Debate List now live on the detail page (not an inline menu here).
-function ChannelCard({ ch, debates, now, tone, onOpen, onSchedule }) {
+function ChannelCard({ ch, debates, now, tone, onOpen, onSchedule, onEdit, onDelete }) {
   const { nearest, start, more } = channelUpcoming(ch.id, debates, now);
   const vis = proximityVisual(start, now, nearest?.status);
   const speakers = (nearest?.spokespersons || []).map((s) => s.name).filter(Boolean);
@@ -547,7 +547,12 @@ function ChannelCard({ ch, debates, now, tone, onOpen, onSchedule }) {
     >
       <div className="flex items-center justify-between gap-2">
         <Tv className={vis.tone === "live" ? "text-red-600" : "text-[#164FA3]"} size={20} />
-        {vis.label && <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${vis.tone === "live" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{vis.label}</span>}
+        <div className="flex items-center gap-1">
+          {vis.label && <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full ${vis.tone === "live" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{vis.label}</span>}
+          {/* Edit / Delete for every channel (BUG 24) */}
+          {onEdit && <button type="button" onClick={() => onEdit(ch)} title="Edit channel" className="p-1 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded"><Pencil size={13} /></button>}
+          {onDelete && <button type="button" onClick={() => onDelete(ch)} title="Delete channel" className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={13} /></button>}
+        </div>
       </div>
       {/* Channel name opens the channel's Debate List page. */}
       <button type="button" onClick={() => onOpen(ch)} className="font-bold text-gray-900 text-sm mt-2 truncate text-left hover:text-[#164FA3] hover:underline" title={`Open ${ch.name}`}>{ch.name}</button>
@@ -583,9 +588,10 @@ function ChannelCard({ ch, debates, now, tone, onOpen, onSchedule }) {
 // Add Channel — exactly two fields: Channel Name + Lok Sabha. Lok Sabha options
 // come live from the existing Lok Sabha Master (GET /api/locations?type=lok_sabha),
 // the single source of truth — nothing hardcoded.
-function ChannelModal({ onClose, onSaved }) {
-  const [name, setName] = useState("");
-  const [lokSabha, setLokSabha] = useState("");
+function ChannelModal({ onClose, onSaved, editing }) {
+  const isEdit = !!editing;
+  const [name, setName] = useState(editing?.name || "");
+  const [lokSabha, setLokSabha] = useState(editing?.lok_sabha_id ? String(editing.lok_sabha_id) : "");
   const [options, setOptions] = useState([]);
   const [loadingLs, setLoadingLs] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -608,18 +614,20 @@ function ChannelModal({ onClose, onSaved }) {
     if (!lokSabha) { setError("Please select a Lok Sabha."); return; }
     setSaving(true); setError("");
     try {
-      const r = await fetch("/api/media/channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: clean, lok_sabha_id: Number(lokSabha) }) });
+      const url = isEdit ? `/api/media/channels/${editing.id}` : "/api/media/channels";
+      const method = isEdit ? "PUT" : "POST";
+      const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: clean, lok_sabha_id: Number(lokSabha) }) });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(d.message || "Could not add the channel."); setSaving(false); return; }
-      onSaved("Channel added successfully.");
+      if (!r.ok) { setError(d.message || (isEdit ? "Could not update the channel." : "Could not add the channel.")); setSaving(false); return; }
+      onSaved(isEdit ? "Channel updated successfully." : "Channel added successfully.");
     } catch {
-      setError("Could not add the channel. Please try again.");
+      setError(isEdit ? "Could not update the channel. Please try again." : "Could not add the channel. Please try again.");
       setSaving(false);
     }
   }
 
   return (
-    <Modal title="Add Channel" onClose={onClose}>
+    <Modal title={isEdit ? "Edit Channel" : "Add Channel"} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Channel Name <span className="text-red-500">*</span></label>
@@ -636,7 +644,7 @@ function ChannelModal({ onClose, onSaved }) {
         {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-2">{saving ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : "Add Channel"}</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-2">{saving ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : (isEdit ? "Save Changes" : "Add Channel")}</button>
         </div>
       </div>
     </Modal>
@@ -647,7 +655,21 @@ function ChannelModal({ onClose, onSaved }) {
 function ChannelsTab({ data, onChange, flash }) {
   const router = useRouter();
   const [showAddChannel, setShowAddChannel] = useState(false);
+  const [editChannel, setEditChannel] = useState(null); // channel being edited (BUG 24)
   const [scheduleFor, setScheduleFor] = useState(null); // channel to schedule a debate for
+
+  // BUG 24 — delete a channel after confirmation. The backend blocks deletion
+  // while debates are still linked, so debate data is never lost or orphaned.
+  async function deleteChannel(ch) {
+    if (!confirm(`Delete the channel “${ch.name}”?\n\nThis removes only the channel. Its debates are never deleted — if any are linked, deletion is blocked until they're removed or reassigned.`)) return;
+    try {
+      const r = await fetch(`/api/media/channels/${ch.id}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { flash?.(d.message || "Could not delete the channel."); return; }
+      flash?.("Channel deleted.");
+      onChange();
+    } catch { flash?.("Could not delete the channel. Please try again."); }
+  }
   const now = useNow(60000);
   const TONE = { supportive: "bg-emerald-100 text-emerald-700", neutral: "bg-gray-100 text-gray-600", opposing: "bg-red-100 text-red-700", unknown: "bg-amber-100 text-amber-700" };
 
@@ -669,11 +691,12 @@ function ChannelsTab({ data, onChange, flash }) {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {data.channels.map((c) => (
-          <ChannelCard key={c.id} ch={c} debates={data.upcomingDebates} now={now} tone={TONE} onOpen={openChannel} onSchedule={scheduleDebate} />
+          <ChannelCard key={c.id} ch={c} debates={data.upcomingDebates} now={now} tone={TONE} onOpen={openChannel} onSchedule={scheduleDebate} onEdit={setEditChannel} onDelete={deleteChannel} />
         ))}
       </div>
 
       {showAddChannel && <ChannelModal onClose={() => setShowAddChannel(false)} onSaved={(msg) => { setShowAddChannel(false); onChange(); flash?.(msg); }} />}
+      {editChannel && <ChannelModal editing={editChannel} onClose={() => setEditChannel(null)} onSaved={(msg) => { setEditChannel(null); onChange(); flash?.(msg); }} />}
       {scheduleFor && (
         <DebateModal
           defaultChannelId={scheduleFor.id}
