@@ -36,6 +36,10 @@ export async function ensurePressNotesSchema() {
     // created_at / updated_at track when a newspaper row was added / last changed.
     await ensureColumn("newspapers", "lok_sabha_id", "INT NULL");
     await ensureColumn("newspapers", "lok_sabha_all", "TINYINT(1) NOT NULL DEFAULT 0");
+    // BUG 20 — each PUBLICATION (press_note) records the Lok Sabha it belongs to,
+    // chosen on the Upload form from the Lok Sabha Master. Nullable so legacy rows
+    // and non-newspaper content types are unaffected.
+    await ensureColumn("press_notes", "lok_sabha_id", "INT NULL");
     await ensureColumn("newspapers", "created_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP");
     await ensureColumn("newspapers", "updated_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
     // Seed the master newspaper list (idempotent — `name` is UNIQUE).

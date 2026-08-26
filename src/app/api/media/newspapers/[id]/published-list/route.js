@@ -30,6 +30,7 @@ export async function GET(_req, { params }) {
 
     const records = await query(
       `SELECT pn.id, pn.title, pn.summary, pn.kind, pn.sentiment, pn.coverage_date, pn.file_url,
+              pn.newspaper_id, pn.lok_sabha_id AS pub_lok_sabha_id,
               np.name AS newspaper_name, np.lok_sabha_id, np.lok_sabha_all, ls.name AS lok_sabha_name
          FROM press_notes pn
          JOIN newspapers np ON np.id = pn.newspaper_id

@@ -1040,17 +1040,43 @@ function FileUpload({ value, onChange, accept = ".pdf,image/*", endpoint = "/api
 const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
 
 export function PressNoteModal({ newspapers, onClose, onSaved, editing, defaultNewspaperId }) {
+  // BUG 20 — the Newspaper is already chosen (Upload via the newspaper card, or
+  // Edit of an existing publication), so the form must NOT ask for it again. The
+  // id is locked and shown read-only; uploads can't land on the wrong newspaper.
+  const lockedNewspaperId = defaultNewspaperId ? String(defaultNewspaperId) : (editing?.newspaper_id ? String(editing.newspaper_id) : "");
+  const lockedNewspaper = (newspapers || []).find((n) => String(n.id) === lockedNewspaperId) || null;
+  const newspaperLocked = !!lockedNewspaperId;
   const [form, setForm] = useState(editing ? {
     title: editing.title || "", summary: editing.summary || "", kind: editing.kind || "press_note",
     newspaper_id: editing.newspaper_id ? String(editing.newspaper_id) : "",
     newspaper_name: "",
+    // The publication's own saved Lok Sabha (pub_lok_sabha_id from the published
+    // list, or lok_sabha_id from the media list); falls back to blank for legacy.
+    lok_sabha_id: (editing.pub_lok_sabha_id ?? editing.lok_sabha_id) ? String(editing.pub_lok_sabha_id ?? editing.lok_sabha_id) : "",
     coverage_date: editing.coverage_date ? String(editing.coverage_date).slice(0, 10) : "",
     sentiment: editing.sentiment || "", file_url: editing.file_url || "",
-  } : { title: "", summary: "", kind: "press_note", newspaper_id: defaultNewspaperId ? String(defaultNewspaperId) : "", newspaper_name: "", coverage_date: new Date().toISOString().slice(0, 10), sentiment: "", file_url: "" });
+  } : {
+    title: "", summary: "", kind: "press_note",
+    newspaper_id: defaultNewspaperId ? String(defaultNewspaperId) : "", newspaper_name: "",
+    // Default the publication's Lok Sabha to the newspaper's mapped constituency
+    // (when it maps to a specific one); still editable from the Master dropdown.
+    lok_sabha_id: lockedNewspaper?.lok_sabha_id ? String(lockedNewspaper.lok_sabha_id) : "",
+    coverage_date: new Date().toISOString().slice(0, 10), sentiment: "", file_url: "",
+  });
+  // Lok Sabha options come live from the existing Master Data — never hardcoded.
+  const [lokOptions, setLokOptions] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/locations?type=lok_sabha")
+      .then((r) => r.json())
+      .then((d) => { if (alive) setLokOptions(d.locations || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const isOther = form.newspaper_id === NEWSPAPER_OTHER;
+  const isOther = !newspaperLocked && form.newspaper_id === NEWSPAPER_OTHER;
 
   async function save() {
     setError("");
@@ -1062,6 +1088,7 @@ export function PressNoteModal({ newspapers, onClose, onSaved, editing, defaultN
         title: form.title.trim(),
         summary: form.summary,
         kind: form.kind,
+        lok_sabha_id: form.lok_sabha_id || "",
         coverage_date: form.coverage_date || "",
         sentiment: form.sentiment || "",
         file_url: form.file_url || "",
@@ -1090,20 +1117,41 @@ export function PressNoteModal({ newspapers, onClose, onSaved, editing, defaultN
             {CONTENT_TYPES.map((c) => <option key={c.v} value={c.v}>{c.l}</option>)}
           </select>
         </div>
-        <div>
-          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Newspaper</label>
-          <select className={inp} value={form.newspaper_id} onChange={(e) => set("newspaper_id", e.target.value)}>
-            <option value="">— Select newspaper —</option>
-            {newspapers.map((n) => <option key={n.id} value={String(n.id)}>{n.name}</option>)}
-            <option value={NEWSPAPER_OTHER}>Other…</option>
-          </select>
-        </div>
+        {newspaperLocked ? (
+          // Newspaper already chosen via the icon/card — read-only context, no
+          // dropdown (§1/§2/§3/§8). The id is fixed to the selected newspaper.
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Newspaper</label>
+            <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-800 flex items-center gap-2" title="Uploading for this newspaper">
+              <Newspaper size={15} className="text-[#164FA3] shrink-0" />
+              <span className="font-medium truncate">{lockedNewspaper?.name || "Selected newspaper"}</span>
+              <span className="ml-auto text-[10px] uppercase tracking-wide text-gray-400">Selected</span>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Newspaper</label>
+            <select className={inp} value={form.newspaper_id} onChange={(e) => set("newspaper_id", e.target.value)}>
+              <option value="">— Select newspaper —</option>
+              {newspapers.map((n) => <option key={n.id} value={String(n.id)}>{n.name}</option>)}
+              <option value={NEWSPAPER_OTHER}>Other…</option>
+            </select>
+          </div>
+        )}
         {isOther && (
           <div className="col-span-2">
             <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Other Newspaper Name *</label>
             <input className={inp} placeholder="Type the newspaper name" value={form.newspaper_name} onChange={(e) => set("newspaper_name", e.target.value)} />
           </div>
         )}
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Lok Sabha</label>
+          <select className={inp} value={form.lok_sabha_id} onChange={(e) => set("lok_sabha_id", e.target.value)}>
+            <option value="">— Select Lok Sabha —</option>
+            {lokOptions.map((o) => <option key={o.id} value={String(o.id)}>{o.name}</option>)}
+          </select>
+          <p className="text-[10px] text-gray-400 mt-1">From the Lok Sabha Master.</p>
+        </div>
         <div>
           <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Date</label>
           <input type="date" className={inp} value={form.coverage_date} onChange={(e) => set("coverage_date", e.target.value)} />

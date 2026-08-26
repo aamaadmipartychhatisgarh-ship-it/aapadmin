@@ -21,7 +21,7 @@ export async function PUT(req, { params }) {
 
     // Only the fields actually present are updated, so unchanged values are
     // preserved (e.g. an existing file_url the form left untouched).
-    const fields = ["title", "summary", "file_url", "kind", "newspaper_id", "coverage_date", "sentiment"];
+    const fields = ["title", "summary", "file_url", "kind", "newspaper_id", "lok_sabha_id", "coverage_date", "sentiment"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     if (!sets.length) return NextResponse.json({ message: "No changes to save." }, { status: 400 });

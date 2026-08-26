@@ -20,12 +20,14 @@ export async function POST(req) {
     // Newspaper: use the selected id, or resolve a typed "Other" name to one.
     let newspaperId = d.newspaper_id ? Number(d.newspaper_id) : null;
     if (!newspaperId && d.newspaper_name) newspaperId = await resolveNewspaperId(d.newspaper_name);
+    // BUG 20 — the publication's Lok Sabha (from the Master Data dropdown).
+    const lokSabhaId = d.lok_sabha_id ? Number(d.lok_sabha_id) : null;
 
     const res = await query(
-      `INSERT INTO press_notes (title, summary, file_url, kind, newspaper_id, coverage_date, sentiment, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO press_notes (title, summary, file_url, kind, newspaper_id, lok_sabha_id, coverage_date, sentiment, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [title, strOrNull(d.summary), strOrNull(d.file_url), strOrNull(d.kind) || "press_note",
-       newspaperId, strOrNull(d.coverage_date), strOrNull(d.sentiment), session.user.id]
+       newspaperId, lokSabhaId, strOrNull(d.coverage_date), strOrNull(d.sentiment), session.user.id]
     );
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {
