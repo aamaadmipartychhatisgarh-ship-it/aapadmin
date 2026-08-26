@@ -24,12 +24,13 @@ export async function PUT(req, { params }) {
       destRows = rows;
     }
 
+    // BUG 18 — the Approvals module is removed; approval_status is no longer an
+    // editable field (posts are live on log). Column kept in DB, not written here.
     const fields = ["title", "caption", "post_type", "media_url", "external_url",
-      "scheduled_at", "posted_at", "approval_status", "publish_status",
+      "scheduled_at", "posted_at", "publish_status",
       "views", "likes", "comments", "shares", "reach", "viral"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
-    if (d.approval_status === "approved") { sets.push("approved_by_user_id = ?"); vals.push(session.user.id); }
     // Keep the post's mirror page_id/external_url aligned with the first
     // destination when destinations are being updated.
     if (destRows && destRows.length) {

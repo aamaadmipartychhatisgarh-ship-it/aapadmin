@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessSocial } from "@/lib/permissions";
 import {
-  Share2, Loader2, Plus, X, Upload, CheckCircle2, XCircle,
+  Share2, Loader2, Plus, X, Upload,
   Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil,
   Bird,
 } from "lucide-react";
@@ -35,20 +35,13 @@ const LOG_POST_TYPES = [["photo", "Photo"], ["video", "Video"], ["reel", "Reel"]
 // Content is unlimited long-form text — NO word/character maximum and no
 // minimum beyond being non-empty (1 word through 10,000+ words are all valid).
 const isValidUrl = (s) => { try { const u = new URL(String(s).trim()); return u.protocol === "http:" || u.protocol === "https:"; } catch { return false; } };
-const APPROVAL = {
-  draft:    "bg-gray-100 text-gray-500",
-  pending:  "bg-amber-100 text-amber-700",
-  approved: "bg-emerald-100 text-emerald-700",
-  rejected: "bg-red-100 text-red-700",
-};
-
 // Dashboard and Overview are merged into ONE unified section (PROMPT 6): the
 // "Dashboard" tab renders the dashboard metrics followed by the overview
-// panels. No separate Overview tab.
+// panels. No separate Overview tab. The "Approvals" tab/module was removed
+// entirely (BUG 18) — posts are live as soon as they're logged, no gate.
 const TABS = [
   { k: "dashboard", l: "Dashboard" },
   { k: "pages", l: "Pages" },
-  { k: "approvals", l: "Approvals" },
   { k: "log", l: "Post Log" },
 ];
 
@@ -76,10 +69,6 @@ function Body() {
     const r = await fetch("/api/social-management");
     if (r.ok) setData(await r.json());
     setLoading(false);
-  }
-  async function setStatus(postId, status) {
-    await fetch(`/api/social-management/posts/${postId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approval_status: status, posted_at: status === "approved" ? new Date().toISOString().slice(0, 19).replace("T", " ") : null }) });
-    load();
   }
 
   if (loading || !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
@@ -126,7 +115,6 @@ function Body() {
         </div>
       )}
       {tab === "pages"     && <PagesTab data={data} onReload={load} />}
-      {tab === "approvals" && <ApprovalsTab data={data} setStatus={setStatus} onEdit={setEditing} />}
       {tab === "log"       && <LogTab data={data} onEdit={setEditing} />}
 
       {showAdd && <PostModal pages={data.pages} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
@@ -378,52 +366,6 @@ function PageModal({ onClose, onSaved, editing }) {
   );
 }
 
-// ============================================================ APPROVALS
-function ApprovalsTab({ data, setStatus, onEdit }) {
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-      {data.pending.length === 0 ? (
-        <div className="p-12 text-center text-gray-400"><CheckCircle2 size={36} className="mx-auto text-emerald-300 mb-3" />No posts awaiting approval.</div>
-      ) : (
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-left">
-            <tr>
-              <th className="px-4 py-3 font-semibold text-gray-600">Content</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Page</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Submitted</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.pending.map((p) => {
-              const meta = PLATFORM[p.platform] || {};
-              const Icon = meta.icon || Share2;
-              return (
-                <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-700 max-w-[24rem]"><div className="text-xs whitespace-pre-wrap break-words max-h-32 overflow-y-auto">{p.caption || <em className="text-gray-400">(no content)</em>}</div></td>
-                  <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{p.post_type}</span></td>
-                  <td className="px-4 py-3 text-gray-600 text-xs"><Icon size={12} style={{ color: meta.color }} className="inline mr-1" />{p.lok_sabha_name} · {p.handle}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{new Date(p.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1.5">
-                      <button onClick={() => setStatus(p.id, "approved")} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold inline-flex items-center gap-1"><CheckCircle2 size={12} /> Approve</button>
-                      <button onClick={() => setStatus(p.id, "rejected")} className="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-semibold inline-flex items-center gap-1"><XCircle size={12} /> Reject</button>
-                      <button onClick={() => onEdit(p)} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ============================================================ LOG
 // The local date (YYYY-MM-DD) of a post's actual DB Date & Time (posted_at,
 // falling back to created_at) — used by the date filter so a selected calendar
@@ -550,9 +492,6 @@ function LogTab({ data, onEdit }) {
                   <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 capitalize">{p.post_type}</span></td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full ${scheduled ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{scheduled ? "Scheduled" : "Published"}</span>
-                    {p.approval_status && p.approval_status !== "approved" && (
-                      <span className={`ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${APPROVAL[p.approval_status] || "bg-gray-100 text-gray-500"}`}>{p.approval_status}</span>
-                    )}
                   </td>
                   <td className="px-4 py-3">
                     <button onClick={() => onEdit(p)} title="Edit / view post" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
@@ -586,7 +525,7 @@ function emptyBlock() {
   return {
     caption: "", post_type: "photo", media_url: "",
     posted_at: new Date().toISOString().slice(0, 16),
-    publish_status: "published", approval_status: "pending",
+    publish_status: "published",
     platforms: [], dest: {},
     views: 0, likes: 0, comments: 0, shares: 0, reach: 0, viral: 0,
     uploading: false,
@@ -611,7 +550,6 @@ function blockFromEditing(editing) {
     media_url: editing.media_url || "",
     posted_at: editing.posted_at ? new Date(editing.posted_at).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
     publish_status: editing.publish_status === "scheduled" ? "scheduled" : "published",
-    approval_status: editing.approval_status || "pending",
     platforms, dest,
     views: editing.views || 0, likes: editing.likes || 0, comments: editing.comments || 0,
     shares: editing.shares || 0, reach: editing.reach || 0, viral: editing.viral || 0,
@@ -807,7 +745,7 @@ function buildPayload(block) {
   }
   return {
     caption: block.caption, post_type: block.post_type, media_url: block.media_url || null,
-    posted_at: block.posted_at, approval_status: block.approval_status,
+    posted_at: block.posted_at,
     publish_status: block.publish_status,
     scheduled_at: block.publish_status === "scheduled" ? block.posted_at : null,
     views: Number(block.views) || 0, likes: Number(block.likes) || 0,

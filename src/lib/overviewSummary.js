@@ -146,13 +146,12 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
         `SELECT COUNT(*) AS total,
                 SUM(scheduled_at IS NOT NULL AND posted_at IS NULL) AS scheduled,
                 SUM(posted_at IS NOT NULL) AS published,
-                SUM(approval_status = 'pending') AS pending_approval,
                 SUM(${istDay} = ?) AS today,
                 MAX(created_at) AS last_activity
            FROM social_posts`,
         [today]
       );
-      social = { total: n(s?.total), scheduled: n(s?.scheduled), published: n(s?.published), pending_approval: n(s?.pending_approval), today: n(s?.today), last_activity: s?.last_activity || null };
+      social = { total: n(s?.total), scheduled: n(s?.scheduled), published: n(s?.published), today: n(s?.today), last_activity: s?.last_activity || null };
     } catch { social = null; }
   }
 

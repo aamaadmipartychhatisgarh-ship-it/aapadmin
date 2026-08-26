@@ -45,7 +45,7 @@ export async function POST(req) {
           first.page_id, d.title || null, d.caption || null, d.post_type || "post",
           d.media_url || null, first.post_link || null,
           d.scheduled_at || null, d.posted_at || null,
-          d.approval_status || "pending", d.publish_status || "published",
+          d.approval_status || "approved", d.publish_status || "published",
           Number(d.views) || 0, Number(d.likes) || 0, Number(d.comments) || 0,
           Number(d.shares) || 0, Number(d.reach) || 0,
           d.viral ? 1 : 0, session.user.id,
