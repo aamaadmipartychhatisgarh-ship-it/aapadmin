@@ -711,9 +711,25 @@ function ChannelsTab({ data, onChange, flash }) {
 }
 
 // ============================================================ CONFERENCES
+// A press conference is UPCOMING when its scheduled date/time is still in the
+// future AND it isn't completed or cancelled — computed from the real stored
+// datetime (BUG 25), never a hardcoded date.
+function isConferenceUpcoming(c, nowMs) {
+  if (!c || c.status === "completed" || c.status === "cancelled") return false;
+  const t = new Date(c.conference_date).getTime();
+  return !Number.isNaN(t) && t > nowMs;
+}
+
 function ConferencesTab({ data, onChange, filtered }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  // Re-evaluate "upcoming" over time so the highlight stops on its own once a
+  // conference's scheduled time passes (§7). A refresh recomputes it too (§8).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -726,11 +742,16 @@ function ConferencesTab({ data, onChange, filtered }) {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {data.conferences.length === 0 ? (
           <div className="col-span-full bg-white rounded-2xl p-8 text-center text-gray-400 text-sm border border-gray-100">{filtered ? "No press conferences found for the selected date range." : "No press conferences."}</div>
-        ) : data.conferences.map((c) => (
-          <div key={c.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        ) : data.conferences.map((c) => {
+          const upcoming = isConferenceUpcoming(c, now);
+          return (
+          <div key={c.id} className={`bg-white rounded-2xl border shadow-sm p-5 ${upcoming ? "pc-upcoming" : "border-gray-100"}`}>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <div className="text-xs text-gray-500 uppercase tracking-wide">{new Date(c.conference_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", weekday: "short" })}</div>
+                <div className="text-xs text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                  {new Date(c.conference_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", weekday: "short" })}
+                  {upcoming && <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-1.5 py-0.5 rounded-full">Upcoming</span>}
+                </div>
                 <h4 className="font-bold text-gray-900 mt-1">{c.title}</h4>
                 {c.venue && <div className="text-xs text-gray-500 mt-1">{c.venue}</div>}
                 {/* Spokesperson(s) — supports multiple (§10.1); falls back to the
@@ -758,7 +779,8 @@ function ConferencesTab({ data, onChange, filtered }) {
               <button onClick={() => setEditing(c)} title="Edit conference" className="inline-flex items-center gap-1 text-[#164FA3] font-semibold hover:underline"><Pencil size={13} /> Edit</button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {showAdd && <ConferenceModal spokespersons={data.spokespersons} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); onChange(); }} />}

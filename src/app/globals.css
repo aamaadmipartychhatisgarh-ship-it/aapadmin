@@ -227,3 +227,21 @@
   }
   @page { margin: 12mm; }
 }
+
+/* BUG 25 — subtle, professional highlight for an UPCOMING press conference
+   (future scheduled date/time, not completed/cancelled). A slow blue glow pulse
+   draws the eye without being distracting. Reduced-motion users get a static
+   ring instead of the animation. Applied by JS only while the conference is
+   still upcoming; it stops automatically once the time passes (see the media
+   Press Conference list). */
+@keyframes pcUpcomingPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(22, 79, 163, 0); }
+  50%      { box-shadow: 0 0 0 4px rgba(22, 79, 163, 0.14); }
+}
+.pc-upcoming {
+  border-color: rgba(22, 79, 163, 0.65) !important;
+  box-shadow: 0 0 0 2px rgba(22, 79, 163, 0.10);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pc-upcoming { animation: pcUpcomingPulse 2.4s ease-in-out infinite; }
+}
