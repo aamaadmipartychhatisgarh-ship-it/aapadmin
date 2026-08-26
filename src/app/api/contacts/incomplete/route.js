@@ -6,37 +6,30 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
+import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 
 export const dynamic = "force-dynamic";
 
-// CONTACTS → INCOMPLETE DESIGNATION — a database-driven filtered VIEW of the
-// existing contacts (no copy table). One field is chosen ("Incomplete Data By"),
-// a status (Blank / Fill), and optionally a Designation from the master; the API
-// returns the matching MEMBERS (name + photo only). All filtering is at the DB
-// level so it stays fast on large tables.
+// CONTACTS → INCOMPLETE DESIGNATION (Level & Designation-wise assignment).
+// Pick a LEVEL (state | zone | lok_sabha | district | assembly | block); the API
+// returns EVERY location at that level, and under each ONLY the designations
+// mapped to that EXACT level (designations.level), each with the assigned
+// person(s) — Photo + Name + Designation — or a Not-Assigned state. A location
+// never borrows a person from another level, location or designation.
 
-const idList = (raw) =>
-  raw ? [...new Set(String(raw).split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))] : [];
-
-// The resolvable value of each selectable field. Zone / Lok Sabha resolve from
-// the contact's own column OR the district hierarchy (district → lok_sabha →
-// zone). "state" resolves when the contact has ANY location at all (the app is
-// single-state, so a contact is "in the state" once it's placed anywhere; it's
-// blank only when fully unplaced). NULL = blank, non-NULL = filled.
-const FIELD_EXPR = {
+// The contact's location id at a given level: its own column, or derived up the
+// district hierarchy for zone / lok_sabha.
+const LEVEL_ID_EXPR = {
   zone: "COALESCE(c.zone_id, lz.id)",
   lok_sabha: "COALESCE(c.lok_sabha_id, lls.id)",
-  district: "ld.id",
-  assembly: "la.id", // Vidhan Sabha
-  state: "COALESCE(c.zone_id, lz.id, c.lok_sabha_id, lls.id, ld.id, la.id)",
+  district: "c.district_id",
+  assembly: "c.assembly_id",
+  block: "c.ward_id",
 };
-
-const JOINS = `
-   LEFT JOIN workers w ON w.id = c.worker_id
-   LEFT JOIN locations ld ON ld.id = c.district_id
-   LEFT JOIN locations lls ON lls.id = ld.parent_id
-   LEFT JOIN locations lz ON lz.id = lls.parent_id
-   LEFT JOIN locations la ON la.id = c.assembly_id`;
+// The location master `type` for each level (block = ward).
+const LOC_TYPE = { zone: "zone", lok_sabha: "lok_sabha", district: "district", assembly: "assembly", block: "ward" };
+const MAX_PEOPLE = 8000;
+const MAX_LOCS = 2000;
 
 export async function GET(req) {
   try {
@@ -45,47 +38,124 @@ export async function GET(req) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     await ensureContactDesignationsSchema();
+    await ensureDesignationLevelColumn(query);
 
     const { searchParams } = new URL(req.url);
-    const field = String(searchParams.get("field") || "zone").toLowerCase();
-    const expr = FIELD_EXPR[field];
-    if (!expr) return NextResponse.json({ message: "Invalid field." }, { status: 400 });
-    const status = String(searchParams.get("status") || "blank").toLowerCase() === "fill" ? "fill" : "blank";
-    const designation_ids = idList(searchParams.get("designation_ids") || searchParams.get("designation_id"));
-    const page = Math.max(1, parseInt(searchParams.get("page"), 10) || 1);
-    const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get("page_size"), 10) || 60));
-    const offset = (page - 1) * pageSize;
+    const level = String(searchParams.get("level") || "state").toLowerCase();
+    const VALID = ["state", "zone", "lok_sabha", "district", "assembly", "block"];
+    if (!VALID.includes(level)) return NextResponse.json({ message: "Invalid level." }, { status: 400 });
+    const designationId = parseInt(searchParams.get("designation_id"), 10);
+    const hasDesignation = Number.isInteger(designationId) && designationId > 0;
 
-    const notWrong = await notWrongNumberClause("c");
     const scope = scopeFilterSync(session.user, "c");
+    const notWrong = await notWrongNumberClause("c");
 
-    let where = ` WHERE 1=1 ${notWrong} ${scope.where}`;
-    const params = [...scope.params];
-    // The chosen field's Blank / Fill condition.
-    where += status === "blank" ? ` AND ${expr} IS NULL` : ` AND ${expr} IS NOT NULL`;
-    // Optional Designation (master) filter — the contact's own designation set
-    // (multi) or the legacy single id.
-    if (designation_ids.length) {
-      const ph = designation_ids.map(() => "?").join(",");
-      where += ` AND (c.designation_id IN (${ph}) OR EXISTS (SELECT 1 FROM contact_designations cd WHERE cd.contact_id = c.id AND cd.designation_id IN (${ph})))`;
-      params.push(...designation_ids, ...designation_ids);
+    // Designations mapped to EXACTLY this level (strict — no cross-level, no
+    // NULL-level fallback), optionally narrowed by the Designation dropdown.
+    const desConds = ["d.level = ?"];
+    const desParams = [level];
+    if (hasDesignation) { desConds.push("d.id = ?"); desParams.push(designationId); }
+    const designations = await query(
+      `SELECT d.id, d.name FROM designations d WHERE ${desConds.join(" AND ")}
+        ORDER BY (d.sort_order IS NULL), d.sort_order, d.name`,
+      desParams
+    );
+    const allowedDes = new Set(designations.map((d) => d.id));
+
+    // The designations dropdown list for this level (always the full level set,
+    // regardless of the current designation filter) so the client can populate
+    // it without a second call.
+    const levelDesignations = hasDesignation
+      ? await query(`SELECT id, name FROM designations WHERE level = ? ORDER BY (sort_order IS NULL), sort_order, name`, [level])
+      : designations;
+
+    const buildDesignations = (peopleByDes) =>
+      designations.map((d) => ({
+        id: d.id,
+        name: d.name,
+        people: (peopleByDes?.get(d.id) || []).map((p) => ({ ...p, designation: d.name })),
+      }));
+
+    // ---- STATE — a single location (the state). People holding a state-level
+    // designation, state-wide. ------------------------------------------------
+    if (level === "state") {
+      const rows = await query(
+        `SELECT cd.designation_id, c.id AS contact_id, c.person_name,
+                COALESCE(c.photo_url, w.photo_url) AS photo_url
+           FROM contacts c
+           JOIN contact_designations cd ON cd.contact_id = c.id
+           JOIN designations d ON d.id = cd.designation_id AND d.level = 'state' ${hasDesignation ? "AND d.id = ?" : ""}
+           LEFT JOIN workers w ON w.id = c.worker_id
+          WHERE 1=1 ${notWrong} ${scope.where}
+          ORDER BY c.person_name
+          LIMIT ${MAX_PEOPLE}`,
+        [...(hasDesignation ? [designationId] : []), ...scope.params]
+      );
+      const byDes = new Map();
+      for (const r of rows) {
+        if (!allowedDes.has(r.designation_id)) continue;
+        if (!byDes.has(r.designation_id)) byDes.set(r.designation_id, []);
+        byDes.get(r.designation_id).push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url });
+      }
+      const groups = [{ id: 0, name: "State", designations: buildDesignations(byDes) }];
+      return NextResponse.json({ level, level_designations: levelDesignations, groups });
     }
 
-    const [cnt] = await query(`SELECT COUNT(*) AS total FROM contacts c ${JOINS} ${where}`, params);
-    const total = Number(cnt?.total || 0);
+    // ---- ZONE / LOK SABHA / DISTRICT / ASSEMBLY / BLOCK ----------------------
+    const levelIdExpr = LEVEL_ID_EXPR[level];
 
-    // Members — NAME + PHOTO only (no other contact fields exposed).
-    const members = await query(
-      `SELECT c.id, c.person_name, COALESCE(c.photo_url, w.photo_url) AS photo_url
-         FROM contacts c ${JOINS} ${where}
-        ORDER BY c.person_name ASC, c.id ASC
-        LIMIT ${pageSize} OFFSET ${offset}`,
-      params
+    // Every location of this level (so empty ones still show "Not Assigned").
+    const masterLocs = await query(
+      `SELECT id, name FROM locations WHERE type = ? ORDER BY name LIMIT ${MAX_LOCS}`,
+      [LOC_TYPE[level]]
     );
 
-    return NextResponse.json({ members, total, page, page_size: pageSize });
+    // People holding a designation OF THIS LEVEL, with the location id at this
+    // level. Strict join to designations.level = ? — a person only appears for a
+    // designation actually mapped to this level.
+    const peopleRows = await query(
+      `SELECT ${levelIdExpr} AS loc_id, cd.designation_id,
+              c.id AS contact_id, c.person_name,
+              COALESCE(c.photo_url, w.photo_url) AS photo_url
+         FROM contacts c
+         JOIN contact_designations cd ON cd.contact_id = c.id
+         JOIN designations d ON d.id = cd.designation_id AND d.level = ? ${hasDesignation ? "AND d.id = ?" : ""}
+         LEFT JOIN workers w ON w.id = c.worker_id
+         LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations lls ON lls.id = ld.parent_id
+         LEFT JOIN locations lz ON lz.id = lls.parent_id
+        WHERE 1=1 ${notWrong} ${scope.where}
+        ORDER BY c.person_name
+        LIMIT ${MAX_PEOPLE}`,
+      [level, ...(hasDesignation ? [designationId] : []), ...scope.params]
+    );
+
+    const grouped = new Map(); // loc_id → (designation_id → people[])
+    for (const r of peopleRows) {
+      if (!allowedDes.has(r.designation_id)) continue;
+      const loc = r.loc_id ?? 0;
+      if (!grouped.has(loc)) grouped.set(loc, new Map());
+      const byDes = grouped.get(loc);
+      if (!byDes.has(r.designation_id)) byDes.set(r.designation_id, []);
+      byDes.get(r.designation_id).push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url });
+    }
+
+    // Show EVERY master location of this level (new locations appear here
+    // automatically once created). A contact placed with no location at this
+    // level lands in an "Unassigned location" group at the end.
+    let locs = masterLocs.map((l) => ({ id: l.id, name: l.name }));
+    if (grouped.has(0)) locs = [...locs, { id: 0, name: "Unassigned location" }];
+
+    const groups = locs.map((l) => ({ id: l.id, name: l.name, designations: buildDesignations(grouped.get(l.id)) }));
+
+    return NextResponse.json({
+      level,
+      level_designations: levelDesignations,
+      groups,
+      capped: peopleRows.length >= MAX_PEOPLE,
+    });
   } catch (err) {
-    console.error("contacts incomplete GET error:", err);
+    console.error("contacts incomplete (level assignment) error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
