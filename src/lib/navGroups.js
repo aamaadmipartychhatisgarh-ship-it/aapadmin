@@ -15,7 +15,7 @@ export const GROUPS = [
   // lives only under its own group above (still reachable from the sidebar).
   // (The Daily Assignment module was removed; the workspace's Call Assignment
   // logic that reads the assignment_rules table is unaffected.)
-  { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers"] },
+  { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers", "/dashboard/admin/contacts-incomplete"] },
   { key: "tasks", label: "Task Management", hrefs: ["/dashboard/tasks", "/dashboard/admin/events", "/dashboard/admin/complaints"] },
   // Every report/analytics page links to every other one (and to the main
   // Reports Center) via this single group — a page only appears here if the
