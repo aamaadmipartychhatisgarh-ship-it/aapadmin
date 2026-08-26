@@ -608,10 +608,11 @@ function AssemblyAssessmentPanel({ assemblyId, onOpen, version }) {
                       <ProfilePhoto name={c.name} src={c.photo_url} size={48} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-gray-900 truncate text-sm">{c.name}</div>
-                        <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5">
+                        <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5 items-center">
                           <span>Age: <span className="text-gray-700 font-medium">{c.age != null ? c.age : "—"}</span></span>
                           <span>Caste: <span className="text-gray-700 font-medium">{c.caste || "—"}</span></span>
                           <span>Net Worth: <span className="text-gray-700 font-medium">{c.net_worth || "—"}</span></span>
+                          {c.party && <span className="inline-flex items-center gap-1">Party: <span className="text-gray-700 font-medium"><PartyBadge name={c.party} size={14} /></span></span>}
                         </div>
                       </div>
                       {/* Actual assessment score — the live 10-parameter total
@@ -1291,8 +1292,9 @@ function MlaProfileModal({ assemblies, taken, initial, onClose, onSaved, fail })
 // pre-selection needed. The assembly a candidate belongs to is chosen in the
 // form from the same master-linked assembly list used across the module, and the
 // list refreshes from the database immediately after every create/edit/remove.
-const EMPTY_CAND = { assembly_id: "", photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", net_worth: "", business: "", monthly_income: "", education: "", political_experience: "", previous_elections: "", current_position: "" };
+const EMPTY_CAND = { assembly_id: "", photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", business: "", monthly_income: "", education: "", political_experience: "", previous_elections: "", current_position: "" };
 function CandidatesTab({ flash, fail }) {
+  const { byName: partyByName } = usePartyMaster(); // live party logos by name (BUG 27)
   const [assemblies, setAssemblies] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1371,7 +1373,7 @@ function CandidatesTab({ flash, fail }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-500"><tr>{[sortBy === "score" ? "#" : "", "Candidate", "Assembly", "District", "Type / Category", "Status", "Assessment Score", ""].map((h, i) => <th key={i} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+              <thead className="bg-gray-50 text-left text-gray-500"><tr>{[sortBy === "score" ? "#" : "", "Candidate", "Assembly", "District", "Party", "Type / Category", "Status", "Assessment Score", ""].map((h, i) => <th key={i} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {view.map((c, idx) => (
                   <tr key={c.id} className="hover:bg-gray-50">
@@ -1388,6 +1390,7 @@ function CandidatesTab({ flash, fail }) {
                     </td>
                     <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{c.assembly_name || "—"}</td>
                     <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{c.district || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{c.party ? <PartyLogo name={c.party} byName={partyByName} size={18} /> : "—"}</td>
                     <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3] whitespace-nowrap">{c.current_position || "AAP Candidate"}</span></td>
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Completed" : "Pending"}</span></td>
                     <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={c.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{c.total}/100</span></div></td>
@@ -1502,6 +1505,13 @@ function CandidateModal({ assemblies, defaultAssemblyId, initial, onClose, onSav
         <div>
           <span className={lbl}>Caste</span>
           <CasteSelect value={{ caste_id: null, name: form.caste }} options={casteOptions} onPick={(p) => set("caste", p.name)} placeholder="Select from Caste Master" />
+        </div>
+        <div>
+          {/* BUG 27 — Party from the Party Master (dropdown only, no free text).
+              Stored by the master's unique name; name + logo resolve live from
+              the master everywhere the candidate is shown. */}
+          <span className={lbl}>Party</span>
+          <PartySelect value={form.party} onChange={(v) => set("party", v)} placeholder="Select from Party Master" />
         </div>
         <Field label="Net Worth" value={form.net_worth} onChange={(v) => set("net_worth", v)} /><Field label="Business" value={form.business} onChange={(v) => set("business", v)} />
         <Field label="Monthly Income" value={form.monthly_income} onChange={(v) => set("monthly_income", v)} /><Field label="Education" value={form.education} onChange={(v) => set("education", v)} />

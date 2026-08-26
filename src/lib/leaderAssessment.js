@@ -225,6 +225,11 @@ export async function ensureLeaderAssessmentTables() {
   await ensureColumn("la_aap_candidates", "organization_experience", "VARCHAR(500) NULL");
   await ensureColumn("la_aap_candidates", "previous_elections", "VARCHAR(500) NULL");
   await ensureColumn("la_aap_candidates", "current_position", "VARCHAR(255) NULL");
+  // BUG 27 — the candidate's Party, keyed by the Party Master's UNIQUE name (the
+  // same relationship the MLA/competitor/election party fields use), so name +
+  // logo are always resolved live from Party Master. Nullable; legacy rows keep
+  // working. No party record is ever created from here (selection only).
+  await ensureColumn("la_aap_candidates", "party", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_elections", "runner_up", "VARCHAR(255) NULL");
   await ensureColumn("la_mla_elections", "runner_up_votes", "INT NULL");
   // Competitor election result on the MLA profile: the two leading competitors

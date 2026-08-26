@@ -23,7 +23,7 @@ export async function GET(req) {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const rows = await query(
       `SELECT c.id, c.assembly_id, c.name, c.photo_url, c.phone, c.address, c.date_of_birth,
-              c.caste, c.net_worth, c.business, c.monthly_income, c.education,
+              c.caste, c.party, c.net_worth, c.business, c.monthly_income, c.education,
               c.political_experience, c.organization_experience, c.previous_elections,
               c.current_position, c.created_at,
               a.name AS assembly_name,

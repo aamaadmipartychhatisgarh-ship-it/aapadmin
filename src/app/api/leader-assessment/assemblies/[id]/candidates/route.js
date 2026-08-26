@@ -23,10 +23,10 @@ export async function POST(req, { params }) {
     const name = strOrNull(d.name);
     if (!name) return NextResponse.json({ message: "Candidate name is required." }, { status: 400 });
     const res = await query(
-      `INSERT INTO la_aap_candidates (assembly_id, photo_url, name, phone, address, date_of_birth, caste, net_worth, business, monthly_income, education, political_experience, previous_elections, current_position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO la_aap_candidates (assembly_id, photo_url, name, phone, address, date_of_birth, caste, party, net_worth, business, monthly_income, education, political_experience, previous_elections, current_position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, strOrNull(d.photo_url), name, strOrNull(d.phone), strOrNull(d.address), dateOrNull(d.date_of_birth),
-       strOrNull(d.caste), strOrNull(d.net_worth), strOrNull(d.business), strOrNull(d.monthly_income),
+       strOrNull(d.caste), strOrNull(d.party), strOrNull(d.net_worth), strOrNull(d.business), strOrNull(d.monthly_income),
        strOrNull(d.education), strOrNull(d.political_experience), strOrNull(d.previous_elections), strOrNull(d.current_position)]
     );
     return NextResponse.json({ id: res.insertId }, { status: 201, headers: noStore });
