@@ -8,6 +8,7 @@ import { ensurePressNotesSchema } from "@/lib/pressNotesSchema";
 import { ensureNewsChannelsSeed } from "@/lib/newsChannelsSeed";
 import { ensureConferenceSchema, normalizeSpokespersonIds } from "@/lib/conferenceSchema";
 import { mediaDateFilter } from "@/lib/mediaDateFilter";
+import { resolveRange } from "@/lib/reports/timeRanges";
 
 // Aggregated GET for the Media hub page.
 export async function GET(req) {
@@ -221,13 +222,103 @@ export async function GET(req) {
       videos: Number(pcg?.videos) || 0,
     };
 
+    // ---- Media Activity time-series (BUG 16) --------------------------------
+    // Per-period counts of Newspaper / TV Debate / Press Conference across the
+    // SELECTED date range (or the default 30-day window when no filter is set),
+    // straight from the records — so the Graph View reflects real activity and
+    // responds to the Media Center date filter. Buckets adapt to the span (daily
+    // ≤45d, weekly ≤180d, monthly beyond) so a long range stays legible. Every
+    // period in range is present (zero-filled), so the chart never has gaps.
+    const seriesRange = noteFilter.range || resolveRange("last_30_days");
+    // Newspaper "published" matches the dashboard KPI (BUG 15): a press_note tied
+    // to a newspaper, plus legacy 'newspaper_scan'. Debate/Conference exclude
+    // cancelled. Group keys forced to 'YYYY-MM-DD' strings via DATE_FORMAT so the
+    // JS merge is driver-independent.
+    const [npSeries, debSeries, confSeries] = await Promise.all([
+      query(
+        `SELECT DATE_FORMAT(pn.coverage_date, '%Y-%m-%d') AS d, COUNT(*) AS c
+           FROM press_notes pn
+          WHERE (pn.newspaper_id IS NOT NULL OR pn.kind = 'newspaper_scan')
+            AND pn.coverage_date BETWEEN ? AND ?
+          GROUP BY DATE_FORMAT(pn.coverage_date, '%Y-%m-%d')`,
+        [seriesRange.from, seriesRange.to]
+      ),
+      query(
+        `SELECT DATE_FORMAT(d.debate_date, '%Y-%m-%d') AS d, COUNT(*) AS c
+           FROM debates d
+          WHERE d.status <> 'cancelled' AND d.debate_date BETWEEN ? AND ?
+          GROUP BY DATE_FORMAT(d.debate_date, '%Y-%m-%d')`,
+        [seriesRange.from, seriesRange.to]
+      ),
+      query(
+        `SELECT DATE_FORMAT(pc.conference_date, '%Y-%m-%d') AS d, COUNT(*) AS c
+           FROM press_conferences pc
+          WHERE pc.status <> 'cancelled' AND DATE(pc.conference_date) BETWEEN ? AND ?
+          GROUP BY DATE_FORMAT(pc.conference_date, '%Y-%m-%d')`,
+        [seriesRange.from, seriesRange.to]
+      ),
+    ]);
+    const { series, granularity } = buildMediaSeries(seriesRange, { newspaper: npSeries, debate: debSeries, conference: confSeries });
+
     return NextResponse.json({
       newspapers, newspaperStats, channels, spokespersons, journalists,
       recentNotes, upcomingDebates, conferences,
-      analytics: { counts, channelTone, topSpokespersons, debateStats, conferenceStats },
+      analytics: {
+        counts, channelTone, topSpokespersons, debateStats, conferenceStats,
+        series, seriesMeta: { from: seriesRange.from, to: seriesRange.to, granularity },
+      },
     });
   } catch (err) {
     console.error("media GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
+}
+
+// Build a zero-filled, bucketed time-series for the Media Activity graph.
+// `range` = { from, to } (YYYY-MM-DD, IST calendar days). `parts` = per-metric
+// arrays of { d: 'YYYY-MM-DD', c } rows. Returns { series, granularity } where
+// series is [{ period, newspaper, debate, conference }] ordered oldest→newest.
+function buildMediaSeries(range, parts) {
+  const MS_DAY = 86400000;
+  const start = new Date(range.from + "T00:00:00Z");
+  const end = new Date(range.to + "T00:00:00Z");
+  // Build the day spine (guard against an inverted/huge range).
+  const days = [];
+  for (let t = start.getTime(); t <= end.getTime() && days.length < 3000; t += MS_DAY) {
+    days.push(new Date(t).toISOString().slice(0, 10));
+  }
+  if (days.length === 0) days.push(range.from);
+  const span = days.length;
+  const granularity = span <= 45 ? "day" : span <= 180 ? "week" : "month";
+
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const keyLabel = (ymd) => {
+    const dt = new Date(ymd + "T00:00:00Z");
+    if (granularity === "month") {
+      return { key: ymd.slice(0, 7), label: `${MONTHS[dt.getUTCMonth()]} ${String(dt.getUTCFullYear()).slice(2)}` };
+    }
+    if (granularity === "week") {
+      const dow = (dt.getUTCDay() + 6) % 7; // Monday=0
+      const wkStart = new Date(dt.getTime() - dow * MS_DAY);
+      return { key: wkStart.toISOString().slice(0, 10), label: `${String(wkStart.getUTCDate()).padStart(2, "0")} ${MONTHS[wkStart.getUTCMonth()]}` };
+    }
+    return { key: ymd, label: `${String(dt.getUTCDate()).padStart(2, "0")} ${MONTHS[dt.getUTCMonth()]}` };
+  };
+
+  const order = [];
+  const byKey = new Map();
+  for (const ymd of days) {
+    const { key, label } = keyLabel(ymd);
+    if (!byKey.has(key)) { const b = { period: label, newspaper: 0, debate: 0, conference: 0 }; byKey.set(key, b); order.push(b); }
+  }
+  const add = (rows, field) => {
+    for (const r of rows || []) {
+      const b = byKey.get(keyLabel(String(r.d)).key);
+      if (b) b[field] += Number(r.c) || 0;
+    }
+  };
+  add(parts.newspaper, "newspaper");
+  add(parts.debate, "debate");
+  add(parts.conference, "conference");
+  return { series: order, granularity };
 }

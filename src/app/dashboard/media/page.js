@@ -11,6 +11,10 @@ import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 import FloatingPopover from "@/components/FloatingPopover";
 import Avatar from "@/components/Avatar";
 import { useRouter } from "next/navigation";
+import {
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, Tooltip as RTooltip, Legend, Cell,
+} from "recharts";
 
 export default function Page() {
   return <SupervisorGuard allow={canAccessMedia}><Body /></SupervisorGuard>;
@@ -738,56 +742,129 @@ function SpokespersonModal({ editing, onClose, onSaved }) {
 }
 
 // ============================================================ ANALYTICS
+// BUG 16 — the lower Media Analytics section is a GRAPH VIEW (the old
+// individual number-cards were removed). Every chart is driven by the live
+// /api/media analytics payload and re-fetches with the Media Center date
+// filter, so the graphs always match the database for the selected period.
+const ACTIVITY_COLORS = { newspaper: "#164FA3", debate: "#F59E0B", conference: "#7C3AED" };
+const SENTIMENT_COLORS = { Positive: "#10B981", Neutral: "#9CA3AF", Negative: "#EF4444" };
+
+// Compact date label for a 'YYYY-MM-DD' string (used in the graph range caption).
+function fmtReportDate(ymd) {
+  if (!ymd) return "";
+  const d = new Date(`${ymd}T00:00:00`);
+  if (isNaN(d.getTime())) return ymd;
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 function AnalyticsTab({ data, filtered }) {
-  const a = data.analytics;
-  const ds = a.debateStats || { total: 0, done: 0, positive: 0, neutral: 0, negative: 0 };
-  const pcs = a.conferenceStats || { total: 0, done: 0, videos: 0 };
+  const a = data.analytics || {};
+  const series = Array.isArray(a.series) ? a.series : [];
+  const meta = a.seriesMeta || {};
+  const ds = a.debateStats || { positive: 0, neutral: 0, negative: 0 };
+  const cov = a.counts || { positive: 0, neutral: 0, negative: 0 };
+
+  // Range totals are the SUM of the same series the trend line draws, so the
+  // "Total by Type" bars always equal the line (req 10 — totals match records).
+  const totalNewspaper = series.reduce((s, r) => s + (Number(r.newspaper) || 0), 0);
+  const totalDebate = series.reduce((s, r) => s + (Number(r.debate) || 0), 0);
+  const totalConference = series.reduce((s, r) => s + (Number(r.conference) || 0), 0);
+  const grandTotal = totalNewspaper + totalDebate + totalConference;
+
+  const totalsData = [
+    { type: "Newspaper", count: totalNewspaper, fill: ACTIVITY_COLORS.newspaper },
+    { type: "TV Debate", count: totalDebate, fill: ACTIVITY_COLORS.debate },
+    { type: "Press Conference", count: totalConference, fill: ACTIVITY_COLORS.conference },
+  ];
+  const sentimentData = [
+    { name: "Newspaper", Positive: Number(cov.positive) || 0, Neutral: Number(cov.neutral) || 0, Negative: Number(cov.negative) || 0 },
+    { name: "TV Debate", Positive: Number(ds.positive) || 0, Neutral: Number(ds.neutral) || 0, Negative: Number(ds.negative) || 0 },
+  ];
+  const hasSentiment = sentimentData.some((d) => d.Positive + d.Neutral + d.Negative > 0);
+
+  const perLabel = { day: "day", week: "week", month: "month" }[meta.granularity] || "day";
+  const rangeText = meta.from && meta.to
+    ? `${fmtReportDate(meta.from)} – ${fmtReportDate(meta.to)}`
+    : (filtered ? "the selected range" : "the last 30 days");
+
   return (
     <div className="space-y-6">
-      {/* News Channel status cards — counts straight from the debate records
-          (respecting the date filter). Informational: no navigation. */}
-      <div>
-        <h3 className="text-sm font-bold text-gray-700 mb-2">News Channel</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <SumCard label="Total Debates Scheduled" value={ds.total} accent />
-          <SumCard label="Total Debates Done" value={ds.done} />
-          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-            <div className="text-2xl font-bold text-emerald-600 tabular-nums">{ds.positive}</div>
-            <div className="text-xs font-medium mt-1 text-gray-500">Positive Debates</div>
+      {/* Chart 1 — Media Activity Over Time (Newspaper / TV Debate / Press
+          Conference), one point per {day|week|month} across the selected range. */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+          <h3 className="font-bold text-gray-900 flex items-center gap-2"><BarChart3 size={16} className="text-[#164FA3]" /> Media Activity Over Time</h3>
+          <span className="text-xs text-gray-400">{rangeText} · per {perLabel}</span>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">Newspaper, News Channel / TV Debate and Press Conference records — live from the database.</p>
+        {grandTotal === 0 ? (
+          <EmptyGraph label="No media activity recorded for this period." />
+        ) : (
+          <div style={{ width: "100%", height: 300 }}>
+            <ResponsiveContainer>
+              <LineChart data={series} margin={{ top: 8, right: 16, left: -8, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F1F3F5" vertical={false} />
+                <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#6B7280" }} interval="preserveStartEnd" minTickGap={24} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#6B7280" }} tickLine={false} axisLine={false} width={32} />
+                <RTooltip contentStyle={{ fontSize: 12, borderRadius: 10, border: "1px solid #E5E7EB" }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="newspaper" name="Newspaper" stroke={ACTIVITY_COLORS.newspaper} strokeWidth={2} dot={false} activeDot={{ r: 5 }} />
+                <Line type="monotone" dataKey="debate" name="TV Debate" stroke={ACTIVITY_COLORS.debate} strokeWidth={2} dot={false} activeDot={{ r: 5 }} />
+                <Line type="monotone" dataKey="conference" name="Press Conference" stroke={ACTIVITY_COLORS.conference} strokeWidth={2} dot={false} activeDot={{ r: 5 }} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
-          <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-            <div className="flex items-start gap-5">
-              <div>
-                <div className="text-2xl font-bold text-gray-600 tabular-nums">{ds.neutral}</div>
-                <div className="text-xs font-medium mt-1 text-gray-500">Neutral</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-red-600 tabular-nums">{ds.negative}</div>
-                <div className="text-xs font-medium mt-1 text-gray-500">Negative</div>
-              </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Chart 2 — Total activity by type across the range. */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-1"><BarChart3 size={16} className="text-[#164FA3]" /> Total Activity by Type</h3>
+          <p className="text-xs text-gray-500 mb-3">Records in {rangeText}.</p>
+          {grandTotal === 0 ? (
+            <EmptyGraph label="No activity to compare for this period." />
+          ) : (
+            <div style={{ width: "100%", height: 260 }}>
+              <ResponsiveContainer>
+                <BarChart data={totalsData} margin={{ top: 8, right: 16, left: -8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F3F5" vertical={false} />
+                  <XAxis dataKey="type" tick={{ fontSize: 11, fill: "#6B7280" }} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#6B7280" }} tickLine={false} axisLine={false} width={32} />
+                  <RTooltip contentStyle={{ fontSize: 12, borderRadius: 10, border: "1px solid #E5E7EB" }} cursor={{ fill: "#F8FAFC" }} />
+                  <Bar dataKey="count" name="Records" radius={[6, 6, 0, 0]} maxBarSize={72}>
+                    {totalsData.map((d) => <Cell key={d.type} fill={d.fill} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-          </div>
+          )}
         </div>
-      </div>
 
-      <div>
-        <h3 className="text-sm font-bold text-gray-700 mb-2">Newspaper</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <SumCard label={filtered ? "Published (selected range)" : "Published (30d)"} value={a.counts?.coverage_total || 0} accent />
-          <SumCard label="Positive" value={a.counts?.positive || 0} />
-          <SumCard label="Neutral" value={a.counts?.neutral || 0} />
-          <SumCard label="Negative" value={a.counts?.negative || 0} />
-        </div>
-      </div>
-
-      {/* Press Conference analytics (§11.3) — scheduled / done / videos uploaded,
-          all counted live from the press_conferences records. */}
-      <div>
-        <h3 className="text-sm font-bold text-gray-700 mb-2">Press Conference</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          <SumCard label="Total Press Conferences Scheduled" value={pcs.total} accent />
-          <SumCard label="Total Press Conferences Done" value={pcs.done} />
-          <SumCard label="Total Videos Uploaded" value={pcs.videos} />
+        {/* Chart 3 — Coverage sentiment & debate tone (positive / neutral /
+            negative), from the sentiment on press_notes and the tone of each
+            debate's news channel. */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-1"><BarChart3 size={16} className="text-[#164FA3]" /> Coverage Sentiment &amp; Debate Tone</h3>
+          <p className="text-xs text-gray-500 mb-3">Positive / Neutral / Negative in {rangeText}.</p>
+          {!hasSentiment ? (
+            <EmptyGraph label="No sentiment-tagged coverage or debates for this period." />
+          ) : (
+            <div style={{ width: "100%", height: 260 }}>
+              <ResponsiveContainer>
+                <BarChart data={sentimentData} margin={{ top: 8, right: 16, left: -8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F3F5" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#6B7280" }} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#6B7280" }} tickLine={false} axisLine={false} width={32} />
+                  <RTooltip contentStyle={{ fontSize: 12, borderRadius: 10, border: "1px solid #E5E7EB" }} cursor={{ fill: "#F8FAFC" }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="Positive" stackId="s" fill={SENTIMENT_COLORS.Positive} radius={[0, 0, 0, 0]} maxBarSize={72} />
+                  <Bar dataKey="Neutral" stackId="s" fill={SENTIMENT_COLORS.Neutral} maxBarSize={72} />
+                  <Bar dataKey="Negative" stackId="s" fill={SENTIMENT_COLORS.Negative} radius={[6, 6, 0, 0]} maxBarSize={72} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
       </div>
 
@@ -796,7 +873,7 @@ function AnalyticsTab({ data, filtered }) {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><TrendingUp size={16} className="text-[#FCB712]" /> Top Spokespersons</h3>
           <ul className="space-y-2">
-            {a.topSpokespersons.length === 0 ? <li className="text-gray-400 text-sm">No debate data yet.</li> :
+            {(a.topSpokespersons || []).length === 0 ? <li className="text-gray-400 text-sm">No debate data yet.</li> :
               a.topSpokespersons.map((s, i) => (
                 <li key={s.id} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2 last:border-0">
                   <span className="flex items-center gap-2"><span className="font-bold text-gray-400 w-5">{i + 1}</span>{s.name}</span>
@@ -806,6 +883,15 @@ function AnalyticsTab({ data, filtered }) {
           </ul>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Friendly placeholder so a period with no data never shows a blank chart area.
+function EmptyGraph({ label }) {
+  return (
+    <div className="flex h-[220px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/50 text-sm text-gray-400 text-center px-4">
+      {label}
     </div>
   );
 }
