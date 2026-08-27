@@ -472,6 +472,61 @@ async function ensureColumn(table, column, def) {
   } catch (e) { console.error(`[LA] ensureColumn ${table}.${column}:`, e?.message || e); }
 }
 
+// Every column the MLA-profile write touches, with its definition. This is the
+// SINGLE source of truth for the profile's writable shape — the CREATE TABLE
+// above lists the same columns for fresh databases, and the ensureColumn backfill
+// covers the ones added after the first release. Exported so the save route can
+// self-heal the table right before it writes: `ensureLeaderAssessmentTables`
+// memoizes with a module-level flag, so a process that set it once will not
+// re-run the migration when this file later gains a new column — leaving a live
+// table missing that column and every INSERT failing with "Unknown column". This
+// guarantees the columns exist on the exact request that needs them, regardless
+// of that flag, so an MLA profile can never fail to save because of schema drift.
+const MLA_PROFILE_COLUMNS = {
+  photo_url: "VARCHAR(1000) NULL",
+  name: "VARCHAR(255) NULL",
+  phone: "VARCHAR(50) NULL",
+  address: "TEXT NULL",
+  date_of_birth: "DATE NULL",
+  caste: "VARCHAR(255) NULL",
+  party: "VARCHAR(255) NULL",
+  net_worth: "VARCHAR(255) NULL",
+  criminal_cases: "INT NULL",
+  times_won: "INT NULL",
+  times_contested: "INT NULL",
+  largest_winning_margin: "INT NULL",
+  previous_winning_margin: "INT NULL",
+  party_won_from: "VARCHAR(255) NULL",
+  party_defeated: "VARCHAR(255) NULL",
+  competitor1_name: "VARCHAR(255) NULL",
+  competitor1_party: "VARCHAR(255) NULL",
+  competitor1_votes: "INT NULL",
+  competitor2_name: "VARCHAR(255) NULL",
+  competitor2_party: "VARCHAR(255) NULL",
+  competitor2_votes: "INT NULL",
+  competitor3_name: "VARCHAR(255) NULL",
+  competitor3_party: "VARCHAR(255) NULL",
+  competitor3_votes: "INT NULL",
+  competitor_margin: "INT NULL",
+  mla_votes: "INT NULL",
+};
+export async function ensureMlaProfileColumns() {
+  // The base table must exist first (fresh DB) — cheap and idempotent.
+  await query(
+    `CREATE TABLE IF NOT EXISTS la_mla_profiles (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       assembly_id INT NOT NULL,
+       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       UNIQUE KEY uq_la_mla_assembly (assembly_id)
+     )`
+  );
+  for (const [col, def] of Object.entries(MLA_PROFILE_COLUMNS)) {
+    // eslint-disable-next-line no-await-in-loop
+    await ensureColumn("la_mla_profiles", col, def);
+  }
+}
+
 // The 10 assessment parameters. `key` = column suffix, `label` = UI label.
 export const ASSESSMENT_PARAMS = [
   { key: "s_nature", label: "Candidate Nature" },

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
+import { ensureMlaProfileColumns } from "@/lib/leaderAssessment";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,12 @@ export async function PUT(req, { params }) {
   try {
     const { id } = await params;
     if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid assembly id." }, { status: 400 });
+    // Self-heal the profile table's columns before writing. guard() already ran
+    // the module's schema ensure, but that memoizes with a module-level flag and
+    // will NOT re-run after a deploy adds a new column to a long-lived process —
+    // which would leave the live table missing a column and every INSERT failing.
+    // Ensuring here guarantees the exact columns this write needs exist right now.
+    await ensureMlaProfileColumns();
     const [asm] = await query("SELECT id FROM la_assemblies WHERE id = ?", [id]);
     if (!asm) return NextResponse.json({ message: "Assembly not found." }, { status: 404 });
     const d = await req.json().catch(() => ({}));
@@ -89,6 +96,12 @@ export async function PUT(req, { params }) {
     return NextResponse.json({ ok: true, mla }, { headers: noStore });
   } catch (e) {
     console.error("[LA] mla PUT:", e);
-    return NextResponse.json({ message: "Failed to save the MLA profile." }, { status: 500 });
+    // Surface the ACTUAL database reason (unknown column, bad value, lock timeout,
+    // …) instead of a generic "Failed to save" that hides the real cause. The
+    // client shows this verbatim, so a save failure is diagnosable at a glance and
+    // errors are never masked behind a fake success.
+    const detail = e?.sqlMessage || e?.message || "";
+    const message = detail ? `Failed to save the MLA profile: ${detail}` : "Failed to save the MLA profile.";
+    return NextResponse.json({ message }, { status: 500 });
   }
 }
