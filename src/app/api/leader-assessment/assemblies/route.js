@@ -31,7 +31,7 @@ export async function GET(req) {
     // authoritative name + parent district are read straight from master.
     const rows = await query(
       `SELECT a.*, ml.name AS master_name, dl.name AS master_district, dl.id AS master_district_id,
-              m.name AS mla_name, m.photo_url AS mla_photo_url,
+              m.name AS mla_name, m.photo_url AS mla_photo_url, m.party AS mla_party,
               (SELECT COUNT(*) FROM la_aap_candidates c WHERE c.assembly_id = a.id) AS candidate_count
          FROM la_assemblies a
          JOIN locations ml ON ml.id = a.location_id AND ml.type = 'assembly'
@@ -80,6 +80,9 @@ export async function GET(req) {
         required_workers: r.required_workers != null ? Number(r.required_workers) : null,
         worker_count: districtId != null ? (workerMap.get(districtId) || 0) : 0,
         mla_photo_url: r.mla_photo_url || null,
+        // The sitting MLA's party (by Master name) so the dashboard can show the
+        // MLA's Party Logo before their photo.
+        mla_party: r.mla_party || null,
         top_candidate: topByAsm[r.id]?.name || null,
         top_candidate_photo_url: topByAsm[r.id]?.photo_url || null,
         top_candidate_party: topByAsm[r.id]?.party || null,

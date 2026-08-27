@@ -408,7 +408,13 @@ function Overview({ flash, fail }) {
                     <td className="px-3 py-2.5"><div className="font-semibold text-gray-900">{a.name}</div><div className="text-xs text-gray-400">{a.district || "—"}</div></td>
                     <td className="px-3 py-2.5 text-gray-700">
                       {a.mla_name ? (
-                        <div className="flex items-center gap-2 min-w-0"><Avatar name={a.mla_name} src={a.mla_photo_url} size={30} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-[10px]" /><span className="truncate">{a.mla_name}</span></div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          {/* Order: Party Logo → MLA Photo → MLA Name (party logo
+                              resolved live from Party Master by this MLA's party). */}
+                          <PartyLogoSlot party={a.mla_party} partyByName={partyByName} size={18} />
+                          <Avatar name={a.mla_name} src={a.mla_photo_url} size={30} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-[10px]" />
+                          <span className="truncate">{a.mla_name}</span>
+                        </div>
                       ) : <span className="text-gray-300">No MLA</span>}
                     </td>
                     <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{a.candidate_count}/3</span></td>
