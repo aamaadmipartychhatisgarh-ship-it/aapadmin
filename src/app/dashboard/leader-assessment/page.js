@@ -711,9 +711,15 @@ const MLA_PARTY_BUCKETS = [
   { key: "other", label: "Other Party MLA" },
 ];
 function mlaPartyBucket(party) {
-  const s = String(party || "").toLowerCase();
-  if (/\bbjp\b/.test(s) || s.includes("bharatiya janata")) return "bjp";
-  if (/\binc\b/.test(s) || s.includes("congress") || s.includes("indian national")) return "inc";
+  const s = String(party || "").toLowerCase().replace(/[.\s]+/g, " ").trim();
+  if (!s) return "other";
+  // BJP — the abbreviation on its own, or the full name.
+  if (s === "bjp" || s.includes("bharatiya janata")) return "bjp";
+  // INC — the abbreviation, the full name, or plain "congress" as the party name.
+  // Deliberately does NOT match on a bare "congress" substring, so parties like
+  // Nationalist Congress Party (NCP) or Trinamool Congress are NOT miscounted as
+  // INC — they fall under Other Party, which is the correct classification.
+  if (s === "inc" || s === "congress" || s.includes("indian national congress")) return "inc";
   return "other";
 }
 
@@ -770,23 +776,42 @@ function MlaManager({ flash, fail }) {
   const takenAsm = new Set(mlas.map((m) => Number(m.assembly_id)));
   // Keep an open assessment modal bound to the freshest record after a refresh.
   const editingAssessmentLive = editingAssessment ? (mlas.find((m) => m.id === editingAssessment.id) || editingAssessment) : null;
-  // Party-wise counts, computed live from the real MLA data, ordered by count
-  // (highest first) — the party with the most MLAs shows first. No fixed order.
-  const partyBuckets = useMemo(() => {
-    const counts = { bjp: 0, inc: 0, other: 0 };
-    for (const m of mlas) counts[mlaPartyBucket(m.party)] += 1;
-    return MLA_PARTY_BUCKETS.map((b) => ({ ...b, count: counts[b.key] })).sort((a, b) => b.count - a.count);
+  // Base MLA set for BOTH the party counts and the displayed list, so the two can
+  // never disagree: valid records only (must have a name) and de-duplicated by the
+  // unique MLA id, so no record is ever counted or listed twice.
+  const baseMlas = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const m of mlas) {
+      if (!m || m.id == null || seen.has(m.id)) continue;   // drop duplicates
+      if (!String(m.name || "").trim()) continue;            // valid records only
+      seen.add(m.id);
+      out.push(m);
+    }
+    return out;
   }, [mlas]);
 
-  // Client-side filter over the already-loaded list (bounded to one MLA per
-  // assembly): party bucket + text over name / assembly / district / party —
-  // instant, no refetch. Clearing either filter restores the full list.
+  // Text search narrows the base set; the party counts are computed over this
+  // SAME searched set, so selecting a party yields exactly the card's count.
   const needle = q.trim().toLowerCase();
-  const shown = mlas.filter((m) => {
-    if (partyFilter && mlaPartyBucket(m.party) !== partyFilter) return false;
-    if (needle && !`${m.name || ""} ${m.assembly_name || ""} ${m.district || ""} ${m.party || ""}`.toLowerCase().includes(needle)) return false;
-    return true;
-  });
+  const searchFiltered = useMemo(() => (
+    needle
+      ? baseMlas.filter((m) => `${m.name || ""} ${m.assembly_name || ""} ${m.district || ""} ${m.party || ""}`.toLowerCase().includes(needle))
+      : baseMlas
+  ), [baseMlas, needle]);
+
+  // Party-wise counts — same data + same classifier the list filter uses,
+  // ordered highest→lowest (most MLAs first). No hardcoded or separately
+  // maintained counts; recomputed automatically whenever the MLA data changes.
+  const partyBuckets = useMemo(() => {
+    const counts = { bjp: 0, inc: 0, other: 0 };
+    for (const m of searchFiltered) counts[mlaPartyBucket(m.party)] += 1;
+    return MLA_PARTY_BUCKETS.map((b) => ({ ...b, count: counts[b.key] })).sort((a, b) => b.count - a.count);
+  }, [searchFiltered]);
+
+  // Displayed list = the searched base narrowed by the selected party bucket, so
+  // shown.length === the selected party's card count. Clearing restores the list.
+  const shown = partyFilter ? searchFiltered.filter((m) => mlaPartyBucket(m.party) === partyFilter) : searchFiltered;
 
   return (
     <div className="space-y-5">
@@ -812,7 +837,7 @@ function MlaManager({ flash, fail }) {
               <div className="flex items-center gap-2 mb-2">
                 <Flag size={15} className="text-[#164FA3]" />
                 <span className="text-sm font-bold text-gray-800">Party-wise MLAs</span>
-                <span className="text-xs text-gray-400">({mlas.length} total)</span>
+                <span className="text-xs text-gray-400">({baseMlas.length} total)</span>
                 {partyFilter && (
                   <button onClick={() => setPartyFilter("")} className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-[#164FA3] hover:underline">
                     <X size={13} /> Clear filter
