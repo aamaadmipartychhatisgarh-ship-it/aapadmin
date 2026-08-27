@@ -101,6 +101,8 @@ export async function GET(_req, { params }) {
       return {
         id: c.id, assembly_id: c.assembly_id, photo_url: c.photo_url, name: c.name, phone: c.phone,
         address: c.address, date_of_birth: c.date_of_birth, age: ageFromDob(c.date_of_birth),
+        // Party (by Master name) so the comparison view resolves the Party Logo.
+        party: c.party,
         caste: c.caste, net_worth: c.net_worth, business: c.business, monthly_income: c.monthly_income,
         education: c.education, political_experience: c.political_experience,
         organization_experience: c.organization_experience, previous_elections: c.previous_elections,

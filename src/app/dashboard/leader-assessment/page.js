@@ -1821,6 +1821,7 @@ function AssessmentEditor({ c, endpoint, onChange, flash, fail }) {
 // fields are read-only here (Edit opens the full form); the assessment saves,
 // reloads and re-totals through AssessmentEditor.
 function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
+  const { byName: partyByName } = usePartyMaster(); // live party logos by name
   const rows = [
     ["Assembly", c.assembly_name], ["District", c.district],
     ["Phone", c.phone],
@@ -1838,7 +1839,11 @@ function CandidateOpenModal({ c, onClose, onEdit, onChange, flash, fail }) {
           <ProfilePhoto name={c.name} src={c.photo_url} size={72} square editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
+              {/* Party Logo — resolved live from Party Master by the candidate's
+                  party name (same mapping the Assembly list uses). */}
+              <PartyLogoSlot party={c.party} partyByName={partyByName} size={24} />
               <h3 className="text-lg font-bold text-gray-900 truncate">{c.name}</h3>
+              {c.party && <span className="text-xs font-semibold text-gray-500">{c.party}</span>}
               <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Completed" : "Pending"}</span>
               <span className="text-sm font-bold text-[#164FA3]">{c.total}/100</span>
             </div>

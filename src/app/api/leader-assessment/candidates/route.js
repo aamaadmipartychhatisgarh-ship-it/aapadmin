@@ -54,6 +54,10 @@ export async function GET(req) {
         address: r.address,
         date_of_birth: r.date_of_birth,
         caste: r.caste,
+        // The candidate's Party (by Master name) — needed so the list/profile can
+        // resolve and show the correct Party Logo live (BUG FIX 2). It was being
+        // SELECTed but dropped here, so the logo never received a party name.
+        party: r.party,
         net_worth: r.net_worth,
         business: r.business,
         monthly_income: r.monthly_income,
