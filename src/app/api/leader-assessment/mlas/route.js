@@ -60,6 +60,12 @@ export async function GET() {
         competitor2_name: r.competitor2_name ?? null,
         competitor2_party: r.competitor2_party ?? null,
         competitor2_votes: r.competitor2_votes ?? null,
+        // Competitor 3 was SELECTed (mp.*) but dropped here, so its party logo
+        // and name/votes never rendered in the MLA view — restore them for parity
+        // with Competitors 1 & 2.
+        competitor3_name: r.competitor3_name ?? null,
+        competitor3_party: r.competitor3_party ?? null,
+        competitor3_votes: r.competitor3_votes ?? null,
         competitor_margin: r.competitor_margin ?? null,
         mla_votes: r.mla_votes ?? null,
         assessment,
