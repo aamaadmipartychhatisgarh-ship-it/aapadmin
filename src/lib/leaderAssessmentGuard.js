@@ -18,17 +18,26 @@ export async function guard({ superAdminOnly = false, allowPageKeys = [] } = {})
   const session = await getServerSession(authOptions);
   let permitted = false;
   if (session) {
-    // Page-restricted users: role ignored — admitted only if they were assigned
-    // the Leader Assessment page (general routes) or one of this route's
-    // allowPageKeys (e.g. caste_master / polling_master). Non-restricted users:
-    // the normal oversight rule, unchanged.
-    if (await isPageRestricted(session)) {
-      const keys = ["leader_assessment", ...allowPageKeys];
-      for (const k of keys) {
-        // eslint-disable-next-line no-await-in-loop
-        if (await userCanAccessPageKey(session, k)) { permitted = true; break; }
+    try {
+      // Page-restricted users: role ignored — admitted only if they were assigned
+      // the Leader Assessment page (general routes) or one of this route's
+      // allowPageKeys (e.g. caste_master / polling_master). Non-restricted users:
+      // the normal oversight rule, unchanged.
+      if (await isPageRestricted(session)) {
+        const keys = ["leader_assessment", ...allowPageKeys];
+        for (const k of keys) {
+          // eslint-disable-next-line no-await-in-loop
+          if (await userCanAccessPageKey(session, k)) { permitted = true; break; }
+        }
+      } else {
+        permitted = isOversight(session);
       }
-    } else {
+    } catch (e) {
+      // The Page-Access lookup must never DENY a write it can't evaluate. Fall
+      // back to the role check so an oversight user (Supervisor/Admin) is still
+      // admitted — this is why the failure looked Supervisor-specific, since a
+      // Super Admin short-circuits before that lookup even runs.
+      console.error("[LA] guard access check failed, falling back to role:", e?.message || e);
       permitted = isOversight(session);
     }
   }

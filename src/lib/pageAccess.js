@@ -62,11 +62,22 @@ export async function markManaged(userId, by) {
   );
 }
 // Is this user managed by Page Access (has a saved config, possibly empty)?
+// Fail-SAFE: if the managed-status lookup errors (e.g. the config table isn't
+// ready yet), treat the user as NOT managed so access falls back to their role
+// instead of throwing. Otherwise a transient DB hiccup here would bubble up and
+// deny an oversight user (Supervisor/Admin) a write that their role allows —
+// Super Admins never hit this path (isPageRestricted returns before the query),
+// which is exactly why such a failure would look Supervisor-specific.
 export async function isUserManaged(userId) {
   if (!userId) return false;
-  await ensurePagePermissionsSchema();
-  const rows = await query(`SELECT 1 FROM page_access_config WHERE user_id = ? LIMIT 1`, [userId]);
-  return rows.length > 0;
+  try {
+    await ensurePagePermissionsSchema();
+    const rows = await query(`SELECT 1 FROM page_access_config WHERE user_id = ? LIMIT 1`, [userId]);
+    return rows.length > 0;
+  } catch (e) {
+    console.error("[pageAccess] isUserManaged:", e?.message || e);
+    return false;
+  }
 }
 // Remove a user's managed marker → they revert to normal role-based access.
 export async function clearManaged(userId) {
@@ -98,9 +109,14 @@ export function fixedPagesForRole(role) {
 // registry so a stale key for a since-removed page is ignored).
 export async function getUserGrantKeys(userId) {
   if (!userId) return new Set();
-  await ensurePagePermissionsSchema();
-  const rows = await query(`SELECT page_key FROM page_permissions WHERE user_id = ?`, [userId]);
-  return new Set(rows.map((r) => r.page_key).filter(isValidPageKey));
+  try {
+    await ensurePagePermissionsSchema();
+    const rows = await query(`SELECT page_key FROM page_permissions WHERE user_id = ?`, [userId]);
+    return new Set(rows.map((r) => r.page_key).filter(isValidPageKey));
+  } catch (e) {
+    console.error("[pageAccess] getUserGrantKeys:", e?.message || e);
+    return new Set(); // fail-safe: no grants rather than throwing through a guard
+  }
 }
 
 // Is this user page-restricted (managed by Page Access)? Super Admin never is.
