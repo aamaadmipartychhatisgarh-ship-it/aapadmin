@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar, { initialsOf } from "@/components/Avatar";
@@ -10,7 +10,7 @@ import {
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet,
   Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
-  Database, Power, Check, Printer,
+  Database, Power, Check, Printer, Flag,
 } from "lucide-react";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
@@ -695,6 +695,22 @@ function winningMargin(mlaVotes, comp1Votes) {
 }
 // (The old per-assembly MlaTab was replaced by the global MlaManager below.)
 
+// Party buckets for the MLA Profile party-wise filter/count card. Each MLA is
+// classified live by the party NAME stored on its profile — BJP, INC, or every
+// other party — so counts come straight from real data with no hardcoding. The
+// cards are ordered by their ACTUAL counts (highest first), never a fixed order.
+const MLA_PARTY_BUCKETS = [
+  { key: "bjp", label: "BJP MLA" },
+  { key: "inc", label: "INC MLA" },
+  { key: "other", label: "Other Party MLA" },
+];
+function mlaPartyBucket(party) {
+  const s = String(party || "").toLowerCase();
+  if (/\bbjp\b/.test(s) || s.includes("bharatiya janata")) return "bjp";
+  if (/\binc\b/.test(s) || s.includes("congress") || s.includes("indian national")) return "inc";
+  return "other";
+}
+
 // --------------------------- MLA MANAGER ----------------------------------
 // The MLA Profile tab: a global manager with a "+ Create MLA Profile" action and
 // the complete, DB-driven MLA Data List (one row per MLA). Each row shows MLA
@@ -713,6 +729,7 @@ function MlaManager({ flash, fail }) {
   const [editingAssessment, setEditingAssessment] = useState(null); // mla (full assessment edit)
   const [version, setVersion] = useState(0);             // bumped after an edit to refresh the inline view
   const [q, setQ] = useState("");                        // MLA-list search
+  const [partyFilter, setPartyFilter] = useState("");    // "" | bjp | inc | other
   const [showPhotoAudit, setShowPhotoAudit] = useState(false);
 
   const loadAssemblies = useCallback(async () => {
@@ -747,12 +764,23 @@ function MlaManager({ flash, fail }) {
   const takenAsm = new Set(mlas.map((m) => Number(m.assembly_id)));
   // Keep an open assessment modal bound to the freshest record after a refresh.
   const editingAssessmentLive = editingAssessment ? (mlas.find((m) => m.id === editingAssessment.id) || editingAssessment) : null;
+  // Party-wise counts, computed live from the real MLA data, ordered by count
+  // (highest first) — the party with the most MLAs shows first. No fixed order.
+  const partyBuckets = useMemo(() => {
+    const counts = { bjp: 0, inc: 0, other: 0 };
+    for (const m of mlas) counts[mlaPartyBucket(m.party)] += 1;
+    return MLA_PARTY_BUCKETS.map((b) => ({ ...b, count: counts[b.key] })).sort((a, b) => b.count - a.count);
+  }, [mlas]);
+
   // Client-side filter over the already-loaded list (bounded to one MLA per
-  // assembly), matching name / assembly / district / party — instant, no refetch.
+  // assembly): party bucket + text over name / assembly / district / party —
+  // instant, no refetch. Clearing either filter restores the full list.
   const needle = q.trim().toLowerCase();
-  const shown = needle
-    ? mlas.filter((m) => `${m.name || ""} ${m.assembly_name || ""} ${m.district || ""} ${m.party || ""}`.toLowerCase().includes(needle))
-    : mlas;
+  const shown = mlas.filter((m) => {
+    if (partyFilter && mlaPartyBucket(m.party) !== partyFilter) return false;
+    if (needle && !`${m.name || ""} ${m.assembly_name || ""} ${m.district || ""} ${m.party || ""}`.toLowerCase().includes(needle)) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-5">
@@ -771,6 +799,37 @@ function MlaManager({ flash, fail }) {
           <Empty msg="No MLA profiles yet." action={<button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Create MLA Profile</button>} />
         ) : (
           <>
+            {/* Party-wise filter & count card — counts computed live from the MLA
+                data, ordered highest→lowest. Click a party to filter the list to
+                only its MLAs; click again (or All) to clear. */}
+            <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Flag size={15} className="text-[#164FA3]" />
+                <span className="text-sm font-bold text-gray-800">Party-wise MLAs</span>
+                <span className="text-xs text-gray-400">({mlas.length} total)</span>
+                {partyFilter && (
+                  <button onClick={() => setPartyFilter("")} className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-[#164FA3] hover:underline">
+                    <X size={13} /> Clear filter
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {partyBuckets.map((b) => {
+                  const active = partyFilter === b.key;
+                  return (
+                    <button
+                      key={b.key}
+                      onClick={() => setPartyFilter(active ? "" : b.key)}
+                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors ${active ? "border-[#164FA3] bg-[#164FA3]/10 ring-1 ring-[#164FA3]/30" : "border-gray-200 bg-white hover:bg-gray-50"}`}
+                    >
+                      <span className={`text-sm font-semibold ${active ? "text-[#164FA3]" : "text-gray-700"}`}>{b.label}</span>
+                      <span className={`text-lg font-bold ${active ? "text-[#164FA3]" : "text-gray-900"}`}>{b.count.toLocaleString()}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="flex items-center gap-2 mb-4 max-w-md">
               <div className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-2 bg-white w-full focus-within:ring-2 focus-within:ring-[#164FA3]/40">
                 <Search size={15} className="text-gray-400 shrink-0" />
@@ -778,7 +837,7 @@ function MlaManager({ flash, fail }) {
                 {q && <button onClick={() => setQ("")} className="text-gray-400 hover:text-gray-600"><X size={15} /></button>}
               </div>
             </div>
-            {shown.length === 0 ? <div className="text-sm text-gray-400 py-6 text-center">No MLAs match “{q}”.</div> : (
+            {shown.length === 0 ? <div className="text-sm text-gray-400 py-6 text-center">No MLAs match the current filter.{(partyFilter || q) && <button onClick={() => { setPartyFilter(""); setQ(""); }} className="ml-1 text-[#164FA3] font-semibold hover:underline">Clear</button>}</div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-gray-500"><tr>{["MLA", "Assembly", "District", "Party", "Assessment Score", "Status", ""].map((h) => <th key={h} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
