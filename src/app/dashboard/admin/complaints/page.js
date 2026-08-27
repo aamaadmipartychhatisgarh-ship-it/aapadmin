@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
+import { usePageGuard } from "@/components/usePageGuard";
 import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -24,11 +25,13 @@ const STATUS_OPTS = ["open", "in_progress", "resolved", "closed"];
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // Role OR a Page-Access grant for this page (managed override).
+  const { ready, allowed } = usePageGuard("complaints", isOversight(session));
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isOversight(session)) router.push("/dashboard");
-  }, [status, session, router]);
-  if (status !== "authenticated" || !isOversight(session)) {
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <Body />;

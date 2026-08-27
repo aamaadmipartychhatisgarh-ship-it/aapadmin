@@ -5,15 +5,19 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Loader2, Phone, PhoneCall, TrendingUp, CalendarDays, Users, Clock, Star } from "lucide-react";
 import { isAdmin } from "@/lib/permissions";
+import { usePageGuard } from "@/components/usePageGuard";
 
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // Access = role OR a Page-Access grant for this page (managed override), so a
+  // user granted "Caller Report" opens it without an Access-Denied bounce.
+  const { ready, allowed } = usePageGuard("caller_report", isAdmin(session));
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isAdmin(session)) router.push("/dashboard");
-  }, [status, session, router]);
-  if (status !== "authenticated" || !isAdmin(session)) {
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <Body />;

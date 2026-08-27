@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
 // Per-caller performance report for the admin dashboard: call volume, outcome
@@ -27,7 +28,9 @@ async function getCallColumns() {
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    // Role OR a Page-Access grant for this page (managed override) — mirrors the
+    // client guard and the sidebar, so a granted user's data actually loads.
+    if (!(await pageAllowed(session, "caller_report", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 

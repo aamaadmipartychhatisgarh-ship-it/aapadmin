@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isSuperAdmin, normalizeRole, roleLabel, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { ensurePagePermissionsSchema, setUserPages, markManaged, clearManaged } from "@/lib/pageAccess";
+import { ensurePagePermissionsSchema, setUserPages, markManaged, clearManaged, fixedPagesForRole } from "@/lib/pageAccess";
 import { PAGES, PAGE_KEYS, isValidPageKey, getPage } from "@/lib/pages";
 
 // BUG 14 — Page Access Management (Super Admin only).
@@ -45,6 +45,10 @@ export async function GET() {
         photo_url: u.photo_url ?? null,
         is_active: u.is_active,
         managed: managedSet.has(u.id),
+        // System-required pages this user's ROLE always keeps, even when managed
+        // (e.g. a Caller never loses My Workspace / My Calls / Wrong Numbers).
+        // The console shows these as locked so they can't be unticked away.
+        fixed_pages: fixedPagesForRole(u.role),
       }));
 
     const grantRows = await query(

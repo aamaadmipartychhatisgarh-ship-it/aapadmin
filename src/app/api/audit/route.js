@@ -2,17 +2,18 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
 // GET /api/audit?action=&actor=&date_from=&date_to=&page=&limit=
-// Read the audit trail (admins only). Paginated; filterable by action, actor and
-// date range. Returns { logs, total, page, pages }.
+// Read the audit trail (admins, or a user granted the Audit Log page). Paginated;
+// filterable by action, actor and date range. Returns { logs, total, page, pages }.
 export const dynamic = "force-dynamic";
 
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    if (!(await pageAllowed(session, "audit", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { searchParams } = new URL(req.url);

@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureUserTeamMembers } from "@/lib/teamSchema";
 
 export async function GET(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) {
+    if (!(await pageAllowed(session, "teams", session && isOversight(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     await ensureUserTeamMembers();

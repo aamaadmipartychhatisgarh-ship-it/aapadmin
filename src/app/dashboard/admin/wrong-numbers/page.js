@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight, isAdmin, isCaller } from "@/lib/permissions";
+import { usePageGuard } from "@/components/usePageGuard";
 import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X, GitMerge, Send, HeartCrack } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
@@ -17,12 +18,15 @@ const REASON_LABEL = Object.fromEntries(WRONG_NUMBER_REASONS.map((r) => [r.value
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // Oversight OR caller by role, OR a Page-Access grant for this page (managed
+  // override). Wrong Numbers is also a FIXED caller page, so a managed caller
+  // always keeps it (Not Interested / Wrong Number workflow never breaks).
+  const { ready, allowed } = usePageGuard("wrong_numbers", isOversight(session) || isCaller(session));
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    // Oversight roles get the full dashboard; callers get the Not Interested tab.
-    else if (status === "authenticated" && !isOversight(session) && !isCaller(session)) router.push("/dashboard");
-  }, [status, session, router]);
-  if (status !== "authenticated" || (!isOversight(session) && !isCaller(session))) {
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <WrongNumbersDashboard session={session} oversight={isOversight(session)} canDelete={isAdmin(session)} />;

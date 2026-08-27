@@ -8,6 +8,7 @@ import { Search, Filter, RefreshCcw, Phone, MapPin, ChevronRight, Loader2, Downl
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
+import { usePageGuard } from "@/components/usePageGuard";
 
 const STATUS_PILL = {
   "Phone Picked":   { bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
@@ -35,6 +36,10 @@ function fmtDur(seconds) {
 export default function AdminCallRecords() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // Role OR a Page-Access grant for this page (managed override). All access
+  // gating below keys off `allowed`, so a granted user can open it and its data
+  // loads (Call Records).
+  const { ready, allowed } = usePageGuard("call_records", isAdmin(session));
 
   const [calls, setCalls] = useState([]);
   // Summary totals come from the API (computed over the whole matching dataset,
@@ -66,11 +71,11 @@ export default function AdminCallRecords() {
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isAdmin(session)) router.push("/dashboard");
-  }, [status, session, router]);
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
 
   useEffect(() => {
-    if (status !== "authenticated" || !isAdmin(session)) return;
+    if (!allowed) return;
     (async () => {
       const [s, z, ls, d, a, u, dg] = await Promise.all([
         fetch("/api/statuses").then((r) => r.json()).catch(() => ({})),
@@ -89,7 +94,7 @@ export default function AdminCallRecords() {
       setUsers((u.users || []).filter((x) => normalizeRole(x.role) === ROLES.CALLER));
       setDesignations(dg.designations || []);
     })();
-  }, [status, session]);
+  }, [allowed]);
 
   const fetchCalls = async () => {
     setLoading(true);
@@ -118,13 +123,13 @@ export default function AdminCallRecords() {
   };
 
   useEffect(() => {
-    if (status === "authenticated" && isAdmin(session)) fetchCalls();
+    if (allowed) fetchCalls();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, session]);
+  }, [allowed]);
 
   // Re-fetch on filter changes (debounced for search)
   useEffect(() => {
-    if (status !== "authenticated" || !isAdmin(session)) return;
+    if (!allowed) return;
     const t = setTimeout(fetchCalls, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,7 +143,7 @@ export default function AdminCallRecords() {
   };
 
 
-  if (status !== "authenticated" || !isAdmin(session)) {
+  if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
 

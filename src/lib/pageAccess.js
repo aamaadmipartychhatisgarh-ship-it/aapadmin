@@ -78,6 +78,22 @@ function isSuper(role) {
   return normalizeRole(role) === ROLES.SUPER_ADMIN;
 }
 
+// FIXED (locked) pages per role — system-required access that a managed user of
+// that role ALWAYS keeps, even after the Super Admin saves a Page-Access config
+// that does not include them. This is how an existing Caller never loses their
+// core workflow (My Workspace, My Calls, and the Wrong Number / Not Interested
+// dashboard) because their pages were managed. These pages are unioned into the
+// effective set for managed users everywhere access is resolved (sidebar, client
+// guard, route block, and backend/API authorization), so all layers agree. They
+// are additive only — they never remove anything and never widen an unmanaged
+// user's role access.
+const FIXED_ROLE_PAGES = {
+  [ROLES.CALLER]: ["workspace", "calls", "wrong_numbers"],
+};
+export function fixedPagesForRole(role) {
+  return (FIXED_ROLE_PAGES[normalizeRole(role)] || []).filter(isValidPageKey);
+}
+
 // All explicit grants for one user, as a Set of page keys (validated against the
 // registry so a stale key for a since-removed page is ignored).
 export async function getUserGrantKeys(userId) {
@@ -103,7 +119,11 @@ export async function isPageRestricted(session) {
 export async function getEffectivePageKeys(userId, role) {
   const canonical = normalizeRole(role);
   if (isSuper(canonical)) return new Set(PAGE_KEYS);
-  if (await isUserManaged(userId)) return new Set(await getUserGrantKeys(userId));
+  if (await isUserManaged(userId)) {
+    // Managed → exactly the assigned pages, PLUS this role's fixed/locked pages
+    // (so an existing Caller never loses My Workspace / My Calls / Wrong Numbers).
+    return new Set([...(await getUserGrantKeys(userId)), ...fixedPagesForRole(canonical)]);
+  }
   return new Set(baselinePagesForRole(canonical));
 }
 
@@ -113,7 +133,8 @@ export async function userCanAccessPageKey(session, pageKey) {
   if (!isValidPageKey(pageKey)) return false;
   const role = roleOf(session);
   if (isSuper(role)) return true;
-  if (await isUserManaged(session.user.id)) {                 // managed → assigned only
+  if (await isUserManaged(session.user.id)) {                 // managed → assigned + fixed
+    if (fixedPagesForRole(role).includes(pageKey)) return true;
     return (await getUserGrantKeys(session.user.id)).has(pageKey);
   }
   return baselinePagesForRole(role).includes(pageKey);        // unmanaged → role baseline
@@ -136,8 +157,10 @@ export async function userCanAccessPath(session, pathname) {
 // Insert as: if (!(await pageAllowed(session, KEY, <existingRoleExpr>))) → 401.
 export async function pageAllowed(session, pageKey, roleOk) {
   if (!session?.user) return false;
-  if (isSuper(roleOf(session))) return true;
+  const role = roleOf(session);
+  if (isSuper(role)) return true;
   if (await isUserManaged(session.user.id)) {
+    if (fixedPagesForRole(role).includes(pageKey)) return true;   // role's locked pages
     return isValidPageKey(pageKey) && (await getUserGrantKeys(session.user.id)).has(pageKey);
   }
   return !!roleOk;

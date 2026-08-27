@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isAdmin } from "@/lib/permissions";
+import { usePageGuard } from "@/components/usePageGuard";
 import { Loader2, Shield, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 
@@ -31,11 +32,13 @@ function fmt(v) {
 export default function AuditPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // Role OR a Page-Access grant for this page (managed override).
+  const { ready, allowed } = usePageGuard("audit", isAdmin(session));
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isAdmin(session)) router.push("/dashboard");
-  }, [status, session, router]);
-  if (status !== "authenticated" || !isAdmin(session)) {
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <Body />;

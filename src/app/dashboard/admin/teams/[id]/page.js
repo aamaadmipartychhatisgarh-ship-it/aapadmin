@@ -5,17 +5,20 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { isAdmin, isOversight } from "@/lib/permissions";
+import { usePageGuard } from "@/components/usePageGuard";
 import { ArrowLeft, Users, Trophy, Plus, X, Loader2, Trash2 } from "lucide-react";
 
 export default function Page({ params }) {
   const { id } = use(params);
   const { data: session, status } = useSession();
   const router = useRouter();
+  // Role OR a Page-Access grant for this page (managed override).
+  const { ready, allowed } = usePageGuard("teams", isOversight(session));
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isOversight(session)) router.push("/dashboard");
-  }, [status, session, router]);
-  if (status !== "authenticated" || !isOversight(session)) {
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <Body id={id} canEdit={isAdmin(session)} router={router} />;

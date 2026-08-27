@@ -14,9 +14,14 @@ export async function GET(req) {
     if (!session) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
-    // Page-restricted users reach My Calls only if "calls" is one of their
-    // assigned pages (assigning some other page must not unlock it).
-    if (await isPageRestricted(session) && !(await userCanAccessPageKey(session, "calls"))) {
+    // Page-restricted users reach the calls data only if they were assigned My
+    // Calls ("calls") or the admin Call Records ("call_records") page. Assigning
+    // some unrelated page must not unlock it. The data SCOPE below stays
+    // role-based (a caller still sees only their own calls), so a grant opens the
+    // page without widening whose calls are visible.
+    if (await isPageRestricted(session)
+        && !(await userCanAccessPageKey(session, "calls"))
+        && !(await userCanAccessPageKey(session, "call_records"))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 

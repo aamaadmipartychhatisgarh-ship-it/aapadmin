@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
+import { usePageGuard } from "@/components/usePageGuard";
 import { CalendarDays, Plus, Loader2, X, Pencil, MapPin, Users, Search } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
@@ -22,11 +23,13 @@ function fmtTime(t) { return t ? t.slice(0, 5) : ""; }
 export default function EventsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // Role OR a Page-Access grant for this page (managed override).
+  const { ready, allowed } = usePageGuard("events", isOversight(session));
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isOversight(session)) router.push("/dashboard");
-  }, [status, session, router]);
-  if (status !== "authenticated" || !isOversight(session)) {
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <Body />;

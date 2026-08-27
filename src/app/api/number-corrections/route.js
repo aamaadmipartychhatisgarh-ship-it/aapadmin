@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +23,9 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
     const mine = searchParams.get("mine") === "1";
-    const oversight = isOversight(session);
+    // The full corrections center is for oversight OR a user granted the Number
+    // Corrections page (managed override); everyone else only with mine=1.
+    const oversight = isOversight(session) || (await pageAllowed(session, "number_corrections", false));
 
     if (!oversight && !mine) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });

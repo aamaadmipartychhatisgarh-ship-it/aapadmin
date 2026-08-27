@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
+import { usePageGuard } from "@/components/usePageGuard";
 import { Flag, Loader2, CheckCircle2, XCircle, Clock, RotateCcw } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import Avatar from "@/components/Avatar";
@@ -11,11 +12,13 @@ import Avatar from "@/components/Avatar";
 export default function Page() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  // Role OR a Page-Access grant for this page (managed override).
+  const { ready, allowed } = usePageGuard("number_corrections", isOversight(session));
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && !isOversight(session)) router.push("/dashboard");
-  }, [status, session, router]);
-  if (status !== "authenticated" || !isOversight(session)) {
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
   }
   return <Body />;

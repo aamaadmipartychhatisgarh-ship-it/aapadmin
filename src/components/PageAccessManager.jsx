@@ -202,6 +202,9 @@ export default function PageAccessManager() {
 
         {selUser && (() => {
           const u = userById.get(Number(selUser));
+          // System-required (locked) pages for this user's role — always kept
+          // even when managed, shown ticked+disabled so they can't be removed.
+          const fixedSet = new Set(u?.fixed_pages || []);
           return (
           <>
             {/* Current DB state for this user (§18) */}
@@ -210,6 +213,11 @@ export default function PageAccessManager() {
                 {u.managed
                   ? <>Managed by Page Access — this user can access <strong>exactly</strong> the pages saved below (role defaults do not apply).</>
                   : <>Not yet managed — currently on <strong>{u.role_label}</strong> role defaults. Saving switches them to explicit page access (only the pages you pick).</>}
+                {fixedSet.size > 0 && (
+                  <div className="mt-1 text-[11px] text-gray-500">
+                    Locked pages for this role are always available and can’t be removed: <strong>{[...fixedSet].map((k) => pageByKey.get(k)?.label || k).join(", ")}</strong>.
+                  </div>
+                )}
               </div>
             )}
             {/* Selected pages as removable tags */}
@@ -252,11 +260,14 @@ export default function PageAccessManager() {
                     {shown.length === 0 ? (
                       <div className="col-span-full text-xs text-gray-400 px-2 py-3 text-center">No pages match “{pageQ.trim()}”.</div>
                     ) : shown.map((p) => {
-                      const checked = selPages.includes(p.key);
+                      const locked = fixedSet.has(p.key);
+                      const checked = locked || selPages.includes(p.key);
                       return (
-                        <label key={p.key} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer text-sm ${checked ? "bg-blue-50 text-[#164FA3] font-medium" : "text-gray-700 hover:bg-gray-50"}`}>
-                          <input type="checkbox" checked={checked} onChange={() => togglePage(p.key)} className="accent-[#164FA3]" />
-                          <span className="truncate" title={p.key}>{p.label}</span>
+                        <label key={p.key} title={locked ? "Always available for this role — can’t be removed" : p.key}
+                          className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm ${locked ? "bg-gray-50 text-gray-500 cursor-not-allowed" : checked ? "bg-blue-50 text-[#164FA3] font-medium cursor-pointer" : "text-gray-700 hover:bg-gray-50 cursor-pointer"}`}>
+                          <input type="checkbox" checked={checked} disabled={locked} onChange={() => !locked && togglePage(p.key)} className="accent-[#164FA3]" />
+                          <span className="truncate">{p.label}</span>
+                          {locked && <span className="ml-auto text-[9px] font-bold uppercase tracking-wide text-gray-400">Locked</span>}
                         </label>
                       );
                     })}
