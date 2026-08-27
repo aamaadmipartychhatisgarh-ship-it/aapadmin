@@ -51,14 +51,11 @@ export default function PageAccessManager() {
   const [dirty, setDirty] = useState(false);
   const [pageQ, setPageQ] = useState(""); // search filter over the page list
 
-  // When the chosen user changes, preload their currently-assigned pages so the
-  // multi-select opens on their real saved selection (edit flow).
+  // When the chosen user changes, mark the selection clean; the effect below
+  // fills in their saved pages once grants are available.
   function chooseUser(id) {
     setSelUser(id);
     setDirty(false);
-    if (!id) { setSelPages([]); return; }
-    const grants = grantsByUser.get(Number(id));
-    setSelPages(grants ? [...grants] : []);
   }
   function togglePage(key) {
     setDirty(true);
@@ -136,6 +133,22 @@ export default function PageAccessManager() {
     for (const g of data.grants) { if (!m.has(g.user_id)) m.set(g.user_id, new Set()); m.get(g.user_id).add(g.page_key); }
     return m;
   }, [data.grants]);
+
+  // Reactively mirror the selected user's SAVED grants into the multi-select.
+  // This runs on user change AND whenever the loaded grants change (initial
+  // load, and the reload after a save), so an existing user's assigned pages are
+  // ALWAYS pre-ticked from the database and can never show an empty selection
+  // because of a load race (selecting a user before grants finished loading).
+  // Unsaved edits are preserved: once the admin ticks/unticks anything (dirty),
+  // the effect stops overwriting their in-progress selection until it's saved or
+  // the user changes. Without this, an empty-by-race selection saved over the
+  // real grants would silently wipe the user's existing access.
+  useEffect(() => {
+    if (dirty) return;               // don't clobber unsaved tick/untick edits
+    if (!selUser) { setSelPages([]); return; }
+    const grants = grantsByUser.get(Number(selUser));
+    setSelPages(grants ? [...grants] : []);
+  }, [selUser, grantsByUser, dirty]);
 
   const roleHasPage = useCallback(
     (role, key) => (pageByKey.get(key)?.baseline_roles || []).includes(role),
