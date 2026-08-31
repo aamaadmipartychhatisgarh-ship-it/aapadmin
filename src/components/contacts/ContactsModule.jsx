@@ -94,6 +94,10 @@ export default function ContactsModule({ session, mode }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE); // configurable (20/25/50/100)
   const [search, setSearch] = useState("");
+  // Active count-card filter: "" | "has_address" | "has_photo". Clicking the
+  // Address / Photo Update count card filters the list to EXACTLY the records
+  // that card counts (same backend flag), so the count and the list always match.
+  const [flagFilter, setFlagFilter] = useState("");
   // Initialise from a ?filter= deep-link (e.g. sidebar "Wrong Numbers") on the
   // very first render, so every load uses the right filter and none race in as
   // the default. This component only mounts client-side, so reading the URL
@@ -164,11 +168,11 @@ export default function ContactsModule({ session, mode }) {
   }, []);
 
   // Reload the page of results whenever a filter or the page number changes.
-  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page, pageSize]);
+  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page, pageSize, flagFilter]);
   // Any filter change (not a page change) jumps back to page 1 and drops any
   // bulk selection — a selection made under one filter view shouldn't silently
   // carry over and get acted on under a different one.
-  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search]);
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search, flagFilter]);
 
   useEffect(() => {
     fetch(cfg.callersUrl).then((r) => r.json()).then((d) => {
@@ -449,6 +453,9 @@ export default function ContactsModule({ session, mode }) {
     if (assemblyIds.length) params.set("assembly_ids", assemblyIds.join(","));
     if (designationIds.length) params.set("designation_ids", designationIds.join(","));
     if (assignedTo) params.set("assigned_to", assignedTo);
+    // Count-card filter — the SAME flag the card's count is computed from, so the
+    // filtered list matches the card total exactly (record-for-record).
+    if (flagFilter) params.set(flagFilter, "1");
     params.set("page", String(pageNum));
     params.set("page_size", String(pageSize));
     return params;
@@ -692,23 +699,42 @@ export default function ContactsModule({ session, mode }) {
       {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3">{error}</div>}
 
       {/* Top count cards (PROMPT 2) — live from the DB for the current scope.
-          Address Count = contacts with a real address; Photo Update Count =
-          contacts that have a stored photo. Both update on the same reload as
-          the rest (add / edit address / upload / remove photo). */}
+          Address Count = contacts with a real (saved) address; Photo Update Count
+          = contacts with a stored photo. CLICK a card to filter the list to
+          exactly those records: the list uses the SAME backend flag the count is
+          built from, so the card total and the filtered list always match. Click
+          again (or Total Contacts) to clear the filter. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {[
-          { label: "Total Contacts", value: total, Icon: UserCheck, tint: "text-[#164FA3]", live: false },
-          { label: "Address Count", value: counts.address, Icon: MapPin, tint: "text-emerald-600", live: true },
-          { label: "Photo Update Count", value: counts.photo, Icon: Camera, tint: "text-amber-600", live: true },
-        ].map((s) => (
-          <div key={s.label} className="bg-white rounded-2xl border border-gray-200 shadow-sm px-4 py-3 flex items-center gap-3">
-            <span className={`w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center ${s.tint}`}><s.Icon size={18} /></span>
-            <div className="min-w-0">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{s.label}</div>
-              <div className="text-xl font-bold text-gray-900">{s.live && countsLoading ? "…" : Number(s.value || 0).toLocaleString()}</div>
-            </div>
-          </div>
-        ))}
+          { label: "Total Contacts", value: total, Icon: UserCheck, tint: "text-[#164FA3]", live: false, flag: "" },
+          { label: "Address Count", value: counts.address, Icon: MapPin, tint: "text-emerald-600", live: true, flag: "has_address" },
+          { label: "Photo Update Count", value: counts.photo, Icon: Camera, tint: "text-amber-600", live: true, flag: "has_photo" },
+        ].map((s) => {
+          const isActive = s.flag !== "" ? flagFilter === s.flag : flagFilter === "";
+          return (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => {
+                const next = s.flag === flagFilter ? "" : s.flag;
+                setFlagFilter(next);
+                // The card count is over the geo scope, ALL statuses, no search —
+                // so match the list to it: clear the status pill + search when a
+                // flag card is activated, guaranteeing list total === card count.
+                if (next) { setFilter("all"); setSearch(""); }
+              }}
+              aria-pressed={isActive}
+              title={s.flag ? `Show only contacts with a ${s.flag === "has_photo" ? "photo" : "an address"} update` : "Show all contacts"}
+              className={`text-left bg-white rounded-2xl border shadow-sm px-4 py-3 flex items-center gap-3 transition-colors ${isActive ? "border-[#164FA3] ring-1 ring-[#164FA3]/30 bg-[#164FA3]/5" : "border-gray-200 hover:bg-gray-50"}`}
+            >
+              <span className={`w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center ${s.tint}`}><s.Icon size={18} /></span>
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{s.label}{isActive && s.flag ? " · filtering" : ""}</div>
+                <div className="text-xl font-bold text-gray-900">{s.live && countsLoading ? "…" : Number(s.value || 0).toLocaleString()}</div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       <CollapsibleSection title="Search & Filters">
