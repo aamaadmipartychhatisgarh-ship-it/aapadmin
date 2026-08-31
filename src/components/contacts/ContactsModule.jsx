@@ -993,7 +993,10 @@ export default function ContactsModule({ session, mode }) {
                   <td className="px-4 py-3 text-gray-600">{c.district_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.assembly_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.ward_name || "—"}</td>
-                  <td className="px-4 py-3 text-gray-600 max-w-[220px]"><div className="truncate" title={c.address || ""}>{c.address || "—"}</div></td>
+                  {/* Show the FULL current address (wraps up to ~3 lines) so an
+                      updated long address never looks cut off / partial; the
+                      value comes straight from the DB record (c.address). */}
+                  <td className="px-4 py-3 text-gray-600 min-w-[180px] max-w-[280px]"><div className="whitespace-normal break-words line-clamp-3" title={c.address || ""}>{c.address || "—"}</div></td>
                   <td className="px-4 py-3">
                     {c.is_completed ? (
                       <span className="text-emerald-700 font-medium text-xs">Done</span>
