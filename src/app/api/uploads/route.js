@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, isPressMedia, isSocialMedia, isCaller } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { writeFile, mkdir } from "fs/promises";
 import { randomUUID } from "crypto";
 import path from "path";
@@ -24,11 +25,30 @@ import { saveMediaFile } from "@/lib/mediaFileStore";
 // `/uploads/<uuid>.<ext>` URL is served by /api/media/[file], which reads the DB
 // stores before falling back to disk — so the photo survives refreshes and
 // redeploys. The disk write is kept as a best-effort backward-compatible copy.
+// Pages whose functionality includes a photo/screenshot upload through this
+// shared endpoint. A user AUTHORIZED for any of them (by role baseline or a
+// Page-Access grant) may upload for it — so a Social-Media-granted user can
+// upload just like a Super Admin. This endpoint only stores the bytes and hands
+// back a URL; that URL is authorized again when it is saved onto the actual
+// record (social post, contact, MLA, …), so this can't leak access.
+const UPLOAD_PAGE_KEYS = ["social_management", "media", "leader_assessment", "contacts"];
+async function canUpload(session) {
+  if (!session) return false;
+  // Existing fast paths — unchanged, so Super Admin/oversight/press/social/caller
+  // behave exactly as before.
+  if (isOversight(session) || isPressMedia(session) || isSocialMedia(session) || isCaller(session)) return true;
+  for (const key of UPLOAD_PAGE_KEYS) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await pageAllowed(session, key, false)) return true;
+  }
+  return false;
+}
+
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    // Press/social media staff upload for their modules; callers upload worker photos.
-    if (!session || !(isOversight(session) || isPressMedia(session) || isSocialMedia(session) || isCaller(session))) {
+    // Authorized if a role or a Page-Access grant covers an upload-bearing page.
+    if (!(await canUpload(session))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const form = await req.formData();
