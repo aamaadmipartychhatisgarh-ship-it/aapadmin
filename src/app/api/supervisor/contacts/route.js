@@ -162,10 +162,11 @@ export async function GET(req) {
               la.name AS assembly_name,
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
-              -- Contacts have their own native photo_url now; COALESCE only
-              -- covers rows whose backfill (scripts/add-contact-photo-url.mjs)
-              -- somehow missed them.
-              COALESCE(c.photo_url, w.photo_url) AS photo_url
+              -- Resolve the photo EXACTLY like the has_photo count condition
+              -- (NULLIF(TRIM(...))), so an empty-string c.photo_url falls back to
+              -- the worker photo instead of returning '' — otherwise a contact
+              -- counted via its worker photo would show blank in the list.
+              COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
          FROM contacts c
          ${workerJoin}
          LEFT JOIN users u ON u.id = c.assigned_to_user_id

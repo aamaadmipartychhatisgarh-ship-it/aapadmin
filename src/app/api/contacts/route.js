@@ -207,10 +207,12 @@ export async function GET(req) {
               -- legacy designation. designation_ids (CSV) preloads the edit form.
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
-              -- Contacts have their own native photo_url now; COALESCE only
-              -- covers rows from before that column existed whose backfill
-              -- (scripts/add-contact-photo-url.mjs) somehow missed them.
-              COALESCE(c.photo_url, w.photo_url) AS photo_url
+              -- Resolve the photo EXACTLY like the has_photo count condition:
+              -- NULLIF(TRIM(...)) so an empty-string c.photo_url falls back to the
+              -- linked worker photo. A plain COALESCE returned '' for such rows, so
+              -- a contact counted via its worker photo showed BLANK in the Photo
+              -- Update Count list — the count/list photo mismatch. Now identical.
+              COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
          FROM contacts c
          ${workerJoin}
          LEFT JOIN users u ON u.id = c.assigned_to_user_id
