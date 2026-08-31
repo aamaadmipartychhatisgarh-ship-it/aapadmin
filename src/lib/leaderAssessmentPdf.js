@@ -1,6 +1,6 @@
 import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
-import { photosToDataUris } from "@/lib/photoDataUri";
+import { photoToDataUri } from "@/lib/photoDataUri";
 
 // PDF export for the MLA Profile list and the AAP Candidate list. Each row shows
 // the record's OWN profile photo, embedded from durable storage (never a broken
@@ -16,7 +16,7 @@ const styles = StyleSheet.create({
   cell: { paddingHorizontal: 3 },
   cellHeader: { paddingHorizontal: 3, color: "#fff", fontFamily: "Helvetica-Bold" },
   photoWrap: { flex: PHOTO_FLEX, alignItems: "center", justifyContent: "center" },
-  photoImg: { width: 28, height: 28, borderRadius: 4, objectFit: "cover" },
+  photoImg: { width: 30, height: 30, borderRadius: 4, objectFit: "contain" },
   photoPlaceholder: { width: 28, height: 28, borderRadius: 4, backgroundColor: "#E7EDF6", alignItems: "center", justifyContent: "center" },
   photoInitials: { fontSize: 8, color: "#164FA3", fontFamily: "Helvetica-Bold" },
   empty: { marginTop: 16, color: "#888", fontSize: 10 },
@@ -63,11 +63,14 @@ function clientPhoto(r) {
 }
 
 async function buildListPdf({ title, subtitle, columns, rows, nameKey }) {
-  // Prefer the client-rendered JPEG (exact displayed photo, always PDF-safe);
-  // fall back to reading the bytes server-side from durable storage.
+  // SERVER-SIDE is the authoritative path: read each record's OWN photo bytes from
+  // durable storage (by its stored URL/id) and normalize to a PDF-safe PNG. The
+  // client-rendered JPEG is only a fallback when the server can't read the bytes.
   const photos = await Promise.all(
-    rows.map((r) => clientPhoto(r) || photosToDataUris([r.photo_url || null]).then((a) => a[0]))
+    rows.map(async (r) => (await photoToDataUri(r.photo_url)) || clientPhoto(r))
   );
+  const embedded = photos.filter(Boolean).length;
+  console.log(`[LA PDF] ${title}: ${rows.length} rows, ${embedded} photos embedded, ${rows.length - embedded} placeholder`);
   return renderToBuffer(React.createElement(ListDoc, { title, subtitle, columns, rows, photos, nameKey }));
 }
 

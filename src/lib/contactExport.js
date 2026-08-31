@@ -157,7 +157,7 @@ const pdfStyles = StyleSheet.create({
   cell: { paddingHorizontal: 3 },
   cellHeader: { paddingHorizontal: 3, color: "#fff", fontFamily: "Helvetica-Bold" },
   photoWrap: { flex: PHOTO_FLEX, alignItems: "center", justifyContent: "center" },
-  photoImg: { width: 26, height: 26, borderRadius: 3, objectFit: "cover" },
+  photoImg: { width: 28, height: 28, borderRadius: 3, objectFit: "contain" },
   photoPlaceholder: { width: 26, height: 26, borderRadius: 3, backgroundColor: "#E7EDF6", alignItems: "center", justifyContent: "center" },
   photoInitials: { fontSize: 8, color: "#164FA3", fontFamily: "Helvetica-Bold" },
   empty: { marginTop: 16, color: "#888", fontSize: 10 },
@@ -206,6 +206,8 @@ export async function buildContactsPdfBuffer(rows, subtitle = "") {
   // Resolve each contact's own photo (contact photo, else linked worker photo),
   // index-aligned so row N always gets row N's picture.
   const photos = await photosToDataUris(rows.map((r) => r.photo_url || r.worker_photo_url || null));
+  const embedded = photos.filter(Boolean).length;
+  console.log(`[Contacts PDF] ${rows.length} rows, ${embedded} photos embedded, ${rows.length - embedded} placeholder`);
   return renderToBuffer(React.createElement(ContactsPdfDoc, { rows, photos, subtitle: sub }));
 }
 
