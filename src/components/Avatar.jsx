@@ -38,13 +38,22 @@ export function initialsOf(name) {
 //   textClassName — classes for the initials/icon (color)
 export default function Avatar({ name, src, size = 64, square = false, className = "", textClassName = "", onClick, title }) {
   const [errored, setErrored] = useState(false);
-  // Reset the error flag whenever the image URL changes, so a freshly-uploaded
-  // photo replaces the initials immediately instead of staying stuck on a prior
-  // failed/placeholder load until the component remounts.
-  useEffect(() => { setErrored(false); }, [src]);
+  // Retry attempts (0 = first load). In a large list dozens of photos load at
+  // once through the auth+DB-backed /api/media route; under that burst a request
+  // can transiently fail (pool/queue pressure). Without a retry it would stick on
+  // the initials placeholder forever, so the SAME photo that shows fine elsewhere
+  // looks "blank" here. Retry once (cache-busting) before falling back.
+  const [retry, setRetry] = useState(0);
+  // Reset whenever the image URL changes, so a freshly-uploaded photo replaces
+  // the initials immediately instead of staying stuck on a prior failed load.
+  useEffect(() => { setErrored(false); setRetry(0); }, [src]);
   const ini = initialsOf(name);
   const resolvedSrc = resolvePhotoUrl(src);
+  const finalSrc = retry > 0 && resolvedSrc
+    ? `${resolvedSrc}${resolvedSrc.includes("?") ? "&" : "?"}r=${retry}`
+    : resolvedSrc;
   const showImg = resolvedSrc && !errored;
+  const onImgError = () => { if (retry < 2) setRetry((n) => n + 1); else setErrored(true); };
   return (
     <div
       onClick={onClick}
@@ -54,7 +63,7 @@ export default function Avatar({ name, src, size = 64, square = false, className
     >
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={resolvedSrc} alt={name || "avatar"} loading="lazy" decoding="async" onError={() => setErrored(true)} className="w-full h-full object-cover" />
+        <img key={retry} src={finalSrc} alt={name || "avatar"} loading="lazy" decoding="async" onError={onImgError} className="w-full h-full object-cover" />
       ) : ini ? (
         <span className={`font-bold leading-none ${textClassName}`} style={{ fontSize: Math.round(size * 0.38) }}>{ini}</span>
       ) : (

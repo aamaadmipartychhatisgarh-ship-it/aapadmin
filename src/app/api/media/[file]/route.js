@@ -57,12 +57,19 @@ export async function GET(_req, { params }) {
     };
 
     const id = name.slice(0, name.length - ext.length - 1);
-    // The two DB-backed stores below are LEGACY and optional — a deployment that
-    // never ran their migrations has no worker_photos / user_photos tables. A
-    // missing table must NOT abort the request (it used to throw straight to the
-    // 404 catch, so every disk-backed upload — e.g. a freshly uploaded contact
-    // photo — silently 404'd and never displayed). Swallow per-lookup errors and
-    // fall through to the disk read.
+    // Durable Media Center store FIRST — every photo uploaded now lives here
+    // (contacts / MLA / candidate / spokesperson), so the common case resolves in
+    // ONE query. This matters when a list renders dozens of photos at once: the
+    // old order ran 3 queries per image (worker_photos, user_photos, then this),
+    // ~3x the DB/pool pressure, which under a burst caused transient failures and
+    // blank photos. Serves with the stored MIME type so a PDF opens as a PDF.
+    const media = await getMediaFile(id);
+    if (media) {
+      return new Response(new Uint8Array(media.data), { status: 200, headers: { ...headers, "Content-Type": media.mime_type || type } });
+    }
+    // LEGACY, optional DB stores — a deployment that never ran their migrations
+    // has no worker_photos / user_photos tables, so a missing table must NOT abort
+    // the request (swallow per-lookup errors and fall through to the disk read).
     try {
       const [row] = await query("SELECT data, mime_type FROM worker_photos WHERE id = ? LIMIT 1", [id]);
       if (row) {
@@ -75,15 +82,6 @@ export async function GET(_req, { params }) {
         return new Response(new Uint8Array(userRow.data), { status: 200, headers: { ...headers, "Content-Type": userRow.mime_type } });
       }
     } catch { /* user_photos table absent — ignore and try the next source */ }
-
-    // Durable Media Center store (newspaper cuttings, coverage PDFs, briefs, …).
-    // Checked before disk so files keep resolving across redeploys / on hosts
-    // whose public/uploads isn't persistent. Serves with the stored MIME type,
-    // so a PDF opens as a PDF.
-    const media = await getMediaFile(id);
-    if (media) {
-      return new Response(new Uint8Array(media.data), { status: 200, headers: { ...headers, "Content-Type": media.mime_type || type } });
-    }
 
     const buf = await readFile(path.join(process.cwd(), "public", "uploads", name));
     return new Response(new Uint8Array(buf), { status: 200, headers });
