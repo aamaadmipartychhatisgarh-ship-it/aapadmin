@@ -92,6 +92,7 @@ export default function ContactsModule({ session, mode }) {
   const [designations, setDesignations] = useState([]);
   const [designationIds, setDesignationIds] = useState([]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE); // configurable (20/25/50/100)
   const [search, setSearch] = useState("");
   // Initialise from a ?filter= deep-link (e.g. sidebar "Wrong Numbers") on the
   // very first render, so every load uses the right filter and none race in as
@@ -163,7 +164,7 @@ export default function ContactsModule({ session, mode }) {
   }, []);
 
   // Reload the page of results whenever a filter or the page number changes.
-  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page]);
+  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page, pageSize]);
   // Any filter change (not a page change) jumps back to page 1 and drops any
   // bulk selection — a selection made under one filter view shouldn't silently
   // carry over and get acted on under a different one.
@@ -449,7 +450,7 @@ export default function ContactsModule({ session, mode }) {
     if (designationIds.length) params.set("designation_ids", designationIds.join(","));
     if (assignedTo) params.set("assigned_to", assignedTo);
     params.set("page", String(pageNum));
-    params.set("page_size", String(PAGE_SIZE));
+    params.set("page_size", String(pageSize));
     return params;
   }
 
@@ -525,7 +526,7 @@ export default function ContactsModule({ session, mode }) {
     const nextInPage = editingIndex + delta;
     if (nextInPage >= 0 && nextInPage < contacts.length) { setEditingIndex(nextInPage); return; }
     const targetPage = page + delta;
-    if (targetPage < 1 || (delta > 0 && (targetPage - 1) * PAGE_SIZE >= total)) return; // nothing further
+    if (targetPage < 1 || (delta > 0 && (targetPage - 1) * pageSize >= total)) return; // nothing further
     setEditNavBusy(true);
     const d = await fetchContactsPage(targetPage);
     setEditNavBusy(false);
@@ -537,9 +538,9 @@ export default function ContactsModule({ session, mode }) {
   }
 
   const editingContact = editingIndex != null ? contacts[editingIndex] : null;
-  const editingPosition = editingIndex != null ? (page - 1) * PAGE_SIZE + editingIndex + 1 : null;
+  const editingPosition = editingIndex != null ? (page - 1) * pageSize + editingIndex + 1 : null;
   const editingHasPrev = editingIndex != null && ((editingIndex > 0) || page > 1);
-  const editingHasNext = editingIndex != null && ((editingIndex < contacts.length - 1) || page * PAGE_SIZE < total);
+  const editingHasNext = editingIndex != null && ((editingIndex < contacts.length - 1) || page * pageSize < total);
 
   useEffect(() => {
     const t = setTimeout(load, 300);
@@ -1008,7 +1009,7 @@ export default function ContactsModule({ session, mode }) {
         )}
       </div>
 
-      <Pagination total={total} page={page} pageSize={PAGE_SIZE} onPage={setPage} loading={loading} />
+      <Pagination total={total} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} loading={loading} />
 
       {cfg.canAdd && showAdd && (
         <AddContactModal
@@ -1072,12 +1073,14 @@ export default function ContactsModule({ session, mode }) {
   );
 }
 
-// Page-number controls (1 · 2 · 3 …) with Prev/Next. Only renders when there's
-// more than one page.
-function Pagination({ total, page, pageSize, onPage, loading }) {
+// Page-number controls (1 · 2 · 3 …) with Prev/Next + a rows-per-page selector.
+// The selector always shows (so the page size is configurable even on one page);
+// the page buttons appear only when there's more than one page. Server-side
+// pagination means every record is reachable across pages — nothing is dropped.
+const PAGE_SIZE_OPTIONS = [20, 25, 50, 100];
+function Pagination({ total, page, pageSize, onPage, onPageSize, loading }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  if (pageCount <= 1) return null;
-  const from = (page - 1) * pageSize + 1;
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(total, page * pageSize);
 
   // A compact window of page numbers around the current page.
@@ -1090,7 +1093,19 @@ function Pagination({ total, page, pageSize, onPage, loading }) {
 
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap">
-      <div className="text-xs text-gray-500">Showing {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()}</div>
+      <div className="flex items-center gap-3 text-xs text-gray-500">
+        <span>Showing {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()}</span>
+        {onPageSize && (
+          <label className="flex items-center gap-1.5">
+            <span>Rows</span>
+            <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} disabled={loading}
+              className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs outline-none focus:ring-2 focus:ring-[#164FA3]/30">
+              {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      {pageCount <= 1 ? null : (
       <div className="flex items-center gap-1">
         <button onClick={() => onPage(page - 1)} disabled={page <= 1 || loading}
           className="px-2.5 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Prev</button>
@@ -1107,6 +1122,7 @@ function Pagination({ total, page, pageSize, onPage, loading }) {
         <button onClick={() => onPage(page + 1)} disabled={page >= pageCount || loading}
           className="px-2.5 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next</button>
       </div>
+      )}
     </div>
   );
 }

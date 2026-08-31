@@ -13,6 +13,10 @@ import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 
+// Never cache the (territory-scoped) supervisor contacts list — a cached copy is
+// what made counts differ between users / shrink over time.
+export const dynamic = "force-dynamic";
+
 // Supervisor-scoped mirror of GET /api/contacts (src/app/api/contacts/route.js)
 // — same filters, same shape, same pagination — but gated to the strict
 // Supervisor role and ALWAYS scoped to the supervisor's own territory via
@@ -180,7 +184,12 @@ export async function GET(req) {
         LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
-    return NextResponse.json({ contacts, total, page, page_size: pageSize });
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return NextResponse.json(
+      { contacts, total, page, page_size: pageSize,
+        pagination: { page, pageSize, total, totalPages } },
+      { headers: { "Cache-Control": "no-store, max-age=0" } }
+    );
   } catch (err) {
     console.error("supervisor contacts GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

@@ -12,6 +12,12 @@ import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 
+// The contacts list (and its photos) must never be served from a cache: it is
+// per-user role/territory scoped and changes as contacts/photos are added, so a
+// cached copy is exactly what made different users see different counts and the
+// count appear to "shrink" over time. Force dynamic + no-store below.
+export const dynamic = "force-dynamic";
+
 // Columns the `contacts` table actually has in this deployment — detected once
 // and cached, so the create path never references a column a given environment
 // is missing (a past cause of intermittent 500s on save).
@@ -223,7 +229,15 @@ export async function GET(req) {
         LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
-    return NextResponse.json({ contacts, total, page, page_size: pageSize });
+    // Full pagination metadata so the client can page through the COMPLETE set
+    // (every record is reachable across pages — nothing is silently dropped by a
+    // cap). no-store so all authorized users always get the same fresh list.
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return NextResponse.json(
+      { contacts, total, page, page_size: pageSize,
+        pagination: { page, pageSize, total, totalPages } },
+      { headers: { "Cache-Control": "no-store, max-age=0" } }
+    );
   } catch (err) {
     console.error("contacts GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
