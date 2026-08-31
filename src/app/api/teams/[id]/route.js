@@ -9,7 +9,10 @@ import { ensureUserTeamMembers } from "@/lib/teamSchema";
 export async function GET(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!(await pageAllowed(session, "teams", session && isOversight(session)))) {
+    // Teams page grant / oversight, OR a Contacts grant (team members are needed
+    // for Call Assignment by team on the Contacts page).
+    if (!(await pageAllowed(session, "teams", session && isOversight(session)))
+        && !(await pageAllowed(session, "contacts", false))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     await ensureUserTeamMembers();

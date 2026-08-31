@@ -2,6 +2,7 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isTopAdmin, isOversight, ASSIGNABLE_ROLES } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import bcrypt from "bcryptjs";
@@ -49,8 +50,10 @@ export async function GET() {
     const session = await getServerSession(authOptions);
 
     // Oversight roles (supervisors + admins) can read the user list — supervisors
-    // need it to assign tasks. User creation/editing stays top-admin only.
-    if (!session || !isOversight(session)) {
+    // need it to assign tasks. Also admitted: a user granted the Contacts page via
+    // Page Access, who needs the caller list for Call Assignment. User
+    // creation/editing stays top-admin only.
+    if (!(await pageAllowed(session, "contacts", session && isOversight(session)))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query, getPool } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
@@ -25,7 +26,8 @@ const idList = (v) => [...new Set(String(v ?? "").split(",").map((s) => parseInt
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    // Part of the Contacts page — admin role OR a "contacts" Page-Access grant.
+    if (!(await pageAllowed(session, "contacts", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const body = await req.json().catch(() => ({}));

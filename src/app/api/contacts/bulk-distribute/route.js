@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, normalizeRole, ROLES, scopeFilterSync } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query, getPool } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
@@ -38,7 +39,10 @@ const UPDATE_CHUNK_SIZE = 1000;
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    // Call Assignment is part of the Contacts page — admit the user's admin role
+    // OR an explicit Page-Access grant of the "contacts" page (managed override),
+    // consistent with /api/contacts. Data still stays geo-scoped to the caller.
+    if (!(await pageAllowed(session, "contacts", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 

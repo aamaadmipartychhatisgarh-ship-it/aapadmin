@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) {
+    // Oversight, OR a user granted the Contacts page (needs teams for Call
+    // Assignment by team). Team creation/edit stays admin-only (POST below).
+    if (!(await pageAllowed(session, "contacts", session && isOversight(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { searchParams } = new URL(req.url);
