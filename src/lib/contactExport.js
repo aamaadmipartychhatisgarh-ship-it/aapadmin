@@ -1,7 +1,8 @@
 import ExcelJS from "exceljs";
-import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
+import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
 import { query } from "@/lib/db";
+import { photosToDataUris } from "@/lib/photoDataUri";
 
 // Shared Excel export for the Contacts module (admin + supervisor). Both list
 // routes build the SAME WHERE clause + params they use for the on-screen table;
@@ -15,6 +16,7 @@ import { query } from "@/lib/db";
 export async function fetchContactExportRows(where, params) {
   return query(
     `SELECT c.*,
+            w.photo_url AS worker_photo_url,
             u.username AS assigned_caller_name,
             COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
             COALESCE(cz.name, lz.name) AS zone_name,
@@ -145,38 +147,66 @@ const PDF_COLUMNS = [
   { header: "Status", flex: 0.9, get: (c) => statusLabel(c) },
 ];
 
+const PHOTO_FLEX = 0.7;
 const pdfStyles = StyleSheet.create({
   page: { padding: 22, fontSize: 8, fontFamily: "Helvetica" },
   title: { fontSize: 15, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   subtitle: { fontSize: 9, color: "#555", marginBottom: 10 },
-  row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 3 },
-  headerRow: { backgroundColor: "#164FA3", paddingVertical: 5 },
+  row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 3, alignItems: "center" },
+  headerRow: { backgroundColor: "#164FA3", paddingVertical: 5, alignItems: "center" },
   cell: { paddingHorizontal: 3 },
   cellHeader: { paddingHorizontal: 3, color: "#fff", fontFamily: "Helvetica-Bold" },
+  photoWrap: { flex: PHOTO_FLEX, alignItems: "center", justifyContent: "center" },
+  photoImg: { width: 26, height: 26, borderRadius: 3, objectFit: "cover" },
+  photoPlaceholder: { width: 26, height: 26, borderRadius: 3, backgroundColor: "#E7EDF6", alignItems: "center", justifyContent: "center" },
+  photoInitials: { fontSize: 8, color: "#164FA3", fontFamily: "Helvetica-Bold" },
   empty: { marginTop: 16, color: "#888", fontSize: 10 },
 });
 
-function ContactsPdfDoc({ rows, subtitle }) {
+// Photo cell — the record's OWN embedded image, or an initials placeholder when
+// there is no photo (never a broken image, never another record's picture).
+export function photoInitials(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+export function PdfPhotoCell({ dataUri, name }) {
+  if (dataUri) {
+    return React.createElement(View, { style: pdfStyles.photoWrap },
+      React.createElement(Image, { src: dataUri, style: pdfStyles.photoImg }));
+  }
+  return React.createElement(View, { style: pdfStyles.photoWrap },
+    React.createElement(View, { style: pdfStyles.photoPlaceholder },
+      React.createElement(Text, { style: pdfStyles.photoInitials }, photoInitials(name))));
+}
+
+function ContactsPdfDoc({ rows, photos, subtitle }) {
   return React.createElement(Document, null,
     React.createElement(Page, { size: "A4", orientation: "landscape", style: pdfStyles.page },
       React.createElement(Text, { style: pdfStyles.title }, "Contacts Export"),
       React.createElement(Text, { style: pdfStyles.subtitle }, subtitle),
       React.createElement(View, { style: [pdfStyles.row, pdfStyles.headerRow] },
-        PDF_COLUMNS.map((c, i) => React.createElement(Text, { key: i, style: [pdfStyles.cellHeader, { flex: c.flex }] }, c.header))),
+        [React.createElement(Text, { key: "ph", style: [pdfStyles.cellHeader, { flex: PHOTO_FLEX, textAlign: "center" }] }, "Photo"),
+         ...PDF_COLUMNS.map((c, i) => React.createElement(Text, { key: i, style: [pdfStyles.cellHeader, { flex: c.flex }] }, c.header))]),
       rows.length === 0
         ? React.createElement(Text, { style: pdfStyles.empty }, "No contacts match the current selection.")
         : rows.map((r, i) => React.createElement(View, { key: i, style: pdfStyles.row, wrap: false },
-            PDF_COLUMNS.map((col, j) => React.createElement(Text, { key: j, style: [pdfStyles.cell, { flex: col.flex }] }, String(col.get(r) ?? "")))))
+            [React.createElement(PdfPhotoCell, { key: "ph", dataUri: photos[i], name: r.person_name }),
+             ...PDF_COLUMNS.map((col, j) => React.createElement(Text, { key: j, style: [pdfStyles.cell, { flex: col.flex }] }, String(col.get(r) ?? "")))]))
     )
   );
 }
 
 // Build the contacts export as a landscape PDF table (same rows the .xlsx/.csv
-// use). `subtitle` typically states how many records and whether it's a selected
-// or filtered export.
+// use), each row showing that contact's OWN photo (embedded from durable
+// storage; initials placeholder when none). `subtitle` states how many records
+// and whether it's a selected or filtered export.
 export async function buildContactsPdfBuffer(rows, subtitle = "") {
   const sub = subtitle || `${rows.length} contact${rows.length === 1 ? "" : "s"} · ${new Date().toLocaleString("en-GB")}`;
-  return renderToBuffer(React.createElement(ContactsPdfDoc, { rows, subtitle: sub }));
+  // Resolve each contact's own photo (contact photo, else linked worker photo),
+  // index-aligned so row N always gets row N's picture.
+  const photos = await photosToDataUris(rows.map((r) => r.photo_url || r.worker_photo_url || null));
+  return renderToBuffer(React.createElement(ContactsPdfDoc, { rows, photos, subtitle: sub }));
 }
 
 // Descriptive, timestamped filename (application timezone). `ext` picks the

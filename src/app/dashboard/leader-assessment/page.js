@@ -10,7 +10,7 @@ import {
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet,
   Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
-  Database, Power, Check, Printer, Flag,
+  Database, Power, Check, Printer, Flag, FileText,
 } from "lucide-react";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
@@ -813,6 +813,28 @@ function MlaManager({ flash, fail }) {
   // shown.length === the selected party's card count. Clearing restores the list.
   const shown = partyFilter ? searchFiltered.filter((m) => mlaPartyBucket(m.party) === partyFilter) : searchFiltered;
 
+  // Export the CURRENTLY-shown MLA list to a PDF — each MLA's own photo embedded
+  // server-side from durable storage. Sends exactly what's displayed (search /
+  // party filter preserved).
+  const [exportingPdf, setExportingPdf] = useState(false);
+  async function exportPdf() {
+    if (exportingPdf || shown.length === 0) return;
+    setExportingPdf(true);
+    try {
+      const r = await fetch("/api/leader-assessment/mlas/export", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: shown, subtitle: `${shown.length} MLA${shown.length === 1 ? "" : "s"}${partyFilter ? ` · ${partyFilter.toUpperCase()}` : ""} · ${new Date().toLocaleString("en-GB")}` }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "PDF export failed."); return; }
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) { fail?.("The PDF came back empty."); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `MLA_Profiles_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { fail?.("PDF export failed — network error."); }
+    finally { setExportingPdf(false); }
+  }
+
   return (
     <div className="space-y-5">
       <Card
@@ -822,6 +844,7 @@ function MlaManager({ flash, fail }) {
         right={
           <div className="flex items-center gap-2">
             <button onClick={() => setShowPhotoAudit(true)} title="Check & repair photo storage" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold"><Database size={15} /> Photo Audit</button>
+            <button onClick={exportPdf} disabled={exportingPdf || shown.length === 0} title="Export the shown MLA list to PDF (with photos)" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">{exportingPdf ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />} Export PDF</button>
             <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={16} /> Create MLA Profile</button>
           </div>
         }
@@ -1439,6 +1462,27 @@ function CandidatesTab({ flash, fail }) {
     catch (e) { fail(e.message); } finally { setDeletingId(null); }
   }
 
+  // Export the shown candidate list to PDF — each candidate's own photo embedded
+  // server-side from durable storage (respects the assembly filter + sort).
+  const [exportingPdf, setExportingPdf] = useState(false);
+  async function exportPdf() {
+    if (exportingPdf || view.length === 0) return;
+    setExportingPdf(true);
+    try {
+      const r = await fetch("/api/leader-assessment/candidates/export", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: view, subtitle: `${view.length} candidate${view.length === 1 ? "" : "s"} · ${new Date().toLocaleString("en-GB")}` }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "PDF export failed."); return; }
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) { fail?.("The PDF came back empty."); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `AAP_Candidates_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { fail?.("PDF export failed — network error."); }
+    finally { setExportingPdf(false); }
+  }
+
   return (
     <div className="space-y-5">
       <Card
@@ -1446,9 +1490,12 @@ function CandidatesTab({ flash, fail }) {
         icon={Users}
         sub="Every AAP candidate across all assemblies. Click Open on a candidate to view their profile and score the 10-parameter assessment."
         right={
-          <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
-            <Plus size={16} /> Create Candidate
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={exportPdf} disabled={exportingPdf || view.length === 0} title="Export the shown candidate list to PDF (with photos)" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">{exportingPdf ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />} Export PDF</button>
+            <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
+              <Plus size={16} /> Create Candidate
+            </button>
+          </div>
         }
       >
         <div className="flex items-center gap-2 mb-4 flex-wrap">
