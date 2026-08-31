@@ -163,7 +163,15 @@ export async function PUT(req, { params }) {
     const sets = [];
     const vals = [];
     for (const f of fields) {
-      if (f in data && existingColumns.has(f)) { sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]); }
+      if (!(f in data) || !existingColumns.has(f)) continue;
+      // photo_url is NEVER blanked by a general contact edit. ROOT CAUSE of
+      // "photos disappear over time": an edit made for another reason (e.g. an
+      // address change) whose payload carries photo_url as "" / null would null
+      // the pointer here, so the contact stops showing a photo whose blob still
+      // exists. Setting/removing a photo goes through the dedicated
+      // /api/contacts/[id]/photo endpoint; a blank value here means "leave it".
+      if (f === "photo_url" && (data[f] == null || data[f] === "")) continue;
+      sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]);
     }
     // Stamp assigned_at whenever the owner changes, so stale-reclaim can tell how
     // long a contact has been held (cleared when it returns to the pool).
@@ -177,6 +185,10 @@ export async function PUT(req, { params }) {
       else { sets.push("assigned_by_user_id = NULL"); }
     }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
+    // Audit stamp: record WHEN this contact was last edited, so a persistence
+    // question ("did my change stick?") can be answered from the row itself.
+    // Feature-detected — absent on a deployment that hasn't added the column.
+    if (existingColumns.has("updated_at")) sets.push("updated_at = NOW()");
 
     // Apply the contact edit. Returns the fresh contact.
     const pool = getPool();

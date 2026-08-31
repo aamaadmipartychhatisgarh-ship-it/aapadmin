@@ -32,6 +32,21 @@ export async function hasContactPhotoColumn() {
   return _photoUrl;
 }
 
+// Optional contacts.photo_updated_at column (scripts/add-contact-timestamps.mjs)
+// — audit stamp for when a contact's photo was last set/replaced/cleared, so a
+// "photo disappeared" report can be traced to WHEN it changed.
+let _photoUpdatedAt;
+export async function hasContactPhotoUpdatedAtColumn() {
+  if (_photoUpdatedAt !== undefined) return _photoUpdatedAt;
+  try {
+    const rows = await query("SHOW COLUMNS FROM contacts LIKE 'photo_updated_at'");
+    _photoUpdatedAt = rows.length > 0;
+  } catch {
+    _photoUpdatedAt = false;
+  }
+  return _photoUpdatedAt;
+}
+
 // Optional contacts.follow_up_time column (scripts/add-followup-time.mjs).
 let _fupTime;
 export async function hasFollowUpTimeColumn() {

@@ -96,7 +96,13 @@ export async function PUT(req, { params }) {
     const sets = [];
     const vals = [];
     for (const f of fields) {
-      if (f in data && existingColumns.has(f)) { sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]); }
+      if (!(f in data) || !existingColumns.has(f)) continue;
+      // Never blank an existing photo on a general edit — see the same guard in
+      // /api/contacts/[id]: an unrelated edit submitting an empty photo_url would
+      // otherwise wipe a photo whose blob still exists. Clearing goes through the
+      // dedicated photo endpoint.
+      if (f === "photo_url" && (data[f] == null || data[f] === "")) continue;
+      sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]);
     }
     if ("assigned_to_user_id" in data && existingColumns.has("assigned_at")) {
       sets.push(data.assigned_to_user_id ? "assigned_at = NOW()" : "assigned_at = NULL");
@@ -106,6 +112,8 @@ export async function PUT(req, { params }) {
       else { sets.push("assigned_by_user_id = NULL"); }
     }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
+    // Audit stamp (feature-detected) — when this contact was last edited.
+    if (existingColumns.has("updated_at")) sets.push("updated_at = NOW()");
 
     // Territory scope baked into the WHERE itself — an out-of-scope id
     // matches zero rows rather than ever being touched.

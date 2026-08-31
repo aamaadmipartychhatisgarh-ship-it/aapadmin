@@ -43,6 +43,13 @@ export async function PUT(req, { params }) {
 
     const { person_name, phone_number, status_id, remarks, sentiment, address } = data;
 
+    // Read the call as it stands BEFORE this edit. We need the OLD field values
+    // to tell which fields the editor actually CHANGED — see the contact
+    // propagation below.
+    const [oldCall] = await query(
+      "SELECT contact_id, person_name, phone_number, address FROM calls WHERE id = ?", [id]
+    );
+
     // Sentiment only applies to a connected ("Phone Picked") call — store NULL
     // for any other status so a correction never leaves a stale sentiment.
     const [statusRow] = await query("SELECT name FROM call_statuses WHERE id = ?", [status_id]);
@@ -56,14 +63,26 @@ export async function PUT(req, { params }) {
       [person_name, phone_number, status_id, remarks || null, finalSentiment, address ?? null, id]
     );
 
-    // Keep the underlying contact in step so the correction sticks for future
-    // calls (and, via the contact→worker sync, the Workers directory too).
-    const [callRow] = await query("SELECT contact_id FROM calls WHERE id = ?", [id]);
-    if (callRow?.contact_id) {
-      await query(
-        "UPDATE contacts SET person_name = ?, phone_number = ?, address = COALESCE(?, address) WHERE id = ?",
-        [person_name, phone_number, address ?? null, callRow.contact_id]
-      );
+    // Keep the underlying contact in step ONLY for fields the editor actually
+    // CHANGED in this edit. ROOT CAUSE of "names/addresses revert over time":
+    // this used to overwrite the contact's person_name/phone_number/address from
+    // the call-edit form every time — so re-saving an OLD call (whose form still
+    // carries the values as they were at call time) silently REVERTED a newer
+    // admin edit on the master contact. By diffing against the call's previous
+    // values we propagate a genuine correction but never clobber the contact with
+    // a stale, unchanged value.
+    if (oldCall?.contact_id) {
+      const sets = [];
+      const vals = [];
+      if (person_name !== oldCall.person_name) { sets.push("person_name = ?"); vals.push(person_name); }
+      if (phone_number !== oldCall.phone_number) { sets.push("phone_number = ?"); vals.push(phone_number); }
+      // Address is optional on the form; only push a non-null value the editor
+      // genuinely changed.
+      if (address != null && address !== oldCall.address) { sets.push("address = ?"); vals.push(address); }
+      if (sets.length) {
+        vals.push(oldCall.contact_id);
+        await query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
+      }
     }
 
     return Response.json({ message: "Call updated" }, { status: 200 });

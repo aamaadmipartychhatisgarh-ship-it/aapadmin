@@ -82,13 +82,22 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
   const wDes = workerDesignationPart(designation_ids);
   const workerConds = [...wGeo.parts];
   const workerParams = [...wGeo.params];
-  if (wDes || desExists) {
-    // Match by the worker's multi-role position text OR the contact's own
-    // designation set.
-    const clauses = [];
-    if (wDes) { clauses.push(wDes.clause); workerParams.push(...wDes.params); }
-    if (desExists) { clauses.push(desExists.clause); workerParams.push(...desExists.params); }
-    workerConds.push(`(${clauses.join(" OR ")})`);
+  if (desExists) {
+    // ONE authoritative designation source: the contact's OWN set
+    // (contact_designations), which the edit flow keeps current. The worker's
+    // free-text `position` is only a FALLBACK for contacts that have NO
+    // designations of their own — because that text is NOT rewritten when a
+    // contact's designation is changed, so left as an OR it would keep matching
+    // the OLD designation after an edit (e.g. "Vidhansabha Prabhari" still hits a
+    // member now set to "Member"). So a contact that HAS designations is matched
+    // strictly by its current set.
+    const parts = [desExists.clause];
+    workerParams.push(...desExists.params);
+    if (wDes) {
+      parts.push(`(NOT EXISTS (SELECT 1 FROM contact_designations cdx WHERE cdx.contact_id = c.id) AND ${wDes.clause})`);
+      workerParams.push(...wDes.params);
+    }
+    workerConds.push(`(${parts.join(" OR ")})`);
   }
 
   // Contact-own fallback (for contacts with no worker link).

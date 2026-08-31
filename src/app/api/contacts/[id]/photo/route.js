@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { hasContactPhotoColumn } from "@/lib/contactExtras";
+import { hasContactPhotoColumn, hasContactPhotoUpdatedAtColumn } from "@/lib/contactExtras";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 
 // POST /api/contacts/[id]/photo  { photo_url }
@@ -33,7 +33,13 @@ export async function POST(req, { params }) {
 
     const [prev] = await query("SELECT photo_url FROM contacts WHERE id = ?", [id]);
     const oldPhoto = prev?.photo_url || null;
-    await query("UPDATE contacts SET photo_url = ? WHERE id = ?", [photo_url || null, id]);
+    // Stamp when the photo changed (feature-detected) so a later "photo
+    // disappeared" report can be traced to the moment it was set/cleared.
+    if (await hasContactPhotoUpdatedAtColumn()) {
+      await query("UPDATE contacts SET photo_url = ?, photo_updated_at = NOW() WHERE id = ?", [photo_url || null, id]);
+    } else {
+      await query("UPDATE contacts SET photo_url = ? WHERE id = ?", [photo_url || null, id]);
+    }
 
     if (oldPhoto && oldPhoto !== (photo_url || null)) await deleteLocalUpload(oldPhoto);
 
