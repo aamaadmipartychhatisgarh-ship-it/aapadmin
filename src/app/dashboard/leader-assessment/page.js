@@ -105,6 +105,37 @@ async function api(url, opts) {
   return data;
 }
 
+// Load a same-origin photo URL and return a JPEG data URI via canvas, so the
+// EXACT photo shown in the app can be embedded in the PDF regardless of its
+// stored format — canvas always outputs JPEG, which react-pdf can render (it
+// cannot render WEBP). Waits for the image to fully load; resolves null on any
+// failure so a missing/blocked photo never breaks the export (the PDF then shows
+// an initials placeholder for that record).
+function imageToJpegDataUri(url, max = 240) {
+  return new Promise((resolve) => {
+    if (!url || typeof window === "undefined") return resolve(null);
+    const img = new window.Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+        if (!w || !h) return resolve(null);
+        const scale = Math.min(1, max / Math.max(w, h));
+        const cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = cw; canvas.height = ch;
+        canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      } catch { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+// Attach a client-rendered JPEG (photo_data) to each row for the PDF export.
+async function rowsWithPhotoData(rows) {
+  return Promise.all(rows.map(async (r) => ({ ...r, photo_data: r.photo_url ? await imageToJpegDataUri(r.photo_url) : null })));
+}
+
 // Active castes from the centralized Caste Master — the SINGLE source for every
 // caste/community dropdown (Social Profile, MLA, Candidate). Loaded live, never
 // hardcoded, so adding/editing/deleting a caste in Caste Master flows everywhere.
@@ -821,9 +852,10 @@ function MlaManager({ flash, fail }) {
     if (exportingPdf || shown.length === 0) return;
     setExportingPdf(true);
     try {
+      const rows = await rowsWithPhotoData(shown); // exact displayed photos → JPEG
       const r = await fetch("/api/leader-assessment/mlas/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: shown, subtitle: `${shown.length} MLA${shown.length === 1 ? "" : "s"}${partyFilter ? ` · ${partyFilter.toUpperCase()}` : ""} · ${new Date().toLocaleString("en-GB")}` }),
+        body: JSON.stringify({ rows, subtitle: `${shown.length} MLA${shown.length === 1 ? "" : "s"}${partyFilter ? ` · ${partyFilter.toUpperCase()}` : ""} · ${new Date().toLocaleString("en-GB")}` }),
       });
       if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "PDF export failed."); return; }
       const blob = await r.blob();
@@ -1469,9 +1501,10 @@ function CandidatesTab({ flash, fail }) {
     if (exportingPdf || view.length === 0) return;
     setExportingPdf(true);
     try {
+      const rows = await rowsWithPhotoData(view); // exact displayed photos → JPEG
       const r = await fetch("/api/leader-assessment/candidates/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: view, subtitle: `${view.length} candidate${view.length === 1 ? "" : "s"} · ${new Date().toLocaleString("en-GB")}` }),
+        body: JSON.stringify({ rows, subtitle: `${view.length} candidate${view.length === 1 ? "" : "s"} · ${new Date().toLocaleString("en-GB")}` }),
       });
       if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "PDF export failed."); return; }
       const blob = await r.blob();

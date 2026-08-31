@@ -54,8 +54,20 @@ function ListDoc({ title, subtitle, columns, rows, photos, nameKey }) {
   );
 }
 
+// A PDF-safe (JPEG/PNG) data URI the client already prepared from the exact image
+// it displays — canvas output is always JPEG/PNG, so this sidesteps react-pdf's
+// lack of WEBP support and guarantees the shown photo. Anything else is ignored.
+function clientPhoto(r) {
+  const d = r?.photo_data;
+  return typeof d === "string" && /^data:image\/(jpeg|jpg|png);base64,/i.test(d) ? d : null;
+}
+
 async function buildListPdf({ title, subtitle, columns, rows, nameKey }) {
-  const photos = await photosToDataUris(rows.map((r) => r.photo_url || null));
+  // Prefer the client-rendered JPEG (exact displayed photo, always PDF-safe);
+  // fall back to reading the bytes server-side from durable storage.
+  const photos = await Promise.all(
+    rows.map((r) => clientPhoto(r) || photosToDataUris([r.photo_url || null]).then((a) => a[0]))
+  );
   return renderToBuffer(React.createElement(ListDoc, { title, subtitle, columns, rows, photos, nameKey }));
 }
 
