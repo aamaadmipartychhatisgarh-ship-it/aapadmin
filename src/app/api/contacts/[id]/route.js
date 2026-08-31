@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query, getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
@@ -25,7 +26,11 @@ export async function GET(_req, { params }) {
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
 
-    if (!isAdmin(session)) {
+    // Admin role OR a "contacts" Page-Access grant (managed override) gives full
+    // Contact-Details access; otherwise a caller may only read a contact they hold
+    // or that is assigned to them.
+    const canManage = await pageAllowed(session, "contacts", session && isAdmin(session));
+    if (!canManage) {
       const { userId } = await resolveActingUserId(session);
       const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
       const mine = row && (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId));
@@ -72,7 +77,10 @@ export async function PUT(req, { params }) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
-    const admin = isAdmin(session);
+    // Admin role OR a "contacts" Page-Access grant → full edit rights on any
+    // contact (the Contacts page is admin-tier; granting it confers the same
+    // Contact-Details management). Consistent with /api/contacts list & add.
+    const admin = await pageAllowed(session, "contacts", session && isAdmin(session));
     if (!admin) {
       // Callers may edit a contact they currently hold (locked mid-call) OR one
       // that is assigned to them — so editing from My Calls works even after the
@@ -207,7 +215,8 @@ export async function PUT(req, { params }) {
 export async function DELETE(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isAdmin(session)) {
+    // Admin role OR a "contacts" Page-Access grant — same Contacts-page capability.
+    if (!(await pageAllowed(session, "contacts", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { hasContactPhotoColumn } from "@/lib/contactExtras";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
@@ -16,7 +17,9 @@ export async function POST(req, { params }) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
-    const admin = isOversight(session);
+    // Oversight OR a "contacts" Page-Access grant; otherwise the caller holding
+    // the contact.
+    const admin = await pageAllowed(session, "contacts", session && isOversight(session));
     if (!admin) {
       const [row] = await query("SELECT locked_by_user_id FROM contacts WHERE id = ?", [id]);
       if (!row || String(row.locked_by_user_id) !== String(session.user.id)) {
