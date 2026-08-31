@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, AlertTriangle, Camera, Network } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
 import ActionBar from "@/components/ActionBar";
@@ -453,37 +453,47 @@ export default function ContactsModule({ session, mode }) {
     return params;
   }
 
-  // Export every contact matching the CURRENT filters (search, geo, designation,
-  // caller, status) to a .csv — the server reuses the exact same filter + role
-  // scope as the on-screen list, so what downloads is what's shown (and, for a
-  // supervisor, only their territory).
-  async function exportCsv() {
-    setExporting(true); setError(""); setMessage("");
+  // Export contacts to Excel / PDF / CSV. Priority (same on server): (1) if any
+  // contacts are checkbox-SELECTED, export exactly those; else (2) the CURRENT
+  // filters (search, geo, designation, caller, status); else (3) everything. The
+  // server reuses the same filter + role scope as the on-screen list, so what
+  // downloads is what's shown (and, for a supervisor, only their territory).
+  const [exportingFormat, setExportingFormat] = useState(""); // which format is in flight
+  async function exportData(format) {
+    setExporting(true); setExportingFormat(format); setError(""); setMessage("");
+    // Abort so the menu can never hang if the server stalls building a big PDF.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
     try {
       const params = buildParams(1);
       params.delete("page"); params.delete("page_size");
-      params.set("format", "csv");
-      const r = await fetch(`${cfg.listUrl}?${params}`, { cache: "no-store" });
+      params.set("format", format);
+      // Priority 1 — an explicit checkbox selection overrides the filters.
+      if (selectedIds.size > 0) params.set("ids", [...selectedIds].join(","));
+      const r = await fetch(`${cfg.listUrl}?${params}`, { cache: "no-store", signal: controller.signal });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         setError(d.message || "Export failed. Please try again.");
         return;
       }
-      // Filename from Content-Disposition, with a sensible fallback.
       const cd = r.headers.get("content-disposition") || "";
       const m = cd.match(/filename="?([^"]+)"?/i);
-      const filename = m ? m[1] : `Contacts_Export_${new Date().toISOString().slice(0, 10)}.csv`;
+      const ext = format === "xlsx" ? "xlsx" : format;
+      const filename = m ? m[1] : `Contacts_Export_${new Date().toISOString().slice(0, 10)}.${ext}`;
       const blob = await r.blob();
+      if (!blob || blob.size === 0) { setError("The export came back empty. Please adjust the selection and try again."); return; }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = filename;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-      setMessage(`Export ready — downloading “${filename}”.`);
-    } catch {
-      setError("Export failed — network error.");
+      const scopeNote = selectedIds.size > 0 ? `${selectedIds.size} selected` : "current filters";
+      setMessage(`${format === "pdf" ? "PDF" : format === "xlsx" ? "Excel" : "CSV"} export ready (${scopeNote}) — downloading “${filename}”.`);
+    } catch (e) {
+      setError(e.name === "AbortError" ? "Export timed out — narrow the selection and try again." : "Export failed — network error.");
     } finally {
-      setExporting(false);
+      clearTimeout(timer);
+      setExporting(false); setExportingFormat("");
     }
   }
 
@@ -648,7 +658,12 @@ export default function ContactsModule({ session, mode }) {
           <ActionBar items={[
             { key: "hierarchy", label: "Designation Hierarchy", icon: Network, menuOnly: true, onClick: () => { window.location.href = "/dashboard/admin/contacts-hierarchy"; } },
             cfg.canImport && { key: "import", label: "Import Excel", icon: Upload, menuOnly: true, onClick: () => setShowImport(true) },
-            { key: "export", label: exporting ? "Exporting…" : "Export CSV", icon: Download, loading: exporting, menuOnly: true, onClick: exportCsv },
+            // Export — Excel / PDF / CSV. The label reflects the priority: when
+            // contacts are checkbox-selected it exports ONLY those, otherwise the
+            // current filters (or everything when unfiltered).
+            { key: "export-xlsx", label: (exporting && exportingFormat === "xlsx") ? "Exporting…" : `Export Excel${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: FileSpreadsheet, loading: exporting && exportingFormat === "xlsx", disabled: exporting, menuOnly: true, onClick: () => exportData("xlsx") },
+            { key: "export-pdf", label: (exporting && exportingFormat === "pdf") ? "Exporting…" : `Export PDF${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: FileText, loading: exporting && exportingFormat === "pdf", disabled: exporting, menuOnly: true, onClick: () => exportData("pdf") },
+            { key: "export-csv", label: (exporting && exportingFormat === "csv") ? "Exporting…" : "Export CSV", icon: Download, loading: exporting && exportingFormat === "csv", disabled: exporting, menuOnly: true, onClick: () => exportData("csv") },
             cfg.canImport && { key: "upload", label: uploading ? "Uploading…" : "Upload", icon: Upload, loading: uploading, menuOnly: true, onClick: () => fileRef.current?.click() },
             cfg.canAdd && { key: "add", label: "Add Contact", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
           ]} />

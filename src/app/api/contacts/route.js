@@ -7,7 +7,7 @@ import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause } from "@/lib/contactExtras";
-import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, contactsExportFilename } from "@/lib/contactExport";
+import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
@@ -128,14 +128,37 @@ export async function GET(req) {
     // `where`/`params`), just every matching row instead of one page. Both CSV
     // and Excel share the identical dataset + columns.
     const format = searchParams.get("format");
-    if (format === "csv" || format === "xlsx") {
-      const rows = await fetchContactExportRows(where, params);
+    if (format === "csv" || format === "xlsx" || format === "pdf") {
+      // Selected-contacts export (priority 1): when explicit ids are passed, they
+      // OVERRIDE the filters — export EXACTLY those contacts, still confined to the
+      // caller's role scope so ids outside their territory can't be exported. With
+      // no ids, fall through to the on-screen filter/scope `where` (priority 2/3:
+      // filtered, or all).
+      const ids = idList(searchParams.get("ids"));
+      let exWhere = where, exParams = params, selected = false;
+      if (ids.length) {
+        exWhere = ` WHERE c.id IN (${ids.map(() => "?").join(",")})${scope.where ? " " + scope.where : ""}`;
+        exParams = [...ids, ...scope.params];
+        selected = true;
+      }
+      const rows = await fetchContactExportRows(exWhere, exParams);
       if (format === "csv") {
         return new NextResponse(buildContactsCsv(rows), {
           status: 200,
           headers: {
             "Content-Type": "text/csv; charset=utf-8",
             "Content-Disposition": `attachment; filename="${contactsExportFilename(false, "csv")}"`,
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+      if (format === "pdf") {
+        const buf = await buildContactsPdfBuffer(rows, `${rows.length} contact${rows.length === 1 ? "" : "s"} · ${selected ? "Selected" : "Filtered"} export · ${new Date().toLocaleString("en-GB")}`);
+        return new NextResponse(buf, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="${contactsExportFilename(false, "pdf")}"`,
             "Cache-Control": "no-store",
           },
         });

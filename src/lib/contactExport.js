@@ -1,4 +1,6 @@
 import ExcelJS from "exceljs";
+import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
+import React from "react";
 import { query } from "@/lib/db";
 
 // Shared Excel export for the Contacts module (admin + supervisor). Both list
@@ -129,8 +131,56 @@ export function buildContactsCsv(rows) {
   return "\uFEFF" + lines.join("\r\n");
 }
 
+// A focused, readable column set for the PDF (the .xlsx keeps every field; a PDF
+// page can't fit 24 columns legibly). Covers the spec's requested fields.
+const PDF_COLUMNS = [
+  { header: "Name", flex: 2, get: (c) => c.person_name || "" },
+  { header: "Mobile", flex: 1.5, get: (c) => c.phone_number || "" },
+  { header: "Designation", flex: 1.7, get: (c) => c.designation_name || "" },
+  { header: "Zone", flex: 1.2, get: (c) => c.zone_name || "" },
+  { header: "Lok Sabha", flex: 1.4, get: (c) => c.lok_sabha_name || "" },
+  { header: "District", flex: 1.4, get: (c) => c.district_name || "" },
+  { header: "Assembly", flex: 1.4, get: (c) => c.assembly_name || "" },
+  { header: "Address", flex: 2.2, get: (c) => c.address || "" },
+  { header: "Status", flex: 0.9, get: (c) => statusLabel(c) },
+];
+
+const pdfStyles = StyleSheet.create({
+  page: { padding: 22, fontSize: 8, fontFamily: "Helvetica" },
+  title: { fontSize: 15, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  subtitle: { fontSize: 9, color: "#555", marginBottom: 10 },
+  row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 3 },
+  headerRow: { backgroundColor: "#164FA3", paddingVertical: 5 },
+  cell: { paddingHorizontal: 3 },
+  cellHeader: { paddingHorizontal: 3, color: "#fff", fontFamily: "Helvetica-Bold" },
+  empty: { marginTop: 16, color: "#888", fontSize: 10 },
+});
+
+function ContactsPdfDoc({ rows, subtitle }) {
+  return React.createElement(Document, null,
+    React.createElement(Page, { size: "A4", orientation: "landscape", style: pdfStyles.page },
+      React.createElement(Text, { style: pdfStyles.title }, "Contacts Export"),
+      React.createElement(Text, { style: pdfStyles.subtitle }, subtitle),
+      React.createElement(View, { style: [pdfStyles.row, pdfStyles.headerRow] },
+        PDF_COLUMNS.map((c, i) => React.createElement(Text, { key: i, style: [pdfStyles.cellHeader, { flex: c.flex }] }, c.header))),
+      rows.length === 0
+        ? React.createElement(Text, { style: pdfStyles.empty }, "No contacts match the current selection.")
+        : rows.map((r, i) => React.createElement(View, { key: i, style: pdfStyles.row, wrap: false },
+            PDF_COLUMNS.map((col, j) => React.createElement(Text, { key: j, style: [pdfStyles.cell, { flex: col.flex }] }, String(col.get(r) ?? "")))))
+    )
+  );
+}
+
+// Build the contacts export as a landscape PDF table (same rows the .xlsx/.csv
+// use). `subtitle` typically states how many records and whether it's a selected
+// or filtered export.
+export async function buildContactsPdfBuffer(rows, subtitle = "") {
+  const sub = subtitle || `${rows.length} contact${rows.length === 1 ? "" : "s"} · ${new Date().toLocaleString("en-GB")}`;
+  return renderToBuffer(React.createElement(ContactsPdfDoc, { rows, subtitle: sub }));
+}
+
 // Descriptive, timestamped filename (application timezone). `ext` picks the
-// extension so the same helper serves both the .xlsx and .csv exports.
+// extension so the same helper serves the .xlsx, .csv and .pdf exports.
 export function contactsExportFilename(isSupervisor, ext = "xlsx") {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
