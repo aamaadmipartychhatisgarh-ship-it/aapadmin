@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import { canAccessSocial } from "@/lib/permissions";
+import { formatDateTimeDot } from "@/lib/dateFormat";
 import {
   Share2, Loader2, Plus, X, Upload,
   Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil,
@@ -367,21 +368,25 @@ function PageModal({ onClose, onSaved, editing }) {
 }
 
 // ============================================================ LOG
-// The local date (YYYY-MM-DD) of a post's actual DB Date & Time (posted_at,
-// falling back to created_at) — used by the date filter so a selected calendar
-// date matches the real stored timestamp.
+// The date (YYYY-MM-DD) of a post's actual DB Date & Time (posted_at, falling
+// back to created_at) IN THE APP TIMEZONE (Asia/Kolkata) — the SAME timezone the
+// timestamps are displayed in, so a selected calendar date always matches the
+// date shown on the row (never off-by-one from a browser in another timezone).
+const IST_DAY_KEY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
 function postDateKey(p) {
   const v = p.posted_at || p.created_at;
   if (!v) return "";
   const d = new Date(v);
   if (isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return IST_DAY_KEY.format(d); // YYYY-MM-DD in Asia/Kolkata
 }
+// Every Social Media timestamp renders through the app's single date/time source
+// of truth (Asia/Kolkata timezone, DD/MM/YYYY • hh:mm AM/PM — 12-hour). This
+// replaces the previous en-GB 24-hour, browser-timezone formatting so the shown
+// time is correct and consistently 12-hour with AM/PM across the module. The
+// stored timestamp is untouched — only its display conversion changed.
 function fmtDateTime(v) {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return "—";
-  return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} · ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+  return formatDateTimeDot(v) || "—";
 }
 
 // A post's destinations, with a legacy fallback for any pre-destinations row.
