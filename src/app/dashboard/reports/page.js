@@ -5,12 +5,13 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
+import ShareReportModal from "@/components/reports/ShareReportModal";
 import { formatDate, formatDateTime } from "@/lib/dateFormat";
 import {
   FileText, Search, Download, FileSpreadsheet, Printer, Table as TableIcon, BarChart3,
   ListFilter, Save, ChevronLeft, ChevronRight, X, ArrowUpDown, Loader2,
   PhoneCall, Contact, Users, ClipboardList, MessageSquareWarning, Clock,
-  UserCog, Network, Bell, ScrollText, PhoneOff, Calendar as CalendarIcon,
+  UserCog, Network, Bell, ScrollText, PhoneOff, Calendar as CalendarIcon, Share2,
 } from "lucide-react";
 
 const ICONS = {
@@ -99,6 +100,9 @@ function ReportsCenter() {
   const [err, setErr] = useState("");
   const [notice, setNotice] = useState("");        // transient success message (exports)
   const [saved, setSaved] = useState([]);
+  const [shareOpen, setShareOpen] = useState(false);        // Share Report modal
+  const sharedAppliedRef = useRef(false);                    // fetch ?share= once
+  const pendingSharedRef = useRef(null);                     // {module, config} awaiting meta
 
   // Filter panel: expanded by default so it's visible on arrival, then
   // auto-collapses ONCE the first result for this module loads — so it
@@ -114,7 +118,11 @@ function ReportsCenter() {
       setBoot(d);
       // Deep-link support: /dashboard/reports?module=tasks opens straight to
       // that module (used by the Dashboard's Reports Summary tiles).
-      const requested = new URLSearchParams(window.location.search).get("module");
+      const params = new URLSearchParams(window.location.search);
+      // A ?share=<token> link controls the module itself (see the share-hydration
+      // effect) — don't auto-select a different one here and cause a double load.
+      if (params.get("share")) return;
+      const requested = params.get("module");
       const initial = (requested && d.modules?.some((m) => m.key === requested)) ? requested : d.modules?.[0]?.key;
       if (initial) setModuleKey(initial);
     }).catch((e) => setBootErr(e.message || "Failed to load reports"))
@@ -305,6 +313,49 @@ function ReportsCenter() {
     if (r.ok) setSaved((prev) => prev.filter((x) => x.id !== s.id));
   };
 
+  // ---- Share Report: capture / restore the FULL current report config --------
+  // Everything that defines the on-screen report (module comes separately): view,
+  // grouping, time range, filters, geo, search, sort and the calendar month. The
+  // Share modal sends this; opening a shared link restores exactly this.
+  const shareableConfig = useCallback(() => ({
+    view, groupBy, time, dateFrom, dateTo, filters, geo, search, sort, calendarMonth,
+  }), [view, groupBy, time, dateFrom, dateTo, filters, geo, search, sort, calendarMonth]);
+  const getShareConfig = useCallback(
+    () => (moduleKey ? { module: moduleKey, config: shareableConfig() } : null),
+    [moduleKey, shareableConfig]
+  );
+  const applyConfig = useCallback((c) => {
+    if (!c) return;
+    setView(c.view || "table"); setGroupBy(c.groupBy || ""); setTime(c.time || "all");
+    setDateFrom(c.dateFrom || ""); setDateTo(c.dateTo || ""); setFilters(c.filters || {});
+    setGeo({ ...emptyGeo(), ...(c.geo || {}) }); setSearch(c.search || "");
+    setSort(c.sort || null); if (c.calendarMonth) setCalendarMonth(c.calendarMonth);
+    setPage(1);
+  }, []);
+
+  // Open a shared report (?share=<token>): fetch its stored config (permission-
+  // checked server-side), switch to its module, then apply the config once the
+  // module's meta has loaded (the module switch resets filters first, so we wait
+  // for meta before restoring). The report data is re-run live for THIS user, so
+  // their own permissions/scope always apply.
+  useEffect(() => {
+    if (sharedAppliedRef.current) return;
+    const token = new URLSearchParams(window.location.search).get("share");
+    if (!token) return;
+    sharedAppliedRef.current = true;
+    fetch(`/api/reports/share/${encodeURIComponent(token)}`)
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.message || "Could not open the shared report."); return d; })
+      .then((d) => { pendingSharedRef.current = { module: d.module, config: d.config || {} }; setModuleKey(d.module); })
+      .catch((e) => setErr(e.message || "Could not open the shared report."));
+  }, []);
+  useEffect(() => {
+    const pend = pendingSharedRef.current;
+    if (pend && meta && moduleKey === pend.module) {
+      applyConfig(pend.config);
+      pendingSharedRef.current = null;
+    }
+  }, [meta, moduleKey, applyConfig]);
+
   const totalPages = result?.mode === "detail" ? Math.max(1, Math.ceil(result.total / pageSize)) : 1;
 
   const asItems = (options) => (options || []).map((o) => ({ id: o.value, name: o.label }));
@@ -477,6 +528,9 @@ function ReportsCenter() {
               {exporting === "today" ? <Loader2 size={15} className="animate-spin" /> : <CalendarIcon size={15} />} Today's Report
             </button>
             <button onClick={openPrint} disabled={!result} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"><Printer size={15} /> Print</button>
+            {/* Share Report — mints a secure link that reopens THIS exact report
+                (module + filters + view/group/sort) for another authorized user. */}
+            <button onClick={() => setShareOpen(true)} disabled={!moduleKey} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-[#164FA3] text-[#164FA3] hover:bg-blue-50 disabled:opacity-40"><Share2 size={15} /> Share Report</button>
           </div>
         </div>
 
@@ -598,6 +652,13 @@ function ReportsCenter() {
           <MonthCalendar month={calendarMonth} rows={result.rows} daysInMonth={monthBounds.daysInMonth} />
         )}
       </div>
+
+      <ShareReportModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        moduleLabel={boot?.modules?.find((m) => m.key === moduleKey)?.label || "Reports"}
+        getConfig={getShareConfig}
+      />
     </div>
   );
 }
