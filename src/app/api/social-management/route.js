@@ -86,6 +86,15 @@ export async function GET() {
       [...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams, ...lsParams]
     ).then((r) => [r]);
 
+    // Total Posts (Post Log card): the COMPLETE count of posts in the DB for this
+    // user's scope — NOT the 50-row recent window the list renders. Same page
+    // scope (${f}) as the other metrics, so it matches what the user can see.
+    const totalRows = await query(
+      `SELECT COUNT(*) AS total_posts FROM social_posts p JOIN social_pages sp2 ON sp2.id = p.page_id WHERE 1=1 ${f}`,
+      lsParams
+    );
+    overview.total_posts = Number(totalRows[0]?.total_posts || 0);
+
     // Attach each post's platform/page destinations (with per-page links) so the
     // Post List can show every destination, and Edit can repopulate them (§10/§12).
     const dmap = await destinationsByPost(recentPosts.map((p) => p.id));

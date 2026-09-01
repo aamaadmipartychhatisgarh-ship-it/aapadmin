@@ -6,7 +6,7 @@ import { canAccessSocial } from "@/lib/permissions";
 import { formatDateTimeDot } from "@/lib/dateFormat";
 import {
   Share2, Loader2, Plus, X, Upload,
-  Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil,
+  Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil, Trash2,
   Bird,
 } from "lucide-react";
 import SocialDashboardTab from "@/components/social/SocialDashboardTab";
@@ -90,10 +90,11 @@ function Body() {
         </button>
       </div>
 
-      {/* Search cards (PROMPT 5) — exactly four, all from live DB records:
-          today's FB/IG post counts (from logged posts) and FB/IG follower
-          totals (from the pages' Followers Master). */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* Search cards — Total Posts (the COMPLETE DB count, not the current page)
+          followed by the four live-DB platform cards: today's FB/IG post counts
+          and FB/IG follower totals. */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <Kpi label="Total Posts" value={fmt(o.total_posts || 0)} highlight />
         <Kpi label="Today's Total Post — Facebook" value={fmt(o.fb_today_posts || 0)} accent />
         <Kpi label="Today's Total Post — Instagram" value={fmt(o.ig_today_posts || 0)} accent />
         <Kpi label="Facebook Total Followers" value={fmt(o.fb_followers || 0)} />
@@ -116,7 +117,7 @@ function Body() {
         </div>
       )}
       {tab === "pages"     && <PagesTab data={data} onReload={load} />}
-      {tab === "log"       && <LogTab data={data} onEdit={setEditing} />}
+      {tab === "log"       && <LogTab data={data} onEdit={setEditing} onReload={load} />}
 
       {showAdd && <PostModal pages={data.pages} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {editing && <PostModal editing={editing} pages={data.pages} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
@@ -396,12 +397,33 @@ function postDests(p) {
   return [];
 }
 
-function LogTab({ data, onEdit }) {
+function LogTab({ data, onEdit, onReload }) {
   const posts = data.recentPosts || [];
   const [date, setDate] = useState("");     // "" = all dates
   const [q, setQ] = useState("");
   const [platform, setPlatform] = useState("");
   const [pageId, setPageId] = useState(""); // §13 page filter
+  const [deletingId, setDeletingId] = useState(null);
+
+  // Delete one post (with confirmation). On success reload the page data so the
+  // list, the Total Posts card and the other counts all refresh together.
+  async function del(p) {
+    if (!confirm(`Delete this post?\n\n${(p.caption || "(no content)").slice(0, 120)}\n\nThis permanently removes the post and its destinations and cannot be undone.`)) return;
+    setDeletingId(p.id);
+    try {
+      const r = await fetch(`/api/social-management/posts/${p.id}`, { method: "DELETE" });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.message || "Delete failed."); return; }
+      await onReload?.();
+    } catch { alert("Delete failed — network error."); }
+    finally { setDeletingId(null); }
+  }
+  // Comma-joined page names for a post (the actual pages it was posted to), from
+  // its real destinations — never hardcoded. Falls back to the post's own page.
+  const pageNames = (p) => {
+    const names = [...new Set(postDests(p).map((d) => d.page_name).filter(Boolean))];
+    if (names.length) return names.join(", ");
+    return p.handle || "—";
+  };
 
   const needle = q.trim().toLowerCase();
   // Filtering runs over the real records + their destinations (a post matches a
@@ -450,6 +472,7 @@ function LogTab({ data, onEdit }) {
             <tr>
               <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Date &amp; Time</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Content</th>
+              <th className="px-4 py-3 font-semibold text-gray-600">Page Name</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Destinations (Page → Link)</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Post Access</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Format</th>
@@ -459,7 +482,7 @@ function LogTab({ data, onEdit }) {
           </thead>
           <tbody>
             {shown.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400 text-sm">{posts.length === 0 ? "No posts yet — use “Log a Post”." : "No posts match the selected filters."}</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400 text-sm">{posts.length === 0 ? "No posts yet — use “Log a Post”." : "No posts match the selected filters."}</td></tr>
             ) : shown.map((p) => {
               const scheduled = p.publish_status === "scheduled";
               const dests = postDests(p);
@@ -469,6 +492,9 @@ function LogTab({ data, onEdit }) {
                   <td className="px-4 py-3 text-gray-700 max-w-[20rem]">
                     <div className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{p.caption || <span className="text-gray-300">(no content)</span>}</div>
                   </td>
+                  {/* Page Name — the actual social page(s) this post went to (live
+                      from its destinations), never hardcoded. */}
+                  <td className="px-4 py-3 text-gray-700 text-xs min-w-[9rem] max-w-[12rem]"><div className="whitespace-normal break-words font-medium">{pageNames(p)}</div></td>
                   {/* All destinations for this post — every platform/page + its own link (§12) */}
                   <td className="px-4 py-3 min-w-[16rem]">
                     {dests.length === 0 ? <span className="text-gray-300 text-xs">—</span> : (
@@ -494,12 +520,17 @@ function LogTab({ data, onEdit }) {
                       <a href={p.media_url} target="_blank" rel="noreferrer" title="Open screenshot"><img src={p.media_url} alt="" className="w-10 h-10 rounded object-cover border border-gray-200" /></a>
                     ) : <span className="text-gray-300 text-xs">—</span>}
                   </td>
-                  <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 capitalize">{p.post_type}</span></td>
+                  {/* Format — always the plain text label ("Photo" / "Video" /
+                      "Reel"), never an icon. */}
+                  <td className="px-4 py-3"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{LOG_POST_TYPES.find(([k]) => k === p.post_type)?.[1] || (p.post_type ? p.post_type[0].toUpperCase() + p.post_type.slice(1) : "—")}</span></td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-full ${scheduled ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{scheduled ? "Scheduled" : "Published"}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <button onClick={() => onEdit(p)} title="Edit / view post" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      <button onClick={() => onEdit(p)} title="Edit / view post" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
+                      <button onClick={() => del(p)} disabled={deletingId === p.id} title="Delete post" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50">{deletingId === p.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}</button>
+                    </div>
                   </td>
                 </tr>
               );
