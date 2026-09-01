@@ -202,6 +202,9 @@ function Body() {
     }
     return "overview";
   });
+  // Cross-tab: an "Edit" on the Current MLA in the Comparison table jumps to the
+  // MLA Profile tab and opens that assembly's MLA editor (la_assemblies.id).
+  const [mlaEditAssembly, setMlaEditAssembly] = useState(null);
   const [notice, setNotice] = useState("");
   const [err, setErr] = useState("");
   const flash = (m) => { setNotice(m); setErr(""); };
@@ -238,8 +241,8 @@ function Body() {
       </div>
 
       {tab === "overview" && <Overview flash={flash} fail={fail} />}
-      {tab === "mla" && <MlaManager flash={flash} fail={fail} />}
-      {tab === "comparison" && <VoteComparisonTab flash={flash} fail={fail} />}
+      {tab === "mla" && <MlaManager flash={flash} fail={fail} editAssemblyId={mlaEditAssembly} onEditConsumed={() => setMlaEditAssembly(null)} />}
+      {tab === "comparison" && <VoteComparisonTab flash={flash} fail={fail} onEditMla={(assemblyId) => { setMlaEditAssembly(assemblyId); setTab("mla"); }} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
     </div>
   );
@@ -789,7 +792,7 @@ function mlaPartyBucket(party) {
 // edit the full profile) and Add Assessment (score the 10 parameters). MLAs are
 // one-per-assembly (unique), so no duplicates are created; the list refreshes
 // immediately after any save with no browser refresh.
-function MlaManager({ flash, fail }) {
+function MlaManager({ flash, fail, editAssemblyId, onEditConsumed }) {
   const { byName: partyByName } = usePartyMaster(); // live party logos by name (BUG 29)
   const [assemblies, setAssemblies] = useState([]);
   const [mlas, setMlas] = useState([]);
@@ -813,6 +816,17 @@ function MlaManager({ flash, fail }) {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { loadAssemblies(); loadMlas(); }, [loadAssemblies, loadMlas]);
+  // Cross-tab edit request from the Comparison tab: once the MLAs are loaded,
+  // open the editor for the requested assembly's MLA (matched by la_assemblies.id),
+  // then clear the request. If that assembly has no MLA profile, just tell the user.
+  useEffect(() => {
+    if (!editAssemblyId || loading) return;
+    const target = mlas.find((m) => Number(m.assembly_id) === Number(editAssemblyId));
+    if (target) setEditing(target);
+    else fail?.("No MLA profile exists for that assembly yet — create one first.");
+    onEditConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editAssemblyId, loading]);
   // After any assessment/analysis edit, refresh both the list and the inline view.
   const afterEdit = () => { loadMlas(); setVersion((v) => v + 1); };
   // Delete ONE MLA by its unique id (with confirmation). Its assessment cascades
@@ -968,11 +982,18 @@ function MlaManager({ flash, fail }) {
                   const open = expandedId === m.id;
                   return (
                     <Fragment key={m.id}>
-                      <tr className={open ? "bg-[#164FA3]/5" : "hover:bg-gray-50"}>
+                      <tr className={`group ${open ? "bg-[#164FA3]/5" : "hover:bg-gray-50"}`}>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2.5 min-w-0">
                             <ProfilePhoto name={m.name} src={m.photo_url} size={34} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
                             <div className="min-w-0"><div className="font-semibold text-gray-900 truncate">{m.name}</div>{m.phone && <div className="text-[11px] text-gray-400 truncate">{m.phone}</div>}</div>
+                            {/* Edit / Delete right by the name — no need to scroll to
+                                the far-right Action column. Revealed on row hover /
+                                keyboard focus (always shown while the row is open). */}
+                            <div className={`ml-auto pl-2 flex items-center gap-0.5 transition-opacity ${open ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}>
+                              <button onClick={() => setEditing(m)} title="Edit MLA profile" className="p-1.5 rounded-md text-gray-500 hover:text-[#164FA3] hover:bg-[#164FA3]/10"><Pencil size={14} /></button>
+                              <button onClick={() => del(m)} disabled={deletingId === m.id} title="Delete MLA profile" className="p-1.5 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-50">{deletingId === m.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}</button>
+                            </div>
                           </div>
                         </td>
                         <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{m.assembly_name || "—"}</td>
@@ -983,7 +1004,6 @@ function MlaManager({ flash, fail }) {
                         <td className="px-3 py-2.5 text-right whitespace-nowrap">
                           <button onClick={() => setExpandedId(open ? null : m.id)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {open ? "Close" : "Open"}</button>
                           <button onClick={() => setEditingAssessment(m)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={13} /> Add Assessment</button>
-                          <button onClick={() => del(m)} disabled={deletingId === m.id} title="Delete MLA profile" className="text-xs font-bold text-red-600 hover:bg-red-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-50">{deletingId === m.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete</button>
                         </td>
                       </tr>
                       {open && (
@@ -1594,7 +1614,7 @@ function CandidatesTab({ flash, fail }) {
               <thead className="bg-gray-50 text-left text-gray-500"><tr>{[sortBy === "score" ? "#" : "", "Candidate", "Assembly", "District", "Current Designation", "Status", "Assessment Score", ""].map((h, i) => <th key={i} className={`px-3 py-2.5 font-semibold ${h === "Current Designation" ? "w-[150px]" : "whitespace-nowrap"}`}>{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {view.map((c, idx) => (
-                  <tr key={c.id} className="hover:bg-gray-50">
+                  <tr key={c.id} className="group hover:bg-gray-50">
                     <td className="px-3 py-2.5 text-gray-400 font-bold w-8">{sortBy === "score" ? idx + 1 : ""}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -1605,6 +1625,12 @@ function CandidatesTab({ flash, fail }) {
                           <div className="font-semibold text-gray-900 truncate">{c.name}</div>
                           <AgeLine person={c} />
                           {c.phone && <div className="text-[11px] text-gray-400 truncate">{c.phone}</div>}
+                        </div>
+                        {/* Edit / Delete right by the name — revealed on row hover /
+                            keyboard focus, so no scroll to the far-right column. */}
+                        <div className="ml-auto pl-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                          <button onClick={() => setEditing(c)} title="Edit candidate" className="p-1.5 rounded-md text-gray-500 hover:text-[#164FA3] hover:bg-[#164FA3]/10"><Pencil size={14} /></button>
+                          <button onClick={() => del(c)} disabled={deletingId === c.id} title="Delete candidate" className="p-1.5 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-50">{deletingId === c.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}</button>
                         </div>
                       </div>
                     </td>
@@ -1618,8 +1644,6 @@ function CandidatesTab({ flash, fail }) {
                     <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={c.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{c.total}/100</span></div></td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                       <button onClick={() => setOpening(c)} className="text-xs font-bold text-[#164FA3] hover:bg-[#164FA3]/10 px-2.5 py-1 rounded-lg inline-flex items-center gap-1"><ClipboardCheck size={14} /> Open</button>
-                      <button onClick={() => setEditing(c)} className="text-gray-500 hover:text-[#164FA3] p-1" title="Edit"><Pencil size={14} /></button>
-                      <button onClick={() => del(c)} disabled={deletingId === c.id} title="Delete candidate" className="text-xs font-bold text-red-600 hover:bg-red-50 px-2.5 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-50">{deletingId === c.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -2800,7 +2824,7 @@ function LeadBadge({ row }) {
   return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Equal Votes</span>;
 }
 
-function VoteComparisonTab({ flash, fail }) {
+function VoteComparisonTab({ flash, fail, onEditMla }) {
   const [geo, setGeo] = useState(emptyGeo());
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -2985,7 +3009,20 @@ function VoteComparisonTab({ flash, fail }) {
                         <td className="py-2 pr-2"><input type="checkbox" checked={selected.has(r.assembly_id)} onChange={() => toggleOne(r.assembly_id)} className="accent-[#164FA3]" /></td>
                         <td className="py-2 pr-3 font-semibold text-gray-900">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[10px] font-normal text-gray-400">({r.election_year})</span> : null}</td>
                         <td className="py-2 pr-3 text-gray-600">{r.district_name || "—"}</td>
-                        <td className="py-2 pr-3 text-gray-800">{r.mla_name || <span className="text-gray-400">Not Available</span>}{r.mla_party ? <span className="block text-[10px] text-gray-400">{r.mla_party}</span> : null}</td>
+                        <td className="py-2 pr-3 text-gray-800">
+                          <div className="group/mla flex items-center gap-1.5 min-w-0">
+                            <div className="min-w-0">
+                              {r.mla_name || <span className="text-gray-400">Not Available</span>}
+                              {r.mla_party ? <span className="block text-[10px] text-gray-400">{r.mla_party}</span> : null}
+                            </div>
+                            {/* Edit the Current MLA right here — jumps to the MLA
+                                Profile tab and opens that assembly's editor. */}
+                            {r.mla_name && onEditMla ? (
+                              <button onClick={() => onEditMla(r.assembly_id)} title="Edit this MLA's profile"
+                                className="opacity-0 group-hover/mla:opacity-100 focus:opacity-100 transition-opacity p-1 rounded-md text-gray-500 hover:text-[#164FA3] hover:bg-[#164FA3]/10 shrink-0"><Pencil size={13} /></button>
+                            ) : null}
+                          </div>
+                        </td>
                         <td className={`py-2 pr-3 text-right font-semibold ${naMla ? "text-gray-300" : "text-gray-900"}`}>{voteText(r.mla_votes)}</td>
                         <td className="py-2 pr-3 text-gray-800">{r.aap_candidate || <span className="text-gray-400">Not Available</span>}</td>
                         <td className={`py-2 pr-3 text-right font-semibold ${naAap ? "text-gray-300" : "text-gray-900"}`}>{voteText(r.aap_votes)}</td>
