@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
 import { syncAssemblies } from "@/lib/leaderAssessment";
-import { fetchComparisonDataset, comparisonSummary } from "@/lib/mlaComparison";
+import { fetchComparisonDataset, comparisonSummary, fetchComparisonPartyTotals } from "@/lib/mlaComparison";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,10 @@ export async function GET(req) {
     };
 
     const all = await fetchComparisonDataset(filters);
-    const summary = comparisonSummary(all);
+    // Summary = per-assembly counts + party-wise vote totals (BJP/INC/AAP) over
+    // the SAME filter scope, so the cards always agree with the filtered table.
+    const partyTotals = await fetchComparisonPartyTotals(filters);
+    const summary = { ...comparisonSummary(all), ...partyTotals };
 
     const total = all.length;
     const pageSize = Math.min(Math.max(parseInt(searchParams.get("pageSize") || "20", 10) || 20, 1), 200);

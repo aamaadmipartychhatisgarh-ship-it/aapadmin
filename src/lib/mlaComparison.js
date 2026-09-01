@@ -24,13 +24,24 @@ import { query } from "@/lib/db";
 // mapped to the wrong assembly (spec §4).
 // ---------------------------------------------------------------------------
 
-// AAP party match against the free-text party name (there is no AAP flag; parties
-// are stored by their Party-Master name). Covers the common English + Hindi forms
-// and is case-insensitive, so "AAP", "Aam Aadmi Party", "आम आदमी पार्टी" all match.
+// Party matchers against the free-text party name (there is no party flag; parties
+// are stored by their Party-Master name). Each covers the common English + Hindi
+// forms, case-insensitively, so the stored name resolves regardless of exact form.
 const AAP_MATCH_SQL = `(
   UPPER(TRIM(e.party)) = 'AAP'
   OR LOWER(e.party) LIKE '%aam aadmi%'
   OR e.party LIKE '%आम आदमी%'
+)`;
+const BJP_MATCH_SQL = `(
+  UPPER(TRIM(e.party)) = 'BJP'
+  OR LOWER(e.party) LIKE '%bharatiya janata%'
+  OR e.party LIKE '%भारतीय जनता%'
+)`;
+const INC_MATCH_SQL = `(
+  UPPER(TRIM(e.party)) IN ('INC', 'CONGRESS')
+  OR LOWER(e.party) LIKE '%indian national congress%'
+  OR LOWER(e.party) LIKE '%congress%'
+  OR e.party LIKE '%कांग्रेस%'
 )`;
 
 // Normalize a filter value (single id, array of ids, or comma-separated string)
@@ -163,8 +174,8 @@ export async function fetchComparisonDataset(filters = {}) {
   });
 }
 
-// Summary cards (spec §8) — computed from the SAME dataset shown in the table, so
-// they always agree with it. "Complete" means both vote values are present.
+// Summary cards — computed from the SAME dataset shown in the table, so they
+// always agree with it. "Complete" means both vote values are present.
 export function comparisonSummary(rows) {
   let complete = 0, mlaMore = 0, aapMore = 0, equal = 0;
   for (const r of rows) {
@@ -181,4 +192,46 @@ export function comparisonSummary(rows) {
     aap_more: aapMore,
     equal_votes: equal,
   };
+}
+
+// PARTY-WISE VOTE TOTALS for the summary cards (BJP / INC / AAP). For every
+// master assembly in the current filter scope, we take that assembly's MOST
+// RECENT election year (the applicable election — same anchor the AAP column
+// uses) and SUM the votes of EVERY row of each party in that year (so multiple
+// candidate records of the same party are all counted, never just one), then add
+// those sums across all filtered assemblies. Read live from la_mla_elections, so
+// the totals update whenever the source vote data changes. Also returns the
+// AAP-vs-BJP margin and who leads.
+export async function fetchComparisonPartyTotals(filters = {}) {
+  const { where: geoWhere, params: geoParams } = geoFilter(filters);
+  const whereSql = geoWhere.length ? `AND ${geoWhere.join(" AND ")}` : "";
+
+  const [row] = await query(
+    `SELECT
+        COALESCE(SUM(CASE WHEN ${BJP_MATCH_SQL} THEN e.votes ELSE 0 END), 0) AS bjp_total,
+        COALESCE(SUM(CASE WHEN ${INC_MATCH_SQL} THEN e.votes ELSE 0 END), 0) AS inc_total,
+        COALESCE(SUM(CASE WHEN ${AAP_MATCH_SQL} THEN e.votes ELSE 0 END), 0) AS aap_total
+       FROM la_mla_elections e
+       JOIN la_assemblies a  ON a.id = e.assembly_id
+       JOIN locations al  ON al.id = a.location_id AND al.type = 'assembly'
+       LEFT JOIN locations dl  ON dl.id  = al.parent_id  AND dl.type  = 'district'
+       LEFT JOIN locations lsl ON lsl.id = dl.parent_id  AND lsl.type = 'lok_sabha'
+       LEFT JOIN locations zl  ON zl.id  = lsl.parent_id AND zl.type  = 'zone'
+       JOIN (
+         SELECT assembly_id, MAX(election_year) AS yr
+           FROM la_mla_elections
+          WHERE election_year IS NOT NULL
+          GROUP BY assembly_id
+       ) latest ON latest.assembly_id = e.assembly_id AND e.election_year = latest.yr
+      WHERE a.location_id IS NOT NULL
+        ${whereSql}`,
+    geoParams
+  );
+
+  const bjp = Number(row?.bjp_total || 0);
+  const inc = Number(row?.inc_total || 0);
+  const aap = Number(row?.aap_total || 0);
+  const margin = Math.abs(bjp - aap);
+  const margin_leader = bjp > aap ? "BJP" : aap > bjp ? "AAP" : "Equal";
+  return { bjp_total: bjp, inc_total: inc, aap_total: aap, aap_bjp_margin: margin, margin_leader };
 }

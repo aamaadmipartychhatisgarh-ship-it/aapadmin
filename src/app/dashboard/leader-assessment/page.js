@@ -2896,23 +2896,33 @@ function VoteComparisonTab({ flash, fail }) {
   });
   const toggleOne = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
+  // Party-wise vote totals for the summary cards, summed live from Election
+  // History across the filtered assemblies (each party's votes at every
+  // assembly's most recent election). The 5th card is the AAP-vs-BJP margin with
+  // an explicit "ahead by" line.
+  const marginHint = summary
+    ? summary.margin_leader === "BJP" ? `BJP Ahead by ${Number(summary.aap_bjp_margin).toLocaleString("en-IN")}`
+      : summary.margin_leader === "AAP" ? `AAP Ahead by ${Number(summary.aap_bjp_margin).toLocaleString("en-IN")}`
+      : "Equal Votes"
+    : "";
   const cards = summary ? [
     { label: "Total Assemblies", value: summary.total_assemblies, cls: "text-gray-900" },
-    { label: "Complete Vote Data", value: summary.complete_data, cls: "text-[#164FA3]" },
-    { label: "Current MLA Ahead", value: summary.mla_more, cls: "text-[#164FA3]" },
-    { label: "AAP Candidate Ahead", value: summary.aap_more, cls: "text-emerald-600" },
-    { label: "Equal Votes", value: summary.equal_votes, cls: "text-amber-600" },
+    { label: "BJP Total Vote", value: summary.bjp_total ?? 0, cls: "text-[#FF6634]" },
+    { label: "INC Total Vote", value: summary.inc_total ?? 0, cls: "text-[#19AAF8]" },
+    { label: "AAP Total Vote", value: summary.aap_total ?? 0, cls: "text-emerald-600" },
+    { label: "AAP vs BJP Margin", value: summary.aap_bjp_margin ?? 0, cls: "text-amber-600", hint: marginHint },
   ] : [];
 
   return (
     <div className="space-y-4">
-      {/* Summary cards (§8) — computed from the same filtered dataset. */}
+      {/* Summary cards — party-wise vote totals over the same filtered dataset. */}
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {cards.map((c) => (
             <div key={c.label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
               <div className={`text-2xl font-bold ${c.cls}`}>{Number(c.value).toLocaleString("en-IN")}</div>
               <div className="text-xs text-gray-500 mt-0.5">{c.label}</div>
+              {c.hint ? <div className="text-[11px] font-semibold text-gray-600 mt-0.5">{c.hint}</div> : null}
             </div>
           ))}
         </div>
