@@ -1,6 +1,6 @@
 import path from "path";
 import { readFile } from "fs/promises";
-import sharp from "sharp";
+import { getSharp } from "@/lib/sharpSafe";
 import { query } from "@/lib/db";
 import { getMediaFile } from "@/lib/mediaFileStore";
 
@@ -19,19 +19,29 @@ import { getMediaFile } from "@/lib/mediaFileStore";
 // genuinely no readable image.
 const MAX_DIM = 320;
 
+// Raw passthrough when the bytes are already a react-pdf-renderable format.
+function rawPassthrough(buf) {
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return `data:image/jpeg;base64,${buf.toString("base64")}`;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return `data:image/png;base64,${buf.toString("base64")}`;
+  return null;
+}
+
 async function bytesToPdfDataUri(data, tag = "") {
   if (!data) return null;
   const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const sharp = getSharp();
+  // sharp missing (bad native binary) → don't crash: pass through JPEG/PNG bytes
+  // as-is, drop anything else (WEBP/GIF just won't embed, same as before).
+  if (!sharp) return rawPassthrough(buf);
   try {
     // sharp decodes JPEG/PNG/WEBP/GIF/… and re-encodes as PNG (always renderable
     // by react-pdf). rotate() bakes in EXIF orientation; resize keeps aspect ratio.
     const png = await sharp(buf).rotate().resize(MAX_DIM, MAX_DIM, { fit: "inside", withoutEnlargement: true }).png().toBuffer();
     return `data:image/png;base64,${png.toString("base64")}`;
   } catch (e) {
-    // sharp couldn't decode — fall back to a raw passthrough if the bytes already
-    // are a format react-pdf accepts (JPEG/PNG).
-    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return `data:image/jpeg;base64,${buf.toString("base64")}`;
-    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return `data:image/png;base64,${buf.toString("base64")}`;
+    // sharp couldn't decode — fall back to a raw passthrough (JPEG/PNG).
+    const raw = rawPassthrough(buf);
+    if (raw) return raw;
     console.error(`[photoDataUri] transcode failed${tag ? ` (${tag})` : ""}:`, e?.message || e);
     return null;
   }

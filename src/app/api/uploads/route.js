@@ -8,7 +8,7 @@ import { randomUUID } from "crypto";
 import path from "path";
 import { sniffImage, IMAGE_TYPES } from "@/lib/imageSniff";
 import { saveMediaFile } from "@/lib/mediaFileStore";
-import sharp from "sharp";
+import { getSharp } from "@/lib/sharpSafe";
 
 // Normalize an uploaded photo to a bounded, DB-safe blob. THE ROOT CAUSE of
 // "photos disappear over time": a large original (a 6–12 MP phone photo can be
@@ -22,6 +22,10 @@ import sharp from "sharp";
 // If sharp fails for any reason, we fall back to the original bytes so an upload
 // is never lost.
 async function normalizeImage(buffer, sniffed) {
+  const sharp = getSharp();
+  // sharp unavailable (bad native binary) → store the original bytes unchanged
+  // rather than crashing the upload.
+  if (!sharp) return { data: buffer, mimeType: sniffed, ext: IMAGE_TYPES[sniffed] };
   try {
     const img = sharp(buffer, { failOn: "none" }).rotate(); // honor EXIF orientation
     const meta = await img.metadata();

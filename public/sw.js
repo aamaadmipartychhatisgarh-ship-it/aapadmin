@@ -1,42 +1,45 @@
-// Minimal service worker — required for the PWA install prompt to be offered.
-// We keep it network-first (no aggressive caching) so the dashboard always
-// shows fresh data; the SW mainly exists to make the app "installable".
+// Minimal service worker — required only so the PWA install prompt can be
+// offered. It deliberately does NOT handle page navigations or API calls, so it
+// can never trap the app on a stale/broken cached page or turn a server hiccup
+// (e.g. a 504) into a hard-stuck screen. Navigations and /api/ always go
+// straight to the network, uncached.
 
-const CACHE = "aap-admin-v1";
+const CACHE = "aap-admin-v2";
 
-self.addEventListener("install", (event) => {
-  // Activate immediately on first install.
+self.addEventListener("install", () => {
+  // Activate immediately on first install / update.
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
-  // Clean up old caches and take control of open pages.
+  // Drop every old cache (including the previous v1 that cached navigations),
+  // then take control of open pages.
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-      )
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  // Only handle GET; never cache API/auth calls — always go to network.
-  if (req.method !== "GET" || req.url.includes("/api/")) return;
-
-  // Network-first. On failure, fall back to any cached copy — but ALWAYS
-  // resolve to a real Response. Returning undefined here throws
-  // "Failed to convert value to 'Response'" and turns a transient network
-  // blip into a hard-broken page for every client with the SW installed.
-  event.respondWith(
-    fetch(req).catch(async () => {
-      const cached = (await caches.match(req)) || (await caches.match("/dashboard"));
-      if (cached) return cached;
-      // Nothing cached and the network is down — behave like a normal
-      // network failure instead of crashing the fetch handler.
-      return Response.error();
-    })
-  );
+  // NEVER intercept:
+  //  - page navigations (mode 'navigate' / an HTML document) — the browser must
+  //    always get the live server response, so a bad SW cache can't stick the
+  //    homepage or mask a 504;
+  //  - non-GET requests;
+  //  - API / auth calls.
+  // For everything else we simply don't call respondWith, so the request goes to
+  // the network exactly as if no service worker were installed. This makes the
+  // SW inert for correctness while still satisfying the installability check.
+  if (
+    req.mode === "navigate" ||
+    req.method !== "GET" ||
+    req.destination === "document" ||
+    req.url.includes("/api/")
+  ) {
+    return;
+  }
+  // Pass-through for other GETs — no caching, no fallback, no way to break a page.
 });
