@@ -2825,6 +2825,7 @@ function LeadBadge({ row }) {
 }
 
 function VoteComparisonTab({ flash, fail, onEditMla }) {
+  const { byName: partyByName } = usePartyMaster(); // live party logos by name
   const [geo, setGeo] = useState(emptyGeo());
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -3010,10 +3011,18 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
                         <td className="py-2 pr-3 font-semibold text-gray-900">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[10px] font-normal text-gray-400">({r.election_year})</span> : null}</td>
                         <td className="py-2 pr-3 text-gray-600">{r.district_name || "—"}</td>
                         <td className="py-2 pr-3 text-gray-800">
-                          <div className="group/mla flex items-center gap-1.5 min-w-0">
+                          <div className="group/mla flex items-center gap-2 min-w-0">
+                            {/* The Current MLA's OWN uploaded photo (by their profile
+                                record), placeholder when none — never another MLA's. */}
+                            <ProfilePhoto name={r.mla_name || "?"} src={r.mla_photo_url} size={28} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
                             <div className="min-w-0">
                               {r.mla_name || <span className="text-gray-400">Not Available</span>}
-                              {r.mla_party ? <span className="block text-[10px] text-gray-400">{r.mla_party}</span> : null}
+                              {r.mla_party ? (
+                                <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                                  <PartyLogo name={r.mla_party} byName={partyByName} size={14} />
+                                  <span className="truncate">{r.mla_party}</span>
+                                </span>
+                              ) : null}
                             </div>
                             {/* Edit the Current MLA right here — jumps to the MLA
                                 Profile tab and opens that assembly's editor. */}

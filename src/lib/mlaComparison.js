@@ -110,6 +110,7 @@ export async function fetchComparisonDataset(filters = {}) {
         dl.id           AS district_id,      dl.name  AS district_name,
         mp.name         AS mla_name,
         mp.party        AS mla_party,
+        mp.photo_url    AS mla_photo_url,
         mp.mla_votes    AS mla_votes
        FROM la_assemblies a
        JOIN locations al  ON al.id = a.location_id AND al.type = 'assembly'
@@ -164,6 +165,7 @@ export async function fetchComparisonDataset(filters = {}) {
       district_name: r.district_name || null,
       mla_name: mlaName,
       mla_party: r.mla_party || null,
+      mla_photo_url: r.mla_photo_url || null,
       mla_votes: mlaVotes,
       aap_candidate: aapCandidate,
       aap_votes: aapVotes,
