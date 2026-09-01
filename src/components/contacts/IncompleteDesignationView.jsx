@@ -106,7 +106,7 @@ export default function IncompleteDesignationView() {
 
       {/* Counts. "Total Assigned Person" is clickable — it opens the flattened,
           paginated list of every assigned person behind the count. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <CountCard label="Total Designations" value={counts.total} tone="blue" active={!personsView} onClick={() => setView("matrix")} />
         <CountCard label="Filled" value={counts.filled} tone="green" active={!personsView && status === "filled"} onClick={() => { setView("matrix"); setStatus("filled"); }} />
         <CountCard label="Blank" value={counts.blank} tone="amber" active={!personsView && status === "blank"} onClick={() => { setView("matrix"); setStatus("blank"); }} />
