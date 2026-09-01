@@ -20,7 +20,7 @@ export const CANDIDATE_COLUMNS = [
   { key: "assembly", header: "Assembly", width: 20, flex: 1.8, get: (c) => c.assembly_name || "" },
   { key: "district", header: "District", width: 16, flex: 1.4, get: (c) => c.district || "" },
   { key: "party", header: "Party", width: 16, flex: 1.6, get: (c) => c.party || "" },
-  { key: "type", header: "Type", width: 16, flex: 1.4, get: (c) => c.current_position || "AAP Candidate" },
+  { key: "type", header: "Current Designation", width: 18, flex: 1.6, get: (c) => c.current_position || "" },
   { key: "score", header: "Score", width: 10, flex: 0.9, get: (c) => `${c.total ?? 0}/100` },
   { key: "status", header: "Status", width: 12, flex: 1, get: (c) => (c.assessment_done ? "Completed" : "Pending") },
 ];

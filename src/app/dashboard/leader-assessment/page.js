@@ -1591,7 +1591,7 @@ function CandidatesTab({ flash, fail }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-gray-500"><tr>{[sortBy === "score" ? "#" : "", "Candidate", "Assembly", "District", "Type / Category", "Status", "Assessment Score", ""].map((h, i) => <th key={i} className="px-3 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}</tr></thead>
+              <thead className="bg-gray-50 text-left text-gray-500"><tr>{[sortBy === "score" ? "#" : "", "Candidate", "Assembly", "District", "Current Designation", "Status", "Assessment Score", ""].map((h, i) => <th key={i} className={`px-3 py-2.5 font-semibold ${h === "Current Designation" ? "w-[150px]" : "whitespace-nowrap"}`}>{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {view.map((c, idx) => (
                   <tr key={c.id} className="hover:bg-gray-50">
@@ -1610,7 +1610,10 @@ function CandidatesTab({ flash, fail }) {
                     </td>
                     <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{c.assembly_name || "—"}</td>
                     <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{c.district || "—"}</td>
-                    <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3] whitespace-nowrap">{c.current_position || "AAP Candidate"}</span></td>
+                    {/* Current Designation — fixed width; long names wrap inside
+                        the column instead of expanding the table. Value is the
+                        candidate's saved current designation (current_position). */}
+                    <td className="px-3 py-2.5 align-top w-[150px] max-w-[150px]"><div className="whitespace-normal break-words text-xs font-semibold text-[#164FA3]">{c.current_position || "—"}</div></td>
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${c.assessment_done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{c.assessment_done ? "Completed" : "Pending"}</span></td>
                     <td className="px-3 py-2.5"><div className="flex items-center gap-2 min-w-[130px]"><ScoreBar value={c.total} max={100} showValue={false} /><span className="text-sm font-bold text-[#164FA3] w-14 text-right">{c.total}/100</span></div></td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
@@ -2793,7 +2796,7 @@ function voteText(v) {
 function LeadBadge({ row }) {
   if (row.mla_votes == null || row.aap_votes == null) return <span className="text-gray-400">—</span>;
   if (row.leader === "Current MLA") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">Current MLA</span>;
-  if (row.leader === "AAP Candidate") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">AAP Candidate</span>;
+  if (row.leader === "AAP Candidate") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">AAP Competitor</span>;
   return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Equal Votes</span>;
 }
 
@@ -2929,9 +2932,9 @@ function VoteComparisonTab({ flash, fail }) {
       )}
 
       <Card
-        title="Current MLA vs AAP Candidate — Vote Comparison"
+        title="Current MLA vs AAP Competitor — Vote Comparison"
         icon={BarChart3}
-        sub="Assembly-wise comparison of vote counts only. Data comes from the MLA Profile (MLA votes) and Election History (AAP candidate votes, same election year)."
+        sub="Assembly-wise comparison of vote counts only. Data comes from the MLA Profile (MLA votes) and Election History (AAP competitor votes, same election year)."
         right={
           <div className="flex items-center gap-2">
             <button onClick={() => exportAs("xlsx")} disabled={!!exporting || loading}
@@ -2968,7 +2971,7 @@ function VoteComparisonTab({ flash, fail }) {
                     <th className="py-2 pr-3">District</th>
                     <th className="py-2 pr-3">Current MLA</th>
                     <th className="py-2 pr-3 text-right">MLA Votes</th>
-                    <th className="py-2 pr-3">AAP Candidate</th>
+                    <th className="py-2 pr-3">AAP Competitor</th>
                     <th className="py-2 pr-3 text-right">AAP Votes</th>
                     <th className="py-2 pr-3 text-right">Difference</th>
                     <th className="py-2 pr-3">Vote Lead</th>
