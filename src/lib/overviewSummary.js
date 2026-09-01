@@ -147,11 +147,17 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
                 SUM(scheduled_at IS NOT NULL AND posted_at IS NULL) AS scheduled,
                 SUM(posted_at IS NOT NULL) AS published,
                 SUM(${istDay} = ?) AS today,
-                MAX(created_at) AS last_activity
+                MAX(created_at) AS last_activity,
+                (SELECT COALESCE(SUM(followers),0) FROM social_pages WHERE is_active=1 AND platform='instagram') AS ig_followers,
+                (SELECT COALESCE(SUM(followers),0) FROM social_pages WHERE is_active=1 AND platform='facebook')  AS fb_followers
            FROM social_posts`,
         [today]
       );
-      social = { total: n(s?.total), scheduled: n(s?.scheduled), published: n(s?.published), today: n(s?.today), last_activity: s?.last_activity || null };
+      social = {
+        total: n(s?.total), scheduled: n(s?.scheduled), published: n(s?.published),
+        today: n(s?.today), last_activity: s?.last_activity || null,
+        ig_followers: n(s?.ig_followers), fb_followers: n(s?.fb_followers),
+      };
     } catch { social = null; }
   }
 

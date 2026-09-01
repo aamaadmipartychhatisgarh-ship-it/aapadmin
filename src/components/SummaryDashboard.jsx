@@ -300,12 +300,13 @@ export default function SummaryDashboard({
                     <div className="w-10 h-10 rounded-full bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center"><Share2 size={20} /></div>
                     <span className="font-bold text-lg text-gray-900">Social Media Team</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <MiniStat label="Posts" value={social.total} />
-                    <MiniStat label="Scheduled" value={social.scheduled} />
-                    <MiniStat label="Published" value={social.published} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <MiniStat label="Total Posts" value={social.total} />
+                    <MiniStat label="Today Posts" value={social.today} />
+                    <MiniStat label="Instagram Followers" value={social.ig_followers} />
+                    <MiniStat label="Facebook Followers" value={social.fb_followers} />
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-3">Today: {social.today} · Last activity: {social.last_activity ? formatDateTimeDot(social.last_activity) : "—"}</p>
+                  <p className="text-[11px] text-gray-400 mt-3">Last activity: {social.last_activity ? formatDateTimeDot(social.last_activity) : "—"}</p>
                 </div>
               )}
             </div>
