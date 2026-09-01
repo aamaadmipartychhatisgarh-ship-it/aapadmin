@@ -7,6 +7,8 @@ import DesignationMultiSelect, { parseDesignationIdList } from "@/components/con
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
+import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
+import { CONTACT_EXPORT_COLUMNS } from "@/lib/contactExportColumns";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import { isCaller, isSuperAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import CallActionIcons from "@/components/CallActionIcons";
@@ -149,6 +151,10 @@ export default function ContactsModule({ session, mode }) {
   // client-side sort of one page), and the SAME order the exports use.
   const [sortKey, setSortKey] = useState("");
   const [sortDir, setSortDir] = useState("asc");
+  // Export column selection — all columns checked by default. When the user
+  // deselects some, only the checked columns are exported (Excel + PDF).
+  const CONTACT_COL_KEYS = CONTACT_EXPORT_COLUMNS.map((c) => c.key);
+  const [exportColumns, setExportColumns] = useState(CONTACT_COL_KEYS);
   const fileRef = useRef(null);
   const loadSeq = useRef(0);
   const countSeq = useRef(0);
@@ -509,6 +515,9 @@ export default function ContactsModule({ session, mode }) {
       params.set("format", format);
       // Priority 1 — an explicit checkbox selection overrides the filters.
       if (selectedIds.size > 0) params.set("ids", [...selectedIds].join(","));
+      // Column selection — sent only when the user has customized it.
+      const colParam = exportColumnsParam(exportColumns, CONTACT_COL_KEYS);
+      if (colParam) params.set("columns", colParam.join(","));
       const r = await fetch(`${cfg.listUrl}?${params}`, { cache: "no-store", signal: controller.signal });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
@@ -548,6 +557,8 @@ export default function ContactsModule({ session, mode }) {
       params.delete("page"); params.delete("page_size");
       params.set("format", "pdf");
       if (selectedIds.size > 0) params.set("ids", [...selectedIds].join(","));
+      const colParam = exportColumnsParam(exportColumns, CONTACT_COL_KEYS);
+      if (colParam) params.set("columns", colParam.join(","));
       const r = await fetch(`${cfg.listUrl}?${params}`, { cache: "no-store", signal: controller.signal });
       if (!r.ok) { const d = await r.json().catch(() => ({})); setError(d.message || "Print failed. Please try again."); return; }
       const blob = await r.blob();
@@ -721,10 +732,14 @@ export default function ContactsModule({ session, mode }) {
         }
         breadcrumb={cfg.breadcrumbTrail}
         actions={
-          // One shared 3-dot (⋮) menu — identical in the admin and supervisor
-          // dashboards — holding exactly Import CSV / Export CSV / Upload CSV.
-          // Add Contact stays its own primary button, immediately to the right
-          // of the ⋮ (ActionBar renders the menu first, then the primary).
+          // Column picker (controls which columns the Excel/PDF/Print exports
+          // include) sits to the left of the ⋮ menu that triggers those exports.
+          <div className="flex items-center gap-2">
+          <ColumnPicker columns={CONTACT_EXPORT_COLUMNS} selected={exportColumns} onChange={setExportColumns} />
+          {/* One shared 3-dot (⋮) menu — identical in the admin and supervisor
+              dashboards — holding exactly Import CSV / Export CSV / Upload CSV.
+              Add Contact stays its own primary button, immediately to the right
+              of the ⋮ (ActionBar renders the menu first, then the primary). */}
           <ActionBar items={[
             { key: "hierarchy", label: "Designation Hierarchy", icon: Network, menuOnly: true, onClick: () => { window.location.href = "/dashboard/admin/contacts-hierarchy"; } },
             cfg.canImport && { key: "import", label: "Import Excel", icon: Upload, menuOnly: true, onClick: () => setShowImport(true) },
@@ -738,6 +753,7 @@ export default function ContactsModule({ session, mode }) {
             cfg.canImport && { key: "upload", label: uploading ? "Uploading…" : "Upload", icon: Upload, loading: uploading, menuOnly: true, onClick: () => fileRef.current?.click() },
             cfg.canAdd && { key: "add", label: "Add Contact", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
           ]} />
+          </div>
         }
       />
       {cfg.canImport && (

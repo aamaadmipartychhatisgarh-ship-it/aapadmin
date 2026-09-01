@@ -6,6 +6,8 @@ import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar, { initialsOf } from "@/components/Avatar";
 import PartySelect, { usePartyMaster, PartyLogo, PartyBadge, partyLogoFor } from "@/components/PartySelect";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
+import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
+import { MLA_EXPORT_COLUMNS, CANDIDATE_EXPORT_COLUMNS } from "@/lib/leaderAssessmentColumns";
 import {
   LayoutDashboard, Building2, UserSquare2, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
@@ -873,24 +875,30 @@ function MlaManager({ flash, fail }) {
   // Export the CURRENTLY-shown MLA list to a PDF — each MLA's own photo embedded
   // server-side from durable storage. Sends exactly what's displayed (search /
   // party filter preserved).
-  const [exportingPdf, setExportingPdf] = useState(false);
-  async function exportPdf() {
-    if (exportingPdf || shown.length === 0) return;
-    setExportingPdf(true);
+  // Export column selection — all columns checked by default; the SAME selection
+  // drives both the PDF and the Excel export.
+  const MLA_COL_KEYS = MLA_EXPORT_COLUMNS.map((c) => c.key);
+  const [exportColumns, setExportColumns] = useState(MLA_COL_KEYS);
+  const [exportingFmt, setExportingFmt] = useState(""); // "pdf" | "xlsx" | ""
+  const exportingPdf = exportingFmt !== "";
+  async function exportList(format) {
+    if (exportingFmt || shown.length === 0) return;
+    setExportingFmt(format);
     try {
       const rows = await rowsWithPhotoData(shown); // exact displayed photos → JPEG
+      const columns = exportColumnsParam(exportColumns, MLA_COL_KEYS); // null → all
       const r = await fetch("/api/leader-assessment/mlas/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, subtitle: `${shown.length} MLA${shown.length === 1 ? "" : "s"}${partyFilter ? ` · ${partyFilter.toUpperCase()}` : ""} · ${new Date().toLocaleString("en-GB")}` }),
+        body: JSON.stringify({ rows, format, columns, subtitle: `${shown.length} MLA${shown.length === 1 ? "" : "s"}${partyFilter ? ` · ${partyFilter.toUpperCase()}` : ""} · ${new Date().toLocaleString("en-GB")}` }),
       });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "PDF export failed."); return; }
+      if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "Export failed."); return; }
       const blob = await r.blob();
-      if (!blob || blob.size === 0) { fail?.("The PDF came back empty."); return; }
+      if (!blob || blob.size === 0) { fail?.("The export came back empty."); return; }
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `MLA_Profiles_${new Date().toISOString().slice(0, 10)}.pdf`;
+      const a = document.createElement("a"); a.href = url; a.download = `MLA_Profiles_${new Date().toISOString().slice(0, 10)}.${format === "xlsx" ? "xlsx" : "pdf"}`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    } catch { fail?.("PDF export failed — network error."); }
-    finally { setExportingPdf(false); }
+    } catch { fail?.("Export failed — network error."); }
+    finally { setExportingFmt(""); }
   }
 
   return (
@@ -902,7 +910,9 @@ function MlaManager({ flash, fail }) {
         right={
           <div className="flex items-center gap-2">
             <button onClick={() => setShowPhotoAudit(true)} title="Check & repair photo storage" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold"><Database size={15} /> Photo Audit</button>
-            <button onClick={exportPdf} disabled={exportingPdf || shown.length === 0} title="Export the shown MLA list to PDF (with photos)" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">{exportingPdf ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />} Export PDF</button>
+            <ColumnPicker columns={MLA_EXPORT_COLUMNS} selected={exportColumns} onChange={setExportColumns} />
+            <button onClick={() => exportList("xlsx")} disabled={exportingPdf || shown.length === 0} title="Export the shown MLA list to Excel (selected columns)" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">{exportingFmt === "xlsx" ? <Loader2 size={15} className="animate-spin" /> : <Database size={15} />} Export Excel</button>
+            <button onClick={() => exportList("pdf")} disabled={exportingPdf || shown.length === 0} title="Export the shown MLA list to PDF (selected columns, with photos)" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">{exportingFmt === "pdf" ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />} Export PDF</button>
             <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={16} /> Create MLA Profile</button>
           </div>
         }
@@ -1522,24 +1532,28 @@ function CandidatesTab({ flash, fail }) {
 
   // Export the shown candidate list to PDF — each candidate's own photo embedded
   // server-side from durable storage (respects the assembly filter + sort).
-  const [exportingPdf, setExportingPdf] = useState(false);
-  async function exportPdf() {
-    if (exportingPdf || view.length === 0) return;
-    setExportingPdf(true);
+  const CAND_COL_KEYS = CANDIDATE_EXPORT_COLUMNS.map((c) => c.key);
+  const [exportColumns, setExportColumns] = useState(CAND_COL_KEYS);
+  const [exportingFmt, setExportingFmt] = useState(""); // "pdf" | "xlsx" | ""
+  const exportingPdf = exportingFmt !== "";
+  async function exportList(format) {
+    if (exportingFmt || view.length === 0) return;
+    setExportingFmt(format);
     try {
       const rows = await rowsWithPhotoData(view); // exact displayed photos → JPEG
+      const columns = exportColumnsParam(exportColumns, CAND_COL_KEYS); // null → all
       const r = await fetch("/api/leader-assessment/candidates/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, subtitle: `${view.length} candidate${view.length === 1 ? "" : "s"} · ${new Date().toLocaleString("en-GB")}` }),
+        body: JSON.stringify({ rows, format, columns, subtitle: `${view.length} candidate${view.length === 1 ? "" : "s"} · ${new Date().toLocaleString("en-GB")}` }),
       });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "PDF export failed."); return; }
+      if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "Export failed."); return; }
       const blob = await r.blob();
-      if (!blob || blob.size === 0) { fail?.("The PDF came back empty."); return; }
+      if (!blob || blob.size === 0) { fail?.("The export came back empty."); return; }
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `AAP_Candidates_${new Date().toISOString().slice(0, 10)}.pdf`;
+      const a = document.createElement("a"); a.href = url; a.download = `AAP_Candidates_${new Date().toISOString().slice(0, 10)}.${format === "xlsx" ? "xlsx" : "pdf"}`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    } catch { fail?.("PDF export failed — network error."); }
-    finally { setExportingPdf(false); }
+    } catch { fail?.("Export failed — network error."); }
+    finally { setExportingFmt(""); }
   }
 
   return (
@@ -1550,7 +1564,9 @@ function CandidatesTab({ flash, fail }) {
         sub="Every AAP candidate across all assemblies. Click Open on a candidate to view their profile and score the 10-parameter assessment."
         right={
           <div className="flex items-center gap-2">
-            <button onClick={exportPdf} disabled={exportingPdf || view.length === 0} title="Export the shown candidate list to PDF (with photos)" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">{exportingPdf ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />} Export PDF</button>
+            <ColumnPicker columns={CANDIDATE_EXPORT_COLUMNS} selected={exportColumns} onChange={setExportColumns} />
+            <button onClick={() => exportList("xlsx")} disabled={exportingPdf || view.length === 0} title="Export the shown candidate list to Excel (selected columns)" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">{exportingFmt === "xlsx" ? <Loader2 size={15} className="animate-spin" /> : <Database size={15} />} Export Excel</button>
+            <button onClick={() => exportList("pdf")} disabled={exportingPdf || view.length === 0} title="Export the shown candidate list to PDF (selected columns, with photos)" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">{exportingFmt === "pdf" ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />} Export PDF</button>
             <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold">
               <Plus size={16} /> Create Candidate
             </button>

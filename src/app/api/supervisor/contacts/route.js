@@ -115,9 +115,11 @@ export async function GET(req) {
         exParams = [...ids, ...scope.params];
         selected = true;
       }
+      const colsRaw = searchParams.get("columns");
+      const cols = colsRaw != null ? colsRaw.split(",").map((s) => s.trim()).filter(Boolean) : null;
       const rows = await fetchContactExportRows(exWhere, exParams, sortOrderBy);
       if (format === "csv") {
-        return new NextResponse(buildContactsCsv(rows), {
+        return new NextResponse(buildContactsCsv(rows, cols), {
           status: 200,
           headers: {
             "Content-Type": "text/csv; charset=utf-8",
@@ -127,7 +129,7 @@ export async function GET(req) {
         });
       }
       if (format === "pdf") {
-        const buf = await buildContactsPdfBuffer(rows, `${rows.length} contact${rows.length === 1 ? "" : "s"} · ${selected ? "Selected" : "Filtered"} export · ${new Date().toLocaleString("en-GB")}`);
+        const buf = await buildContactsPdfBuffer(rows, `${rows.length} contact${rows.length === 1 ? "" : "s"} · ${selected ? "Selected" : "Filtered"} export · ${new Date().toLocaleString("en-GB")}`, cols);
         return new NextResponse(buf, {
           status: 200,
           headers: {
@@ -137,7 +139,7 @@ export async function GET(req) {
           },
         });
       }
-      const buf = await buildContactsWorkbookBuffer(rows);
+      const buf = await buildContactsWorkbookBuffer(rows, cols);
       return new NextResponse(buf, {
         status: 200,
         headers: {

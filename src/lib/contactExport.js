@@ -79,38 +79,59 @@ function statusLabel(c) {
 // reformatted into scientific notation. Fields with no backing column resolve
 // to "" (kept as columns on purpose, per the spec's "show blank if unavailable").
 const COLUMNS = [
-  { header: "Contact ID", width: 11, get: (c) => c.id },
-  { header: "Name", width: 24, get: (c) => c.person_name || "" },
-  { header: "Mobile Number", width: 16, text: true, get: (c) => c.phone_number || "" },
-  { header: "Alternate Mobile", width: 16, text: true, get: (c) => c.alt_phone_number || c.alternate_mobile || "" },
-  { header: "Designation", width: 20, get: (c) => c.designation_name || "" },
-  { header: "Zone", width: 15, get: (c) => c.zone_name || "" },
-  { header: "Lok Sabha", width: 16, get: (c) => c.lok_sabha_name || "" },
-  { header: "Assembly", width: 18, get: (c) => c.assembly_name || "" },
-  { header: "District", width: 16, get: (c) => c.district_name || "" },
-  { header: "Address", width: 30, get: (c) => c.address || "" },
-  { header: "Village/City", width: 18, get: (c) => c.village || "" },
-  { header: "Pincode", width: 11, text: true, get: (c) => c.pincode || "" },
-  { header: "Status", width: 12, get: (c) => statusLabel(c) },
-  { header: "Assigned Caller", width: 18, get: (c) => c.assigned_caller_name || "" },
-  { header: "Assigned Supervisor", width: 18, get: (c) => c.assigned_supervisor_name || "" },
-  { header: "Created By", width: 16, get: (c) => c.created_by_name || "" },
-  { header: "Created Date", width: 19, get: (c) => fmt(c.created_at) },
-  { header: "Last Updated", width: 19, get: (c) => fmt(c.updated_at) },
-  { header: "Last Call Date", width: 19, get: (c) => fmt(c.last_call_date) },
-  { header: "Total Calls", width: 11, number: true, get: (c) => Number(c.total_calls || 0) },
-  { header: "Follow-up Date", width: 15, get: (c) => fmt(c.follow_up_date, true) },
-  { header: "Complaint Status", width: 16, get: (c) => c.complaint_status || "" },
-  { header: "Remarks/Notes", width: 32, get: (c) => c.remarks || "" },
-  { header: "VIP", width: 7, get: (c) => (c.is_vip ? "Yes" : "") },
+  { key: "id", header: "Contact ID", width: 11, get: (c) => c.id },
+  { key: "name", header: "Name", width: 24, get: (c) => c.person_name || "" },
+  { key: "phone", header: "Mobile Number", width: 16, text: true, get: (c) => c.phone_number || "" },
+  { key: "alt_phone", header: "Alternate Mobile", width: 16, text: true, get: (c) => c.alt_phone_number || c.alternate_mobile || "" },
+  { key: "designation", header: "Designation", width: 20, get: (c) => c.designation_name || "" },
+  { key: "zone", header: "Zone", width: 15, get: (c) => c.zone_name || "" },
+  { key: "lok_sabha", header: "Lok Sabha", width: 16, get: (c) => c.lok_sabha_name || "" },
+  { key: "assembly", header: "Assembly", width: 18, get: (c) => c.assembly_name || "" },
+  { key: "district", header: "District", width: 16, get: (c) => c.district_name || "" },
+  { key: "address", header: "Address", width: 30, get: (c) => c.address || "" },
+  { key: "village", header: "Village/City", width: 18, get: (c) => c.village || "" },
+  { key: "pincode", header: "Pincode", width: 11, text: true, get: (c) => c.pincode || "" },
+  { key: "status", header: "Status", width: 12, get: (c) => statusLabel(c) },
+  { key: "assigned_caller", header: "Assigned Caller", width: 18, get: (c) => c.assigned_caller_name || "" },
+  { key: "assigned_supervisor", header: "Assigned Supervisor", width: 18, get: (c) => c.assigned_supervisor_name || "" },
+  { key: "created_by", header: "Created By", width: 16, get: (c) => c.created_by_name || "" },
+  { key: "created_date", header: "Created Date", width: 19, get: (c) => fmt(c.created_at) },
+  { key: "last_updated", header: "Last Updated", width: 19, get: (c) => fmt(c.updated_at) },
+  { key: "last_call_date", header: "Last Call Date", width: 19, get: (c) => fmt(c.last_call_date) },
+  { key: "total_calls", header: "Total Calls", width: 11, number: true, get: (c) => Number(c.total_calls || 0) },
+  { key: "followup_date", header: "Follow-up Date", width: 15, get: (c) => fmt(c.follow_up_date, true) },
+  { key: "complaint_status", header: "Complaint Status", width: 16, get: (c) => c.complaint_status || "" },
+  { key: "remarks", header: "Remarks/Notes", width: 32, get: (c) => c.remarks || "" },
+  { key: "vip", header: "VIP", width: 7, get: (c) => (c.is_vip ? "Yes" : "") },
 ];
+
+// Photo is a PDF-only visual column (Excel/CSV can't embed the image), offered in
+// the picker so a user can drop it from the PDF too.
+export const CONTACT_PDF_PHOTO_KEY = "photo";
+// The full set of selectable export columns for the frontend column picker, in
+// canonical order — every data column plus the PDF photo column.
+export const CONTACT_EXPORT_COLUMNS = [
+  ...COLUMNS.map((c) => ({ key: c.key, label: c.header })),
+  { key: CONTACT_PDF_PHOTO_KEY, label: "Photo (PDF only)" },
+];
+
+// Resolve which DATA columns to emit. `cols` null/undefined → the full default
+// set (unchanged behavior). An explicit list → exactly those keys, in canonical
+// order (a customized selection). The photo key is not a data column, so it never
+// appears here.
+function pickColumns(cols) {
+  if (cols == null) return COLUMNS;
+  const set = new Set(cols);
+  return COLUMNS.filter((c) => set.has(c.key));
+}
 
 // Build the .xlsx as a Buffer: bold white-on-blue header, frozen first row,
 // sized columns, phone/pincode as text. Unicode (Hindi) is preserved natively.
-export async function buildContactsWorkbookBuffer(rows) {
+export async function buildContactsWorkbookBuffer(rows, cols) {
+  const columns = pickColumns(cols);
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Contacts", { views: [{ state: "frozen", ySplit: 1 }] });
-  ws.columns = COLUMNS.map((col) => ({ header: col.header, key: col.header, width: col.width }));
+  ws.columns = columns.map((col) => ({ header: col.header, key: col.key, width: col.width }));
 
   const header = ws.getRow(1);
   header.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -119,8 +140,8 @@ export async function buildContactsWorkbookBuffer(rows) {
   header.height = 20;
 
   for (const c of rows) {
-    const row = ws.addRow(COLUMNS.map((col) => col.get(c)));
-    COLUMNS.forEach((col, i) => {
+    const row = ws.addRow(columns.map((col) => col.get(c)));
+    columns.forEach((col, i) => {
       const cell = row.getCell(i + 1);
       if (col.text) { cell.value = String(col.get(c) ?? ""); cell.numFmt = "@"; }
     });
@@ -129,16 +150,17 @@ export async function buildContactsWorkbookBuffer(rows) {
   return Buffer.from(buf);
 }
 
-// Build a UTF-8 CSV string from the SAME COLUMNS as the .xlsx export, so both
-// formats are byte-for-byte consistent in content. A leading BOM makes Excel
+// Build a UTF-8 CSV string from the SAME selected COLUMNS as the .xlsx export, so
+// both formats are byte-for-byte consistent in content. A leading BOM makes Excel
 // open Unicode (Hindi) correctly; RFC-4180 quoting handles commas/quotes/newlines.
-export function buildContactsCsv(rows) {
+export function buildContactsCsv(rows, cols) {
+  const columns = pickColumns(cols);
   const esc = (v) => {
     const s = v == null ? "" : String(v);
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const lines = [COLUMNS.map((col) => esc(col.header)).join(",")];
-  for (const c of rows) lines.push(COLUMNS.map((col) => esc(col.get(c))).join(","));
+  const lines = [columns.map((col) => esc(col.header)).join(",")];
+  for (const c of rows) lines.push(columns.map((col) => esc(col.get(c))).join(","));
   return "\uFEFF" + lines.join("\r\n");
 }
 
@@ -189,35 +211,43 @@ export function PdfPhotoCell({ dataUri, name }) {
       React.createElement(Text, { style: pdfStyles.photoInitials }, photoInitials(name))));
 }
 
-function ContactsPdfDoc({ rows, photos, subtitle }) {
+function ContactsPdfDoc({ rows, photos, subtitle, columns, includePhoto }) {
   return React.createElement(Document, null,
     React.createElement(Page, { size: "A4", orientation: "landscape", style: pdfStyles.page },
       React.createElement(Text, { style: pdfStyles.title }, "Contacts Export"),
       React.createElement(Text, { style: pdfStyles.subtitle }, subtitle),
       React.createElement(View, { style: [pdfStyles.row, pdfStyles.headerRow] },
-        [React.createElement(Text, { key: "ph", style: [pdfStyles.cellHeader, { flex: PHOTO_FLEX, textAlign: "center" }] }, "Photo"),
-         ...PDF_COLUMNS.map((c, i) => React.createElement(Text, { key: i, style: [pdfStyles.cellHeader, { flex: c.flex }] }, c.header))]),
+        [includePhoto && React.createElement(Text, { key: "ph", style: [pdfStyles.cellHeader, { flex: PHOTO_FLEX, textAlign: "center" }] }, "Photo"),
+         ...columns.map((c, i) => React.createElement(Text, { key: i, style: [pdfStyles.cellHeader, { flex: c.flex }] }, c.header))]),
       rows.length === 0
         ? React.createElement(Text, { style: pdfStyles.empty }, "No contacts match the current selection.")
         : rows.map((r, i) => React.createElement(View, { key: i, style: pdfStyles.row, wrap: false },
-            [React.createElement(PdfPhotoCell, { key: "ph", dataUri: photos[i], name: r.person_name }),
-             ...PDF_COLUMNS.map((col, j) => React.createElement(Text, { key: j, style: [pdfStyles.cell, { flex: col.flex }] }, String(col.get(r) ?? "")))]))
+            [includePhoto && React.createElement(PdfPhotoCell, { key: "ph", dataUri: photos[i], name: r.person_name }),
+             ...columns.map((col, j) => React.createElement(Text, { key: j, style: [pdfStyles.cell, { flex: col.flex }] }, String(col.get(r) ?? "")))]))
     )
   );
 }
 
-// Build the contacts export as a landscape PDF table (same rows the .xlsx/.csv
-// use), each row showing that contact's OWN photo (embedded from durable
-// storage; initials placeholder when none). `subtitle` states how many records
-// and whether it's a selected or filtered export.
-export async function buildContactsPdfBuffer(rows, subtitle = "") {
+// Build the contacts export as a landscape PDF table. `cols` (optional) selects
+// which columns appear: null → the default focused column set + photo (unchanged);
+// an explicit list → exactly those columns, and the photo only when its key is
+// included. Each row shows that contact's OWN photo (embedded from durable
+// storage; initials placeholder when none) when the photo column is on.
+export async function buildContactsPdfBuffer(rows, subtitle = "", cols) {
   const sub = subtitle || `${rows.length} contact${rows.length === 1 ? "" : "s"} · ${new Date().toLocaleString("en-GB")}`;
-  // Resolve each contact's own photo (contact photo, else linked worker photo),
-  // index-aligned so row N always gets row N's picture.
-  const photos = await photosToDataUris(rows.map((r) => r.photo_url || r.worker_photo_url || null));
+  const includePhoto = cols == null || cols.includes(CONTACT_PDF_PHOTO_KEY);
+  // Default keeps the hand-tuned focused layout; a custom selection derives a
+  // sensible flex from each column's Excel width.
+  const columns = cols == null
+    ? PDF_COLUMNS
+    : COLUMNS.filter((c) => cols.includes(c.key)).map((c) => ({ header: c.header, flex: Math.max(0.8, c.width / 12), get: c.get }));
+  // Only resolve photos when the photo column is actually shown.
+  const photos = includePhoto
+    ? await photosToDataUris(rows.map((r) => r.photo_url || r.worker_photo_url || null))
+    : [];
   const embedded = photos.filter(Boolean).length;
-  console.log(`[Contacts PDF] ${rows.length} rows, ${embedded} photos embedded, ${rows.length - embedded} placeholder`);
-  return renderToBuffer(React.createElement(ContactsPdfDoc, { rows, photos, subtitle: sub }));
+  console.log(`[Contacts PDF] ${rows.length} rows, ${columns.length} cols, photo=${includePhoto}, ${embedded} photos embedded`);
+  return renderToBuffer(React.createElement(ContactsPdfDoc, { rows, photos, subtitle: sub, columns, includePhoto }));
 }
 
 // Descriptive, timestamped filename (application timezone). `ext` picks the

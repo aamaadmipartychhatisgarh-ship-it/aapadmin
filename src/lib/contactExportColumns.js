@@ -1,0 +1,31 @@
+// Client-safe list of selectable Contact export columns (key + display label),
+// in canonical order — used by the Contacts column picker. The KEYS must match
+// the COLUMNS keys in contactExport.js (the server-side renderer); this file
+// carries NO exceljs / react-pdf imports so it is safe to bundle into the client.
+export const CONTACT_EXPORT_COLUMNS = [
+  { key: "id", label: "Contact ID" },
+  { key: "name", label: "Name" },
+  { key: "phone", label: "Mobile Number" },
+  { key: "alt_phone", label: "Alternate Mobile" },
+  { key: "designation", label: "Designation" },
+  { key: "zone", label: "Zone" },
+  { key: "lok_sabha", label: "Lok Sabha" },
+  { key: "assembly", label: "Assembly" },
+  { key: "district", label: "District" },
+  { key: "address", label: "Address" },
+  { key: "village", label: "Village/City" },
+  { key: "pincode", label: "Pincode" },
+  { key: "status", label: "Status" },
+  { key: "assigned_caller", label: "Assigned Caller" },
+  { key: "assigned_supervisor", label: "Assigned Supervisor" },
+  { key: "created_by", label: "Created By" },
+  { key: "created_date", label: "Created Date" },
+  { key: "last_updated", label: "Last Updated" },
+  { key: "last_call_date", label: "Last Call Date" },
+  { key: "total_calls", label: "Total Calls" },
+  { key: "followup_date", label: "Follow-up Date" },
+  { key: "complaint_status", label: "Complaint Status" },
+  { key: "remarks", label: "Remarks/Notes" },
+  { key: "vip", label: "VIP" },
+  { key: "photo", label: "Photo (PDF only)" },
+];
