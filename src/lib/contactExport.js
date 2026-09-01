@@ -3,6 +3,7 @@ import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@
 import React from "react";
 import { query } from "@/lib/db";
 import { photosToDataUris } from "@/lib/photoDataUri";
+import { DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 
 // Shared Excel export for the Contacts module (admin + supervisor). Both list
 // routes build the SAME WHERE clause + params they use for the on-screen table;
@@ -13,12 +14,20 @@ import { photosToDataUris } from "@/lib/photoDataUri";
 // One row per contact, with every displayable field resolved in a single query
 // (no N+1): geography is the contact's own column when set, else derived from
 // the district hierarchy; call stats come from a grouped subquery.
-export async function fetchContactExportRows(where, params) {
+export async function fetchContactExportRows(where, params, orderBy) {
+  // Designation resolution MUST match the on-screen list exactly: prefer the
+  // contact's OWN authoritative designation set (contact_designations, kept
+  // current by the edit flow), then the worker's legacy free-text position, then
+  // the single legacy designation. The export previously started from w.position,
+  // which is NOT rewritten on a designation change — so a contact changed to
+  // "Member" still exported the stale "Vidhansabha Prabhari". Using the same
+  // COALESCE as the list guarantees the export shows the latest saved designation.
+  const order = orderBy && String(orderBy).trim() ? orderBy : "c.id DESC";
   return query(
     `SELECT c.*,
             w.photo_url AS worker_photo_url,
             u.username AS assigned_caller_name,
-            COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+            COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
             COALESCE(cz.name, lz.name) AS zone_name,
             COALESCE(cls.name, lls.name) AS lok_sabha_name,
             la.name AS assembly_name,
@@ -39,7 +48,7 @@ export async function fetchContactExportRows(where, params) {
            FROM calls GROUP BY contact_id
        ) cl ON cl.contact_id = c.id
        ${where}
-       ORDER BY c.id DESC`,
+       ORDER BY ${order}`,
     params
   );
 }

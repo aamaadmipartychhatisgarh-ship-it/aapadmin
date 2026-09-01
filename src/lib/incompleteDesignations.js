@@ -59,6 +59,12 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   const designationId = Number.isInteger(opts.designationId) && opts.designationId > 0 ? opts.designationId : null;
   const locationId = Number.isInteger(opts.locationId) && opts.locationId > 0 ? opts.locationId : null;
   const status = ["filled", "blank"].includes(opts.status) ? opts.status : "all";
+  // "persons" view = the flattened Total-Assigned-Person list (one row per
+  // assignment record), server-side paginated. Anything else = the location ×
+  // designation matrix (the original behavior).
+  const view = opts.view === "persons" ? "persons" : "matrix";
+  const page = Number.isInteger(opts.page) && opts.page > 0 ? opts.page : 1;
+  const pageSize = Number.isInteger(opts.pageSize) && opts.pageSize > 0 ? Math.min(opts.pageSize, 500) : 50;
 
   await ensureContactDesignationsSchema();
   await ensureDesignationLevelColumn(query);
@@ -152,13 +158,69 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     }
   }
 
+  // Flatten every assignment into ONE record per (person × filled slot) — the
+  // authoritative "Total Assigned Person" dataset. A person assigned to several
+  // assemblies / designations yields several records (each a valid assignment,
+  // never removed), while `assigned_unique` counts distinct people. Built over
+  // allRows, so it is independent of the filled/blank filter and reflects the
+  // COMPLETE scoped database dataset — the source for both the count and the list.
+  const assignedPersons = [];
+  const uniquePersons = new Set();
+  for (const row of allRows) {
+    for (const p of row.people) {
+      uniquePersons.add(p.id);
+      assignedPersons.push({
+        contact_id: p.id,
+        person_name: p.person_name,
+        photo_url: p.photo_url,
+        designation_id: row.designation_id,
+        designation_name: row.designation_name,
+        location_id: row.location_id,
+        location_name: row.location_name,
+      });
+    }
+  }
+  // Stable order: person A→Z, then location, then designation.
+  assignedPersons.sort((a, b) =>
+    String(a.person_name || "").localeCompare(String(b.person_name || "")) ||
+    String(a.location_name || "").localeCompare(String(b.location_name || "")) ||
+    String(a.designation_name || "").localeCompare(String(b.designation_name || ""))
+  );
+
   // Counts over the current level + designation + location scope (independent of
-  // the filled/blank filter, so the breakdown is always visible).
+  // the filled/blank filter, so the breakdown is always visible). assigned_persons
+  // = total assignment records (the card's headline count); assigned_unique =
+  // distinct people behind them.
   const counts = {
     total: allRows.length,
     filled: allRows.filter((r) => r.filled).length,
     blank: allRows.filter((r) => !r.filled).length,
+    assigned_persons: assignedPersons.length,
+    assigned_unique: uniquePersons.size,
   };
+
+  // PERSONS VIEW — the Total-Assigned-Person drill-down, server-side paginated.
+  // `persons_total` is the count over the complete dataset (matches the card), and
+  // only the requested page slice is returned.
+  if (view === "persons") {
+    const total = assignedPersons.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(page, totalPages);
+    const start = (safePage - 1) * pageSize;
+    return {
+      level,
+      level_label: LEVEL_LABEL[level],
+      view: "persons",
+      status,
+      level_designations: levelDesignations,
+      all_locations: allLocations,
+      persons: assignedPersons.slice(start, start + pageSize),
+      persons_total: total,
+      pagination: { page: safePage, pageSize, total, totalPages },
+      counts,
+      capped: peopleRows.length >= MAX_PEOPLE,
+    };
+  }
 
   const rows = status === "filled" ? allRows.filter((r) => r.filled)
     : status === "blank" ? allRows.filter((r) => !r.filled)
@@ -167,6 +229,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   return {
     level,
     level_label: LEVEL_LABEL[level],
+    view: "matrix",
     status,
     level_designations: levelDesignations,
     all_locations: allLocations,

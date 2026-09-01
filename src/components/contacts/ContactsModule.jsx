@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network, Printer } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
 import ActionBar from "@/components/ActionBar";
@@ -144,6 +144,11 @@ export default function ContactsModule({ session, mode }) {
   // unchanged behavior); non-empty means "act on exactly these contacts".
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [selectingAll, setSelectingAll] = useState(false);
+  // Server-side sort. sortKey "" = the default order; otherwise a whitelisted
+  // column sorted asc/desc IN THE DATABASE over the complete filtered set (never a
+  // client-side sort of one page), and the SAME order the exports use.
+  const [sortKey, setSortKey] = useState("");
+  const [sortDir, setSortDir] = useState("asc");
   const fileRef = useRef(null);
   const loadSeq = useRef(0);
   const countSeq = useRef(0);
@@ -168,11 +173,14 @@ export default function ContactsModule({ session, mode }) {
   }, []);
 
   // Reload the page of results whenever a filter or the page number changes.
-  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page, pageSize, flagFilter]);
+  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page, pageSize, flagFilter, sortKey, sortDir]);
   // Any filter change (not a page change) jumps back to page 1 and drops any
   // bulk selection — a selection made under one filter view shouldn't silently
   // carry over and get acted on under a different one.
   useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search, flagFilter]);
+  // A SORT change re-orders the whole set, so jump to page 1 — but KEEP the
+  // selection (it's tracked by id and stays valid regardless of order/page).
+  useEffect(() => { setPage(1); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sortKey, sortDir]);
 
   useEffect(() => {
     fetch(cfg.callersUrl).then((r) => r.json()).then((d) => {
@@ -456,10 +464,33 @@ export default function ContactsModule({ session, mode }) {
     // Count-card filter — the SAME flag the card's count is computed from, so the
     // filtered list matches the card total exactly (record-for-record).
     if (flagFilter) params.set(flagFilter, "1");
+    // Active server-side sort (also carried into exports so file order == screen).
+    if (sortKey) { params.set("sort", sortKey); params.set("dir", sortDir); }
     params.set("page", String(pageNum));
     params.set("page_size", String(pageSize));
     return params;
   }
+
+  // Cycle a column's sort on header click: none → asc → desc → none (default).
+  function toggleSort(key) {
+    if (sortKey !== key) { setSortKey(key); setSortDir("asc"); }
+    else if (sortDir === "asc") setSortDir("desc");
+    else { setSortKey(""); setSortDir("asc"); }
+  }
+  // A clickable, sortable column header. Shows ↕ when idle, ▲/▼ for the active
+  // asc/desc. A plain JSX helper (not a component) so it never remounts.
+  const sortTh = (label, key, extra = "") => {
+    const active = sortKey === key;
+    return (
+      <th className={`px-4 py-3 font-semibold text-gray-600 ${extra}`}>
+        <button type="button" onClick={() => toggleSort(key)} title={`Sort by ${label}`}
+          className={`inline-flex items-center gap-1 ${active ? "text-[#164FA3]" : "hover:text-[#164FA3]"}`}>
+          {label}
+          <span className="text-[10px] text-gray-400">{active ? (sortDir === "asc" ? "▲" : "▼") : "↕"}</span>
+        </button>
+      </th>
+    );
+  };
 
   // Export contacts to Excel / PDF / CSV. Priority (same on server): (1) if any
   // contacts are checkbox-SELECTED, export exactly those; else (2) the CURRENT
@@ -499,6 +530,37 @@ export default function ContactsModule({ session, mode }) {
       setMessage(`${format === "pdf" ? "PDF" : format === "xlsx" ? "Excel" : "CSV"} export ready (${scopeNote}) — downloading “${filename}”.`);
     } catch (e) {
       setError(e.name === "AbortError" ? "Export timed out — narrow the selection and try again." : "Export failed — network error.");
+    } finally {
+      clearTimeout(timer);
+      setExporting(false); setExportingFormat("");
+    }
+  }
+
+  // Print — reuses the SAME PDF the export builds (so it honors the exact
+  // selected/filtered/sorted dataset), opening it in a new tab and triggering the
+  // browser print dialog. Selection priority is identical to exportData.
+  async function printData() {
+    setExporting(true); setExportingFormat("print"); setError(""); setMessage("");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
+    try {
+      const params = buildParams(1);
+      params.delete("page"); params.delete("page_size");
+      params.set("format", "pdf");
+      if (selectedIds.size > 0) params.set("ids", [...selectedIds].join(","));
+      const r = await fetch(`${cfg.listUrl}?${params}`, { cache: "no-store", signal: controller.signal });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); setError(d.message || "Print failed. Please try again."); return; }
+      const blob = await r.blob();
+      if (!blob || blob.size === 0) { setError("Nothing to print for the current selection."); return; }
+      const url = URL.createObjectURL(blob);
+      const w = window.open(url, "_blank");
+      if (!w) { setError("Allow pop-ups for this site to print."); URL.revokeObjectURL(url); return; }
+      // Trigger the print dialog once the PDF viewer has loaded.
+      try { w.addEventListener("load", () => { try { w.focus(); w.print(); } catch { /* viewer blocks scripted print — user can Ctrl+P */ } }); } catch { /* ignore */ }
+      const scopeNote = selectedIds.size > 0 ? `${selectedIds.size} selected` : "current filters";
+      setMessage(`Print ready (${scopeNote}) — opened in a new tab.`);
+    } catch (e) {
+      setError(e.name === "AbortError" ? "Print timed out — narrow the selection and try again." : "Print failed — network error.");
     } finally {
       clearTimeout(timer);
       setExporting(false); setExportingFormat("");
@@ -672,6 +734,7 @@ export default function ContactsModule({ session, mode }) {
             { key: "export-xlsx", label: (exporting && exportingFormat === "xlsx") ? "Exporting…" : `Export Excel${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: FileSpreadsheet, loading: exporting && exportingFormat === "xlsx", disabled: exporting, menuOnly: true, onClick: () => exportData("xlsx") },
             { key: "export-pdf", label: (exporting && exportingFormat === "pdf") ? "Exporting…" : `Export PDF${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: FileText, loading: exporting && exportingFormat === "pdf", disabled: exporting, menuOnly: true, onClick: () => exportData("pdf") },
             { key: "export-csv", label: (exporting && exportingFormat === "csv") ? "Exporting…" : "Export CSV", icon: Download, loading: exporting && exportingFormat === "csv", disabled: exporting, menuOnly: true, onClick: () => exportData("csv") },
+            { key: "print", label: (exporting && exportingFormat === "print") ? "Preparing…" : `Print${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: Printer, loading: exporting && exportingFormat === "print", disabled: exporting, menuOnly: true, onClick: () => printData() },
             cfg.canImport && { key: "upload", label: uploading ? "Uploading…" : "Upload", icon: Upload, loading: uploading, menuOnly: true, onClick: () => fileRef.current?.click() },
             cfg.canAdd && { key: "add", label: "Add Contact", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
           ]} />
@@ -949,15 +1012,15 @@ export default function ContactsModule({ session, mode }) {
                     · Zone · Lok Sabha · District · Assembly · Block · Address ·
                     Status · Assigned To · Convert · Action. Header and every row
                     cell below follow this exact sequence. */}
-                <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Phone Number</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Zone</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">District</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
+                {sortTh("Name", "name")}
+                {sortTh("Phone Number", "phone")}
+                {sortTh("Designation", "designation")}
+                {sortTh("Zone", "zone")}
+                {sortTh("Lok Sabha", "lok_sabha")}
+                {sortTh("District", "district")}
+                {sortTh("Assembly", "assembly")}
                 <th className="px-4 py-3 font-semibold text-gray-600">Block</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Address</th>
+                {sortTh("Address", "address")}
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
                 {isSuperAdmin(session) && <th className="px-4 py-3 font-semibold text-gray-600">Convert</th>}

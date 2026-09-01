@@ -11,6 +11,7 @@ import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, 
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { buildContactOrderBy } from "@/lib/contactSort";
 
 // The contacts list (and its photos) must never be served from a cache: it is
 // per-user role/territory scoped and changes as contacts/photos are added, so a
@@ -64,6 +65,10 @@ export async function GET(req) {
     const page = Math.max(1, parseInt(searchParams.get("page"), 10) || 1);
     const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get("page_size"), 10) || 50));
     const offset = (page - 1) * pageSize;
+    // Server-side sort (over the COMPLETE filtered dataset, not just the page).
+    // Null when no/invalid sort is asked for → the default order is kept. The
+    // SAME order string is reused by the export so screen and file agree.
+    const sortOrderBy = buildContactOrderBy(searchParams.get("sort"), searchParams.get("dir"));
 
     // Build the shared WHERE clause once (used for both the count and the list).
     let where = " WHERE 1=1";
@@ -147,7 +152,7 @@ export async function GET(req) {
         exParams = [...ids, ...scope.params];
         selected = true;
       }
-      const rows = await fetchContactExportRows(exWhere, exParams);
+      const rows = await fetchContactExportRows(exWhere, exParams, sortOrderBy);
       if (format === "csv") {
         return new NextResponse(buildContactsCsv(rows), {
           status: 200,
@@ -225,9 +230,11 @@ export async function GET(req) {
          LEFT JOIN locations lw ON lw.id = c.ward_id
          LEFT JOIN designations dsg ON dsg.id = c.designation_id
          ${where}
-        ORDER BY ${duplicates === "1"
-          ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, c.id ASC"
-          : "c.is_completed ASC, c.id DESC"}
+        ORDER BY ${sortOrderBy
+          ? sortOrderBy
+          : duplicates === "1"
+            ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, c.id ASC"
+            : "c.is_completed ASC, c.id DESC"}
         LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );

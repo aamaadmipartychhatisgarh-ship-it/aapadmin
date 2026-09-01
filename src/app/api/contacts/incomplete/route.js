@@ -30,8 +30,12 @@ export async function GET(req) {
       designationId: parseInt(searchParams.get("designation_id"), 10),
       locationId: parseInt(searchParams.get("location_id"), 10),
       status: searchParams.get("status"),
+      // Total-Assigned-Person drill-down (flattened, server-side paginated).
+      view: searchParams.get("view"),
+      page: parseInt(searchParams.get("page"), 10),
+      pageSize: parseInt(searchParams.get("page_size"), 10),
     });
-    return NextResponse.json(data);
+    return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("contacts incomplete (level assignment) error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

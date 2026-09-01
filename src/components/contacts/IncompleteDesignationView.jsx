@@ -23,12 +23,18 @@ const LEVELS = [
 
 const inp = "h-10 px-3 rounded-lg border border-gray-200 bg-white text-sm text-gray-900 outline-none focus:border-[#164FA3] focus:ring-1 focus:ring-[#164FA3]";
 
+const PERSONS_PAGE_SIZE = 50;
+
 export default function IncompleteDesignationView() {
   const [level, setLevel] = useState("state");
   const [designationId, setDesignationId] = useState("");
   const [locationId, setLocationId] = useState("");
   const [status, setStatus] = useState("all"); // all | filled | blank
-  const [data, setData] = useState({ rows: [], level_designations: [], all_locations: [], counts: { total: 0, filled: 0, blank: 0 } });
+  // "matrix" = the location × designation table; "persons" = the flattened Total
+  // Assigned Person list (opened by clicking that card), server-side paginated.
+  const [view, setView] = useState("matrix");
+  const [ppage, setPpage] = useState(1);
+  const [data, setData] = useState({ rows: [], level_designations: [], all_locations: [], counts: { total: 0, filled: 0, blank: 0, assigned_persons: 0, assigned_unique: 0 } });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -42,25 +48,42 @@ export default function IncompleteDesignationView() {
     return p.toString();
   }, [level, designationId, locationId, status]);
 
+  // The list query adds the persons view + pagination on top of the shared filters.
+  const listQs = useCallback(() => {
+    const p = new URLSearchParams(qs());
+    if (view === "persons") {
+      p.set("view", "persons");
+      p.set("page", String(ppage));
+      p.set("page_size", String(PERSONS_PAGE_SIZE));
+    }
+    return p.toString();
+  }, [qs, view, ppage]);
+
   const load = useCallback(() => {
     setLoading(true);
-    fetch(`/api/contacts/incomplete?${qs()}`, { cache: "no-store" })
+    fetch(`/api/contacts/incomplete?${listQs()}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load."))))
       .then((d) => { setData(d); setError(""); })
       .catch((e) => setError(e.message || "Failed to load."))
       .finally(() => setLoading(false));
-  }, [qs]);
+  }, [listQs]);
 
   useEffect(() => { load(); }, [load]);
   // Changing the level clears the level-specific designation & location filters.
   useEffect(() => { setDesignationId(""); setLocationId(""); }, [level]);
+  // Any filter change resets the persons page so the count and the list stay in
+  // step (page 1 of the freshly-filtered set).
+  useEffect(() => { setPpage(1); }, [level, designationId, locationId, view]);
 
   const rows = data.rows || [];
+  const persons = data.persons || [];
+  const personsPagination = data.pagination || { page: 1, pageSize: PERSONS_PAGE_SIZE, total: 0, totalPages: 1 };
   const levelDesignations = data.level_designations || [];
   const allLocations = data.all_locations || [];
-  const counts = data.counts || { total: 0, filled: 0, blank: 0 };
+  const counts = data.counts || { total: 0, filled: 0, blank: 0, assigned_persons: 0, assigned_unique: 0 };
   const levelLabel = LEVELS.find((l) => l.key === level)?.label || level;
   const isState = level === "state";
+  const personsView = view === "persons";
 
   return (
     <div className="space-y-5">
@@ -81,11 +104,20 @@ export default function IncompleteDesignationView() {
         </a>
       </div>
 
-      {/* Counts */}
-      <div className="grid grid-cols-3 gap-3">
-        <CountCard label="Total Designations" value={counts.total} tone="blue" />
-        <CountCard label="Filled" value={counts.filled} tone="green" />
-        <CountCard label="Blank" value={counts.blank} tone="amber" />
+      {/* Counts. "Total Assigned Person" is clickable — it opens the flattened,
+          paginated list of every assigned person behind the count. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <CountCard label="Total Designations" value={counts.total} tone="blue" active={!personsView} onClick={() => setView("matrix")} />
+        <CountCard label="Filled" value={counts.filled} tone="green" active={!personsView && status === "filled"} onClick={() => { setView("matrix"); setStatus("filled"); }} />
+        <CountCard label="Blank" value={counts.blank} tone="amber" active={!personsView && status === "blank"} onClick={() => { setView("matrix"); setStatus("blank"); }} />
+        <CountCard
+          label="Total Assigned Person"
+          value={counts.assigned_persons}
+          hint={counts.assigned_unique != null ? `${Number(counts.assigned_unique).toLocaleString()} unique` : null}
+          tone="violet"
+          active={personsView}
+          onClick={() => setView("persons")}
+        />
       </div>
 
       {/* Controls: Level + Designation + Location + Filled/Blank */}
@@ -112,27 +144,89 @@ export default function IncompleteDesignationView() {
             </select>
           </div>
         )}
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Status</label>
-          <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
-            {[["all", "All"], ["filled", "Filled"], ["blank", "Blank"]].map(([k, lbl]) => (
-              <button key={k} onClick={() => setStatus(k)}
-                className={`h-10 px-3.5 text-sm font-semibold transition-colors ${status === k ? "bg-[#164FA3] text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
-                {lbl}
-              </button>
-            ))}
+        {personsView ? (
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">View</label>
+            <button onClick={() => setView("matrix")}
+              className="h-10 px-3.5 text-sm font-semibold rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
+              ← Back to designation matrix
+            </button>
           </div>
-        </div>
+        ) : (
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Status</label>
+            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+              {[["all", "All"], ["filled", "Filled"], ["blank", "Blank"]].map(([k, lbl]) => (
+                <button key={k} onClick={() => setStatus(k)}
+                  className={`h-10 px-3.5 text-sm font-semibold transition-colors ${status === k ? "bg-[#164FA3] text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="ml-auto text-sm text-gray-500 self-center">
           {loading ? <span className="inline-flex items-center gap-1.5"><Loader2 size={14} className="animate-spin" /> Loading…</span>
+            : personsView ? <span><strong className="text-gray-900">{Number(personsPagination.total).toLocaleString()}</strong> assigned persons</span>
             : <span><strong className="text-gray-900">{rows.length.toLocaleString()}</strong> {status === "all" ? "records" : status}</span>}
         </div>
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-2.5 text-sm">{error}</div>}
 
-      {/* Table: Location → Designation → Assigned Person → Status */}
-      {levelDesignations.length === 0 && !loading ? (
+      {/* PERSONS VIEW — the Total Assigned Person drill-down, server-side
+          paginated. The count on the card equals personsPagination.total. */}
+      {personsView ? (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-gray-500">
+                <tr>
+                  <th className="px-4 py-2.5 font-semibold whitespace-nowrap">Assigned Person</th>
+                  <th className="px-4 py-2.5 font-semibold whitespace-nowrap">Designation</th>
+                  <th className="px-4 py-2.5 font-semibold whitespace-nowrap">{isState ? "Level" : levelLabel}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {loading && persons.length === 0 ? (
+                  <tr><td colSpan={3} className="px-4 py-10 text-center text-gray-400"><Loader2 className="animate-spin inline text-[#164FA3]" /></td></tr>
+                ) : persons.length === 0 ? (
+                  <tr><td colSpan={3} className="px-4 py-10 text-center text-gray-400">No assigned persons match the current filters.</td></tr>
+                ) : persons.map((p, i) => (
+                  <tr key={`${p.contact_id}:${p.designation_id}:${p.location_id}:${i}`} className="hover:bg-gray-50/60">
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex items-center gap-2">
+                        <Avatar name={p.person_name} src={p.photo_url} size={28} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[10px]" />
+                        <span className="text-gray-900 font-medium">{p.person_name}</span>
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-gray-700">{p.designation_name}</td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex items-center gap-1.5 text-gray-900"><MapPin size={14} className="text-[#164FA3]" />{p.location_name}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {/* Pagination — controls the page only; the count above is the full set. */}
+          {personsPagination.total > 0 && (
+            <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-3 border-t border-gray-100">
+              <div className="text-xs text-gray-500">
+                Showing {(personsPagination.page - 1) * personsPagination.pageSize + 1}–{Math.min(personsPagination.page * personsPagination.pageSize, personsPagination.total)} of {personsPagination.total.toLocaleString()} assigned persons
+              </div>
+              <div className="flex items-center gap-1">
+                <button disabled={personsPagination.page <= 1} onClick={() => setPpage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 disabled:opacity-40 hover:bg-gray-50">Prev</button>
+                <span className="text-xs text-gray-500 px-2">Page {personsPagination.page} / {personsPagination.totalPages}</span>
+                <button disabled={personsPagination.page >= personsPagination.totalPages} onClick={() => setPpage((p) => Math.min(personsPagination.totalPages, p + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 disabled:opacity-40 hover:bg-gray-50">Next</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : /* Matrix table: Location → Designation → Assigned Person → Status */
+      levelDesignations.length === 0 && !loading ? (
         <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center text-gray-400">
           No {levelLabel}-level designations are configured. Map a designation to the {levelLabel} level in Master Data → Designation.
         </div>
@@ -189,16 +283,24 @@ export default function IncompleteDesignationView() {
   );
 }
 
-function CountCard({ label, value, tone }) {
+function CountCard({ label, value, tone, hint, onClick, active }) {
   const tones = {
     blue: "bg-[#164FA3]/5 border-[#164FA3]/15 text-[#164FA3]",
     green: "bg-emerald-50 border-emerald-100 text-emerald-700",
     amber: "bg-amber-50 border-amber-100 text-amber-700",
+    violet: "bg-violet-50 border-violet-100 text-violet-700",
   };
+  const clickable = typeof onClick === "function";
   return (
-    <div className={`rounded-2xl border p-4 ${tones[tone]}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!clickable}
+      className={`text-left rounded-2xl border p-4 transition-shadow ${tones[tone]} ${clickable ? "cursor-pointer hover:shadow-sm" : "cursor-default"} ${active ? "ring-2 ring-offset-1 ring-current" : ""}`}
+    >
       <div className="text-[11px] font-semibold uppercase tracking-wide opacity-70">{label}</div>
       <div className="text-2xl font-bold mt-0.5">{Number(value || 0).toLocaleString()}</div>
-    </div>
+      {hint ? <div className="text-[11px] font-medium opacity-60 mt-0.5">{hint}</div> : null}
+    </button>
   );
 }
