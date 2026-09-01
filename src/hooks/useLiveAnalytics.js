@@ -2,44 +2,33 @@
 
 import { useEffect, useRef } from "react";
 
-const SAFETY_POLL_MS = 60000;
+const POLL_MS = 45000;
 
 // Keeps `onRefresh` firing whenever the Analytics dataset might be stale:
-//   - instantly (debounced) on any live event pushed over SSE — several
-//     mutations can land within the same second (e.g. a bulk worker import),
-//     so bursts collapse into one refetch
-//   - every 60s regardless, as a safety net — covers Hostinger's CDN/proxy
-//     layer silently buffering or dropping the long-lived SSE connection,
-//     which is unconfirmed on this host (see api/analytics/stream/route.js)
-//   - immediately on tab focus/visibility, matching this app's existing
-//     refetch pattern (see dashboard/map/page.js)
+//   - every 45s on a lightweight poll, and
+//   - immediately on tab focus/visibility (so returning to the tab is instant).
+//
+// It deliberately uses NO long-lived SSE connection. On this app's shared Node
+// hosting a persistent EventSource holds a worker/connection slot for the life
+// of every open Analytics tab, and the browser's EventSource auto-reconnects
+// (~3s) whenever the proxy drops the stream — so those connections accumulate
+// and starve ordinary requests (even GET / then returns 504). Polling can never
+// hold a worker open, so it can't exhaust the process. The old
+// /api/analytics/stream endpoint now returns 204 (stop-reconnecting) for any
+// stale tab still pointing at it.
 // Returns nothing — it's a side-effect-only subscription.
 export function useLiveAnalytics(onRefresh) {
   const cbRef = useRef(onRefresh);
   cbRef.current = onRefresh;
 
   useEffect(() => {
-    let debounceTimer;
-    const debouncedRefresh = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => cbRef.current(), 400);
-    };
-
-    const es = new EventSource("/api/analytics/stream");
-    es.onmessage = debouncedRefresh;
-    // EventSource retries transient errors on its own (built-in ~3s backoff);
-    // the safety-net poll below covers a connection that never recovers.
-    es.onerror = () => {};
-
-    const poll = setInterval(() => cbRef.current(), SAFETY_POLL_MS);
+    const poll = setInterval(() => cbRef.current(), POLL_MS);
 
     const onFocus = () => { if (document.visibilityState === "visible") cbRef.current(); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
 
     return () => {
-      clearTimeout(debounceTimer);
-      es.close();
       clearInterval(poll);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);

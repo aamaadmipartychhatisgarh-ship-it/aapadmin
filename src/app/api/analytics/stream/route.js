@@ -1,74 +1,24 @@
-import { getServerSession } from "next-auth/next";
-import { authOptions, isSupervisor } from "@/lib/auth";
-import { subscribeLiveEvents } from "@/lib/liveEvents";
-
-// GET /api/analytics/stream — Server-Sent Events. Pushes a small "something
-// changed" message (never the actual chart data — the client just refetches
-// /api/analytics on receipt, same query it already knows how to run) whenever
-// a call is logged, a task completes, a worker is added, or a contact gets
-// assigned. See src/lib/liveEvents.js for the in-process broadcaster and
-// src/components/AnalyticsPanel.jsx for the client side.
+// GET /api/analytics/stream — RETIRED.
 //
-// This is a best-effort accelerant, not the only way data gets fresh: the
-// client also runs a 60s safety-net poll (see useLiveAnalytics) in case
-// Hostinger's CDN/proxy layer buffers or drops this long-lived connection —
-// unconfirmed on this host, so the app must work correctly even if every SSE
-// message here is silently lost.
+// This used to be a Server-Sent Events (SSE) stream that stayed open for the
+// life of every Analytics tab. On this app's shared Node hosting each such
+// long-lived connection holds a worker/connection slot, and the browser's
+// EventSource auto-reconnects (~3s) whenever the proxy drops the stream — so the
+// open connections accumulate and starve ordinary requests, until even a plain
+// GET / (which only redirects) can't get a worker and nginx returns 504. That is
+// the recurring production 504.
+//
+// Live analytics no longer needs a persistent connection: the client refreshes
+// on a lightweight 45s poll plus tab-focus (see hooks/useLiveAnalytics.js), which
+// can never hold a worker open. This endpoint now returns 204 No Content, which
+// per the EventSource spec tells any stale tab still connected here to CLOSE and
+// NOT reconnect — so old connections drain instead of looping. It returns
+// instantly and touches no session or database, so it can never hang.
 export const dynamic = "force-dynamic";
 
-const HEARTBEAT_MS = 20000;
-
-export async function GET(req) {
-  const session = await getServerSession(authOptions);
-  if (!session || !isSupervisor(session)) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
-  let unsubscribe = () => {};
-  let heartbeat;
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream({
-    start(controller) {
-      const send = (obj) => {
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-        } catch {
-          // Controller already closed (client disconnected between events) — ignore.
-        }
-      };
-
-      unsubscribe = subscribeLiveEvents((evt) => send(evt));
-      // Keeps the connection alive through any intermediary proxy/CDN idle
-      // timeout, and doubles as a liveness signal the client can watch for.
-      heartbeat = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(": ping\n\n"));
-        } catch {
-          clearInterval(heartbeat);
-        }
-      }, HEARTBEAT_MS);
-
-      req.signal.addEventListener("abort", () => {
-        clearInterval(heartbeat);
-        unsubscribe();
-        try { controller.close(); } catch {}
-      });
-    },
-    cancel() {
-      clearInterval(heartbeat);
-      unsubscribe();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      // Ask any nginx-style reverse proxy in front of the app not to buffer
-      // this response — harmless no-op if Hostinger's layer ignores it.
-      "X-Accel-Buffering": "no",
-    },
+export async function GET() {
+  return new Response(null, {
+    status: 204,
+    headers: { "Cache-Control": "no-store" },
   });
 }

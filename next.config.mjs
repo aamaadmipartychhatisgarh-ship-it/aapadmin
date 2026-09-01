@@ -23,6 +23,8 @@ const nextConfig = {
     return {
       afterFiles: [
         { source: "/uploads/:file", destination: "/api/media/:file" },
+        // Lightweight liveness probe reachable at the conventional /health path.
+        { source: "/health", destination: "/api/health" },
       ],
     };
   },
