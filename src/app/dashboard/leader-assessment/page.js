@@ -5,6 +5,7 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar, { initialsOf } from "@/components/Avatar";
 import PartySelect, { usePartyMaster, PartyLogo, PartyBadge, partyLogoFor } from "@/components/PartySelect";
+import FilterMultiSelect from "@/components/FilterMultiSelect";
 import {
   LayoutDashboard, Building2, UserSquare2, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
@@ -35,6 +36,8 @@ const SCORE_MAX = 10;
 const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard, scoped: false },
   { key: "mla", label: "MLA Profile", icon: UserSquare2, scoped: false },
+  // Vote-only comparison of the current MLA vs the AAP candidate, per assembly.
+  { key: "comparison", label: "Comparison", icon: BarChart3, scoped: false },
   { key: "candidates", label: "AAP Candidates", icon: Users, scoped: false },
   // Caste Master and Voter Master (Polling Station Master) were MOVED to
   // Administration → they are no longer tabs here. The CasteMaster / PollingMaster
@@ -103,6 +106,28 @@ async function api(url, opts) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.message || "Request failed");
   return data;
+}
+
+// Load master `locations` of one type, optionally as the children of one or more
+// selected parents — the SAME endpoint + cascade the Contacts / Reports geo
+// filters use, so the Comparison filters resolve identical options. Failures
+// resolve to [] so a filter never hard-fails the page.
+async function fetchLocations(type, parentIds) {
+  try {
+    if (!parentIds || parentIds.length === 0) {
+      const d = await fetch(`/api/locations?type=${type}`, { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+      return d.locations || [];
+    }
+    const lists = await Promise.all(
+      parentIds.map((id) =>
+        fetch(`/api/locations?parent_id=${id}`, { cache: "no-store" })
+          .then((r) => r.json()).then((d) => d.locations || []).catch(() => [])
+      )
+    );
+    const merged = new Map();
+    for (const list of lists) for (const loc of list) if (loc.type === type) merged.set(loc.id, loc);
+    return [...merged.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  } catch { return []; }
 }
 
 // Load a same-origin photo URL and return a JPEG data URI via canvas, so the
@@ -212,6 +237,7 @@ function Body() {
 
       {tab === "overview" && <Overview flash={flash} fail={fail} />}
       {tab === "mla" && <MlaManager flash={flash} fail={fail} />}
+      {tab === "comparison" && <VoteComparisonTab flash={flash} fail={fail} />}
       {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
     </div>
   );
@@ -2729,4 +2755,236 @@ function personAge(p) {
 function AgeLine({ person }) {
   const a = personAge(person);
   return <div className="text-[11px] text-gray-500 font-normal">Age: {a != null ? a : "—"}</div>;
+}
+
+// ===========================================================================
+// Comparison — Current MLA vs AAP Candidate, by VOTES only (spec §1-§18).
+// Purely a vote comparison: no assessment scores, strengths, or rankings (§17).
+// The screen, Excel export and PDF export all read the SAME server dataset
+// (/api/leader-assessment/comparison) with the SAME filters, so their values can
+// never disagree (§14). Pagination only slices the current page — totals,
+// summary and exports always use the COMPLETE filtered dataset (§13).
+// ===========================================================================
+const emptyGeo = () => ({ zone_id: [], lok_sabha_id: [], district_id: [], assembly_id: [] });
+
+// Vote value → Indian-grouped string, or "Not Available" when the DB has no value
+// (never a fake 0 — §7).
+function voteText(v) {
+  const s = nfmt(v);
+  return s == null ? "Not Available" : s;
+}
+// Vote lead → colored label. Incomplete data (either side missing) shows "—".
+function LeadBadge({ row }) {
+  if (row.mla_votes == null || row.aap_votes == null) return <span className="text-gray-400">—</span>;
+  if (row.leader === "Current MLA") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">Current MLA</span>;
+  if (row.leader === "AAP Candidate") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">AAP Candidate</span>;
+  return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Equal Votes</span>;
+}
+
+function VoteComparisonTab({ flash, fail }) {
+  const [geo, setGeo] = useState(emptyGeo());
+  const [zones, setZones] = useState([]);
+  const [lokSabhas, setLokSabhas] = useState([]);
+  const [districts, setDistricts] = useState([]);
+  const [assemblies, setAssemblies] = useState([]);
+
+  const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [exporting, setExporting] = useState("");
+  const [selected, setSelected] = useState(() => new Set()); // assembly_id set for selective export
+
+  // Build the shared filter query string used by both the list and the exports.
+  const geoParams = useCallback(() => {
+    const p = new URLSearchParams();
+    for (const k of ["zone_id", "lok_sabha_id", "district_id", "assembly_id"]) {
+      if (geo[k]?.length) p.set(k, geo[k].join(","));
+    }
+    return p;
+  }, [geo]);
+
+  // Zones bootstrap once; the lower levels cascade from the selected parents.
+  useEffect(() => { fetchLocations("zone", []).then(setZones); }, []);
+  useEffect(() => {
+    fetchLocations("lok_sabha", geo.zone_id).then((list) => {
+      setLokSabhas(list);
+      setGeo((g) => { const ok = new Set(list.map((x) => x.id)); const f = g.lok_sabha_id.filter((id) => ok.has(id)); return f.length === g.lok_sabha_id.length ? g : { ...g, lok_sabha_id: f }; });
+    });
+  }, [geo.zone_id]);
+  useEffect(() => {
+    fetchLocations("district", geo.lok_sabha_id).then((list) => {
+      setDistricts(list);
+      setGeo((g) => { const ok = new Set(list.map((x) => x.id)); const f = g.district_id.filter((id) => ok.has(id)); return f.length === g.district_id.length ? g : { ...g, district_id: f }; });
+    });
+  }, [geo.lok_sabha_id]);
+  useEffect(() => {
+    fetchLocations("assembly", geo.district_id).then((list) => {
+      setAssemblies(list);
+      setGeo((g) => { const ok = new Set(list.map((x) => x.id)); const f = g.assembly_id.filter((id) => ok.has(id)); return f.length === g.assembly_id.length ? g : { ...g, assembly_id: f }; });
+    });
+  }, [geo.district_id]);
+
+  // Any filter change resets to page 1 (so the count/list stay consistent, §9).
+  useEffect(() => { setPage(1); }, [geo]);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const p = geoParams();
+      p.set("page", String(page));
+      p.set("pageSize", "20");
+      const d = await api(`/api/leader-assessment/comparison?${p.toString()}`);
+      setRows(d.data || []);
+      setSummary(d.summary || null);
+      setPagination(d.pagination || { page: 1, pageSize: 20, total: (d.data || []).length, totalPages: 1 });
+    } catch (e) { setError(e.message); setRows([]); setSummary(null); }
+    finally { setLoading(false); }
+  }, [geoParams, page]);
+  useEffect(() => { load(); }, [load]);
+
+  async function exportAs(format) {
+    if (exporting) return;
+    setExporting(format);
+    try {
+      const p = geoParams();
+      p.set("format", format);
+      if (selected.size) p.set("ids", [...selected].join(","));
+      const r = await fetch(`/api/leader-assessment/comparison/export?${p.toString()}`, { cache: "no-store" });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "Export failed."); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `MLA_vs_AAP_Vote_Comparison.${format === "pdf" ? "pdf" : "xlsx"}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      flash?.(`${format === "pdf" ? "PDF" : "Excel"} exported${selected.size ? ` (${selected.size} selected)` : ""}.`);
+    } catch { fail?.("Export failed — network error."); }
+    finally { setExporting(""); }
+  }
+
+  const clearFilters = () => setGeo(emptyGeo());
+  const hasFilters = geo.zone_id.length || geo.lok_sabha_id.length || geo.district_id.length || geo.assembly_id.length;
+
+  // Page-level select-all toggles only the visible rows' assemblies.
+  const pageIds = rows.map((r) => r.assembly_id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const toggleAllPage = () => setSelected((s) => {
+    const n = new Set(s);
+    if (allPageSelected) pageIds.forEach((id) => n.delete(id));
+    else pageIds.forEach((id) => n.add(id));
+    return n;
+  });
+  const toggleOne = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const cards = summary ? [
+    { label: "Total Assemblies", value: summary.total_assemblies, cls: "text-gray-900" },
+    { label: "Complete Vote Data", value: summary.complete_data, cls: "text-[#164FA3]" },
+    { label: "Current MLA Ahead", value: summary.mla_more, cls: "text-[#164FA3]" },
+    { label: "AAP Candidate Ahead", value: summary.aap_more, cls: "text-emerald-600" },
+    { label: "Equal Votes", value: summary.equal_votes, cls: "text-amber-600" },
+  ] : [];
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards (§8) — computed from the same filtered dataset. */}
+      {summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {cards.map((c) => (
+            <div key={c.label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className={`text-2xl font-bold ${c.cls}`}>{Number(c.value).toLocaleString("en-IN")}</div>
+              <div className="text-xs text-gray-500 mt-0.5">{c.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Card
+        title="Current MLA vs AAP Candidate — Vote Comparison"
+        icon={BarChart3}
+        sub="Assembly-wise comparison of vote counts only. Data comes from the MLA Profile (MLA votes) and Election History (AAP candidate votes, same election year)."
+        right={
+          <div className="flex items-center gap-2">
+            <button onClick={() => exportAs("xlsx")} disabled={!!exporting || loading}
+              className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold">
+              {exporting === "xlsx" ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />} Export Excel
+            </button>
+            <button onClick={() => exportAs("pdf")} disabled={!!exporting || loading}
+              className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold">
+              {exporting === "pdf" ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Export PDF
+            </button>
+          </div>
+        }
+      >
+        {/* Filters (§9) — reuse the shared cascading multi-select. */}
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <FilterMultiSelect label="zones" items={zones.map((z) => ({ id: z.id, name: z.name }))} selected={geo.zone_id} onChange={(v) => setGeo((g) => ({ ...g, zone_id: v }))} />
+          <FilterMultiSelect label="Lok Sabhas" items={lokSabhas.map((l) => ({ id: l.id, name: l.name }))} selected={geo.lok_sabha_id} onChange={(v) => setGeo((g) => ({ ...g, lok_sabha_id: v }))} />
+          <FilterMultiSelect label="districts" items={districts.map((d) => ({ id: d.id, name: d.name }))} selected={geo.district_id} onChange={(v) => setGeo((g) => ({ ...g, district_id: v }))} />
+          <FilterMultiSelect label="assemblies" items={assemblies.map((a) => ({ id: a.id, name: a.name }))} selected={geo.assembly_id} onChange={(v) => setGeo((g) => ({ ...g, assembly_id: v }))} />
+          {hasFilters ? <button onClick={clearFilters} className="text-xs font-semibold text-gray-500 hover:text-gray-700 px-2 py-1">Clear filters</button> : null}
+          {selected.size > 0 ? <span className="text-xs font-semibold text-[#164FA3] ml-auto">{selected.size} selected for export · <button onClick={() => setSelected(new Set())} className="underline">clear</button></span> : null}
+        </div>
+
+        {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : rows.length === 0 ? (
+          <Empty msg="No assemblies match the current selection." />
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                    <th className="py-2 pr-2 w-8"><input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className="accent-[#164FA3]" title="Select page" /></th>
+                    <th className="py-2 pr-3">Assembly</th>
+                    <th className="py-2 pr-3">District</th>
+                    <th className="py-2 pr-3">Current MLA</th>
+                    <th className="py-2 pr-3 text-right">MLA Votes</th>
+                    <th className="py-2 pr-3">AAP Candidate</th>
+                    <th className="py-2 pr-3 text-right">AAP Votes</th>
+                    <th className="py-2 pr-3 text-right">Difference</th>
+                    <th className="py-2 pr-3">Vote Lead</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const naMla = r.mla_votes == null, naAap = r.aap_votes == null;
+                    return (
+                      <tr key={r.assembly_id} className="border-b border-gray-50 hover:bg-gray-50/60">
+                        <td className="py-2 pr-2"><input type="checkbox" checked={selected.has(r.assembly_id)} onChange={() => toggleOne(r.assembly_id)} className="accent-[#164FA3]" /></td>
+                        <td className="py-2 pr-3 font-semibold text-gray-900">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[10px] font-normal text-gray-400">({r.election_year})</span> : null}</td>
+                        <td className="py-2 pr-3 text-gray-600">{r.district_name || "—"}</td>
+                        <td className="py-2 pr-3 text-gray-800">{r.mla_name || <span className="text-gray-400">Not Available</span>}{r.mla_party ? <span className="block text-[10px] text-gray-400">{r.mla_party}</span> : null}</td>
+                        <td className={`py-2 pr-3 text-right font-semibold ${naMla ? "text-gray-300" : "text-gray-900"}`}>{voteText(r.mla_votes)}</td>
+                        <td className="py-2 pr-3 text-gray-800">{r.aap_candidate || <span className="text-gray-400">Not Available</span>}</td>
+                        <td className={`py-2 pr-3 text-right font-semibold ${naAap ? "text-gray-300" : "text-gray-900"}`}>{voteText(r.aap_votes)}</td>
+                        <td className={`py-2 pr-3 text-right font-bold ${r.difference == null ? "text-gray-300" : "text-gray-900"}`}>{r.difference == null ? "—" : nfmt(r.difference)}</td>
+                        <td className="py-2 pr-3"><LeadBadge row={r} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination (§13) — controls only the current page. */}
+            <div className="flex items-center justify-between flex-wrap gap-2 mt-4">
+              <div className="text-xs text-gray-500">
+                Showing {(pagination.page - 1) * pagination.pageSize + 1}–{Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total.toLocaleString("en-IN")} assemblies
+              </div>
+              <div className="flex items-center gap-1">
+                <button disabled={pagination.page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 disabled:opacity-40 hover:bg-gray-50">Prev</button>
+                <span className="text-xs text-gray-500 px-2">Page {pagination.page} / {pagination.totalPages}</span>
+                <button disabled={pagination.page >= pagination.totalPages} onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 disabled:opacity-40 hover:bg-gray-50">Next</button>
+              </div>
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
 }
