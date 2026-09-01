@@ -120,17 +120,16 @@ export default function AnalyticsPanel() {
     (taData?.topAgents || []).map((r) => ({ agent: r.agent, calls: Number(r.calls), connected: Number(r.connected) })),
   [taData]);
 
-  // Workers by District — EVERY district from the shared district-stats service
-  // (backend already includes zero-worker districts and sorts by worker count).
-  const districtStats = useMemo(() => data?.treemap || [], [data]);
-  // Dedicated bar-chart dataset: District → ACTUAL workers only (the live
-  // Contacts count `count` from districtWorkerStats — NOT required workers,
-  // attempt calls or strength %), sorted highest → lowest, all districts kept.
-  const workersByDistrict = useMemo(() =>
-    districtStats
-      .map((d) => ({ district: d.district, workers: Number(d.count) || 0 }))
-      .sort((a, b) => b.workers - a.workers || a.district.localeCompare(b.district)),
-  [districtStats]);
+  // Workers by Assembly — EVERY master assembly from the backend (all 90,
+  // including zero-worker ones), each with its live Contacts-based worker count.
+  const workersByAssembly = useMemo(() =>
+    (data?.assemblyWorkers || []).map((a) => ({ assembly: a.assembly, workers: Number(a.workers) || 0 })),
+  [data]);
+  // Total worker count across all assemblies — consistent with the per-assembly
+  // rows above (summed from the same dataset, never a separate query).
+  const workersByAssemblyTotal = useMemo(() =>
+    workersByAssembly.reduce((s, a) => s + a.workers, 0),
+  [workersByAssembly]);
 
   // Date × hour heat map: an array of { day, hours: {10: n, …}, total } — one
   // row per actual calendar date in the window (zero-call days included).
@@ -308,23 +307,26 @@ export default function AnalyticsPanel() {
             )}
           </Panel>
 
-          {/* Row 6: Workers by District — a dedicated horizontal bar chart of the
-              ACTUAL worker count per district (District → workers), sorted
-              high→low, every district incl. zero. Deliberately NOT the
-              Organization Map's tile/strength design. */}
-          <Panel title="Workers by District" icon={Layers}>
-            <p className="text-xs text-gray-400 -mt-3 mb-3">Actual workers per district (live Contacts count), highest to lowest.</p>
-            {workersByDistrict.length === 0 ? (
-              <div className="h-[120px] flex items-center justify-center text-gray-400 text-sm">No district data available.</div>
+          {/* Row 6: Workers by Assembly — a horizontal bar chart of the ACTUAL
+              worker count per assembly (Assembly → workers), sorted high→low.
+              EVERY master assembly (all 90) is shown, including zero-worker ones;
+              the scroll container keeps them all accessible. Total below. */}
+          <Panel title="Workers by Assembly" icon={Layers}>
+            <div className="flex items-center justify-between -mt-3 mb-3 gap-3 flex-wrap">
+              <p className="text-xs text-gray-400">Actual workers per assembly (live Contacts count), highest to lowest. All {workersByAssembly.length} assemblies.</p>
+              <p className="text-xs font-semibold text-gray-700">Total: <span className="text-[#164FA3]">{Number(workersByAssemblyTotal).toLocaleString("en-IN")}</span></p>
+            </div>
+            {workersByAssembly.length === 0 ? (
+              <div className="h-[120px] flex items-center justify-center text-gray-400 text-sm">No assembly data available.</div>
             ) : (
               <div className="overflow-y-auto" style={{ maxHeight: 520 }}>
-                <ResponsiveContainer width="100%" height={Math.max(220, workersByDistrict.length * 26)}>
-                  <BarChart layout="vertical" data={workersByDistrict} margin={{ top: 4, right: 44, bottom: 4, left: 8 }} barCategoryGap={4}>
+                <ResponsiveContainer width="100%" height={Math.max(220, workersByAssembly.length * 24)}>
+                  <BarChart layout="vertical" data={workersByAssembly} margin={{ top: 4, right: 48, bottom: 4, left: 8 }} barCategoryGap={4}>
                     <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="#eef2f7" />
                     <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#9ca3af" }} />
-                    <YAxis type="category" dataKey="district" width={120} interval={0} tick={{ fontSize: 11, fill: "#374151" }} />
-                    <Tooltip cursor={{ fill: "rgba(22,79,163,0.06)" }} content={<WorkersByDistrictTooltip />} />
-                    <Bar dataKey="workers" fill="#164FA3" radius={[0, 4, 4, 0]} maxBarSize={20} isAnimationActive={false}>
+                    <YAxis type="category" dataKey="assembly" width={150} interval={0} tick={{ fontSize: 11, fill: "#374151" }} />
+                    <Tooltip cursor={{ fill: "rgba(22,79,163,0.06)" }} content={<WorkersByAssemblyTooltip />} />
+                    <Bar dataKey="workers" fill="#164FA3" radius={[0, 4, 4, 0]} maxBarSize={18} isAnimationActive={false}>
                       <LabelList dataKey="workers" position="right" formatter={(v) => Number(v).toLocaleString("en-IN")} style={{ fontSize: 11, fill: "#374151", fontWeight: 600 }} />
                     </Bar>
                   </BarChart>
@@ -454,12 +456,12 @@ function Empty() {
 
 // Workers-by-District tooltip — shows ONLY the district name and its actual
 // worker count (no required/attempt/strength values).
-function WorkersByDistrictTooltip({ active, payload }) {
+function WorkersByAssemblyTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-md px-3 py-2 text-xs">
-      <div className="font-bold text-gray-900">{d.district}</div>
+      <div className="font-bold text-gray-900">{d.assembly}</div>
       <div className="text-gray-600 mt-0.5">Actual Workers: <strong className="text-[#164FA3]">{Number(d.workers).toLocaleString("en-IN")}</strong></div>
     </div>
   );

@@ -5,6 +5,7 @@ import { scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { districtWorkerStats } from "@/lib/districtStats";
+import { contactsByAssembly } from "@/lib/workerCounts";
 
 // Powers /dashboard/analytics. Returns datasets for all charts in one round-trip.
 export async function GET(req) {
@@ -228,6 +229,32 @@ export async function GET(req) {
       treemap = [];
     }
 
+    // 8. Workers by Assembly — EVERY master assembly (locations of type
+    // 'assembly') is listed, including ones with zero workers, so all 90 appear.
+    // The worker value is the SAME contacts-based, person-aware count as the
+    // district numbers (contactsByAssembly), keyed by assembly_id — no text
+    // matching, nothing hardcoded — and it reconciles with the underlying data.
+    let assemblyWorkers = [];
+    try {
+      const [asmRows, counts] = await Promise.all([
+        query(
+          `SELECT a.id, a.name,
+                  COALESCE(d.name, '') AS district
+             FROM locations a
+             LEFT JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
+            WHERE a.type = 'assembly'
+            ORDER BY a.name ASC`
+        ),
+        contactsByAssembly(),
+      ]);
+      assemblyWorkers = asmRows
+        .map((a) => ({ id: a.id, assembly: a.name, district: a.district || null, workers: Number(counts.get(a.id) || 0) }))
+        .sort((x, y) => y.workers - x.workers || String(x.assembly).localeCompare(String(y.assembly)));
+    } catch (e) {
+      console.error("analytics assemblyWorkers failed:", e?.code || e?.message);
+      assemblyWorkers = [];
+    }
+
     return NextResponse.json({
       line,
       topAgents,
@@ -236,6 +263,7 @@ export async function GET(req) {
       cumulative,
       heatmap,
       treemap,
+      assemblyWorkers,
     });
   } catch (err) {
     console.error("analytics error:", err);

@@ -42,6 +42,29 @@ export async function contactsByDistrict() {
   return m;
 }
 
+// Assembly-wise ACTUAL people/worker count from Contacts — the assembly analogue
+// of contactsByDistrict, using the SAME person-aware resolution and active-record
+// rule, so the two always reconcile. A contact's assembly comes from its linked
+// worker's assembly_id (a person's geography lives on the worker row) and falls
+// back to the contact's own assembly_id only when it has no worker link. Each
+// contact is counted once. Returns Map<assembly_id, count>. No total is
+// hardcoded; it updates live as contacts/workers change.
+export async function contactsByAssembly() {
+  const notWrong = await notWrongNumberClause("ct");
+  const effAssembly =
+    "CASE WHEN ct.worker_id IS NOT NULL THEN w.assembly_id ELSE ct.assembly_id END";
+  const rows = await query(
+    `SELECT ${effAssembly} AS assembly_id, COUNT(*) AS n
+       FROM contacts ct
+       LEFT JOIN workers w ON w.id = ct.worker_id
+      WHERE (${effAssembly}) IS NOT NULL${notWrong}
+      GROUP BY assembly_id`
+  );
+  const m = new Map();
+  for (const r of rows) m.set(r.assembly_id, Number(r.n) || 0);
+  return m;
+}
+
 // Raw `users.role` values that count as actual field workers/callers — the same
 // people Administration → Users manages. Oversight roles (super_admin / state /
 // zone / district / assembly admin, supervisor) and media roles are excluded;
