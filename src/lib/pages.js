@@ -46,6 +46,19 @@ export const PAGES = [
     roles: [...OVERSIGHT, ROLES.CALLER, ROLES.WORKER, ROLES.PRESS_MEDIA, ROLES.SOCIAL_MEDIA] },
   { key: "leader_assessment", label: "Leader Assessment", href: "/dashboard/leader-assessment", prefixes: ["/dashboard/leader-assessment"], icon: "Gauge",
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
+  // Sub-sections (tabs) of Leader Assessment — grantable individually in Page
+  // Access. `tab: true` + empty prefixes means pageKeyForPath never resolves a
+  // URL to them (the route stays governed by `leader_assessment`); they carry a
+  // `parent` so the access model treats a parent grant as covering all its
+  // children and any child grant as unlocking the parent page (see
+  // pageAccess.getEffectivePageKeys / the guards). Overview is always available
+  // to anyone who can open the module, so it needs no separate key.
+  { key: "la_mla_profile", label: "MLA Information · MLA Profile", href: "/dashboard/leader-assessment?tab=mla", prefixes: [], tab: true, parent: "leader_assessment", icon: "UserSquare2",
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
+  { key: "la_aap_candidates", label: "MLA Information · AAP Candidate", href: "/dashboard/leader-assessment?tab=candidates", prefixes: [], tab: true, parent: "leader_assessment", icon: "Users",
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
+  { key: "la_comparison", label: "MLA Information · Comparison", href: "/dashboard/leader-assessment?tab=comparison", prefixes: [], tab: true, parent: "leader_assessment", icon: "BarChart3",
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
   { key: "media", label: "Media", href: "/dashboard/media", prefixes: ["/dashboard/media"], icon: "Newspaper",
     roles: [...OVERSIGHT, ROLES.PRESS_MEDIA, ROLES.MEDIA_USER] },
   // BUG 17 — the "Social Media" (War Room) page was removed entirely. Only the
@@ -140,4 +153,37 @@ export function pageKeyForPath(pathname) {
 // The set of page keys a role holds by baseline (before any explicit grants).
 export function baselinePagesForRole(role) {
   return PAGES.filter((p) => p.roles.includes(role)).map((p) => p.key);
+}
+
+// Nested-permission helpers. A page may declare a `parent` key; those are the
+// sub-sections/tabs shown under a module in Page Access.
+export function childKeysOf(parentKey) {
+  return PAGES.filter((p) => p.parent === parentKey).map((p) => p.key);
+}
+export function parentKeyOf(key) {
+  return byKey.get(key)?.parent || null;
+}
+// Expand a set of granted keys with the implied ones (ADDITIVE — never removes):
+//   • a parent grant implies all of its child sub-sections;
+//   • a child grant implies its parent (so the module page/route is reachable
+//     and appears in the nav) — but NOT the sibling children.
+// So an admin can grant a whole module, or just one section of it, and both the
+// guard and the UI stay consistent.
+export function expandPageKeys(keys) {
+  const out = new Set(keys);
+  for (const k of Array.from(out)) {
+    for (const child of childKeysOf(k)) out.add(child); // parent ⇒ children
+    const par = parentKeyOf(k);
+    if (par) out.add(par);                               // child ⇒ parent
+  }
+  return out;
+}
+// True when `key` is allowed given a set of granted keys, honoring the
+// parent/child relationship above.
+export function grantSetAllows(grants, key) {
+  if (grants.has(key)) return true;
+  const par = parentKeyOf(key);
+  if (par && grants.has(par)) return true;               // parent grant covers a child
+  if (childKeysOf(key).some((c) => grants.has(c))) return true; // a child grant unlocks the parent
+  return false;
 }

@@ -1,6 +1,6 @@
 import { query } from "@/lib/db";
 import { normalizeRole, ROLES, roleOf } from "@/lib/permissions";
-import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath } from "@/lib/pages";
+import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath, expandPageKeys, grantSetAllows } from "@/lib/pages";
 
 // Page Access Management backend.
 //
@@ -138,9 +138,11 @@ export async function getEffectivePageKeys(userId, role) {
   if (await isUserManaged(userId)) {
     // Managed → exactly the assigned pages, PLUS this role's fixed/locked pages
     // (so an existing Caller never loses My Workspace / My Calls / Wrong Numbers).
-    return new Set([...(await getUserGrantKeys(userId)), ...fixedPagesForRole(canonical)]);
+    // expandPageKeys adds implied parent/child keys (a module grant covers its
+    // sub-sections; a sub-section grant unlocks the module page + nav).
+    return expandPageKeys([...(await getUserGrantKeys(userId)), ...fixedPagesForRole(canonical)]);
   }
-  return new Set(baselinePagesForRole(canonical));
+  return expandPageKeys(baselinePagesForRole(canonical));
 }
 
 // Does this session's user have access to a given page key? (OVERRIDE model)
@@ -151,7 +153,7 @@ export async function userCanAccessPageKey(session, pageKey) {
   if (isSuper(role)) return true;
   if (await isUserManaged(session.user.id)) {                 // managed → assigned + fixed
     if (fixedPagesForRole(role).includes(pageKey)) return true;
-    return (await getUserGrantKeys(session.user.id)).has(pageKey);
+    return grantSetAllows(await getUserGrantKeys(session.user.id), pageKey);
   }
   return baselinePagesForRole(role).includes(pageKey);        // unmanaged → role baseline
 }
@@ -177,7 +179,7 @@ export async function pageAllowed(session, pageKey, roleOk) {
   if (isSuper(role)) return true;
   if (await isUserManaged(session.user.id)) {
     if (fixedPagesForRole(role).includes(pageKey)) return true;   // role's locked pages
-    return isValidPageKey(pageKey) && (await getUserGrantKeys(session.user.id)).has(pageKey);
+    return isValidPageKey(pageKey) && grantSetAllows(await getUserGrantKeys(session.user.id), pageKey);
   }
   return !!roleOk;
 }

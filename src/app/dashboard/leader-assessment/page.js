@@ -8,6 +8,7 @@ import PartySelect, { usePartyMaster, PartyLogo, PartyBadge, partyLogoFor } from
 import FilterMultiSelect from "@/components/FilterMultiSelect";
 import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
 import { MLA_EXPORT_COLUMNS, CANDIDATE_EXPORT_COLUMNS } from "@/lib/leaderAssessmentColumns";
+import { usePageAccess } from "@/components/usePageAccess";
 import {
   LayoutDashboard, Building2, UserSquare2, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
@@ -194,7 +195,26 @@ export default function Page() {
   return <SupervisorGuard><Body /></SupervisorGuard>;
 }
 
+// A Leader Assessment tab → its Page-Access key. A page-restricted user sees a
+// tab only when they hold that key (a module grant covers all of them; a
+// sub-section grant covers just that one). Overview maps to the module key, so
+// anyone who can open Leader Assessment always sees it.
+const LA_TAB_KEY = {
+  overview: "leader_assessment",
+  mla: "la_mla_profile",
+  candidates: "la_aap_candidates",
+  comparison: "la_comparison",
+};
+
 function Body() {
+  // Effective page access — used to gate the tabs for page-restricted users.
+  const { pages: accessKeys, restricted } = usePageAccess();
+  const effective = new Set(accessKeys || []);
+  // Unrestricted (role-based) users see every tab exactly as before; a restricted
+  // user sees only the sub-sections they were granted.
+  const canTab = (key) => (restricted ? effective.has(LA_TAB_KEY[key]) : true);
+  const visibleTabs = TABS.filter((t) => canTab(t.key));
+
   const [tab, setTab] = useState(() => {
     if (typeof window !== "undefined") {
       const t = new URLSearchParams(window.location.search).get("tab");
@@ -202,6 +222,12 @@ function Body() {
     }
     return "overview";
   });
+  // Keep the active tab valid for this user: if their granted set doesn't include
+  // the current tab, fall back to the first tab they can see.
+  useEffect(() => {
+    if (accessKeys && !canTab(tab) && visibleTabs[0]) setTab(visibleTabs[0].key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessKeys, restricted, tab]);
   // Cross-tab: an "Edit" on the Current MLA in the Comparison table jumps to the
   // MLA Profile tab and opens that assembly's MLA editor (la_assemblies.id).
   const [mlaEditAssembly, setMlaEditAssembly] = useState(null);
@@ -229,7 +255,7 @@ function Body() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-gray-200 -mb-px overflow-x-auto">
-        {TABS.map((t) => {
+        {visibleTabs.map((t) => {
           const Icon = t.icon;
           return (
             <button key={t.key} onClick={() => setTab(t.key)}
@@ -240,10 +266,10 @@ function Body() {
         })}
       </div>
 
-      {tab === "overview" && <Overview flash={flash} fail={fail} />}
-      {tab === "mla" && <MlaManager flash={flash} fail={fail} editAssemblyId={mlaEditAssembly} onEditConsumed={() => setMlaEditAssembly(null)} />}
-      {tab === "comparison" && <VoteComparisonTab flash={flash} fail={fail} onEditMla={(assemblyId) => { setMlaEditAssembly(assemblyId); setTab("mla"); }} />}
-      {tab === "candidates" && <CandidatesTab flash={flash} fail={fail} />}
+      {tab === "overview" && canTab("overview") && <Overview flash={flash} fail={fail} />}
+      {tab === "mla" && canTab("mla") && <MlaManager flash={flash} fail={fail} editAssemblyId={mlaEditAssembly} onEditConsumed={() => setMlaEditAssembly(null)} />}
+      {tab === "comparison" && canTab("comparison") && <VoteComparisonTab flash={flash} fail={fail} onEditMla={(assemblyId) => { setMlaEditAssembly(assemblyId); setTab("mla"); }} />}
+      {tab === "candidates" && canTab("candidates") && <CandidatesTab flash={flash} fail={fail} />}
     </div>
   );
 }
