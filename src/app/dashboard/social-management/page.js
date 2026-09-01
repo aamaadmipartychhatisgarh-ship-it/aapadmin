@@ -7,7 +7,7 @@ import { formatDateTimeDot } from "@/lib/dateFormat";
 import {
   Share2, Loader2, Plus, X, Upload,
   Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil, Trash2,
-  Bird,
+  Bird, CheckCircle2,
 } from "lucide-react";
 import SocialDashboardTab from "@/components/social/SocialDashboardTab";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -63,11 +63,15 @@ function Body() {
   const [tab, setTab] = useState("dashboard");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { if (!msg) return; const t = setTimeout(() => setMsg(""), 3500); return () => clearTimeout(t); }, [msg]);
 
   useEffect(() => { load(); }, []);
   async function load() {
     setLoading(true);
-    const r = await fetch("/api/social-management");
+    // no-store so an edit/delete always reloads the LATEST DB state, never a
+    // cached copy of the Post Log.
+    const r = await fetch("/api/social-management", { cache: "no-store" });
     if (r.ok) setData(await r.json());
     setLoading(false);
   }
@@ -77,6 +81,11 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {msg && (
+        <div className="fixed top-4 right-4 z-[80] flex items-center gap-2 bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg">
+          <CheckCircle2 size={16} /> {msg}
+        </div>
+      )}
       {/* Monday "update Followers" reminder — Social users/admins only (this
           page is already gated to them), once per Monday. */}
       <FollowersMondayReminder />
@@ -119,8 +128,8 @@ function Body() {
       {tab === "pages"     && <PagesTab data={data} onReload={load} />}
       {tab === "log"       && <LogTab data={data} onEdit={setEditing} onReload={load} />}
 
-      {showAdd && <PostModal pages={data.pages} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
-      {editing && <PostModal editing={editing} pages={data.pages} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
+      {showAdd && <PostModal pages={data.pages} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); setMsg("Post logged successfully."); load(); }} />}
+      {editing && <PostModal editing={editing} pages={data.pages} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setMsg("Post updated successfully."); load(); }} />}
     </div>
   );
 }

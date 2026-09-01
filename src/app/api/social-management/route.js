@@ -8,6 +8,10 @@ import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 import { ensureSocialPostSchema } from "@/lib/socialPostSchema";
 import { destinationsByPost } from "@/lib/socialDestinations";
 
+// Per-user, always-fresh: the Post Log must reflect the latest DB state right
+// after an edit/delete, never a cached copy. force-dynamic + no-store below.
+export const dynamic = "force-dynamic";
+
 // Aggregate data for the Social Management page (overview + per-LS rollups).
 export async function GET() {
   try {
@@ -100,7 +104,7 @@ export async function GET() {
     const dmap = await destinationsByPost(recentPosts.map((p) => p.id));
     for (const p of recentPosts) p.destinations = dmap[p.id] || [];
 
-    return NextResponse.json({ pages, recentPosts, overview });
+    return NextResponse.json({ pages, recentPosts, overview }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (err) {
     console.error("social-management GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
