@@ -46,9 +46,36 @@ export async function ensurePagePermissionsSchema() {
          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    await backfillLegacyFixedPages();
     ensured = true;
   } catch (e) {
     console.error("[pageAccess] ensure schema:", e?.message || e);
+  }
+}
+
+// One-time, non-destructive migration: because the auto-union of role "fixed"
+// pages is retired, any EXISTING managed caller who was silently keeping My
+// Workspace / My Calls / Wrong Numbers now has those written into their real
+// grants — so their effective access is unchanged. INSERT IGNORE makes it
+// idempotent (safe to re-run), and it only ever ADDS the pages such users were
+// already getting. New/other users are untouched.
+async function backfillLegacyFixedPages() {
+  try {
+    const managed = await query(
+      `SELECT c.user_id, u.role FROM page_access_config c JOIN users u ON u.id = c.user_id`
+    );
+    for (const m of managed) {
+      const keys = (LEGACY_FIXED_ROLE_PAGES[normalizeRole(m.role)] || []).filter(isValidPageKey);
+      for (const k of keys) {
+        // eslint-disable-next-line no-await-in-loop
+        await query(
+          `INSERT IGNORE INTO page_permissions (user_id, page_key, granted_by) VALUES (?, ?, NULL)`,
+          [m.user_id, k]
+        );
+      }
+    }
+  } catch (e) {
+    console.error("[pageAccess] backfill legacy fixed pages:", e?.message || e);
   }
 }
 
@@ -89,20 +116,22 @@ function isSuper(role) {
   return normalizeRole(role) === ROLES.SUPER_ADMIN;
 }
 
-// FIXED (locked) pages per role — system-required access that a managed user of
-// that role ALWAYS keeps, even after the Super Admin saves a Page-Access config
-// that does not include them. This is how an existing Caller never loses their
-// core workflow (My Workspace, My Calls, and the Wrong Number / Not Interested
-// dashboard) because their pages were managed. These pages are unioned into the
-// effective set for managed users everywhere access is resolved (sidebar, client
-// guard, route block, and backend/API authorization), so all layers agree. They
-// are additive only — they never remove anything and never widen an unmanaged
-// user's role access.
-const FIXED_ROLE_PAGES = {
+// EXACT-ASSIGNMENT MODEL: a managed user's access is EXACTLY the pages assigned
+// to them — nothing is auto-granted. There are no more "fixed/locked" pages that
+// a role silently keeps: if a Caller needs My Workspace / My Calls / Wrong
+// Numbers, the admin assigns those pages explicitly like any other. This makes
+// "0 assigned → 0 access" hold for every role (see the ticket).
+//
+// The pages a Caller used to keep automatically are preserved for EXISTING
+// managed callers by a one-time backfill into their real grants
+// (backfillLegacyFixedPages below), so retiring the auto-union removes access
+// from nobody. fixedPagesForRole now returns [] for every role; it is kept only
+// so the many call sites don't need to change (adding nothing is a safe no-op).
+const LEGACY_FIXED_ROLE_PAGES = {
   [ROLES.CALLER]: ["workspace", "calls", "wrong_numbers"],
 };
-export function fixedPagesForRole(role) {
-  return (FIXED_ROLE_PAGES[normalizeRole(role)] || []).filter(isValidPageKey);
+export function fixedPagesForRole() {
+  return []; // no automatic pages for any role anymore
 }
 
 // All explicit grants for one user, as a Set of page keys (validated against the

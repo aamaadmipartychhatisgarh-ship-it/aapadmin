@@ -2,7 +2,7 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isTopAdmin, isOversight, ASSIGNABLE_ROLES } from "@/lib/permissions";
-import { pageAllowed } from "@/lib/pageAccess";
+import { pageAllowed, setUserPages } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import bcrypt from "bcryptjs";
@@ -16,11 +16,14 @@ export async function POST(req) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const { username, password, role, home_district_id, scope_zone_id, scope_assembly_id } = await req.json();
+    const { username, password, role, home_district_id, scope_zone_id, scope_assembly_id, page_keys } = await req.json();
 
     if (!username || !password) {
       return Response.json({ message: "Username and password are required" }, { status: 400 });
     }
+    // Pages the admin explicitly assigned at creation (optional). Anything else
+    // means the user starts with ZERO pages.
+    const initialPages = Array.isArray(page_keys) ? page_keys.map((k) => String(k)) : [];
 
     // Check if user already exists
     const existingUsers = await query("SELECT id FROM users WHERE username = ?", [username]);
@@ -36,9 +39,17 @@ export async function POST(req) {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [username, hashedPassword, userRole, home_district_id || null, scope_zone_id || null, scope_assembly_id || null]
     );
-    await logAudit(session, { action: "user.create", entityType: "user", entityId: ins.insertId, details: { username, role: userRole } });
+    // CRITICAL (exact-assignment model): every new user is Page-Access MANAGED
+    // from creation with EXACTLY the pages the admin selected (empty by default).
+    // Being managed means their access is precisely their grants — they do NOT
+    // fall back to role-baseline/default pages. So a new user with no selection
+    // starts with ZERO pages until an admin assigns some via Page Access.
+    // setUserPages marks the user managed and stores exactly this set.
+    await setUserPages(ins.insertId, initialPages, session.user.id);
 
-    return Response.json({ message: "User created successfully" }, { status: 201 });
+    await logAudit(session, { action: "user.create", entityType: "user", entityId: ins.insertId, details: { username, role: userRole, pages: initialPages } });
+
+    return Response.json({ message: "User created successfully", id: ins.insertId }, { status: 201 });
   } catch (error) {
     console.error("Error creating user:", error);
     return Response.json({ message: "Internal server error" }, { status: 500 });
