@@ -3,6 +3,8 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { Map as MapIcon, Loader2, Users, Network, PhoneCall, Activity, X, Contact, UserCog, TrendingUp, TrendingDown, Minus, ExternalLink } from "lucide-react";
 import FloatingPopover from "@/components/FloatingPopover";
+import CommonPrintButton from "@/components/common/CommonPrintButton";
+import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
 
 // The Organization Map, extracted from the former standalone /dashboard/map
 // page so it can be embedded as a section of the dashboard. Same data source
@@ -76,6 +78,38 @@ export default function TerritoryMap() {
           <Legend color="bg-emerald-500" label="Strong" />
           <Legend color="bg-amber-500" label="Medium" />
           <Legend color="bg-red-500" label="Weak" />
+          <div className="flex items-center gap-2">
+            <CommonPrintButton title="Organization Map" />
+            <CommonPDFExportButton
+              filename="organization-map.pdf"
+              getPayload={() => ({
+                title: "Organization Map",
+                subtitle: `Districts by organizational strength · ${districts.length} districts · ${new Date().toLocaleString("en-GB")}`,
+                orientation: "portrait",
+                table: {
+                  columns: [
+                    { header: "Zone", flex: 1.2 },
+                    { header: "District", flex: 1.6 },
+                    { header: "Workers", flex: 1, align: "right" },
+                    { header: "Target", flex: 1, align: "right" },
+                    { header: "Strength %", flex: 1, align: "right" },
+                    { header: "Band", flex: 1 },
+                  ],
+                  rows: districts.map((d) => {
+                    const t = targetInfo(d);
+                    return [
+                      d.zone_name || "—",
+                      d.name || "—",
+                      t.workers,
+                      t.hasTarget ? t.target : "—",
+                      t.hasTarget ? `${t.label}%` : "—",
+                      t.hasTarget ? t.band : "no target",
+                    ];
+                  }),
+                },
+              })}
+            />
+          </div>
         </div>
       </div>
 

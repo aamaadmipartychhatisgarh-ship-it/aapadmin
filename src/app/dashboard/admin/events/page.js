@@ -8,6 +8,8 @@ import { usePageGuard } from "@/components/usePageGuard";
 import { CalendarDays, Plus, Loader2, X, Pencil, MapPin, Users, Search } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
+import CommonPrintButton from "@/components/common/CommonPrintButton";
+import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
 
 const TYPES = { meeting: "Meeting", rally: "Rally", booth: "Booth Event", training: "Training", other: "Other" };
 const STATUS = {
@@ -103,6 +105,39 @@ function Body() {
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
         </select>
+        <div className="ml-auto flex items-center gap-2">
+          <CommonPrintButton title="Events" />
+          <CommonPDFExportButton
+            filename="events.pdf"
+            getPayload={() => ({
+              title: "Events & Mobilization",
+              subtitle: `${data.events.length} event${data.events.length === 1 ? "" : "s"}${typeFilter ? ` · ${TYPES[typeFilter] || typeFilter}` : ""}${statusFilter ? ` · ${statusFilter}` : ""}${search ? ` · "${search}"` : ""}`,
+              orientation: "landscape",
+              table: {
+                columns: [
+                  { header: "S.No.", flex: 0.5 },
+                  { header: "Event", flex: 2.4 },
+                  { header: "Type", flex: 1 },
+                  { header: "When", flex: 1.4 },
+                  { header: "Venue", flex: 1.8 },
+                  { header: "District", flex: 1.2 },
+                  { header: "Attendance", flex: 1 },
+                  { header: "Status", flex: 1 },
+                ],
+                rows: data.events.map((e, i) => [
+                  i + 1,
+                  e.title || "",
+                  TYPES[e.type] || e.type || "—",
+                  `${fmtDate(e.event_date)}${e.event_time ? ` • ${fmtTime(e.event_time)}` : ""}`,
+                  e.venue || "—",
+                  e.district_name || "—",
+                  e.invited > 0 ? `${e.attended || 0}/${e.invited}` : "—",
+                  e.status || "—",
+                ]),
+              },
+            })}
+          />
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

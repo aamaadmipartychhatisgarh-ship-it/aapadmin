@@ -7,6 +7,9 @@ import {
 } from "recharts";
 import { Loader2, Filter, BarChart3, PieChart as PieIcon, TrendingUp, Layers, Activity, Grid3x3, Radio } from "lucide-react";
 import { useLiveAnalytics } from "@/hooks/useLiveAnalytics";
+import CommonPrintButton from "@/components/common/CommonPrintButton";
+import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
+import { captureCharts } from "@/lib/print/captureNode";
 
 const STATUS_COLORS = {
   "Phone Picked":   "#10B981",
@@ -165,17 +168,58 @@ export default function AnalyticsPanel() {
             Clear
           </button>
         )}
-        <div className="ml-auto flex items-center gap-1.5 text-xs text-gray-400 self-center" title="Updates automatically — no refresh needed">
-          <Radio size={13} className="text-emerald-500 animate-pulse" />
-          <span className="font-medium text-emerald-600">Live</span>
-          {lastUpdated && <span>· updated {lastUpdated.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>}
+        <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400 self-center" title="Updates automatically — no refresh needed">
+            <Radio size={13} className="text-emerald-500 animate-pulse" />
+            <span className="font-medium text-emerald-600">Live</span>
+            {lastUpdated && <span>· updated {lastUpdated.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>}
+          </div>
+          <CommonPrintButton title="Analytics" />
+          <CommonPDFExportButton
+            filename="analytics.pdf"
+            getPayload={async () => {
+              const images = await captureCharts("#analytics-capture");
+              const stamp = new Date().toLocaleString("en-GB");
+              return {
+                title: "Analytics",
+                subtitle: `${dateFrom || dateTo ? `${dateFrom || "start"} – ${dateTo || "now"}` : "All time"}${districtId ? ` · ${districts.find((d) => String(d.id) === String(districtId))?.name || ""}` : ""} · ${stamp}`,
+                orientation: "portrait",
+                images,
+                sections: [
+                  {
+                    title: "District × Status Mix",
+                    columns: [
+                      { header: "District", flex: 1.6 },
+                      { header: "Connected", flex: 1, align: "right" },
+                      { header: "No Answer", flex: 1, align: "right" },
+                      { header: "Wrong No.", flex: 1, align: "right" },
+                      { header: "Rejected", flex: 1, align: "right" },
+                      { header: "Busy", flex: 1, align: "right" },
+                      { header: "Switched Off", flex: 1, align: "right" },
+                    ],
+                    rows: stackedData.map((r) => [r.district, r.Connected, r["No Answer"], r["Wrong Number"], r.Rejected, r.Busy, r["Switched Off"]]),
+                  },
+                  {
+                    title: `Workers by Assembly (Total: ${Number(workersByAssemblyTotal).toLocaleString("en-IN")})`,
+                    columns: [{ header: "Assembly", flex: 3 }, { header: "Workers", flex: 1, align: "right" }],
+                    rows: workersByAssembly.map((a) => [a.assembly, a.workers]),
+                  },
+                  {
+                    title: "Activity Heat Map — daily totals",
+                    columns: [{ header: "Date", flex: 2 }, { header: "Total Calls", flex: 1, align: "right" }],
+                    rows: heatmap.map((row) => [row.day, row.total ?? 0]),
+                  },
+                ],
+              };
+            }}
+          />
         </div>
       </div>
 
       {loading && !data ? (
         <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
       ) : (
-        <>
+        <div id="analytics-capture" className="space-y-6">
           {/* Row 1: Line + Pie */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <Panel title="Calls Over Time" icon={TrendingUp} className="lg:col-span-2">
@@ -334,7 +378,7 @@ export default function AnalyticsPanel() {
               </div>
             )}
           </Panel>
-        </>
+        </div>
       )}
     </div>
   );

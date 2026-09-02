@@ -13,6 +13,9 @@ import SocialDashboardTab from "@/components/social/SocialDashboardTab";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar from "@/components/Avatar";
 import FollowersMondayReminder from "@/components/social/FollowersMondayReminder";
+import CommonPrintButton from "@/components/common/CommonPrintButton";
+import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
+import { captureCharts } from "@/lib/print/captureNode";
 
 // The Social Media Master supports exactly these three networks (kept in sync
 // with ALLOWED_PLATFORMS in the pages API and the social_pages.platform enum).
@@ -94,9 +97,53 @@ function Body() {
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Social Media Command Center</h1>
           <p className="text-gray-500 mt-2 font-medium">Manual logging only — team posts on each platform, then logs it here. <span className="text-amber-600">Platform API integration not enabled.</span></p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md">
-          <Plus size={16} /> Log a Post
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <CommonPrintButton title="Social Media Command Center" />
+          <CommonPDFExportButton
+            filename="social-command-centre.pdf"
+            getPayload={async () => {
+              const images = await captureCharts("#social-dashboard-capture");
+              const pages = data.pages || [];
+              return {
+                title: "Social Media Command Center",
+                subtitle: `Total Posts ${o.total_posts || 0} · FB Followers ${o.fb_followers || 0} · IG Followers ${o.ig_followers || 0} · ${new Date().toLocaleString("en-GB")}`,
+                orientation: "portrait",
+                images,
+                sections: [
+                  {
+                    title: "Summary",
+                    columns: [{ header: "Metric", flex: 2 }, { header: "Value", flex: 1, align: "right" }],
+                    rows: [
+                      ["Total Posts", String(o.total_posts || 0)],
+                      ["Today's Posts — Facebook", String(o.fb_today_posts || 0)],
+                      ["Today's Posts — Instagram", String(o.ig_today_posts || 0)],
+                      ["Facebook Total Followers", String(o.fb_followers || 0)],
+                      ["Instagram Total Followers", String(o.ig_followers || 0)],
+                    ],
+                  },
+                  {
+                    title: "Registered Pages",
+                    columns: [
+                      { header: "Platform", flex: 1 },
+                      { header: "Page / Handle", flex: 2 },
+                      { header: "Followers", flex: 1, align: "right" },
+                      { header: "Today's Posts", flex: 1, align: "right" },
+                    ],
+                    rows: pages.map((p) => [
+                      PLATFORM[p.platform]?.label || p.platform || "—",
+                      p.handle || "—",
+                      String(p.followers ?? "—"),
+                      String(p.today_posts ?? 0),
+                    ]),
+                  },
+                ],
+              };
+            }}
+          />
+          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-2 bg-[#164FA3] hover:bg-blue-800 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md">
+            <Plus size={16} /> Log a Post
+          </button>
+        </div>
       </div>
 
       {/* Search cards — Total Posts (the COMPLETE DB count, not the current page)
@@ -120,7 +167,7 @@ function Body() {
           panels in one section. "overview" is accepted as a fallback so any old
           deep-link lands on the same unified view instead of a blank tab. */}
       {(tab === "dashboard" || tab === "overview") && (
-        <div className="space-y-6">
+        <div id="social-dashboard-capture" className="space-y-6">
           <SocialDashboardTab PLATFORM={PLATFORM} />
           <OverviewTab data={data} />
         </div>
@@ -472,6 +519,45 @@ function LogTab({ data, onEdit, onReload }) {
         {(date || platform || pageId || needle) && (
           <button onClick={() => { setDate(""); setPlatform(""); setPageId(""); setQ(""); }} className="text-xs text-gray-500 hover:text-red-600 inline-flex items-center gap-1"><X size={13} /> Clear</button>
         )}
+        <div className="ml-auto flex items-center gap-2">
+          <CommonPrintButton title="Social Media Post Log" />
+          <CommonPDFExportButton
+            filename="social-media-post-log.pdf"
+            getPayload={() => ({
+              title: "Social Media Post Log",
+              subtitle: `${shown.length} post${shown.length === 1 ? "" : "s"}${platform ? ` · ${PLATFORM[platform]?.label || platform}` : ""}${date ? ` · ${date}` : ""}${needle ? ` · "${q.trim()}"` : ""}`,
+              orientation: "landscape",
+              table: {
+                columns: [
+                  { header: "Date & Time", flex: 1.3 },
+                  { header: "Content", flex: 3 },
+                  { header: "Page Name", flex: 1.6 },
+                  { header: "Destinations", flex: 2.4 },
+                  { header: "Format", flex: 0.9 },
+                  { header: "Access", flex: 0.9 },
+                  { header: "Status", flex: 1 },
+                ],
+                rows: shown.map((p) => {
+                  const dests = postDests(p);
+                  const destText = dests.length
+                    ? dests.map((d) => `${d.page_name || `#${d.page_id}`}${d.post_link ? ` (${d.post_link})` : ""}`).join("; ")
+                    : "—";
+                  const fmtLabel = LOG_POST_TYPES.find(([k]) => k === p.post_type)?.[1]
+                    || (p.post_type ? p.post_type[0].toUpperCase() + p.post_type.slice(1) : "—");
+                  return [
+                    fmtDateTime(p.posted_at || p.created_at),
+                    p.caption || "(no content)",
+                    pageNames(p),
+                    destText,
+                    fmtLabel,
+                    p.media_url ? "Screenshot" : "—",
+                    p.publish_status === "scheduled" ? "Scheduled" : "Published",
+                  ];
+                }),
+              },
+            })}
+          />
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

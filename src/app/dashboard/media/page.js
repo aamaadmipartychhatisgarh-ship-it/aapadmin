@@ -10,6 +10,9 @@ import {
 import MediaDashboardTab from "@/components/media/MediaDashboardTab";
 import FloatingPopover from "@/components/FloatingPopover";
 import Avatar from "@/components/Avatar";
+import CommonPrintButton from "@/components/common/CommonPrintButton";
+import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
+import { captureCharts } from "@/lib/print/captureNode";
 import { useRouter } from "next/navigation";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
@@ -73,12 +76,53 @@ function Body() {
   // date-scoped. The Channels tab hosts the Debates list, so it's included.
   const showFilter = ["dashboard", "newspapers", "channels", "conferences"].includes(tab);
 
+  // Build the PDF payload for whichever tab is currently shown, from the same
+  // live `data` the tab renders — so the export always matches the screen. The
+  // Dashboard also snapshots its charts so they render in the PDF, never blank.
+  const TAB_LABEL = { dashboard: "Media Dashboard", newspapers: "Newspapers", channels: "News Channels", conferences: "Press Conferences", spokespersons: "Spokespersons" };
+  const TAB_FILE = { dashboard: "media-dashboard.pdf", newspapers: "newspapers.pdf", channels: "news-channels.pdf", conferences: "press-conferences.pdf", spokespersons: "spokespersons.pdf" };
+  async function buildMediaPayload() {
+    const stamp = new Date().toLocaleString("en-GB");
+    if (tab === "newspapers") {
+      const rows = (data.newspaperStats || []).map((np) => [np.name || "—", np.lok_sabha_all ? "All Lok Sabha" : (np.lok_sabha_name || "—"), String(Number(np.total) || 0)]);
+      return { title: "Newspapers", subtitle: `${rows.length} newspaper${rows.length === 1 ? "" : "s"} · ${stamp}`, orientation: "portrait",
+        table: { columns: [{ header: "Newspaper", flex: 2.4 }, { header: "Lok Sabha", flex: 2 }, { header: "Total Published", flex: 1, align: "right" }], rows } };
+    }
+    if (tab === "channels") {
+      const rows = (data.channels || []).map((ch) => [ch.name || "—", ch.lok_sabha_name || "—", ch.tone || "—", String(Number(ch.total_debates) || 0)]);
+      return { title: "News Channels", subtitle: `${rows.length} channel${rows.length === 1 ? "" : "s"} · ${stamp}`, orientation: "portrait",
+        table: { columns: [{ header: "Channel", flex: 2.2 }, { header: "Lok Sabha", flex: 2 }, { header: "Tone", flex: 1 }, { header: "Total Debates", flex: 1, align: "right" }], rows } };
+    }
+    if (tab === "conferences") {
+      const rows = (data.conferences || []).map((c) => {
+        const spk = (c.spokespersons?.length ? c.spokespersons.map((s) => s.name) : (c.spokesperson_name ? [c.spokesperson_name] : [])).filter(Boolean).join(", ");
+        return [fmtNewsDate(c.conference_date), c.title || "—", c.venue || "—", spk || "—", c.status || "—"];
+      });
+      return { title: "Press Conferences", subtitle: `${rows.length} conference${rows.length === 1 ? "" : "s"} · ${stamp}`, orientation: "landscape",
+        table: { columns: [{ header: "Date", flex: 1 }, { header: "Title", flex: 2.4 }, { header: "Venue", flex: 1.8 }, { header: "Spokesperson(s)", flex: 2 }, { header: "Status", flex: 0.9 }], rows } };
+    }
+    if (tab === "spokespersons") {
+      const rows = (data.spokespersons || []).map((s) => [s.name || "—", s.expertise || "—", s.languages || "—", s.mobile || "—"]);
+      return { title: "Spokespersons", subtitle: `${rows.length} spokesperson${rows.length === 1 ? "" : "s"} · ${stamp}`, orientation: "portrait",
+        table: { columns: [{ header: "Name", flex: 2 }, { header: "Expertise", flex: 2 }, { header: "Languages", flex: 1.6 }, { header: "Mobile", flex: 1.4 }], rows } };
+    }
+    // dashboard (+ analytics): snapshot the charts and include the newspaper mix table.
+    const images = await captureCharts("#media-dashboard-capture");
+    return { title: "Media Dashboard", subtitle: `${stamp}`, orientation: "portrait", images };
+  }
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {toast && <div className="fixed top-4 right-4 z-[80] flex items-center gap-2 bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg"><CheckCircle2 size={16} /> {toast}</div>}
-      <div>
-        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Media Center</h1>
-        <p className="text-gray-500 mt-2 font-medium">Newspaper coverage, debates, press conferences and spokespersons in one place.</p>
+      <div className="flex justify-between items-start gap-4 flex-wrap">
+        <div>
+          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Media Center</h1>
+          <p className="text-gray-500 mt-2 font-medium">Newspaper coverage, debates, press conferences and spokespersons in one place.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <CommonPrintButton title={TAB_LABEL[tab] || "Media Center"} />
+          <CommonPDFExportButton filename={TAB_FILE[tab] || "media.pdf"} getPayload={buildMediaPayload} />
+        </div>
       </div>
 
       <div className="flex gap-2 flex-wrap border-b border-gray-200">
@@ -102,7 +146,7 @@ function Body() {
           (News Channel / Newspaper / Press Conference), merged (BUG #12 Part B).
           Both read the same /api/media data source — no duplicate analytics page. */}
       {tab === "dashboard" && (
-        <div className="space-y-8">
+        <div id="media-dashboard-capture" className="space-y-8">
           <MediaDashboardTab onOpenTab={setTab} />
           <div>
             <h2 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2"><BarChart3 size={18} className="text-[#164FA3]" /> Media Analytics</h2>

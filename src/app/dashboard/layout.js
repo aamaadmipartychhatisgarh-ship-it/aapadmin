@@ -382,14 +382,14 @@ export default function DashboardLayout({ children }) {
   const accessFallbackHref = firstAllowedPage?.href || "/dashboard/profile";
 
   return (
-    <div className="h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
+    <div className="print-shell h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
       <Heartbeat />
       <TaskNotifier />
 
       {/* Mobile drawer overlay */}
       {mobileNavOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="no-print fixed inset-0 bg-black/50 z-40 lg:hidden"
           onClick={() => setMobileNavOpen(false)}
         />
       )}
@@ -400,7 +400,7 @@ export default function DashboardLayout({ children }) {
           rest of each section is reachable from that primary page's header
           (SectionTabs), not listed again here. */}
       <aside
-        className={`w-[260px] flex-shrink-0 flex flex-col h-full bg-[#0B3A82] text-white
+        className={`no-print w-[260px] flex-shrink-0 flex flex-col h-full bg-[#0B3A82] text-white
           fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 lg:static lg:transform-none
           ${mobileNavOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
@@ -441,10 +441,10 @@ export default function DashboardLayout({ children }) {
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        
+      <div className="print-col flex-1 flex flex-col h-full overflow-hidden">
+
         {/* Header */}
-        <header className="bg-white h-[72px] lg:h-[100px] flex items-center justify-between gap-2 px-3 lg:px-8 border-b border-gray-200 shrink-0 shadow-sm z-10">
+        <header className="no-print bg-white h-[72px] lg:h-[100px] flex items-center justify-between gap-2 px-3 lg:px-8 border-b border-gray-200 shrink-0 shadow-sm z-10">
           {/* Header Left - Organization Info */}
           <div className="flex items-center gap-2 lg:gap-5 min-w-0">
             {/* Hamburger (mobile only) */}
@@ -645,7 +645,7 @@ export default function DashboardLayout({ children }) {
             Super Admin (viewAs is never set for other roles), so this can
             never be spoofed into claiming a lesser role has admin access. */}
         {previewing && (
-          <div className="flex items-center justify-center gap-2 bg-amber-50 border-b border-amber-200 px-4 py-1.5 text-xs sm:text-sm text-amber-800 shrink-0">
+          <div className="no-print flex items-center justify-center gap-2 bg-amber-50 border-b border-amber-200 px-4 py-1.5 text-xs sm:text-sm text-amber-800 shrink-0">
             <span>
               Current User: <strong>Super Admin</strong> &middot; Current View:{" "}
               <strong>
@@ -668,7 +668,7 @@ export default function DashboardLayout({ children }) {
 
         {/* Section tabs — sibling pages of the current section as plain text
             links (replaces what the old sidebar accordion used to reveal) */}
-        <SectionTabs items={sectionTabItems} pathname={pathname} />
+        <div className="no-print"><SectionTabs items={sectionTabItems} pathname={pathname} /></div>
 
         {/* Scrollable Main Content — a page-restricted user on an unassigned
             page gets a hard Access Denied screen instead of the page (the
@@ -678,7 +678,7 @@ export default function DashboardLayout({ children }) {
         </main>
 
         {/* Footer */}
-        <footer className="bg-[#0B3A82] text-white py-3 px-4 lg:px-8 text-xs lg:text-[13px] flex flex-col sm:flex-row gap-1 sm:gap-0 justify-between items-center shrink-0 text-center">
+        <footer className="no-print bg-[#0B3A82] text-white py-3 px-4 lg:px-8 text-xs lg:text-[13px] flex flex-col sm:flex-row gap-1 sm:gap-0 justify-between items-center shrink-0 text-center">
           <div className="font-medium text-blue-100">Aam Aadmi Party, Chhattisgarh | Honest Politics, Better Chhattisgarh</div>
           <div className="text-blue-200">© {new Date().getFullYear()} Aam Aadmi Party Chhattisgarh</div>
         </footer>

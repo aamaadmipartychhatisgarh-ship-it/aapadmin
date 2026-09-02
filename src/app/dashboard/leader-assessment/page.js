@@ -9,6 +9,8 @@ import FilterMultiSelect from "@/components/FilterMultiSelect";
 import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
 import { MLA_EXPORT_COLUMNS, CANDIDATE_EXPORT_COLUMNS } from "@/lib/leaderAssessmentColumns";
 import { usePageAccess } from "@/components/usePageAccess";
+import CommonPrintButton from "@/components/common/CommonPrintButton";
+import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
 import {
   LayoutDashboard, Building2, UserSquare2, Users, ClipboardCheck,
   BarChart3, Brain, Plus, Pencil, Trash2, X, Loader2, Trophy, Medal, Award,
@@ -404,6 +406,60 @@ function Overview({ flash, fail }) {
   const s = data?.stats;
   return (
     <div className="space-y-5">
+      <div className="flex items-center justify-end gap-2">
+        <CommonPrintButton title="Leader Assessment Overview" />
+        <CommonPDFExportButton
+          filename="leader-assessment-overview.pdf"
+          getPayload={() => ({
+            title: "Leader Assessment — Overview",
+            subtitle: `${new Date().toLocaleString("en-GB")}`,
+            orientation: "landscape",
+            sections: [
+              {
+                title: "Summary",
+                columns: [{ header: "Metric", flex: 2 }, { header: "Value", flex: 1, align: "right" }],
+                rows: [
+                  ["MLA Data", String(s?.assemblies_with_mla ?? "—")],
+                  ["Total Candidate", String(s?.total_candidates ?? "—")],
+                  ["Candidate Assessment Done", String(s?.assessments_completed ?? "—")],
+                  ["Assembly Candidate", String(s?.total_completed_assemblies ?? "—")],
+                ],
+              },
+              {
+                title: "Top 10 Ranked Assemblies",
+                columns: [{ header: "Rank", flex: 0.5 }, { header: "Assembly", flex: 2 }, { header: "District", flex: 1.5 }, { header: "MLA", flex: 1.8 }, { header: "Score", flex: 0.8, align: "right" }],
+                rows: (data?.top_assemblies || []).slice(0, 10).map((r) => [r.rank, r.assembly_name || "—", r.district || "—", r.mla_name || "—", `${r.assembly_score}/100`]),
+              },
+              {
+                title: "Top 10 Ranked Candidates",
+                columns: [{ header: "Rank", flex: 0.5 }, { header: "Candidate", flex: 2 }, { header: "Assembly", flex: 1.8 }, { header: "Score", flex: 0.8, align: "right" }],
+                rows: (data?.top_candidates || []).slice(0, 10).map((c, i) => [i + 1, c.name || "—", c.assembly_name || "—", `${c.total}/100`]),
+              },
+              {
+                title: "Assemblies",
+                columns: [
+                  { header: "Assembly", flex: 1.8 },
+                  { header: "District", flex: 1.4 },
+                  { header: "Current MLA", flex: 1.8 },
+                  { header: "Candidates", flex: 0.9 },
+                  { header: "Top Candidate", flex: 1.8 },
+                  { header: "Score", flex: 0.8, align: "right" },
+                  { header: "Status", flex: 1 },
+                ],
+                rows: (assemblies || []).map((a) => [
+                  a.name || "—",
+                  a.district || "—",
+                  a.mla_name || "No MLA",
+                  `${a.candidate_count ?? 0}/3`,
+                  a.top_candidate || "—",
+                  a.top_score != null ? `${a.top_score}/100` : "—",
+                  a.completed ? "Completed" : "Pending",
+                ]),
+              },
+            ],
+          })}
+        />
+      </div>
       {/* BUG 30 — the two metric cards are the FIRST thing on the dashboard, above
           Find an Assembly. Rendered unconditionally (outside the load/error gate)
           so they appear on initial load; values fill in from `data.stats` when it

@@ -11,6 +11,8 @@ import { formatDate } from "@/lib/dateFormat";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import ActionBar from "@/components/ActionBar";
+import CommonPrintButton from "@/components/common/CommonPrintButton";
+import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
 import { DURATION_PRESETS, DURATION_DAYS, addDays, daysBetween } from "@/lib/taskDuration";
 
 const SHOW_COMPLETED_KEY = "tasks_show_completed";
@@ -197,6 +199,46 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
           <input type="checkbox" checked={showCompleted} onChange={toggleShowCompleted} className="rounded border-gray-300 text-[#164FA3] focus:ring-[#164FA3]" />
           Show Completed
         </label>
+        <CommonPrintButton title="Tasks" />
+        <CommonPDFExportButton
+          filename="tasks.pdf"
+          getPayload={() => ({
+            title: "Tasks",
+            subtitle: `${visibleTasks.length} task${visibleTasks.length === 1 ? "" : "s"}${statusFilter ? ` · ${statusFilter}` : ""}${search ? ` · "${search}"` : ""}`,
+            orientation: "landscape",
+            table: {
+              columns: [
+                { header: "S.No.", flex: 0.5 },
+                { header: "Task", flex: 2.4 },
+                { header: "District", flex: 1.2 },
+                { header: "Priority", flex: 0.9 },
+                { header: "Assignee", flex: 1.3 },
+                { header: "Created By", flex: 1.3 },
+                { header: "Duration", flex: 1 },
+                { header: "Assigned On", flex: 1 },
+                { header: "Due Date", flex: 1 },
+                { header: "Completion", flex: 0.9 },
+                { header: "Status", flex: 1 },
+              ],
+              rows: visibleTasks.map((t, i) => {
+                const pct = completionPct(t);
+                return [
+                  i + 1,
+                  t.title || "",
+                  t.district_name || "—",
+                  t.priority || "—",
+                  t.assignee_name || t.team_name || "Unassigned",
+                  t.created_by_name || "—",
+                  durationLabel(t),
+                  t.assigned_at || t.created_at ? formatDate(t.assigned_at || t.created_at) : "—",
+                  t.deadline ? formatDate(t.deadline) : "—",
+                  pct === null ? "—" : `${pct}%`,
+                  (t.status || "").replace(/_/g, " "),
+                ];
+              }),
+            },
+          })}
+        />
       </div>
 
       <CollapsibleSection title="Search & Filters">

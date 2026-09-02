@@ -201,14 +201,36 @@
 .dark .leader-photo { mix-blend-mode: normal; background: rgba(255,255,255,0.9); border-radius: 9999px; }
 
 /* ------------------------------------------------------------------ Print
-   Full View → Print (§1.6). When a printable Full View modal is open its
-   overlay carries `.la-print-root`. On print we hide the whole app and show
-   ONLY that modal's content, with its scroll/height caps lifted so the
-   COMPLETE assessment prints (not just the on-screen portion). Interactive
-   chrome (Print/close buttons) is marked `.la-no-print` and omitted. */
+   Reusable print support shared by every page's <CommonPrintButton>. The
+   default behaviour: hide the app chrome (sidebar / top bar / overlays / any
+   control marked `.no-print`) and print just the page content — charts, maps
+   and tables render exactly as on screen. Inner scroll containers are expanded
+   so the COMPLETE content prints, not only the visible slice.
+
+   Special case — Leader Assessment "Full View → Print" (§1.6): when its
+   printable modal overlay (`.la-print-root`) is mounted, print ONLY that modal.
+   Scoped with :has() so the aggressive hide-everything rule fires solely on that
+   page and never blanks out an ordinary page's print. */
 @media print {
-  body * { visibility: hidden !important; }
-  .la-print-root, .la-print-root * { visibility: visible !important; }
+  /* --- Default page print: drop chrome, keep content --- */
+  .no-print, .no-print * { display: none !important; }
+  html, body { height: auto !important; overflow: visible !important; }
+  /* Un-clip the dashboard shell so the full page (not just the viewport slice)
+     flows onto the printed pages. */
+  .print-shell { height: auto !important; overflow: visible !important; display: block !important; }
+  .print-col { height: auto !important; overflow: visible !important; display: block !important; }
+  main { overflow: visible !important; height: auto !important; }
+  .overflow-auto, .overflow-x-auto, .overflow-y-auto {
+    overflow: visible !important; max-height: none !important;
+  }
+  /* Avoid slicing a card/row across a page break where possible. */
+  table { page-break-inside: auto; }
+  tr, .print-keep { page-break-inside: avoid; }
+
+  /* --- Leader Assessment Full View modal print (only when mounted) --- */
+  body:has(.la-print-root) * { visibility: hidden !important; }
+  body:has(.la-print-root) .la-print-root,
+  body:has(.la-print-root) .la-print-root * { visibility: visible !important; }
   .la-print-root {
     position: absolute !important; left: 0 !important; top: 0 !important;
     width: 100% !important; height: auto !important;
@@ -221,7 +243,6 @@
     box-shadow: none !important; border-radius: 0 !important; margin: 0 !important;
   }
   .la-no-print, .la-no-print * { visibility: hidden !important; display: none !important; }
-  /* Let inner scroll containers expand so their full content prints. */
   .la-print-root .overflow-auto, .la-print-root .overflow-x-auto, .la-print-root .overflow-y-auto {
     overflow: visible !important; max-height: none !important;
   }

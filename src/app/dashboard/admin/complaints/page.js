@@ -8,6 +8,8 @@ import { usePageGuard } from "@/components/usePageGuard";
 import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
+import CommonPrintButton from "@/components/common/CommonPrintButton";
+import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
 
 const TYPE_META = {
   water: { label: "Water", icon: Droplet, color: "text-sky-600 bg-sky-50" },
@@ -80,6 +82,39 @@ function Body() {
         title="Complaints"
         description="Review and resolve citizen civic issues. Complaints are logged by callers."
         breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Task Management" }, { label: "Complaints" }]}
+        actions={
+          <div className="flex items-center gap-2">
+            <CommonPrintButton title="Complaints" />
+            <CommonPDFExportButton
+              filename="complaints.pdf"
+              getPayload={() => ({
+                title: "Complaints",
+                subtitle: `${data.complaints.length} complaint${data.complaints.length === 1 ? "" : "s"}${typeFilter ? ` · ${TYPE_META[typeFilter]?.label || typeFilter}` : ""}${filter ? ` · ${filter}` : ""}${search ? ` · "${search}"` : ""}`,
+                orientation: "landscape",
+                table: {
+                  columns: [
+                    { header: "#", flex: 0.6 },
+                    { header: "Citizen", flex: 1.6 },
+                    { header: "Phone", flex: 1.2 },
+                    { header: "Type", flex: 1 },
+                    { header: "District", flex: 1.3 },
+                    { header: "Description", flex: 3 },
+                    { header: "Status", flex: 1 },
+                  ],
+                  rows: data.complaints.map((cm) => [
+                    cm.id,
+                    cm.citizen_name || "—",
+                    cm.citizen_phone || "—",
+                    (TYPE_META[cm.type] || TYPE_META.other).label,
+                    cm.district_name || "—",
+                    cm.description || "—",
+                    (cm.status || "").replace(/_/g, " "),
+                  ]),
+                },
+              })}
+            />
+          </div>
+        }
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
