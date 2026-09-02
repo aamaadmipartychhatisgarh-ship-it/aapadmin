@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3 } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -380,6 +380,34 @@ export default function DashboardLayout({ children }) {
   const firstAllowedPage = (allowedPageKeys || [])
     .map((k) => PAGES.find((p) => p.key === k)).find(Boolean);
   const accessFallbackHref = firstAllowedPage?.href || "/dashboard/profile";
+
+  // ZERO-ACCESS STATE — a page-restricted user (every normal user; a managed
+  // oversight user) whose assigned-page set is EMPTY. They have no pages at all,
+  // so the entire application shell (sidebar, top bar, navigation, dashboard) is
+  // suppressed and ONLY a clear "not allotted any page" screen is shown. Guarded
+  // on allowedPageKeys being a loaded array (null while loading) so it never
+  // flashes during the permission fetch. A previewing Super Admin is exempt.
+  const noAccess =
+    !previewing && pageRestricted && Array.isArray(allowedPageKeys) && allowedPageKeys.length === 0;
+  if (noAccess) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-[#f4f6f8] px-6 text-center">
+        <div className="w-16 h-16 rounded-full bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center mb-5">
+          <Lock size={30} />
+        </div>
+        <h1 className="text-xl font-bold text-gray-900">You have not been allotted any page.</h1>
+        <p className="text-gray-500 mt-2 max-w-md text-sm">
+          Your account does not have access to any page yet. Please contact your administrator to be assigned the pages you need.
+        </p>
+        <button
+          onClick={handleSignOut}
+          className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-100"
+        >
+          <LogOut size={16} /> Sign out
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="print-shell h-screen w-full flex overflow-hidden font-sans bg-[#f4f6f8]">
