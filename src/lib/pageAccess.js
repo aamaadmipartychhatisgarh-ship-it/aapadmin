@@ -46,36 +46,46 @@ export async function ensurePagePermissionsSchema() {
          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
-    await backfillLegacyFixedPages();
+    await cleanupBackfilledFixedPages();
     ensured = true;
   } catch (e) {
     console.error("[pageAccess] ensure schema:", e?.message || e);
   }
 }
 
-// One-time, non-destructive migration: because the auto-union of role "fixed"
-// pages is retired, any EXISTING managed caller who was silently keeping My
-// Workspace / My Calls / Wrong Numbers now has those written into their real
-// grants — so their effective access is unchanged. INSERT IGNORE makes it
-// idempotent (safe to re-run), and it only ever ADDS the pages such users were
-// already getting. New/other users are untouched.
-async function backfillLegacyFixedPages() {
+// ROOT-CAUSE FIX (Page Access auto-assignment bug).
+//
+// A previous migration wrote the caller "fixed" pages (My Workspace / My Calls /
+// Wrong Numbers) into every MANAGED caller's real grants so retiring the old
+// auto-union wouldn't change their access. But that migration also ran against
+// BRAND-NEW managed callers: an admin creating a user and assigning only
+// "Contacts" ended up with Contacts + workspace + calls + wrong_numbers, because
+// the migration re-inserted the legacy pages on the next request. That is exactly
+// the reported "extra pages appear" bug — a managed user must have EXACTLY the
+// pages the admin assigned and nothing else.
+//
+// This reverses that migration and heals already-polluted users. The injected
+// rows are unambiguously identifiable: the migration inserted them with
+// granted_by = NULL, and EVERY legitimate grant (user creation, the Page Access
+// POST/PUT save) is written with granted_by = the admin's id (never NULL). So we
+// delete precisely the legacy-key rows that have granted_by IS NULL — the exact
+// signature of the auto-injected pages — and never touch an admin's real
+// assignment. Idempotent and safe to re-run.
+const LEGACY_FIXED_KEYS = ["workspace", "calls", "wrong_numbers"];
+async function cleanupBackfilledFixedPages() {
   try {
-    const managed = await query(
-      `SELECT c.user_id, u.role FROM page_access_config c JOIN users u ON u.id = c.user_id`
+    const placeholders = LEGACY_FIXED_KEYS.map(() => "?").join(",");
+    const res = await query(
+      `DELETE FROM page_permissions
+        WHERE granted_by IS NULL
+          AND page_key IN (${placeholders})`,
+      LEGACY_FIXED_KEYS
     );
-    for (const m of managed) {
-      const keys = (LEGACY_FIXED_ROLE_PAGES[normalizeRole(m.role)] || []).filter(isValidPageKey);
-      for (const k of keys) {
-        // eslint-disable-next-line no-await-in-loop
-        await query(
-          `INSERT IGNORE INTO page_permissions (user_id, page_key, granted_by) VALUES (?, ?, NULL)`,
-          [m.user_id, k]
-        );
-      }
+    if (res?.affectedRows) {
+      console.log(`[pageAccess] removed ${res.affectedRows} auto-injected legacy page grant(s)`);
     }
   } catch (e) {
-    console.error("[pageAccess] backfill legacy fixed pages:", e?.message || e);
+    console.error("[pageAccess] cleanup backfilled fixed pages:", e?.message || e);
   }
 }
 
@@ -117,21 +127,18 @@ function isSuper(role) {
 }
 
 // EXACT-ASSIGNMENT MODEL: a managed user's access is EXACTLY the pages assigned
-// to them — nothing is auto-granted. There are no more "fixed/locked" pages that
-// a role silently keeps: if a Caller needs My Workspace / My Calls / Wrong
-// Numbers, the admin assigns those pages explicitly like any other. This makes
-// "0 assigned → 0 access" hold for every role (see the ticket).
+// to them — nothing is auto-granted. There are NO "fixed/locked" pages that a
+// role silently keeps: if a Caller needs My Workspace / My Calls / Wrong Numbers,
+// the admin assigns those pages explicitly like any other. This is what makes
+// "0 assigned → 0 access, N assigned → exactly N access" hold for every role.
 //
-// The pages a Caller used to keep automatically are preserved for EXISTING
-// managed callers by a one-time backfill into their real grants
-// (backfillLegacyFixedPages below), so retiring the auto-union removes access
-// from nobody. fixedPagesForRole now returns [] for every role; it is kept only
-// so the many call sites don't need to change (adding nothing is a safe no-op).
-const LEGACY_FIXED_ROLE_PAGES = {
-  [ROLES.CALLER]: ["workspace", "calls", "wrong_numbers"],
-};
+// fixedPagesForRole returns [] for every role — there is no auto-grant of any
+// kind. It is kept as a no-op so the existing call sites (which union it in) need
+// no change: unioning an empty set adds nothing. Do NOT reintroduce a non-empty
+// return here — that is precisely the auto-assignment bug this file guards
+// against.
 export function fixedPagesForRole() {
-  return []; // no automatic pages for any role anymore
+  return []; // no automatic pages for any role — managed access = grants only
 }
 
 // All explicit grants for one user, as a Set of page keys (validated against the
