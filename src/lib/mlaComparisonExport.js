@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
+import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
 // Excel + PDF export for the Current MLA vs AAP Candidate vote comparison. Both
 // are built from the SAME dataset rows the Comparison screen shows (spec §14),
@@ -65,7 +66,7 @@ export async function buildComparisonWorkbookBuffer(rows) {
 }
 
 const pdfStyles = StyleSheet.create({
-  page: { paddingTop: 28, paddingBottom: 34, paddingHorizontal: 20, fontSize: 8, fontFamily: "Helvetica" },
+  page: { paddingTop: PDF_HEADER_HEIGHT + 12, paddingBottom: 34, paddingHorizontal: 20, fontSize: 8, fontFamily: "Helvetica" },
   title: { fontSize: 14, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   subtitle: { fontSize: 9, color: "#555", marginBottom: 10 },
   headerRow: { flexDirection: "row", backgroundColor: "#164FA3", paddingVertical: 5, alignItems: "center" },
@@ -93,12 +94,13 @@ const PDF_COLUMNS = [
   { header: "Vote Lead", flex: 1.3, get: (r) => leadLabel(r) },
 ];
 
-function ComparisonPdfDoc({ rows, subtitle }) {
+function ComparisonPdfDoc({ rows, subtitle, headerPhoto }) {
   const headerEls = PDF_COLUMNS.map((c, i) =>
     React.createElement(Text, { key: i, style: [pdfStyles.cellHeader, { flex: c.flex, textAlign: c.align || "left" }] }, c.header)
   );
   return React.createElement(Document, null,
     React.createElement(Page, { size: "A4", orientation: "landscape", style: pdfStyles.page, wrap: true },
+      React.createElement(PdfHeader, { photo: headerPhoto, subtitle: "MLA vs AAP Vote Comparison" }),
       React.createElement(Text, { style: pdfStyles.title }, "Current MLA vs AAP Competitor – Vote Comparison"),
       React.createElement(Text, { style: pdfStyles.subtitle }, subtitle),
       // Fixed header repeats at the top of every page.
@@ -121,7 +123,8 @@ function ComparisonPdfDoc({ rows, subtitle }) {
 
 export async function buildComparisonPdfBuffer(rows, subtitle = "") {
   const sub = subtitle || `${rows.length} assembl${rows.length === 1 ? "y" : "ies"} · ${new Date().toLocaleString("en-GB")}`;
-  return renderToBuffer(React.createElement(ComparisonPdfDoc, { rows, subtitle: sub }));
+  const headerPhoto = await loadPdfHeaderPhoto();
+  return renderToBuffer(React.createElement(ComparisonPdfDoc, { rows, subtitle: sub, headerPhoto }));
 }
 
 // Timestamped filename (application timezone) for either export.

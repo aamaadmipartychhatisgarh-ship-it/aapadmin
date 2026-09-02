@@ -4,6 +4,7 @@ import React from "react";
 import { query } from "@/lib/db";
 import { photosToDataUris } from "@/lib/photoDataUri";
 import { DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
 // Shared Excel export for the Contacts module (admin + supervisor). Both list
 // routes build the SAME WHERE clause + params they use for the on-screen table;
@@ -180,7 +181,7 @@ const PDF_COLUMNS = [
 
 const PHOTO_FLEX = 0.7;
 const pdfStyles = StyleSheet.create({
-  page: { padding: 22, fontSize: 8, fontFamily: "Helvetica" },
+  page: { paddingTop: PDF_HEADER_HEIGHT + 10, paddingBottom: 22, paddingHorizontal: 22, fontSize: 8, fontFamily: "Helvetica" },
   title: { fontSize: 15, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   subtitle: { fontSize: 9, color: "#555", marginBottom: 10 },
   row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 3, alignItems: "center" },
@@ -211,9 +212,10 @@ export function PdfPhotoCell({ dataUri, name }) {
       React.createElement(Text, { style: pdfStyles.photoInitials }, photoInitials(name))));
 }
 
-function ContactsPdfDoc({ rows, photos, subtitle, columns, includePhoto }) {
+function ContactsPdfDoc({ rows, photos, subtitle, columns, includePhoto, headerPhoto }) {
   return React.createElement(Document, null,
     React.createElement(Page, { size: "A4", orientation: "landscape", style: pdfStyles.page },
+      React.createElement(PdfHeader, { photo: headerPhoto, subtitle: "Contacts Export" }),
       React.createElement(Text, { style: pdfStyles.title }, "Contacts Export"),
       React.createElement(Text, { style: pdfStyles.subtitle }, subtitle),
       React.createElement(View, { style: [pdfStyles.row, pdfStyles.headerRow] },
@@ -247,7 +249,8 @@ export async function buildContactsPdfBuffer(rows, subtitle = "", cols) {
     : [];
   const embedded = photos.filter(Boolean).length;
   console.log(`[Contacts PDF] ${rows.length} rows, ${columns.length} cols, photo=${includePhoto}, ${embedded} photos embedded`);
-  return renderToBuffer(React.createElement(ContactsPdfDoc, { rows, photos, subtitle: sub, columns, includePhoto }));
+  const headerPhoto = await loadPdfHeaderPhoto();
+  return renderToBuffer(React.createElement(ContactsPdfDoc, { rows, photos, subtitle: sub, columns, includePhoto, headerPhoto }));
 }
 
 // Descriptive, timestamped filename (application timezone). `ext` picks the

@@ -7,6 +7,7 @@ import { hasWrongNumberColumn } from "@/lib/contactExtras";
 import * as XLSX from "xlsx";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
+import { PdfHeader, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
 // GET /api/admin/wrong-numbers/export/xlsx|pdf — Supervisor/Admin only.
 export async function GET(req, { params }) {
@@ -99,7 +100,7 @@ export async function GET(req, { params }) {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 24, fontSize: 8, fontFamily: "Helvetica" },
+  page: { paddingTop: PDF_HEADER_HEIGHT + 10, paddingBottom: 24, paddingHorizontal: 24, fontSize: 8, fontFamily: "Helvetica" },
   title: { fontSize: 16, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   subtitle: { fontSize: 9, color: "#555", marginBottom: 12 },
   row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 3 },
@@ -119,6 +120,7 @@ const COLS = [
 function Doc({ rows, subtitle }) {
   return React.createElement(Document, null,
     React.createElement(Page, { size: "A4", orientation: "landscape", style: styles.page },
+      React.createElement(PdfHeader, { subtitle: "Wrong Numbers" }),
       React.createElement(Text, { style: styles.title }, "Wrong Numbers"),
       React.createElement(Text, { style: styles.subtitle }, subtitle),
       React.createElement(View, { style: [styles.row, styles.headerRow] },

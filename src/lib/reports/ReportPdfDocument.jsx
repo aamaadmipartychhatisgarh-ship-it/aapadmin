@@ -1,7 +1,6 @@
-import fs from "fs";
-import path from "path";
-import { Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
+import { PdfHeader, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
 // Professional print/export template shared by the PDF export route — org
 // header + logo, filters-used summary, generated date/by, page numbers,
@@ -11,17 +10,8 @@ import React from "react";
 // print-preview, since a PDF download and an in-browser print are different
 // user journeys but should look like the same report.
 
-let logoBuffer = null;
-function getLogo() {
-  if (logoBuffer === null) {
-    try { logoBuffer = fs.readFileSync(path.join(process.cwd(), "public", "aap_logo.jpg")); }
-    catch { logoBuffer = false; }
-  }
-  return logoBuffer || null;
-}
-
 const styles = StyleSheet.create({
-  page: { padding: 28, paddingBottom: 40, fontSize: 8, fontFamily: "Helvetica" },
+  page: { paddingTop: PDF_HEADER_HEIGHT + 12, paddingBottom: 40, paddingHorizontal: 28, fontSize: 8, fontFamily: "Helvetica" },
   header: { flexDirection: "row", alignItems: "center", marginBottom: 10, paddingBottom: 8, borderBottom: 2, borderColor: "#164FA3" },
   logo: { width: 34, height: 34, borderRadius: 17, marginRight: 10 },
   orgName: { fontSize: 13, fontFamily: "Helvetica-Bold", color: "#0B3A82" },
@@ -42,7 +32,6 @@ const styles = StyleSheet.create({
 });
 
 export default function ReportPdfDocument({ title, filterLines, generatedBy, result, orientation }) {
-  const logo = getLogo();
   const generatedAt = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
 
   return React.createElement(
@@ -52,18 +41,8 @@ export default function ReportPdfDocument({ title, filterLines, generatedBy, res
       Page,
       { size: "A4", orientation, style: styles.page },
 
-      // Header
-      React.createElement(
-        View,
-        { style: styles.header },
-        logo && React.createElement(Image, { src: logo, style: styles.logo }),
-        React.createElement(
-          View,
-          null,
-          React.createElement(Text, { style: styles.orgName }, "Aam Aadmi Party, Chhattisgarh"),
-          React.createElement(Text, { style: styles.orgSub }, "Honest Politics | Better Chhattisgarh")
-        )
-      ),
+      // Common fixed header (Arvind Kejriwal Ji photo + party name), on every page.
+      React.createElement(PdfHeader, { subtitle: `${title} Report` }),
 
       React.createElement(Text, { style: styles.title }, `${title} Report`),
       React.createElement(

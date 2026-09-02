@@ -4,9 +4,10 @@ import { authOptions, isSupervisor } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
+import { PdfHeader, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
 const styles = StyleSheet.create({
-  page: { padding: 32, fontSize: 10, fontFamily: "Helvetica" },
+  page: { paddingTop: PDF_HEADER_HEIGHT + 12, paddingBottom: 32, paddingHorizontal: 32, fontSize: 10, fontFamily: "Helvetica" },
   title: { fontSize: 18, fontFamily: "Helvetica-Bold", marginBottom: 4 },
   subtitle: { fontSize: 10, color: "#555", marginBottom: 16 },
   table: { display: "flex", flexDirection: "column", borderTop: 1, borderColor: "#ddd" },
@@ -46,6 +47,7 @@ function ReportDocument({ title, subtitle, columns, rows }) {
     React.createElement(
       Page,
       { size: "A4", style: styles.page },
+      React.createElement(PdfHeader, { subtitle: title }),
       React.createElement(Text, { style: styles.title }, title),
       React.createElement(Text, { style: styles.subtitle }, subtitle),
       React.createElement(Table, { columns, rows })

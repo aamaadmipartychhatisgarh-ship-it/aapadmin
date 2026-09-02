@@ -6,6 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { fetchIncompleteDesignation, normalizeLevel, LEVEL_LABEL } from "@/lib/incompleteDesignations";
 import * as XLSX from "xlsx";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
+import { PdfHeader, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 import React from "react";
 
 // GET /api/contacts/incomplete/export/xlsx|pdf?level=&designation_id=&location_id=&status=
@@ -85,7 +86,7 @@ export async function GET(req, { params }) {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 24, fontSize: 9, fontFamily: "Helvetica" },
+  page: { paddingTop: PDF_HEADER_HEIGHT + 10, paddingBottom: 24, paddingHorizontal: 24, fontSize: 9, fontFamily: "Helvetica" },
   title: { fontSize: 16, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   subtitle: { fontSize: 9, color: "#555", marginBottom: 12 },
   row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 4 },
@@ -103,6 +104,7 @@ function Doc({ rows, levelLabel, subtitle }) {
   ];
   return React.createElement(Document, null,
     React.createElement(Page, { size: "A4", style: styles.page },
+      React.createElement(PdfHeader, { subtitle: "Incomplete Designation" }),
       React.createElement(Text, { style: styles.title }, "Incomplete Designation"),
       React.createElement(Text, { style: styles.subtitle }, subtitle),
       React.createElement(View, { style: [styles.row, styles.headerRow] },

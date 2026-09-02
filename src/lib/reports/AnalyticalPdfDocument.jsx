@@ -1,24 +1,14 @@
-import fs from "fs";
-import path from "path";
-import { Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
+import { PdfHeader, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
 // Rich analytical report: KPI cards, a per-day bar chart, and breakdown tables
 // (by status / assembly / caller / designation …) with share % and inline bars.
 // Built from the payload produced by src/lib/reports/analytical.js.
 
-let logoBuffer = null;
-function getLogo() {
-  if (logoBuffer === null) {
-    try { logoBuffer = fs.readFileSync(path.join(process.cwd(), "public", "aap_logo.jpg")); }
-    catch { logoBuffer = false; }
-  }
-  return logoBuffer || null;
-}
-
 const BLUE = "#164FA3";
 const s = StyleSheet.create({
-  page: { padding: 28, paddingBottom: 42, fontSize: 9, fontFamily: "Helvetica", color: "#1f2937" },
+  page: { paddingTop: PDF_HEADER_HEIGHT + 12, paddingBottom: 42, paddingHorizontal: 28, fontSize: 9, fontFamily: "Helvetica", color: "#1f2937" },
   header: { flexDirection: "row", alignItems: "center", marginBottom: 8, paddingBottom: 8, borderBottom: 2, borderColor: BLUE },
   logo: { width: 34, height: 34, borderRadius: 17, marginRight: 10 },
   orgName: { fontSize: 13, fontFamily: "Helvetica-Bold", color: "#0B3A82" },
@@ -86,7 +76,6 @@ function BreakdownTable({ section }) {
 }
 
 export default function AnalyticalPdfDocument({ title, subtitle, filterLines = [], generatedBy, data }) {
-  const logo = getLogo();
   const { total = 0, sections = [], timeseries } = data || {};
   const assemblySection = sections.find((x) => x.key === "assembly");
   const topAssembly = assemblySection?.rows?.[0];
@@ -95,14 +84,8 @@ export default function AnalyticalPdfDocument({ title, subtitle, filterLines = [
   return (
     <Document>
       <Page size="A4" style={s.page}>
-        {/* Header */}
-        <View style={s.header}>
-          {logo ? <Image style={s.logo} src={logo} /> : null}
-          <View>
-            <Text style={s.orgName}>Aam Aadmi Party, Chhattisgarh</Text>
-            <Text style={s.orgSub}>Honest Politics · Better Chhattisgarh</Text>
-          </View>
-        </View>
+        {/* Common fixed header (Kejriwal photo + party name), on every page. */}
+        <PdfHeader subtitle={title} />
 
         <Text style={s.title}>{title} — Analytical Report</Text>
         <View style={s.metaRow}>

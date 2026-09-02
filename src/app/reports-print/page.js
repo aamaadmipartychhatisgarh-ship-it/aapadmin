@@ -75,9 +75,10 @@ function ReportPrintout({ data }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, borderBottom: "3px solid #164FA3", paddingBottom: 10, marginBottom: 10 }}>
-        <img src="/aap_logo.jpg" alt="AAP Logo" style={{ width: 44, height: 44, borderRadius: 22 }} />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/kejriwal-header.jpg" alt="Arvind Kejriwal" style={{ width: 44, height: 44, borderRadius: 22, objectFit: "cover" }} />
         <div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: "#0B3A82" }}>Aam Aadmi Party, Chhattisgarh</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#164FA3" }}>Aam Aadmi Party Chhattisgarh</div>
           <div style={{ fontSize: 11, color: "#666" }}>Honest Politics | Better Chhattisgarh</div>
         </div>
       </div>

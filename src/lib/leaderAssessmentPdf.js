@@ -2,6 +2,7 @@ import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@
 import React from "react";
 import { photoToDataUri } from "@/lib/photoDataUri";
 import { MLA_COLUMNS, CANDIDATE_COLUMNS, PHOTO_KEY, pickCols } from "@/lib/leaderAssessmentColumns";
+import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
 // PDF export for the MLA Profile list and the AAP Candidate list. Each row shows
 // the record's OWN profile photo, embedded from durable storage (never a broken
@@ -9,7 +10,7 @@ import { MLA_COLUMNS, CANDIDATE_COLUMNS, PHOTO_KEY, pickCols } from "@/lib/leade
 // the rows). Text columns differ per list; the photo handling is shared.
 const PHOTO_FLEX = 0.7;
 const styles = StyleSheet.create({
-  page: { padding: 22, fontSize: 8, fontFamily: "Helvetica" },
+  page: { paddingTop: PDF_HEADER_HEIGHT + 10, paddingBottom: 22, paddingHorizontal: 22, fontSize: 8, fontFamily: "Helvetica" },
   title: { fontSize: 15, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   subtitle: { fontSize: 9, color: "#555", marginBottom: 10 },
   row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 3, alignItems: "center" },
@@ -38,9 +39,10 @@ function PhotoCell({ dataUri, name }) {
       React.createElement(Text, { style: styles.photoInitials }, initials(name))));
 }
 
-function ListDoc({ title, subtitle, columns, rows, photos, nameKey, includePhoto }) {
+function ListDoc({ title, subtitle, columns, rows, photos, nameKey, includePhoto, headerPhoto }) {
   return React.createElement(Document, null,
     React.createElement(Page, { size: "A4", orientation: "landscape", style: styles.page },
+      React.createElement(PdfHeader, { photo: headerPhoto, subtitle: title }),
       React.createElement(Text, { style: styles.title }, title),
       React.createElement(Text, { style: styles.subtitle }, subtitle),
       React.createElement(View, { style: [styles.row, styles.headerRow] },
@@ -73,7 +75,8 @@ async function buildListPdf({ title, subtitle, columns, rows, nameKey, includePh
     : [];
   const embedded = photos.filter(Boolean).length;
   console.log(`[LA PDF] ${title}: ${rows.length} rows, ${columns.length} cols, photo=${includePhoto}, ${embedded} embedded`);
-  return renderToBuffer(React.createElement(ListDoc, { title, subtitle, columns, rows, photos, nameKey, includePhoto }));
+  const headerPhoto = await loadPdfHeaderPhoto();
+  return renderToBuffer(React.createElement(ListDoc, { title, subtitle, columns, rows, photos, nameKey, includePhoto, headerPhoto }));
 }
 
 // `cols` (optional): null → all columns + photo (unchanged); an explicit key list
