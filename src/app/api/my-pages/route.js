@@ -14,6 +14,10 @@ export async function GET() {
     if (!session?.user) return NextResponse.json({ pages: [] }, { status: 401 });
     const keys = await getEffectivePageKeys(session.user.id, session.user.role);
     const restricted = await isPageRestricted(session);
+    // Permission-trace log (per ticket): the EXACT page set this API returns for
+    // this user. If the sidebar/route shows more than this, the divergence is on
+    // the client; if this shows more than the admin assigned, it is server-side.
+    console.log(`[my-pages] user=${session.user.id} role=${session.user.role} restricted=${restricted} pages=${JSON.stringify([...keys])}`);
     return NextResponse.json(
       { pages: [...keys], restricted },
       { headers: { "Cache-Control": "no-store, max-age=0" } }

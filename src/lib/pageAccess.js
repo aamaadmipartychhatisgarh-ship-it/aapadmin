@@ -61,115 +61,51 @@ export async function ensurePagePermissionsSchema() {
          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
-    // Tracks one-time data migrations so they run exactly once, ever.
-    await query(
-      `CREATE TABLE IF NOT EXISTS app_migrations (
-         name VARCHAR(128) PRIMARY KEY,
-         applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
-    );
-    // Remove the auto-injected legacy caller pages (My Workspace / My Calls /
-    // Wrong Numbers) that an earlier migration wrote into managed callers. Safe
-    // to run every start: legitimate grants always carry a non-null granted_by;
-    // only the auto-injected rows are granted_by NULL.
-    await cleanupBackfilledFixedPages();
-    // ONE-TIME: because normal roles are now grants-only (no role fallback),
-    // preserve access for EXISTING normal users by seeding their current role
-    // baseline as explicit grants. Runs once, against the users that exist now;
-    // new users created afterwards are never seeded, so they start at ZERO.
-    await runOnce("seed_normal_baseline_v1", seedExistingNormalUsersBaseline);
+    // Remove EVERY auto-granted page row so a normal user only ever holds the
+    // pages an admin explicitly assigned. Runs every start (idempotent) so a
+    // stale/older deploy is self-healed the moment this code goes live.
+    await cleanupAutoGrantedPages();
     ensured = true;
   } catch (e) {
     console.error("[pageAccess] ensure schema:", e?.message || e);
   }
 }
 
-// Run `fn` exactly once ever, keyed by `name` in app_migrations.
-async function runOnce(name, fn) {
-  try {
-    const done = await query(`SELECT 1 FROM app_migrations WHERE name = ? LIMIT 1`, [name]);
-    if (done.length) return;
-    await fn();
-    await query(`INSERT IGNORE INTO app_migrations (name) VALUES (?)`, [name]);
-  } catch (e) {
-    console.error(`[pageAccess] migration ${name}:`, e?.message || e);
-  }
-}
-
-// ROOT-CAUSE FIX (Page Access auto-assignment bug).
-//
-// A previous migration wrote the caller "fixed" pages (My Workspace / My Calls /
-// Wrong Numbers) into every MANAGED caller's real grants so retiring the old
-// auto-union wouldn't change their access. But that migration also ran against
-// BRAND-NEW managed callers: an admin creating a user and assigning only
-// "Contacts" ended up with Contacts + workspace + calls + wrong_numbers, because
-// the migration re-inserted the legacy pages on the next request. That is exactly
-// the reported "extra pages appear" bug — a managed user must have EXACTLY the
-// pages the admin assigned and nothing else.
-//
-// This reverses that migration and heals already-polluted users. The injected
-// rows are unambiguously identifiable: the migration inserted them with
-// granted_by = NULL, and EVERY legitimate grant (user creation, the Page Access
-// POST/PUT save) is written with granted_by = the admin's id (never NULL). So we
-// delete precisely the legacy-key rows that have granted_by IS NULL — the exact
-// signature of the auto-injected pages — and never touch an admin's real
-// assignment. Idempotent and safe to re-run.
+// EXACT-ASSIGNMENT ENFORCER — deletes every AUTO-GRANTED page row so a user only
+// ever holds pages an admin explicitly assigned. There are two historical
+// sources of auto-granted rows, both removed here:
+//   • granted_by IS NULL for a legacy caller page (workspace/calls/wrong_numbers)
+//     — the retired "fixed pages" backfill.
+//   • granted_by = 0 — the retired baseline seed (0 was never a real admin id).
+// EVERY legitimate assignment (user creation with page_keys, the Page Access
+// POST/PUT save) is written with granted_by = the admin's real user id (a
+// positive integer), so this never touches an admin's real assignment. Runs on
+// every start (idempotent) so an older/stale deploy is healed the instant this
+// code goes live, and no normal user is ever left with default/role pages.
 const LEGACY_FIXED_KEYS = ["workspace", "calls", "wrong_numbers"];
-async function cleanupBackfilledFixedPages() {
+async function cleanupAutoGrantedPages() {
   try {
     const placeholders = LEGACY_FIXED_KEYS.map(() => "?").join(",");
     const res = await query(
       `DELETE FROM page_permissions
-        WHERE granted_by IS NULL
-          AND page_key IN (${placeholders})`,
+        WHERE granted_by = 0
+           OR (granted_by IS NULL AND page_key IN (${placeholders}))`,
       LEGACY_FIXED_KEYS
     );
     if (res?.affectedRows) {
-      console.log(`[pageAccess] removed ${res.affectedRows} auto-injected legacy page grant(s)`);
+      console.log(`[pageAccess] removed ${res.affectedRows} auto-granted page row(s)`);
     }
-  } catch (e) {
-    console.error("[pageAccess] cleanup backfilled fixed pages:", e?.message || e);
-  }
-}
-
-// Sentinel granted_by for system-seeded baseline grants (not a real admin id).
-// Non-null on purpose so the legacy cleanup (granted_by IS NULL only) never
-// removes a seeded grant.
-const SYSTEM_GRANT = 0;
-
-// ONE-TIME migration (see runOnce): normal roles are now grants-only, so any
-// EXISTING normal user who was never configured through Page Access — and thus
-// relied on the now-removed role baseline — is seeded with that baseline as
-// explicit grants and marked managed. Their access is therefore unchanged, but
-// it is now stored explicitly. Super Admins (full access) and oversight roles
-// (which keep their role baseline) are skipped. New users created after this
-// runs are never seeded, so they start at ZERO until an admin assigns pages.
-async function seedExistingNormalUsersBaseline() {
-  const users = await query(
-    `SELECT u.id, u.role FROM users u
-       LEFT JOIN page_access_config c ON c.user_id = u.id
-      WHERE c.user_id IS NULL`
-  );
-  let seeded = 0;
-  for (const u of users) {
-    const role = normalizeRole(u.role);
-    if (role === ROLES.SUPER_ADMIN || isOversightRole(role)) continue;
-    const keys = baselinePagesForRole(role).filter(isValidPageKey);
-    for (const k of keys) {
-      // eslint-disable-next-line no-await-in-loop
-      await query(
-        `INSERT IGNORE INTO page_permissions (user_id, page_key, granted_by) VALUES (?, ?, ?)`,
-        [u.id, k, SYSTEM_GRANT]
-      );
-    }
-    // eslint-disable-next-line no-await-in-loop
+    // Drop now-empty managed markers created by the retired seed (updated_by = 0),
+    // provided the user has no remaining grants — so they present as a clean
+    // unconfigured account rather than a managed-but-empty one.
     await query(
-      `INSERT IGNORE INTO page_access_config (user_id, updated_by) VALUES (?, ?)`,
-      [u.id, SYSTEM_GRANT]
+      `DELETE c FROM page_access_config c
+        WHERE c.updated_by = 0
+          AND NOT EXISTS (SELECT 1 FROM page_permissions p WHERE p.user_id = c.user_id)`
     );
-    seeded++;
+  } catch (e) {
+    console.error("[pageAccess] cleanup auto-granted pages:", e?.message || e);
   }
-  if (seeded) console.log(`[pageAccess] seeded baseline grants for ${seeded} existing normal user(s)`);
 }
 
 // Mark a user as Page-Access managed (idempotent). Called on every save.
