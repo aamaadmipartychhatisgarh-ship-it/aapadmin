@@ -1,38 +1,32 @@
 import { query } from "@/lib/db";
-import { normalizeRole, ROLES, roleOf, OVERSIGHT_ROLES } from "@/lib/permissions";
+import { normalizeRole, ROLES, roleOf } from "@/lib/permissions";
 import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath, expandPageKeys, grantSetAllows } from "@/lib/pages";
 
 // Page Access Management backend — the SINGLE source of truth for navigation,
 // client route guards and backend/API authorization.
 //
-// ACCESS MODEL (positive allow-list; fail-closed for normal users):
+// ACCESS MODEL — a user is either MANAGED or not, and that flag is the correct
+// discriminator between a NEW user and an EXISTING (never-configured) user:
 //   • Super Admin → every page, always (can never be locked out).
-//   • NORMAL user (a role that is NOT an oversight/management role — i.e. Caller,
-//     Worker, Press/Media, Social Media, Media User, …): access is EXACTLY the
-//     pages explicitly granted to them, and NOTHING else. There is no role
-//     baseline, no default page, no fallback. Zero grants ⇒ ZERO access. This is
-//     enforced regardless of the "managed" flag, so a brand-new normal user —
-//     who is created with no grants — can never see a page the admin did not
-//     assign, even if the managed marker was never written.
-//   • OVERSIGHT user (Super/State/Zone/District/Assembly Admin except Super, and
-//     Supervisor): if the Super Admin has MANAGED them through Page Access, their
-//     access is EXACTLY their grants (same as a normal user). If they were never
-//     configured, they keep their normal role baseline — so management accounts
-//     are never accidentally locked out and their curated dashboards are intact.
+//   • MANAGED user (a row exists in page_access_config — the Super Admin has
+//     taken control of this user's pages through Page Access, even to an empty
+//     set): access is EXACTLY their explicit grants, nothing role-derived.
+//     Assigning "Tasks" grants Tasks and nothing else; removing every page
+//     leaves ZERO pages (no role default reappears). A brand-NEW user is created
+//     managed-with-zero-grants (see the users API), so "new user ⇒ no pages"
+//     falls out of this automatically — no default/role/fallback page is added.
+//   • UNMANAGED user (never configured through Page Access): their normal
+//     role-based baseline, UNCHANGED. This is what preserves EXISTING users —
+//     an old user who was working before this feature keeps exactly the access
+//     they had, and is NEVER shown "no pages" as a side effect of the new-user
+//     rule. Their access derives from their role, so it is inherently
+//     self-restoring and no migration can wipe it.
 //
-// "Managed" (a row in page_access_config) records that the Super Admin saved a
-// Page-Access config for a user (even an empty one). It gates the OVERSIGHT
-// baseline fallback only; normal users are grants-only either way.
-//
-// "Fail-closed for normal roles" is the key rule that fixes the recurring
-// "new user sees pages it was never assigned" bug: a normal user's pages come
-// ONLY from page_permissions, so an empty grant set is always ZERO access.
-
-// A role that is NOT privileged management → grants-only (fail-closed). Super
-// Admin is handled separately (full access) and is never "normal".
-function isOversightRole(role) {
-  return OVERSIGHT_ROLES.includes(normalizeRole(role));
-}
+// The new-user rule is therefore implemented ONLY at creation time (the user is
+// marked managed with an empty grant set) — never by resetting existing users.
+// This is the DB lifecycle state, never a fragile "grants.length === 0" guess:
+// an existing user may legitimately have zero grants, but as long as they are
+// UNMANAGED they keep their role baseline.
 
 let ensured = false;
 export async function ensurePagePermissionsSchema() {
@@ -71,17 +65,22 @@ export async function ensurePagePermissionsSchema() {
   }
 }
 
-// EXACT-ASSIGNMENT ENFORCER — deletes every AUTO-GRANTED page row so a user only
-// ever holds pages an admin explicitly assigned. There are two historical
-// sources of auto-granted rows, both removed here:
+// REPAIR MIGRATION — undoes two earlier bad migrations and, crucially, RESTORES
+// existing users that were wrongly reset, without ever touching a real
+// assignment. It removes only machine-written rows, identified precisely:
 //   • granted_by IS NULL for a legacy caller page (workspace/calls/wrong_numbers)
-//     — the retired "fixed pages" backfill.
-//   • granted_by = 0 — the retired baseline seed (0 was never a real admin id).
+//     — the retired "fixed pages" backfill that polluted managed callers.
+//   • granted_by = 0 — the retired baseline SEED (0 was never a real admin id).
 // EVERY legitimate assignment (user creation with page_keys, the Page Access
-// POST/PUT save) is written with granted_by = the admin's real user id (a
-// positive integer), so this never touches an admin's real assignment. Runs on
-// every start (idempotent) so an older/stale deploy is healed the instant this
-// code goes live, and no normal user is ever left with default/role pages.
+// POST/PUT save) carries granted_by = the admin's real user id (> 0), so those
+// are never touched. Deleting the seed rows AND their seed-written managed marker
+// (updated_by = 0) returns those users to the UNMANAGED state, where
+// getEffectivePageKeys gives them their role baseline again — i.e. their old
+// access is restored automatically, no snapshot needed. Runs every start
+// (idempotent), so a database left in a bad state by any prior deploy self-heals
+// the instant this code goes live. It never resets a genuinely-configured user
+// (real granted_by / non-zero updated_by) and never creates or default-assigns
+// any page.
 const LEGACY_FIXED_KEYS = ["workspace", "calls", "wrong_numbers"];
 async function cleanupAutoGrantedPages() {
   try {
@@ -95,9 +94,10 @@ async function cleanupAutoGrantedPages() {
     if (res?.affectedRows) {
       console.log(`[pageAccess] removed ${res.affectedRows} auto-granted page row(s)`);
     }
-    // Drop now-empty managed markers created by the retired seed (updated_by = 0),
-    // provided the user has no remaining grants — so they present as a clean
-    // unconfigured account rather than a managed-but-empty one.
+    // Drop the managed marker the retired seed wrote (updated_by = 0) so those
+    // users revert to UNMANAGED and regain their role baseline. Only markers with
+    // no admin-written grants remain are removed — a user later configured by an
+    // admin has a real updated_by and is left untouched.
     await query(
       `DELETE c FROM page_access_config c
         WHERE c.updated_by = 0
@@ -145,11 +145,13 @@ function isSuper(role) {
   return normalizeRole(role) === ROLES.SUPER_ADMIN;
 }
 
-// EXACT-ASSIGNMENT MODEL: a managed user's access is EXACTLY the pages assigned
-// to them — nothing is auto-granted. There are NO "fixed/locked" pages that a
-// role silently keeps: if a Caller needs My Workspace / My Calls / Wrong Numbers,
-// the admin assigns those pages explicitly like any other. This is what makes
-// "0 assigned → 0 access, N assigned → exactly N access" hold for every role.
+// A MANAGED user's access is EXACTLY the pages assigned to them — nothing is
+// auto-granted. There are NO "fixed/locked" pages a managed user silently keeps:
+// if a managed Caller needs My Workspace / My Calls / Wrong Numbers, the admin
+// assigns those explicitly like any other page. So for a MANAGED user
+// "0 assigned → 0 access, N assigned → exactly N access" always holds. (An
+// UNMANAGED user is separate: they keep their role baseline, so existing users
+// are never stripped of access — see getEffectivePageKeys.)
 //
 // fixedPagesForRole returns [] for every role — there is no auto-grant of any
 // kind. It is kept as a no-op so the existing call sites (which union it in) need
@@ -174,33 +176,38 @@ export async function getUserGrantKeys(userId) {
   }
 }
 
-// A user whose access is governed purely by explicit grants (positive
-// allow-list). True for EVERY normal (non-oversight) user — always, so a normal
-// user with no grants is fully locked down regardless of the managed flag — and
-// for oversight users the Super Admin has configured through Page Access. Super
-// Admin is never restricted; an unconfigured oversight user keeps role baseline.
+// Is this user page-restricted (governed EXACTLY by their explicit grants)?
+//   • Super Admin      → never restricted (full access).
+//   • MANAGED user     → restricted (a Page-Access config row exists — the admin
+//                        has taken control of their pages, even to an empty set).
+//                        A NEW user is created managed-with-zero-grants, so this
+//                        is how "new user ⇒ no pages" is enforced.
+//   • UNMANAGED user   → NOT restricted → keeps their normal role baseline, so an
+//                        existing user who was never configured is never
+//                        stripped of the access they already had.
+// This managed/unmanaged split is the correct discriminator between "new user"
+// (created managed-empty) and "existing user" (unmanaged, role baseline) — it is
+// the DB lifecycle state, never a fragile "grants.length === 0" guess.
 export async function isPageRestricted(session) {
   if (!session?.user) return false;
-  const role = roleOf(session);
-  if (isSuper(role)) return false;
-  if (!isOversightRole(role)) return true;         // normal role → grants-only
-  return isUserManaged(session.user.id);           // oversight → only if configured
+  if (isSuper(roleOf(session))) return false;
+  return isUserManaged(session.user.id);
 }
 
 // Effective accessible page keys for a user.
-//   Super Admin        → every registered page.
-//   Normal role        → EXACTLY the explicit grants (fail-closed; empty ⇒ none).
-//   Oversight, managed → EXACTLY the explicit grants.
-//   Oversight, unmanaged → the role's baseline pages (management default).
+//   Super Admin  → every registered page.
+//   Managed      → EXACTLY the explicit grants (may be empty ⇒ no pages). New
+//                  users land here with zero grants.
+//   Unmanaged    → the role's baseline pages (existing behaviour preserved).
 // expandPageKeys adds implied parent/child keys (a module grant covers its
 // sub-sections; a sub-section grant unlocks the module page + nav).
 export async function getEffectivePageKeys(userId, role) {
   const canonical = normalizeRole(role);
   if (isSuper(canonical)) return new Set(PAGE_KEYS);
-  if (!isOversightRole(canonical) || (await isUserManaged(userId))) {
-    return expandPageKeys([...(await getUserGrantKeys(userId))]); // grants only
+  if (await isUserManaged(userId)) {
+    return expandPageKeys([...(await getUserGrantKeys(userId))]); // managed → grants only
   }
-  return expandPageKeys(baselinePagesForRole(canonical));        // oversight baseline
+  return expandPageKeys(baselinePagesForRole(canonical));        // unmanaged → role baseline
 }
 
 // Does this session's user have access to a given page key?
@@ -209,10 +216,10 @@ export async function userCanAccessPageKey(session, pageKey) {
   if (!isValidPageKey(pageKey)) return false;
   const role = roleOf(session);
   if (isSuper(role)) return true;
-  if (!isOversightRole(role) || (await isUserManaged(session.user.id))) {
-    return grantSetAllows(await getUserGrantKeys(session.user.id), pageKey); // grants only
+  if (await isUserManaged(session.user.id)) {
+    return grantSetAllows(await getUserGrantKeys(session.user.id), pageKey); // managed → grants
   }
-  return baselinePagesForRole(role).includes(pageKey);           // oversight baseline
+  return baselinePagesForRole(role).includes(pageKey);           // unmanaged → role baseline
 }
 
 // Convenience for API routes: authorize by URL path (maps path→page key first).
@@ -224,21 +231,20 @@ export async function userCanAccessPath(session, pathname) {
 }
 
 // THE reusable API gate. `roleOk` is the route's existing role-check result.
-//   • Super Admin → allowed.
-//   • Grants-only user (every normal user; a managed oversight user) → allowed
-//     ONLY if the page is one of their explicit grants. Their role is ignored,
-//     and `roleOk` is NOT consulted — so a normal user can never reach a page's
-//     API just because their role once could.
-//   • Unmanaged oversight user → the route's original role check, unchanged.
+//   • Super Admin      → allowed.
+//   • Managed user     → allowed ONLY if the page is one of their explicit grants
+//     (their role is ignored — an empty grant set means no API access either).
+//   • Unmanaged user   → the route's original role check, unchanged (so an
+//     existing user's API access is exactly what it always was).
 // Insert as: if (!(await pageAllowed(session, KEY, <existingRoleExpr>))) → 401.
 export async function pageAllowed(session, pageKey, roleOk) {
   if (!session?.user) return false;
   const role = roleOf(session);
   if (isSuper(role)) return true;
-  if (!isOversightRole(role) || (await isUserManaged(session.user.id))) {
+  if (await isUserManaged(session.user.id)) {
     return isValidPageKey(pageKey) && grantSetAllows(await getUserGrantKeys(session.user.id), pageKey);
   }
-  return !!roleOk;                                                // unmanaged oversight
+  return !!roleOk;                                                // unmanaged → role check
 }
 
 // Replace a user's entire page assignment set with `pageKeys` (exact set) in one
