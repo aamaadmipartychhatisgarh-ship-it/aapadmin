@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
 import { useCallerPreview } from "@/lib/useCallerPreview";
-import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown, Users, Check } from "lucide-react";
+import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown, Users, Check, ClipboardPaste } from "lucide-react";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { formatDate } from "@/lib/dateFormat";
 import PageHeader from "@/components/PageHeader";
@@ -13,6 +13,7 @@ import CollapsibleSection from "@/components/CollapsibleSection";
 import ActionBar from "@/components/ActionBar";
 import CommonPrintButton from "@/components/common/CommonPrintButton";
 import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
+import PasteTaskModal from "@/components/PasteTaskModal";
 import { DURATION_PRESETS, DURATION_DAYS, addDays, daysBetween } from "@/lib/taskDuration";
 
 const SHOW_COMPLETED_KEY = "tasks_show_completed";
@@ -85,6 +86,7 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState(canManage ? "all" : "mine");
   const [showAdd, setShowAdd] = useState(false);
+  const [showPaste, setShowPaste] = useState(false);
   const [editing, setEditing] = useState(null);
   // Transient success toast (e.g. after creating a task). Auto-dismisses.
   const [notice, setNotice] = useState("");
@@ -179,7 +181,10 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
         title="Tasks"
         description="Assign, track and complete organizational work."
         breadcrumb={[{ label: "Dashboard", href: canManage ? "/dashboard/admin" : "/dashboard" }, { label: "Task Management" }, { label: "Tasks" }]}
-        actions={<ActionBar items={[canManage && { key: "add", label: "Create Task", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) }]} />}
+        actions={<ActionBar items={[
+          canManage && { key: "paste", label: "Paste Task", icon: ClipboardPaste, variant: "secondary", onClick: () => setShowPaste(true) },
+          canManage && { key: "add", label: "Create Task", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
+        ]} />}
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -391,6 +396,17 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
       </div>
 
       {showAdd && <AddTaskModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); setNotice("Task created successfully."); load(); }} />}
+      {showPaste && (
+        <PasteTaskModal
+          users={users}
+          onClose={() => setShowPaste(false)}
+          onCreated={({ created, duplicate }) => {
+            setShowPaste(false);
+            setNotice(duplicate ? "This paste was already submitted." : `${created} task${created === 1 ? "" : "s"} created successfully.`);
+            load();
+          }}
+        />
+      )}
       {editing && <AddTaskModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setNotice("Task updated successfully."); load(); }} />}
     </div>
   );
