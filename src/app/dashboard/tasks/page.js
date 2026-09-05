@@ -9,6 +9,7 @@ import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Cl
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import Avatar from "@/components/Avatar";
 import { formatDate } from "@/lib/dateFormat";
+import { groupTasksByCreatedThenUser } from "@/lib/taskGrouping";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import ActionBar from "@/components/ActionBar";
@@ -187,47 +188,14 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
   // explicit "Completed" status filter always wins over the hide toggle.
   const visibleTasks = data.tasks.filter((t) => showCompleted || statusFilter === "completed" || t.status !== "completed");
 
-  // Two-level grouping — DATE → USER → tasks. Tasks are grouped by their task
-  // date (due date), then WITHIN each date by the ASSIGNED USER (keyed by the
-  // real assigned_to_user_id / team id, never the display name, so users with
-  // similar names never merge). Order inside each user group is preserved from
-  // the list. Dates newest-first; undated last. DISPLAY-ONLY — every task stays
-  // its own DB record, so this composes with Paste Task automatically.
-  const dateGroups = (() => {
-    const byDate = new Map();
-    for (const t of visibleTasks) {
-      const dk = t.deadline ? String(t.deadline).slice(0, 10) : "none";
-      if (!byDate.has(dk)) byDate.set(dk, []);
-      byDate.get(dk).push(t);
-    }
-    return [...byDate.keys()]
-      .sort((a, b) => (a === "none" ? 1 : b === "none" ? -1 : (a < b ? 1 : -1)))
-      .map((dk) => {
-        const byUser = new Map();
-        for (const t of byDate.get(dk)) {
-          // Grouping key = assigned USER ID (or team id), NOT the name. Tasks
-          // with no assignee go to their own "Unassigned" group, never a user's.
-          const uKey = t.assigned_to_user_id ? `u:${t.assigned_to_user_id}`
-            : t.assigned_to_team_id ? `t:${t.assigned_to_team_id}` : "unassigned";
-          if (!byUser.has(uKey)) {
-            byUser.set(uKey, {
-              key: uKey,
-              name: t.assignee_name || t.team_name || "Unassigned",
-              isTeam: !t.assigned_to_user_id && !!t.assigned_to_team_id,
-              unassigned: !t.assigned_to_user_id && !t.assigned_to_team_id,
-              tasks: [],
-            });
-          }
-          byUser.get(uKey).tasks.push(t);
-        }
-        return {
-          key: dk,
-          label: dk === "none" ? "No due date" : formatDate(dk),
-          total: byDate.get(dk).length,
-          users: [...byUser.values()],
-        };
-      });
-  })();
+  // Two-level grouping — DATE → USER → tasks. The DATE is the task's CREATION
+  // date (created_at), NEVER the due date: a task created on 05 Sep stays under
+  // 05 Sep whatever its deadline is, even if the deadline is later changed or
+  // removed. Within each date, tasks are grouped by the ASSIGNED USER (real
+  // user/team id, never the display name). DISPLAY-ONLY — every task stays its
+  // own DB record, so this composes with Paste Task automatically. Grouping
+  // logic (and its unit tests) live in @/lib/taskGrouping.
+  const dateGroups = groupTasksByCreatedThenUser(visibleTasks, formatDate);
 
   // One task row (its S.No is the position within its date group). Extracted so
   // the grouped body can render it; keeps every existing column/action and adds
