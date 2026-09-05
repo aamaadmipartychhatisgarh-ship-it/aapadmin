@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar, { initialsOf } from "@/components/Avatar";
@@ -17,6 +17,7 @@ import {
   CheckCircle2, AlertCircle, MapPin, Phone, Calendar, Wallet,
   Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
   Database, Power, Check, Printer, Flag, FileText,
+  Upload, Download, FileSpreadsheet, AlertTriangle,
 } from "lucide-react";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
@@ -2651,6 +2652,8 @@ export function PollingMaster({ flash, fail }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null); // the assembly row being edited
+  const [importing, setImporting] = useState(false); // bulk-import modal open
+  const [templateBusy, setTemplateBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2658,6 +2661,23 @@ export function PollingMaster({ flash, fail }) {
     catch (e) { fail(e.message); } finally { setLoading(false); }
   }, [fail]);
   useEffect(() => { load(); }, [load]);
+
+  // Download the ready-to-fill sample template (server builds it from real master
+  // assembly names, so the admin can't guess a name that won't match).
+  async function downloadTemplate() {
+    if (templateBusy) return;
+    setTemplateBusy(true);
+    try {
+      const r = await fetch("/api/leader-assessment/polling/template", { cache: "no-store" });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.message || "Could not download the template."); }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "Polling_Station_Master_Template.xlsx";
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { fail(e.message); } finally { setTemplateBusy(false); }
+  }
 
   const q = search.trim().toLowerCase();
   const visible = items.filter((r) => !q || `${r.assembly_name} ${r.district || ""} ${r.lok_sabha || ""} ${r.zone || ""}`.toLowerCase().includes(q));
@@ -2668,6 +2688,16 @@ export function PollingMaster({ flash, fail }) {
         title="Voter Master"
         icon={Building2}
         sub="Assembly-wise voter & booth data. District, Lok Sabha and Zone are derived automatically from Master Data by the selected Assembly (never typed). Each record is tied to its Assembly by ID; select an assembly to view or edit only its data."
+        right={
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={downloadTemplate} disabled={templateBusy} title="Download a sample .xlsx template pre-filled with valid assembly names" className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 text-gray-600 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
+              {templateBusy ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Template
+            </button>
+            <button onClick={() => setImporting(true)} title="Bulk import assembly-wise voter & booth data from Excel/CSV" className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3 py-2 rounded-lg text-sm font-semibold">
+              <Upload size={15} /> Import
+            </button>
+          </div>
+        }
       >
         <div className="relative max-w-md mb-4">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -2723,7 +2753,194 @@ export function PollingMaster({ flash, fail }) {
       </Card>
 
       {editing && <PollingEditor row={editing} onClose={() => setEditing(null)} onSaved={(msg) => { setEditing(null); flash(msg); load(); }} fail={fail} />}
+      {importing && <PollingImportModal onClose={() => setImporting(false)} onImported={() => load()} flash={flash} />}
     </div>
+  );
+}
+
+// Bulk import modal for the Polling Station Master (Voter Master). Pick or drag
+// an .xlsx/.xls/.csv, PREVIEW (server dry-run — validates & counts, writes
+// nothing) so the admin sees exactly what will be added / updated / skipped /
+// rejected, then Import (same parse, real commit inside one transaction). Shows
+// a per-row error report and any assembly names that didn't match Master Data.
+// Both requests hit the same backend gate (guard + polling_master), so an
+// unauthorized user can neither preview nor import.
+function PollingImportModal({ onClose, onImported, flash }) {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);      // a request is in flight
+  const [stage, setStage] = useState("pick");   // pick | preview | done
+  const [preview, setPreview] = useState(null); // dry-run result
+  const [result, setResult] = useState(null);   // committed result
+  const [error, setError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef(null);
+
+  const fmtSize = (n) => {
+    if (n == null) return "";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  };
+  const pickFile = (f) => { if (!f) return; setError(""); setPreview(null); setStage("pick"); setFile(f); };
+  const onDrop = (e) => {
+    e.preventDefault(); setDragOver(false);
+    const f = e.dataTransfer?.files?.[0];
+    if (f) pickFile(f);
+  };
+
+  // One call for both preview (dry_run=1) and commit. A hard 2-minute abort so it
+  // can never hang.
+  async function send(dry) {
+    if (!file || busy) return;
+    setBusy(true); setError("");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const url = `/api/leader-assessment/polling/import${dry ? "?dry_run=1" : ""}`;
+      const r = await fetch(url, { method: "POST", body: fd, signal: controller.signal });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.message || "Import failed. Check the file and try again."); return; }
+      const shaped = {
+        total: d.total_rows || 0,
+        added: d.added || 0,
+        updated: d.updated || 0,
+        duplicatesInFile: d.duplicates_in_file || 0,
+        invalid: d.invalid || 0,
+        rowErrors: (Array.isArray(d.row_errors) ? d.row_errors : []).slice(0, 100),
+        unmatchedAssemblies: d.unmatched_assemblies || [],
+      };
+      if (dry) { setPreview(shaped); setStage("preview"); }
+      else { setResult(shaped); setStage("done"); onImported(); flash?.(shaped.added || shaped.updated ? "Voter data imported." : "Import finished — nothing to write."); }
+    } catch (e) {
+      setError(e?.name === "AbortError"
+        ? "Import timed out. Try a smaller file or split it into batches."
+        : "Import failed — network error. Please try again.");
+    } finally { clearTimeout(timeoutId); setBusy(false); }
+  }
+
+  const view = stage === "done" ? result : preview;
+
+  return (
+    <Modal title="Import Voter Master (Excel / CSV)" onClose={onClose} wide>
+      <div className="space-y-4">
+        {stage !== "done" && (
+          <>
+            <p className="text-sm text-gray-500">
+              One row per <span className="font-medium text-gray-700">Assembly</span>, with Total Voters, Male, Female and Total Booths.
+              Assemblies are matched to Master Data by name — <span className="font-medium text-gray-700">new assemblies are never created</span>,
+              and District / Lok Sabha / Zone are derived automatically. Use the <span className="font-medium text-gray-700">Template</span> for the exact columns.
+            </p>
+
+            <input
+              ref={inputRef} type="file" className="hidden"
+              accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              onChange={(e) => pickFile(e.target.files?.[0] || null)}
+            />
+
+            {file ? (
+              <div className="flex items-center gap-3 border border-gray-200 rounded-xl p-3">
+                <FileSpreadsheet size={22} className="text-emerald-600 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-gray-800 truncate">{file.name}</div>
+                  <div className="text-xs text-gray-400">{fmtSize(file.size)}</div>
+                </div>
+                <button onClick={() => inputRef.current?.click()} disabled={busy} className="text-xs font-semibold text-[#164FA3] hover:underline disabled:opacity-40">Change</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => inputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={onDrop}
+                className={`w-full border-2 border-dashed rounded-xl p-7 text-center transition-colors ${dragOver ? "border-[#164FA3] bg-blue-50/50" : "border-gray-200 hover:border-[#164FA3]/40 hover:bg-blue-50/30"}`}
+              >
+                <Upload size={22} className="mx-auto text-gray-400 mb-1.5" />
+                <div className="text-sm font-semibold text-gray-700">Drag &amp; drop a file here, or click to choose</div>
+                <div className="text-xs text-gray-400 mt-0.5">.xlsx, .xls or .csv</div>
+              </button>
+            )}
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2.5 text-sm flex items-start gap-2">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{error}</span>
+              </div>
+            )}
+          </>
+        )}
+
+        {stage === "preview" && view && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
+            <div className="text-sm font-bold text-gray-800 mb-2">Preview — nothing has been saved yet</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+              <div className="text-gray-600"><span className="font-bold text-gray-900">{nfmt(view.total) || 0}</span> data rows</div>
+              <div className="text-gray-600"><span className="font-bold text-emerald-700">{nfmt(view.added) || 0}</span> new</div>
+              <div className="text-gray-600"><span className="font-bold text-[#164FA3]">{nfmt(view.updated) || 0}</span> to update</div>
+              <div className="text-gray-600"><span className="font-bold text-amber-600">{nfmt(view.duplicatesInFile) || 0}</span> in-file duplicates</div>
+              <div className="text-gray-600"><span className={`font-bold ${view.invalid ? "text-red-600" : "text-gray-900"}`}>{nfmt(view.invalid) || 0}</span> invalid</div>
+            </div>
+            {view.updated > 0 && <div className="text-[11px] text-gray-500 mt-2">{nfmt(view.updated)} assembl{view.updated === 1 ? "y" : "ies"} already have data and will be overwritten with the file’s figures.</div>}
+          </div>
+        )}
+
+        {stage === "done" && view && (
+          <div className={`${(view.added || view.updated) ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-gray-50 border-gray-200 text-gray-700"} border rounded-xl p-4`}>
+            <div className="flex items-center gap-2 font-bold"><CheckCircle2 size={18} /> {(view.added || view.updated) ? "Import completed successfully" : "Import completed — nothing to write"}</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3 text-sm">
+              <div className="text-gray-600"><span className="font-bold text-gray-900">{nfmt(view.total) || 0}</span> data rows</div>
+              <div className="text-gray-600"><span className="font-bold text-emerald-700">{nfmt(view.added) || 0}</span> added</div>
+              <div className="text-gray-600"><span className="font-bold text-[#164FA3]">{nfmt(view.updated) || 0}</span> updated</div>
+              <div className="text-gray-600"><span className="font-bold text-amber-600">{nfmt(view.duplicatesInFile) || 0}</span> duplicates skipped</div>
+              <div className="text-gray-600"><span className={`font-bold ${view.invalid ? "text-red-600" : "text-gray-900"}`}>{nfmt(view.invalid) || 0}</span> invalid skipped</div>
+            </div>
+          </div>
+        )}
+
+        {/* Error report — every rejected/skipped row with its reason. */}
+        {view && view.rowErrors.length > 0 && (
+          <div className="border border-red-100 rounded-xl overflow-hidden">
+            <div className="bg-red-50 px-3 py-2 text-xs font-bold text-red-700 uppercase tracking-wide">Rows needing attention ({view.rowErrors.length})</div>
+            <div className="max-h-52 overflow-y-auto divide-y divide-gray-100">
+              {view.rowErrors.map((e, i) => (
+                <div key={i} className="px-3 py-1.5 text-xs text-gray-600 flex gap-2">
+                  <span className="font-semibold text-gray-500 shrink-0">Row {e.row}</span>
+                  <span className="truncate">{e.assembly || "—"} — {(e.reasons || []).join("; ")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {view && view.unmatchedAssemblies.length > 0 && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            These assembly names didn’t match Master Data and were skipped: {view.unmatchedAssemblies.slice(0, 8).join(", ")}{view.unmatchedAssemblies.length > 8 ? `, +${view.unmatchedAssemblies.length - 8} more` : ""}. Fix the spelling (or add a District column) and re-import.
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4">
+        {stage === "done" ? (
+          <button onClick={onClose} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 text-white rounded-lg font-semibold">Done</button>
+        ) : (
+          <>
+            <button onClick={onClose} disabled={busy} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Cancel</button>
+            {stage === "preview" && (
+              <button onClick={() => { setStage("pick"); setPreview(null); }} disabled={busy} className="px-4 py-2 text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 rounded-lg disabled:opacity-50">Back</button>
+            )}
+            {stage !== "preview" ? (
+              <button onClick={() => send(true)} disabled={!file || busy} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-60 text-white rounded-lg font-semibold inline-flex items-center gap-2">
+                {busy && <Loader2 size={15} className="animate-spin" />}{busy ? "Checking…" : "Preview"}
+              </button>
+            ) : (
+              <button onClick={() => send(false)} disabled={busy || (view && view.added === 0 && view.updated === 0)} title={view && view.added === 0 && view.updated === 0 ? "No valid rows to import" : ""} className="px-5 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-lg font-semibold inline-flex items-center gap-2">
+                {busy && <Loader2 size={15} className="animate-spin" />}{busy ? "Importing…" : `Import ${nfmt((view?.added || 0) + (view?.updated || 0)) || 0} row${((view?.added || 0) + (view?.updated || 0)) === 1 ? "" : "s"}`}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 

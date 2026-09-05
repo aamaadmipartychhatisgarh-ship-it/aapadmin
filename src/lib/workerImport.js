@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { WORKER_TYPES } from "@/lib/workerTypes";
+import { norm, DISTRICT_ALIASES, ASSEMBLY_ALIASES } from "@/lib/cgGeoAliases";
 
 // Shared parse + validate logic for the Contacts Excel/CSV importer
 // (src/app/api/contacts/import-excel/route.js) — used by BOTH the dry-run
@@ -44,10 +45,6 @@ function buildHeaderIndex(headerRow) {
   return idx;
 }
 
-function norm(s) {
-  return String(s || "").trim().replace(/\s+/g, " ").toUpperCase();
-}
-
 // Canonical phone for duplicate comparison: strip everything non-digit and keep
 // the last 10 digits, so all of "9876543210", "+91 9876543210", "91-9876543210"
 // and "+919876543210" collapse to the same key "9876543210". Returns null when
@@ -59,40 +56,9 @@ export function normalizePhone(raw) {
   return digits.length > 10 ? digits.slice(-10) : digits;
 }
 
-// Map common spelling variants in member lists -> the canonical DB name (normalized).
-const DISTRICT_ALIASES = {
-  "BALODABAJAR": "BALODABAZAR-BHATAPARA",
-  "BALODA BAZAR": "BALODABAZAR-BHATAPARA",
-  "BALRAMPUR": "BALRAMPUR-RAMANUJGANJ",
-  "GORELA-PENDRA-MARWAHI": "GAURELA-PENDRA-MARWAHI",
-  "GORELLA-PENDRA-MARWAHI": "GAURELA-PENDRA-MARWAHI",
-  "KHAIRGARH": "KHAIRAGARH-CHHUIKHADAN-GANDAI",
-  "KORIYA": "KOREA",
-  "RAIGADH": "RAIGARH",
-  "SARGUJA": "SURGUJA",
-  "SHAKTI": "SAKTI",
-  "KAWARDHA": "KABEERDHAM",
-  "KABIRDHAM": "KABEERDHAM",
-  "DANTEWADA": "DAKSHIN BASTAR DANTEWADA",
-  "KANKER": "UTTAR BASTAR KANKER",
-};
-const ASSEMBLY_ALIASES = {
-  "BRINDANAWAGARH": "BINDRAWAGARH",
-  "BINDRANAWAGARH": "BINDRAWAGARH",
-  "DHARAMJAYGARH": "DHARAMJAIGARH",
-  "DURG GRAMIN": "DURG RURAL",
-  "KHARSIYA": "KHARSIA",
-  "PALITANAKHAR": "PALI-TANAKHAR",
-  "PALI TANAKHAR": "PALI-TANAKHAR",
-  "RAIGADH": "RAIGARH",
-  "RAIPUR NORTH": "RAIPUR CITY NORTH",
-  "RAIPUR WEST": "RAIPUR CITY WEST",
-  "RAIPUR SOUTH": "RAIPUR CITY SOUTH",
-  "RAIPUR RURAL": "RAIPUR CITY RURAL",
-  "RAMANUJAGANJ": "RAMANUJGANJ",
-  "SARAYPALI": "SARAIPALI",
-  "PRATAPUR": "PRATAPPUR",
-};
+// norm() + the CG district/assembly spelling aliases moved to the shared
+// src/lib/cgGeoAliases.js (single source of truth) so the polling importer reuses
+// the EXACT same tables — re-exported below for back-compat with existing callers.
 
 function resolveLoc(name, byName, aliases) {
   if (!name) return null;
