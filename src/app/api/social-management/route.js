@@ -56,6 +56,19 @@ export async function GET() {
       lsParams
     );
 
+    // The COMPLETE post log for this user's scope — every platform (Facebook,
+    // Instagram, …) and every date. There is deliberately NO date filter and NO
+    // platform filter here: the Command Centre shows all historical + new posts
+    // and the client applies any date/platform/search filter the user selects.
+    //
+    // Previously this was `LIMIT 50` with `ORDER BY posted_at DESC`, which
+    // silently hid records: a post logged with a PAST posted_at (a historical
+    // August entry, or a Facebook post backdated to when it was actually posted)
+    // ranks below the 50 newest rows and fell off — so older posts and Facebook
+    // "disappeared" while a busy Instagram log filled the window. A generous cap
+    // (not 50) keeps a pathological dataset bounded while showing the full log
+    // for any realistic manual-logging volume; total_posts (below) is the true
+    // count so the card and the list agree.
     const recentPosts = await query(
       `SELECT p.*, sp.platform, sp.handle, sp.lok_sabha_name,
               u.username AS author_name
@@ -64,7 +77,7 @@ export async function GET() {
          LEFT JOIN users u ON u.id = p.created_by_user_id
         WHERE 1=1 ${lsFilter}
         ORDER BY COALESCE(p.posted_at, p.created_at) DESC
-        LIMIT 50`,
+        LIMIT 5000`,
       lsParams
     );
 
