@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { usePageGuard } from "@/components/usePageGuard";
+import { usePageAccess } from "@/components/usePageAccess";
 import { canAccessSocial } from "@/lib/permissions";
 import { formatDateTimeDot } from "@/lib/dateFormat";
 import {
@@ -82,6 +83,16 @@ function Body() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
+  // Sub-tab visibility follows Page Access: a MANAGED user sees only the tabs
+  // whose `social_<tab>` sub-page was assigned; an unmanaged/role user sees all.
+  const { pages: myPages, restricted: pageRestricted } = usePageAccess();
+  const SOCIAL_TAB_KEY = { dashboard: "social_dashboard", pages: "social_pages", log: "social_log" };
+  const tabAllowed = (k) => !pageRestricted || (Array.isArray(myPages) && myPages.includes(SOCIAL_TAB_KEY[k]));
+  const visibleTabs = TABS.filter((t) => tabAllowed(t.k));
+  useEffect(() => {
+    if (visibleTabs.length && !visibleTabs.some((t) => t.k === tab)) setTab(visibleTabs[0].k);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageRestricted, myPages]);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [msg, setMsg] = useState("");
@@ -176,7 +187,7 @@ function Body() {
       </div>
 
       <div className="flex gap-2 flex-wrap border-b border-gray-200">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button key={t.k} onClick={() => setTab(t.k)} className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px ${tab === t.k ? "border-[#164FA3] text-[#164FA3]" : "border-transparent text-gray-500 hover:text-gray-700"}`}>{t.l}</button>
         ))}
       </div>

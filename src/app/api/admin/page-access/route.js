@@ -77,11 +77,15 @@ export async function GET() {
 
     // The page catalogue for the dropdown + views, each with the roles that
     // already hold it by baseline (so the UI can show baseline vs granted).
+    // Include parent/tab so the console can render the hierarchical (parent →
+    // sub-page) permission tree. `parent` null = a top-level page.
     const pages = PAGES.map((p) => ({
       key: p.key,
       label: p.label,
       href: p.href,
       icon: p.icon,
+      parent: p.parent || null,
+      tab: !!p.tab,
       baseline_roles: p.roles.map((r) => normalizeRole(r)),
     }));
 

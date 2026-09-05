@@ -329,9 +329,16 @@ export default function DashboardLayout({ children }) {
   // Workspace / Contacts / Reports etc. never appear. Non-restricted users keep
   // their normal role nav. Skipped while previewing another role.
   if (!previewing && pageRestricted && allowedPageKeys) {
+    // Skip `tab: true` sub-pages — they are in-page tabs (Media / Social / Leader
+    // Assessment sections), not separate destinations. Their PARENT container
+    // (added to the effective set when a child is granted) is the one nav item;
+    // which tabs show inside it is enforced by that page. De-dup by href so a
+    // parent granted alongside its children still yields one entry.
+    const seen = new Set();
     navItems = allowedPageKeys
       .map((key) => PAGES.find((p) => p.key === key))
-      .filter(Boolean)
+      .filter((pg) => pg && !pg.tab)
+      .filter((pg) => (seen.has(pg.href) ? false : (seen.add(pg.href), true)))
       .map((pg) => ({ name: pg.label, href: pg.href, icon: PAGE_ICONS[pg.icon] || FileText }));
   }
 

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import SupervisorGuard from "@/components/SupervisorGuard";
+import { useSession } from "next-auth/react";
+import { usePageGuard } from "@/components/usePageGuard";
+import { usePageAccess } from "@/components/usePageAccess";
 import { canAccessMedia } from "@/lib/permissions";
 import {
   LayoutDashboard, Newspaper, Tv, Mic, UserCheck, BarChart3, Upload, Plus, Loader2, X,
@@ -20,7 +22,20 @@ import {
 } from "recharts";
 
 export default function Page() {
-  return <SupervisorGuard allow={canAccessMedia}><Body /></SupervisorGuard>;
+  const { data: session, status } = useSession();
+  const router = useRouter();
+  // Access = Media role baseline OR an explicit Page Access grant for "media"
+  // (which a grant of any media sub-tab unlocks). Waits for /api/my-pages so a
+  // granted user never gets a false Access-Denied flicker.
+  const { ready, allowed } = usePageGuard("media", canAccessMedia(session));
+  useEffect(() => {
+    if (status === "unauthenticated") router.push("/login");
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
+  }
+  return <Body />;
 }
 
 const TABS = [
@@ -38,6 +53,20 @@ function Body() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState("");
+  // Sub-tab visibility follows Page Access: a MANAGED user sees only the tabs
+  // whose `media_<tab>` sub-page was assigned; an unmanaged/role user sees all.
+  const { pages: myPages, restricted: pageRestricted } = usePageAccess();
+  const tabAllowed = useCallback(
+    (k) => !pageRestricted || (Array.isArray(myPages) && myPages.includes(`media_${k}`)),
+    [pageRestricted, myPages]
+  );
+  const visibleTabs = TABS.filter((t) => tabAllowed(t.k));
+  // If the current tab isn't allowed (e.g. the default "dashboard" for a user
+  // granted only Newspapers), fall to the first allowed tab.
+  useEffect(() => {
+    if (visibleTabs.length && !visibleTabs.some((t) => t.k === tab)) setTab(visibleTabs[0].k);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageRestricted, myPages]);
   // Global Media Center date filter — kept at this level so it PERSISTS while
   // switching tabs (item 8) and drives the shared /api/media fetch (items 3–5).
   const [dateFilter, setDateFilter] = useState({ time: "all", from: "", to: "" });
@@ -126,7 +155,7 @@ function Body() {
       </div>
 
       <div className="flex gap-2 flex-wrap border-b border-gray-200">
-        {TABS.map((t) => {
+        {visibleTabs.map((t) => {
           const Icon = t.icon;
           return (
             <button key={t.k} onClick={() => setTab(t.k)} className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px ${tab === t.k ? "border-[#164FA3] text-[#164FA3]" : "border-transparent text-gray-500 hover:text-gray-700"}`}>

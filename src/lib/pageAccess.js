@@ -1,6 +1,6 @@
 import { query } from "@/lib/db";
 import { normalizeRole, ROLES, roleOf } from "@/lib/permissions";
-import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath, expandPageKeys, grantSetAllows } from "@/lib/pages";
+import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath, expandPageKeys, grantSetAllows, childKeysOf } from "@/lib/pages";
 
 // Page Access Management backend — the SINGLE source of truth for navigation,
 // client route guards and backend/API authorization.
@@ -55,14 +55,64 @@ export async function ensurePagePermissionsSchema() {
          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    // Tracks one-time data migrations so each runs exactly once, ever.
+    await query(
+      `CREATE TABLE IF NOT EXISTS app_migrations (
+         name VARCHAR(128) PRIMARY KEY,
+         applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+    );
     // Remove EVERY auto-granted page row so a normal user only ever holds the
     // pages an admin explicitly assigned. Runs every start (idempotent) so a
     // stale/older deploy is self-healed the moment this code goes live.
     await cleanupAutoGrantedPages();
+    // ONE-TIME: the model changed from "parent grant implies all children" to
+    // "children are independent". Preserve access for users who were granted a
+    // PARENT (Media / Social Command / Leader Assessment / Administration) — which
+    // used to cover every sub-tab — by materialising all of that parent's current
+    // children as explicit grants. After this, sub-tabs are assigned one-by-one.
+    await runOnce("expand_parent_grants_v1", expandExistingParentGrants);
     ensured = true;
   } catch (e) {
     console.error("[pageAccess] ensure schema:", e?.message || e);
   }
+}
+
+// Run `fn` exactly once ever, keyed by `name` in app_migrations.
+async function runOnce(name, fn) {
+  try {
+    const done = await query(`SELECT 1 FROM app_migrations WHERE name = ? LIMIT 1`, [name]);
+    if (done.length) return;
+    await fn();
+    await query(`INSERT IGNORE INTO app_migrations (name) VALUES (?)`, [name]);
+  } catch (e) {
+    console.error(`[pageAccess] migration ${name}:`, e?.message || e);
+  }
+}
+
+// Parents whose old "grant = whole module" behaviour must be preserved as
+// explicit child grants under the new container-only model.
+const HIERARCHICAL_PARENTS = ["media", "social_management", "leader_assessment", "administration"];
+async function expandExistingParentGrants() {
+  let added = 0;
+  for (const parent of HIERARCHICAL_PARENTS) {
+    const children = childKeysOf(parent).filter(isValidPageKey);
+    for (const child of children) {
+      // Copy the parent grant to the child (same user + same granted_by, so the
+      // repair cleanup never treats it as machine-injected). INSERT IGNORE keeps
+      // it idempotent and never overwrites an existing explicit child grant.
+      // eslint-disable-next-line no-await-in-loop
+      const res = await query(
+        `INSERT IGNORE INTO page_permissions (user_id, page_key, granted_by)
+         SELECT pp.user_id, ?, pp.granted_by
+           FROM page_permissions pp
+          WHERE pp.page_key = ?`,
+        [child, parent]
+      );
+      added += res?.affectedRows || 0;
+    }
+  }
+  if (added) console.log(`[pageAccess] expanded ${added} parent grant(s) into child sub-tab grants`);
 }
 
 // REPAIR MIGRATION — undoes two earlier bad migrations and, crucially, RESTORES

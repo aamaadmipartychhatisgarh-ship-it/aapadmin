@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   ShieldCheck, Loader2, Plus, Trash2, Search, CheckCircle2, AlertCircle,
-  Check, X, User as UserIcon, FileText, Users as UsersIcon,
+  Check, X, User as UserIcon, FileText, Users as UsersIcon, ChevronRight, ChevronDown, Minus,
 } from "lucide-react";
 import Avatar from "@/components/Avatar";
+
+// A checkbox that also supports the INDETERMINATE (partial) visual state, which
+// the DOM only exposes via a property (not an attribute) — set through a ref.
+function TriCheckbox({ checked, indeterminate, onChange, disabled }) {
+  const ref = useRef(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = !!indeterminate && !checked; }, [indeterminate, checked]);
+  return <input ref={ref} type="checkbox" checked={!!checked} disabled={disabled} onChange={onChange} className="accent-[#164FA3]" />;
+}
 
 // BUG 14 — Super Admin Page Access Management console.
 //
@@ -64,6 +72,21 @@ export default function PageAccessManager() {
   function removePage(key) {
     setDirty(true);
     setSelPages((prev) => prev.filter((k) => k !== key));
+  }
+  // Bulk add/remove a set of keys (used by a parent's Select All / Clear All and
+  // its tri-state checkbox — one parent toggle affects only its own children).
+  function setKeys(keys, on) {
+    setDirty(true);
+    setSelPages((prev) => {
+      const s = new Set(prev);
+      if (on) keys.forEach((k) => s.add(k)); else keys.forEach((k) => s.delete(k));
+      return [...s];
+    });
+  }
+  // Which parent groups are expanded in the tree.
+  const [expandedParents, setExpandedParents] = useState(() => new Set());
+  function toggleExpand(key) {
+    setExpandedParents((prev) => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   }
 
   async function saveAssignment() {
@@ -239,36 +262,82 @@ export default function PageAccessManager() {
               )}
             </div>
 
-            {/* Every registered page — searchable, with a live count so the list
-                can never silently fall short of the registry (the source of
-                truth). */}
+            {/* Hierarchical page tree — parent pages with an expandable list of
+                sub-pages/tabs. Each sub-page has its OWN checkbox and is assigned
+                independently; the parent checkbox is a convenience that selects/
+                clears all of its children (a partial selection shows the
+                indeterminate state). Searchable across parents AND sub-pages. */}
             {(() => {
               const q = pageQ.trim().toLowerCase();
-              const shown = q ? data.pages.filter((p) => `${p.label} ${p.key}`.toLowerCase().includes(q)) : data.pages;
+              const matches = (p) => `${p.label} ${p.key}`.toLowerCase().includes(q);
+              const topLevel = data.pages.filter((p) => !p.parent);
+              const childrenOf = (key) => data.pages.filter((p) => p.parent === key);
+              // A parent shows if it matches OR any of its children matches.
+              const visibleTop = topLevel.filter((p) => !q || matches(p) || childrenOf(p.key).some(matches));
+              const totalCount = data.pages.length;
               return (
                 <>
                   <div className="flex items-center gap-2 mb-2">
                     <div className="relative flex-1">
                       <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input className={`${inp} pl-8`} placeholder="Search pages…" value={pageQ} onChange={(e) => setPageQ(e.target.value)} />
+                      <input className={`${inp} pl-8`} placeholder="Search pages & sub-pages…" value={pageQ} onChange={(e) => setPageQ(e.target.value)} />
                     </div>
-                    <span className="text-xs text-gray-500 whitespace-nowrap">
-                      {q ? <>{shown.length} of <strong className="text-gray-900">{data.pages.length}</strong></> : <><strong className="text-gray-900">{data.pages.length}</strong> pages</>}
-                    </span>
+                    <span className="text-xs text-gray-500 whitespace-nowrap"><strong className="text-gray-900">{selPages.length}</strong> of {totalCount} selected</span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-72 overflow-auto border border-gray-100 rounded-lg p-2">
-                    {shown.length === 0 ? (
-                      <div className="col-span-full text-xs text-gray-400 px-2 py-3 text-center">No pages match “{pageQ.trim()}”.</div>
-                    ) : shown.map((p) => {
-                      const locked = fixedSet.has(p.key);
-                      const checked = locked || selPages.includes(p.key);
+                  <div className="max-h-80 overflow-auto border border-gray-100 rounded-lg p-1.5 space-y-0.5">
+                    {visibleTop.length === 0 ? (
+                      <div className="text-xs text-gray-400 px-2 py-3 text-center">No pages match “{pageQ.trim()}”.</div>
+                    ) : visibleTop.map((p) => {
+                      const kids = childrenOf(p.key);
+                      // Leaf top-level page (no sub-pages) → a single checkbox.
+                      if (kids.length === 0) {
+                        const checked = selPages.includes(p.key);
+                        return (
+                          <label key={p.key} title={p.key}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm ${checked ? "bg-blue-50 text-[#164FA3] font-medium" : "text-gray-700 hover:bg-gray-50"} cursor-pointer`}>
+                            <input type="checkbox" checked={checked} onChange={() => togglePage(p.key)} className="accent-[#164FA3]" />
+                            <span className="truncate">{p.label}</span>
+                          </label>
+                        );
+                      }
+                      // Parent with sub-pages → tri-state header + expandable list.
+                      const childKeys = kids.map((c) => c.key);
+                      const selCount = childKeys.filter((k) => selPages.includes(k)).length;
+                      const allSel = selCount === childKeys.length;
+                      const someSel = selCount > 0 && !allSel;
+                      const open = expandedParents.has(p.key);
+                      // With an active search, show only matching children (unless
+                      // the parent itself matched, then show all).
+                      const shownKids = q && !matches(p) ? kids.filter(matches) : kids;
                       return (
-                        <label key={p.key} title={locked ? "Always available for this role — can’t be removed" : p.key}
-                          className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm ${locked ? "bg-gray-50 text-gray-500 cursor-not-allowed" : checked ? "bg-blue-50 text-[#164FA3] font-medium cursor-pointer" : "text-gray-700 hover:bg-gray-50 cursor-pointer"}`}>
-                          <input type="checkbox" checked={checked} disabled={locked} onChange={() => !locked && togglePage(p.key)} className="accent-[#164FA3]" />
-                          <span className="truncate">{p.label}</span>
-                          {locked && <span className="ml-auto text-[9px] font-bold uppercase tracking-wide text-gray-400">Locked</span>}
-                        </label>
+                        <div key={p.key} className="rounded-lg border border-gray-100">
+                          <div className={`flex items-center gap-2 px-2 py-1.5 rounded-t-lg ${someSel || allSel ? "bg-blue-50/60" : "bg-gray-50"}`}>
+                            <button type="button" onClick={() => toggleExpand(p.key)} className="text-gray-400 hover:text-gray-700 shrink-0" aria-label="Expand">
+                              {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                            </button>
+                            <label className="flex items-center gap-2 text-sm font-semibold text-gray-800 cursor-pointer flex-1 min-w-0">
+                              <TriCheckbox checked={allSel} indeterminate={someSel} onChange={() => setKeys(childKeys, !allSel)} />
+                              <span className="truncate">{p.label}</span>
+                              <span className="text-[10px] font-medium text-gray-400">{selCount}/{childKeys.length}</span>
+                            </label>
+                            <button type="button" onClick={() => setKeys(childKeys, true)} className="text-[11px] font-semibold text-[#164FA3] hover:underline shrink-0">All</button>
+                            <button type="button" onClick={() => setKeys(childKeys, false)} className="text-[11px] font-semibold text-gray-500 hover:underline shrink-0">Clear</button>
+                          </div>
+                          {open && (
+                            <div className="py-1 pl-7 pr-2 grid grid-cols-1 sm:grid-cols-2 gap-0.5">
+                              {shownKids.map((c) => {
+                                const checked = selPages.includes(c.key);
+                                return (
+                                  <label key={c.key} title={c.key}
+                                    className={`flex items-center gap-2 px-2 py-1 rounded-md text-sm ${checked ? "text-[#164FA3] font-medium" : "text-gray-600 hover:bg-gray-50"} cursor-pointer`}>
+                                    <input type="checkbox" checked={checked} onChange={() => togglePage(c.key)} className="accent-[#164FA3]" />
+                                    <span className="truncate">{(c.label.split("·").pop() || c.label).trim()}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
                   </div>

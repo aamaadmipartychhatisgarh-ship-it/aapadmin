@@ -61,11 +61,32 @@ export const PAGES = [
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
   { key: "media", label: "Media", href: "/dashboard/media", prefixes: ["/dashboard/media"], icon: "Newspaper",
     roles: [...OVERSIGHT, ROLES.PRESS_MEDIA, ROLES.MEDIA_USER] },
+  // Media sub-tabs (in-page tabs of /dashboard/media). `tab: true` + empty
+  // prefixes → the route stays governed by `media`; these gate WHICH tabs a
+  // MANAGED user sees inside it. Container-only model: granting `media` alone
+  // does NOT grant these — each is assigned independently.
+  { key: "media_dashboard", label: "Media · Dashboard", href: "/dashboard/media", prefixes: [], tab: true, parent: "media", icon: "LayoutDashboard",
+    roles: [...OVERSIGHT, ROLES.PRESS_MEDIA, ROLES.MEDIA_USER] },
+  { key: "media_newspapers", label: "Media · Newspapers", href: "/dashboard/media", prefixes: [], tab: true, parent: "media", icon: "Newspaper",
+    roles: [...OVERSIGHT, ROLES.PRESS_MEDIA, ROLES.MEDIA_USER] },
+  { key: "media_channels", label: "Media · News Channels", href: "/dashboard/media", prefixes: [], tab: true, parent: "media", icon: "Tv",
+    roles: [...OVERSIGHT, ROLES.PRESS_MEDIA, ROLES.MEDIA_USER] },
+  { key: "media_conferences", label: "Media · Press Conferences", href: "/dashboard/media", prefixes: [], tab: true, parent: "media", icon: "Mic",
+    roles: [...OVERSIGHT, ROLES.PRESS_MEDIA, ROLES.MEDIA_USER] },
+  { key: "media_spokespersons", label: "Media · Spokespersons", href: "/dashboard/media", prefixes: [], tab: true, parent: "media", icon: "UserCheck",
+    roles: [...OVERSIGHT, ROLES.PRESS_MEDIA, ROLES.MEDIA_USER] },
   // BUG 17 — the "Social Media" (War Room) page was removed entirely. Only the
   // Social Command centre (social_management) remains. No "social" page key
   // exists anymore, so it can't be granted in Page Access, appears in no nav,
   // and any stale page_permissions row for it is ignored (invalid key).
   { key: "social_management", label: "Social Command", href: "/dashboard/social-management", prefixes: ["/dashboard/social-management"], icon: "Share2",
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SOCIAL_MEDIA] },
+  // Social Command sub-tabs (in-page tabs of /dashboard/social-management).
+  { key: "social_dashboard", label: "Social · Dashboard", href: "/dashboard/social-management", prefixes: [], tab: true, parent: "social_management", icon: "LayoutDashboard",
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SOCIAL_MEDIA] },
+  { key: "social_pages", label: "Social · Pages", href: "/dashboard/social-management", prefixes: [], tab: true, parent: "social_management", icon: "FileText",
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SOCIAL_MEDIA] },
+  { key: "social_log", label: "Social · Post Log", href: "/dashboard/social-management", prefixes: [], tab: true, parent: "social_management", icon: "ClipboardList",
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SOCIAL_MEDIA] },
   { key: "reports", label: "Reports", href: "/dashboard/reports", prefixes: ["/dashboard/reports"], icon: "FileText",
     roles: [...OVERSIGHT] },
@@ -89,21 +110,21 @@ export const PAGES = [
   // Master Data also has a standalone route (/dashboard/admin/settings) that
   // renders the SAME component as the Administration "master" tab — gate it here
   // so the route is protected under the same key (no separate list).
-  { key: "master_data", label: "Master Data", href: "/dashboard/admin/administration?tab=master", prefixes: ["/dashboard/admin/settings"], tab: true, icon: "Database",
+  { key: "master_data", label: "Master Data", href: "/dashboard/admin/administration?tab=master", prefixes: ["/dashboard/admin/settings"], tab: true, parent: "administration", icon: "Database",
     roles: [ROLES.SUPER_ADMIN] },
-  { key: "caste_master", label: "Caste Master", href: "/dashboard/admin/administration?tab=castes", prefixes: [], tab: true, icon: "UserCheck",
+  { key: "caste_master", label: "Caste Master", href: "/dashboard/admin/administration?tab=castes", prefixes: [], tab: true, parent: "administration", icon: "UserCheck",
     roles: [...OVERSIGHT] },
-  { key: "polling_master", label: "Polling Station Master", href: "/dashboard/admin/administration?tab=polling", prefixes: [], tab: true, icon: "ClipboardList",
+  { key: "polling_master", label: "Polling Station Master", href: "/dashboard/admin/administration?tab=polling", prefixes: [], tab: true, parent: "administration", icon: "ClipboardList",
     roles: [...OVERSIGHT] },
-  { key: "party_master", label: "Party Master", href: "/dashboard/admin/administration?tab=parties", prefixes: [], tab: true, icon: "Flag",
+  { key: "party_master", label: "Party Master", href: "/dashboard/admin/administration?tab=parties", prefixes: [], tab: true, parent: "administration", icon: "Flag",
     roles: [...OVERSIGHT] },
   // Administration people-management. Teams and Users are Administration tabs
   // AND have standalone routes (/dashboard/admin/teams, /dashboard/admin/users);
   // register the routes so Page Access can grant them and the routes are
   // protected. (The tabs' own visibility is still enforced by the Admin page.)
-  { key: "teams", label: "Teams", href: "/dashboard/admin/teams", prefixes: ["/dashboard/admin/teams"], icon: "Users",
+  { key: "teams", label: "Teams", href: "/dashboard/admin/teams", prefixes: ["/dashboard/admin/teams"], parent: "administration", icon: "Users",
     roles: [...OVERSIGHT] },
-  { key: "users", label: "Users", href: "/dashboard/admin/users", prefixes: ["/dashboard/admin/users"], icon: "UserCog",
+  { key: "users", label: "Users", href: "/dashboard/admin/users", prefixes: ["/dashboard/admin/users"], parent: "administration", icon: "UserCog",
     roles: [ROLES.SUPER_ADMIN] },
   // Audit Log — the admin activity trail.
   { key: "audit", label: "Audit Log", href: "/dashboard/admin/audit", prefixes: ["/dashboard/admin/audit"], icon: "FileText",
@@ -163,27 +184,30 @@ export function childKeysOf(parentKey) {
 export function parentKeyOf(key) {
   return byKey.get(key)?.parent || null;
 }
-// Expand a set of granted keys with the implied ones (ADDITIVE — never removes):
-//   • a parent grant implies all of its child sub-sections;
-//   • a child grant implies its parent (so the module page/route is reachable
-//     and appears in the nav) — but NOT the sibling children.
-// So an admin can grant a whole module, or just one section of it, and both the
-// guard and the UI stay consistent.
+// CONTAINER-ONLY nested model (children are INDEPENDENT):
+//   • a child grant implies its PARENT — so the module page/route is reachable
+//     and the parent appears in the nav as a container for the granted tab(s);
+//   • a parent grant does NOT imply any child — sub-tabs are assigned one by one.
+// This is the "parent must not auto-grant every sub-page" rule: assigning
+// "Media" alone gives the Media landing but no specific sub-tab; assigning
+// "Media · Newspapers" gives exactly that tab (and makes Media appear).
 export function expandPageKeys(keys) {
   const out = new Set(keys);
   for (const k of Array.from(out)) {
-    for (const child of childKeysOf(k)) out.add(child); // parent ⇒ children
     const par = parentKeyOf(k);
-    if (par) out.add(par);                               // child ⇒ parent
+    if (par) out.add(par);                               // child ⇒ parent (container)
+    // parent ⇏ children (removed): a parent grant never expands to its tabs.
   }
   return out;
 }
-// True when `key` is allowed given a set of granted keys, honoring the
-// parent/child relationship above.
+// True when `key` is allowed given a set of granted keys (container-only model):
+//   • the key is granted directly; OR
+//   • the key is a PARENT and at least one of its children is granted (so the
+//     module route/container is reachable for the granted tab).
+// A CHILD is allowed ONLY if it is granted directly — a parent grant never
+// covers a child. So a managed user sees exactly the sub-tabs assigned to them.
 export function grantSetAllows(grants, key) {
   if (grants.has(key)) return true;
-  const par = parentKeyOf(key);
-  if (par && grants.has(par)) return true;               // parent grant covers a child
-  if (childKeysOf(key).some((c) => grants.has(c))) return true; // a child grant unlocks the parent
+  if (childKeysOf(key).some((c) => grants.has(c))) return true; // child grant unlocks its parent
   return false;
 }
