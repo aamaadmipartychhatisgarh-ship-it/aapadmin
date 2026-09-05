@@ -7,6 +7,7 @@ import { isOversight } from "@/lib/permissions";
 import { useCallerPreview } from "@/lib/useCallerPreview";
 import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown, Users, Check, ClipboardPaste, Trash2 } from "lucide-react";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
+import Avatar from "@/components/Avatar";
 import { formatDate } from "@/lib/dateFormat";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -172,10 +173,10 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
       setDeleting(false);
     }
   }
-  // Which date groups are collapsed to just their first task (a multi-task date
-  // shows the first task with the rest behind an expand toggle).
-  const [expandedDates, setExpandedDates] = useState(() => new Set());
-  const toggleDate = (k) => setExpandedDates((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  // Independent expand/collapse state per USER group (keyed by "date::userKey"),
+  // so expanding one user never affects another user or another date.
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set());
+  const toggleGroup = (k) => setExpandedGroups((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const views = canManage
     ? [{ k: "all", l: "All" }, { k: "mine", l: "My Tasks" }, { k: "pending", l: "Pending" }, { k: "in_progress", l: "In Progress" }, { k: "completed", l: "Completed" }, { k: "overdue", l: "Overdue" }]
@@ -186,19 +187,46 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
   // explicit "Completed" status filter always wins over the hide toggle.
   const visibleTasks = data.tasks.filter((t) => showCompleted || statusFilter === "completed" || t.status !== "completed");
 
-  // Group the visible tasks by their TASK DATE (the due date), preserving the
-  // list's existing order inside each group. Dates newest-first; undated last.
-  // This is a DISPLAY-ONLY grouping — every task stays its own DB record.
+  // Two-level grouping — DATE → USER → tasks. Tasks are grouped by their task
+  // date (due date), then WITHIN each date by the ASSIGNED USER (keyed by the
+  // real assigned_to_user_id / team id, never the display name, so users with
+  // similar names never merge). Order inside each user group is preserved from
+  // the list. Dates newest-first; undated last. DISPLAY-ONLY — every task stays
+  // its own DB record, so this composes with Paste Task automatically.
   const dateGroups = (() => {
-    const map = new Map();
+    const byDate = new Map();
     for (const t of visibleTasks) {
-      const key = t.deadline ? String(t.deadline).slice(0, 10) : "none";
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(t);
+      const dk = t.deadline ? String(t.deadline).slice(0, 10) : "none";
+      if (!byDate.has(dk)) byDate.set(dk, []);
+      byDate.get(dk).push(t);
     }
-    return [...map.keys()]
+    return [...byDate.keys()]
       .sort((a, b) => (a === "none" ? 1 : b === "none" ? -1 : (a < b ? 1 : -1)))
-      .map((key) => ({ key, label: key === "none" ? "No due date" : formatDate(key), tasks: map.get(key) }));
+      .map((dk) => {
+        const byUser = new Map();
+        for (const t of byDate.get(dk)) {
+          // Grouping key = assigned USER ID (or team id), NOT the name. Tasks
+          // with no assignee go to their own "Unassigned" group, never a user's.
+          const uKey = t.assigned_to_user_id ? `u:${t.assigned_to_user_id}`
+            : t.assigned_to_team_id ? `t:${t.assigned_to_team_id}` : "unassigned";
+          if (!byUser.has(uKey)) {
+            byUser.set(uKey, {
+              key: uKey,
+              name: t.assignee_name || t.team_name || "Unassigned",
+              isTeam: !t.assigned_to_user_id && !!t.assigned_to_team_id,
+              unassigned: !t.assigned_to_user_id && !t.assigned_to_team_id,
+              tasks: [],
+            });
+          }
+          byUser.get(uKey).tasks.push(t);
+        }
+        return {
+          key: dk,
+          label: dk === "none" ? "No due date" : formatDate(dk),
+          total: byDate.get(dk).length,
+          users: [...byUser.values()],
+        };
+      });
   })();
 
   // One task row (its S.No is the position within its date group). Extracted so
@@ -433,32 +461,50 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
               </tr>
             </thead>
             <tbody>
-              {dateGroups.map((g) => {
-                const multi = g.tasks.length > 1;
-                const open = expandedDates.has(g.key);
-                // Multi-task date: show the first task; the rest expand behind the
-                // date header's toggle. Single-task date: no dropdown needed.
-                const shown = multi && !open ? g.tasks.slice(0, 1) : g.tasks;
-                return (
-                  <Fragment key={g.key}>
-                    <tr className="bg-blue-50/40 border-t border-blue-100">
-                      <td colSpan={12} className="px-4 py-2">
-                        <button
-                          type="button"
-                          onClick={() => multi && toggleDate(g.key)}
-                          className={`flex items-center gap-2 text-sm font-bold text-[#0B3A82] ${multi ? "cursor-pointer" : "cursor-default"}`}
-                        >
-                          {multi ? (open ? <ChevronDown size={16} /> : <ChevronRight size={16} />) : <Calendar size={14} className="text-[#164FA3]" />}
-                          <span>{g.label}</span>
-                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">{g.tasks.length} Task{g.tasks.length === 1 ? "" : "s"}</span>
-                          {multi && !open && <span className="text-[11px] font-medium text-gray-400">— click to show all</span>}
-                        </button>
-                      </td>
-                    </tr>
-                    {shown.map((t, i) => renderTaskRow(t, i + 1))}
-                  </Fragment>
-                );
-              })}
+              {dateGroups.map((g) => (
+                <Fragment key={g.key}>
+                  {/* DATE header */}
+                  <tr className="bg-[#0B3A82]/[0.06] border-t-2 border-[#0B3A82]/15">
+                    <td colSpan={12} className="px-4 py-2">
+                      <div className="flex items-center gap-2 text-sm font-bold text-[#0B3A82]">
+                        <Calendar size={15} className="text-[#164FA3]" />
+                        <span>{g.label}</span>
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">{g.total} Task{g.total === 1 ? "" : "s"}</span>
+                      </div>
+                    </td>
+                  </tr>
+                  {/* USER groups within this date — each independent, keyed by user id */}
+                  {g.users.map((u) => {
+                    const multi = u.tasks.length > 1;
+                    const gk = `${g.key}::${u.key}`;
+                    const open = expandedGroups.has(gk);
+                    // Single-task user → the task shows directly (no dropdown).
+                    // Multi-task user → an expandable dropdown; collapsed shows only
+                    // the user header, expanded shows all of THAT user's tasks.
+                    const shown = multi ? (open ? u.tasks : []) : u.tasks;
+                    return (
+                      <Fragment key={u.key}>
+                        <tr className="bg-gray-50 border-t border-gray-100">
+                          <td colSpan={12} className="px-4 py-1.5">
+                            <button
+                              type="button"
+                              onClick={() => multi && toggleGroup(gk)}
+                              className={`flex items-center gap-2 text-sm font-semibold text-gray-800 ${multi ? "cursor-pointer" : "cursor-default"}`}
+                            >
+                              {multi ? (open ? <ChevronDown size={15} /> : <ChevronRight size={15} />) : <span className="w-[15px]" />}
+                              <Avatar name={u.name} size={22} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[10px]" />
+                              <span className={u.unassigned ? "text-gray-500 italic" : ""}>{u.name}</span>
+                              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">{u.tasks.length} Task{u.tasks.length === 1 ? "" : "s"}</span>
+                              {multi && !open && <span className="text-[11px] font-medium text-gray-400">— show all</span>}
+                            </button>
+                          </td>
+                        </tr>
+                        {shown.map((t, i) => renderTaskRow(t, i + 1))}
+                      </Fragment>
+                    );
+                  })}
+                </Fragment>
+              ))}
             </tbody>
           </table>
           </div>
