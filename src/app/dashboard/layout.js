@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -380,6 +380,23 @@ export default function DashboardLayout({ children }) {
   const firstAllowedPage = (allowedPageKeys || [])
     .map((k) => PAGES.find((p) => p.key === k)).find(Boolean);
   const accessFallbackHref = firstAllowedPage?.href || "/dashboard/profile";
+
+  // PERMISSIONS-LOADING GATE — for a non-Super-Admin (and not while a Super Admin
+  // previews another role), do NOT render the app shell until /api/my-pages has
+  // resolved this user's exact page set. Without this, the role-based `navItems`
+  // built above would show for a moment (or persist if the fetch is slow/failed),
+  // which is exactly the "old/default pages still appear" bug: a Caller assigned
+  // only Social Command would briefly see their old Caller nav. usePageAccess is
+  // fail-closed (it retries and never yields role defaults), so `allowedPageKeys`
+  // is null ONLY while genuinely loading — we show a spinner, never stale pages.
+  const isSuperUser = canonical === ROLES.SUPER_ADMIN;
+  if (!isSuperUser && !previewing && allowedPageKeys === null) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-[#f4f6f8]">
+        <Loader2 className="animate-spin text-[#164FA3]" size={28} />
+      </div>
+    );
+  }
 
   // ZERO-ACCESS STATE — a page-restricted user (every normal user; a managed
   // oversight user) whose assigned-page set is EMPTY. They have no pages at all,
