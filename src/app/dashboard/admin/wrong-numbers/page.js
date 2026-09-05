@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight, isAdmin, isCaller } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
+import { usePageAccess } from "@/components/usePageAccess";
 import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X, GitMerge, Send, HeartCrack } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
@@ -37,6 +38,20 @@ export default function Page() {
 function WrongNumbersDashboard({ session, oversight, canDelete }) {
   const [tab, setTab] = useState(oversight ? "wrong" : "not_interested");
   const [niCount, setNiCount] = useState(null);
+  // Sub-tab visibility follows Page Access: a MANAGED user sees only the tabs
+  // whose sub-page was granted (wn_wrong_list / not_interested); an unmanaged or
+  // role-based user keeps the existing behaviour (oversight sees both, callers
+  // see Not Interested).
+  const { pages: myPages, restricted: pageRestricted } = usePageAccess();
+  const has = (k) => Array.isArray(myPages) && myPages.includes(k);
+  const showWrong = oversight && (pageRestricted ? has("wn_wrong_list") : true);
+  const showNI = pageRestricted ? has("not_interested") : true;
+  useEffect(() => {
+    // Keep the active tab valid for what this user may see.
+    if (tab === "wrong" && !showWrong) setTab(showNI ? "not_interested" : "wrong");
+    else if (tab === "not_interested" && !showNI && showWrong) setTab("wrong");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageRestricted, myPages]);
   // Eager, unfiltered count so the tab shows "Not Interested (N)" immediately —
   // before the tab is ever opened. Refreshed live by the view's onCount below.
   useEffect(() => {
@@ -58,10 +73,10 @@ function WrongNumbersDashboard({ session, oversight, canDelete }) {
   return (
     <div className="space-y-4 animate-in fade-in duration-500">
       <div className="flex items-center gap-1 border-b border-gray-200">
-        {oversight && <Tab id="wrong">Wrong Numbers</Tab>}
-        <Tab id="not_interested">Not Interested{niCount != null ? ` (${niCount.toLocaleString()})` : ""}</Tab>
+        {showWrong && <Tab id="wrong">Wrong Numbers</Tab>}
+        {showNI && <Tab id="not_interested">Not Interested{niCount != null ? ` (${niCount.toLocaleString()})` : ""}</Tab>}
       </div>
-      {tab === "wrong" && oversight ? (
+      {tab === "wrong" && showWrong ? (
         <Body canDelete={canDelete} embedded />
       ) : (
         <div className="space-y-4">

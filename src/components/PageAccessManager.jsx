@@ -270,11 +270,74 @@ export default function PageAccessManager() {
             {(() => {
               const q = pageQ.trim().toLowerCase();
               const matches = (p) => `${p.label} ${p.key}`.toLowerCase().includes(q);
-              const topLevel = data.pages.filter((p) => !p.parent);
               const childrenOf = (key) => data.pages.filter((p) => p.parent === key);
-              // A parent shows if it matches OR any of its children matches.
-              const visibleTop = topLevel.filter((p) => !q || matches(p) || childrenOf(p.key).some(matches));
+              // Every descendant key (recursive) of a node.
+              const descendantsOf = (key) => {
+                const out = [];
+                const stack = [...childrenOf(key)];
+                const seen = new Set();
+                while (stack.length) {
+                  const c = stack.pop();
+                  if (seen.has(c.key)) continue;
+                  seen.add(c.key); out.push(c);
+                  stack.push(...childrenOf(c.key));
+                }
+                return out;
+              };
+              // A node is visible under search if it matches or any descendant does.
+              const nodeVisible = (p) => !q || matches(p) || descendantsOf(p.key).some(matches);
+              const topLevel = data.pages.filter((p) => !p.parent);
               const totalCount = data.pages.length;
+              const shortLabel = (p) => (p.label.includes("·") ? p.label.split("·").pop().trim() : p.label);
+
+              // RECURSIVE node renderer — works at any nesting depth. A node with
+              // children shows an expand toggle + a tri-state (checked / partial /
+              // empty over ALL its descendants) that selects or clears the whole
+              // subtree, plus per-subtree All / Clear. Every node — parent or leaf —
+              // also has its OWN checkbox that grants exactly that page's key, so a
+              // node is assigned independently and selecting one never grants a
+              // sibling.
+              const renderNode = (p, depth) => {
+                const kids = childrenOf(p.key).filter(nodeVisible);
+                const ownChecked = selPages.includes(p.key);
+                const pad = { paddingLeft: 8 + depth * 18 };
+                if (childrenOf(p.key).length === 0) {
+                  return (
+                    <label key={p.key} title={p.key} style={pad}
+                      className={`flex items-center gap-2 pr-2.5 py-1.5 rounded-lg text-sm ${ownChecked ? "text-[#164FA3] font-medium" : "text-gray-700 hover:bg-gray-50"} cursor-pointer`}>
+                      <input type="checkbox" checked={ownChecked} onChange={() => togglePage(p.key)} className="accent-[#164FA3]" />
+                      <span className="truncate">{shortLabel(p)}</span>
+                    </label>
+                  );
+                }
+                const desc = descendantsOf(p.key);
+                const descKeys = desc.map((d) => d.key);
+                const selDesc = descKeys.filter((k) => selPages.includes(k)).length;
+                const allSel = selDesc === descKeys.length;
+                const someSel = selDesc > 0 && !allSel;
+                const open = expandedParents.has(p.key);
+                const subtree = [p.key, ...descKeys];
+                return (
+                  <div key={p.key}>
+                    <div className="flex items-center gap-2 pr-2 py-1.5 rounded-lg hover:bg-gray-50" style={pad}>
+                      <button type="button" onClick={() => toggleExpand(p.key)} className="text-gray-400 hover:text-gray-700 shrink-0" aria-label="Expand">
+                        {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                      </button>
+                      {/* Own-key checkbox (this page's own access) + tri-state over the subtree via All/Clear. */}
+                      <label className="flex items-center gap-2 text-sm font-semibold text-gray-800 cursor-pointer flex-1 min-w-0">
+                        <TriCheckbox checked={ownChecked || allSel} indeterminate={someSel} onChange={() => setKeys(subtree, !(ownChecked || allSel))} />
+                        <span className="truncate">{shortLabel(p)}</span>
+                        <span className="text-[10px] font-medium text-gray-400">{selDesc}/{descKeys.length}</span>
+                      </label>
+                      <button type="button" onClick={() => setKeys(subtree, true)} className="text-[11px] font-semibold text-[#164FA3] hover:underline shrink-0">All</button>
+                      <button type="button" onClick={() => setKeys(subtree, false)} className="text-[11px] font-semibold text-gray-500 hover:underline shrink-0">Clear</button>
+                    </div>
+                    {open && <div className="space-y-0.5">{kids.map((c) => renderNode(c, depth + 1))}</div>}
+                  </div>
+                );
+              };
+
+              const visibleTop = topLevel.filter(nodeVisible);
               return (
                 <>
                   <div className="flex items-center gap-2 mb-2">
@@ -285,61 +348,9 @@ export default function PageAccessManager() {
                     <span className="text-xs text-gray-500 whitespace-nowrap"><strong className="text-gray-900">{selPages.length}</strong> of {totalCount} selected</span>
                   </div>
                   <div className="max-h-80 overflow-auto border border-gray-100 rounded-lg p-1.5 space-y-0.5">
-                    {visibleTop.length === 0 ? (
-                      <div className="text-xs text-gray-400 px-2 py-3 text-center">No pages match “{pageQ.trim()}”.</div>
-                    ) : visibleTop.map((p) => {
-                      const kids = childrenOf(p.key);
-                      // Leaf top-level page (no sub-pages) → a single checkbox.
-                      if (kids.length === 0) {
-                        const checked = selPages.includes(p.key);
-                        return (
-                          <label key={p.key} title={p.key}
-                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm ${checked ? "bg-blue-50 text-[#164FA3] font-medium" : "text-gray-700 hover:bg-gray-50"} cursor-pointer`}>
-                            <input type="checkbox" checked={checked} onChange={() => togglePage(p.key)} className="accent-[#164FA3]" />
-                            <span className="truncate">{p.label}</span>
-                          </label>
-                        );
-                      }
-                      // Parent with sub-pages → tri-state header + expandable list.
-                      const childKeys = kids.map((c) => c.key);
-                      const selCount = childKeys.filter((k) => selPages.includes(k)).length;
-                      const allSel = selCount === childKeys.length;
-                      const someSel = selCount > 0 && !allSel;
-                      const open = expandedParents.has(p.key);
-                      // With an active search, show only matching children (unless
-                      // the parent itself matched, then show all).
-                      const shownKids = q && !matches(p) ? kids.filter(matches) : kids;
-                      return (
-                        <div key={p.key} className="rounded-lg border border-gray-100">
-                          <div className={`flex items-center gap-2 px-2 py-1.5 rounded-t-lg ${someSel || allSel ? "bg-blue-50/60" : "bg-gray-50"}`}>
-                            <button type="button" onClick={() => toggleExpand(p.key)} className="text-gray-400 hover:text-gray-700 shrink-0" aria-label="Expand">
-                              {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                            </button>
-                            <label className="flex items-center gap-2 text-sm font-semibold text-gray-800 cursor-pointer flex-1 min-w-0">
-                              <TriCheckbox checked={allSel} indeterminate={someSel} onChange={() => setKeys(childKeys, !allSel)} />
-                              <span className="truncate">{p.label}</span>
-                              <span className="text-[10px] font-medium text-gray-400">{selCount}/{childKeys.length}</span>
-                            </label>
-                            <button type="button" onClick={() => setKeys(childKeys, true)} className="text-[11px] font-semibold text-[#164FA3] hover:underline shrink-0">All</button>
-                            <button type="button" onClick={() => setKeys(childKeys, false)} className="text-[11px] font-semibold text-gray-500 hover:underline shrink-0">Clear</button>
-                          </div>
-                          {open && (
-                            <div className="py-1 pl-7 pr-2 grid grid-cols-1 sm:grid-cols-2 gap-0.5">
-                              {shownKids.map((c) => {
-                                const checked = selPages.includes(c.key);
-                                return (
-                                  <label key={c.key} title={c.key}
-                                    className={`flex items-center gap-2 px-2 py-1 rounded-md text-sm ${checked ? "text-[#164FA3] font-medium" : "text-gray-600 hover:bg-gray-50"} cursor-pointer`}>
-                                    <input type="checkbox" checked={checked} onChange={() => togglePage(c.key)} className="accent-[#164FA3]" />
-                                    <span className="truncate">{(c.label.split("·").pop() || c.label).trim()}</span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {visibleTop.length === 0
+                      ? <div className="text-xs text-gray-400 px-2 py-3 text-center">No pages match “{pageQ.trim()}”.</div>
+                      : visibleTop.map((p) => renderNode(p, 0))}
                   </div>
                 </>
               );

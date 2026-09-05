@@ -36,6 +36,14 @@ export const PAGES = [
     roles: [...OVERSIGHT] },
   { key: "wrong_numbers", label: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", prefixes: ["/dashboard/admin/wrong-numbers"], icon: "AlertCircle",
     roles: [...OVERSIGHT, ROLES.CALLER] },
+  // Wrong Numbers sub-tabs (in-page tabs of /dashboard/admin/wrong-numbers).
+  // These are the only two SEPARATELY-ACCESSIBLE sections; the individual
+  // disposition reasons (Opponent / Switched Off / Rude Behavior / …) are call
+  // outcome CATEGORIES used to filter these lists, not routable pages.
+  { key: "wn_wrong_list", label: "Wrong Numbers · List", href: "/dashboard/admin/wrong-numbers", prefixes: [], tab: true, parent: "wrong_numbers", icon: "AlertCircle",
+    roles: [...OVERSIGHT] },
+  { key: "not_interested", label: "Wrong Numbers · Not Interested", href: "/dashboard/admin/wrong-numbers", prefixes: [], tab: true, parent: "wrong_numbers", icon: "HeartCrack",
+    roles: [...OVERSIGHT, ROLES.CALLER] },
   { key: "call_records", label: "Call Records", href: "/dashboard/admin/calls", prefixes: ["/dashboard/admin/calls"], icon: "Database",
     roles: [...OVERSIGHT] },
   { key: "caller_report", label: "Caller Report", href: "/dashboard/admin/caller-report", prefixes: ["/dashboard/admin/caller-report"], icon: "TrendingUp",
@@ -176,38 +184,58 @@ export function baselinePagesForRole(role) {
   return PAGES.filter((p) => p.roles.includes(role)).map((p) => p.key);
 }
 
-// Nested-permission helpers. A page may declare a `parent` key; those are the
-// sub-sections/tabs shown under a module in Page Access.
+// Nested-permission helpers — a page may declare a `parent` key, to ANY depth.
+// Direct children of a node.
 export function childKeysOf(parentKey) {
   return PAGES.filter((p) => p.parent === parentKey).map((p) => p.key);
 }
 export function parentKeyOf(key) {
   return byKey.get(key)?.parent || null;
 }
-// CONTAINER-ONLY nested model (children are INDEPENDENT):
-//   • a child grant implies its PARENT — so the module page/route is reachable
-//     and the parent appears in the nav as a container for the granted tab(s);
-//   • a parent grant does NOT imply any child — sub-tabs are assigned one by one.
-// This is the "parent must not auto-grant every sub-page" rule: assigning
-// "Media" alone gives the Media landing but no specific sub-tab; assigning
-// "Media · Newspapers" gives exactly that tab (and makes Media appear).
-export function expandPageKeys(keys) {
-  const out = new Set(keys);
-  for (const k of Array.from(out)) {
-    const par = parentKeyOf(k);
-    if (par) out.add(par);                               // child ⇒ parent (container)
-    // parent ⇏ children (removed): a parent grant never expands to its tabs.
+// Every ancestor of a key, nearest → root (recursive, cycle-safe).
+export function ancestorKeysOf(key) {
+  const out = [];
+  const seen = new Set();
+  let p = parentKeyOf(key);
+  while (p && !seen.has(p)) { out.push(p); seen.add(p); p = parentKeyOf(p); }
+  return out;
+}
+// Every descendant of a key at ANY depth (recursive, cycle-safe).
+export function descendantKeysOf(key) {
+  const out = [];
+  const seen = new Set();
+  const stack = [...childKeysOf(key)];
+  while (stack.length) {
+    const k = stack.pop();
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(k);
+    stack.push(...childKeysOf(k));
   }
   return out;
 }
-// True when `key` is allowed given a set of granted keys (container-only model):
+// CONTAINER-ONLY nested model (children are INDEPENDENT), fully RECURSIVE so it
+// works for a page nested at any depth:
+//   • a grant implies ALL of its ancestors — so every container page/route up
+//     the chain is reachable and appears in the nav for the granted node;
+//   • a grant NEVER implies any descendant — each sub-page is assigned on its own.
+// So assigning a level-3 page unlocks its parent and grandparent as containers,
+// but assigning a parent grants none of its children.
+export function expandPageKeys(keys) {
+  const out = new Set(keys);
+  for (const k of Array.from(out)) {
+    for (const anc of ancestorKeysOf(k)) out.add(anc); // node ⇒ all ancestors (containers)
+  }
+  return out;
+}
+// True when `key` is allowed given a set of granted keys (recursive container
+// model):
 //   • the key is granted directly; OR
-//   • the key is a PARENT and at least one of its children is granted (so the
-//     module route/container is reachable for the granted tab).
-// A CHILD is allowed ONLY if it is granted directly — a parent grant never
-// covers a child. So a managed user sees exactly the sub-tabs assigned to them.
+//   • ANY descendant of the key (at any depth) is granted — so an ancestor
+//     container route is reachable for a granted deep node.
+// A node is NEVER allowed merely because an ANCESTOR is granted — each page is
+// authorized on its own grant. So a user sees exactly the pages assigned to them.
 export function grantSetAllows(grants, key) {
   if (grants.has(key)) return true;
-  if (childKeysOf(key).some((c) => grants.has(c))) return true; // child grant unlocks its parent
+  if (descendantKeysOf(key).some((d) => grants.has(d))) return true; // descendant grant unlocks the container
   return false;
 }

@@ -1,6 +1,6 @@
 import { query } from "@/lib/db";
 import { normalizeRole, ROLES, roleOf } from "@/lib/permissions";
-import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath, expandPageKeys, grantSetAllows, childKeysOf } from "@/lib/pages";
+import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath, expandPageKeys, grantSetAllows, descendantKeysOf } from "@/lib/pages";
 
 // Page Access Management backend — the SINGLE source of truth for navigation,
 // client route guards and backend/API authorization.
@@ -71,7 +71,7 @@ export async function ensurePagePermissionsSchema() {
     // PARENT (Media / Social Command / Leader Assessment / Administration) — which
     // used to cover every sub-tab — by materialising all of that parent's current
     // children as explicit grants. After this, sub-tabs are assigned one-by-one.
-    await runOnce("expand_parent_grants_v1", expandExistingParentGrants);
+    await runOnce("expand_parent_grants_v2", expandExistingParentGrants);
     ensured = true;
   } catch (e) {
     console.error("[pageAccess] ensure schema:", e?.message || e);
@@ -91,12 +91,14 @@ async function runOnce(name, fn) {
 }
 
 // Parents whose old "grant = whole module" behaviour must be preserved as
-// explicit child grants under the new container-only model.
-const HIERARCHICAL_PARENTS = ["media", "social_management", "leader_assessment", "administration"];
+// explicit descendant grants under the new container-only model.
+const HIERARCHICAL_PARENTS = ["media", "social_management", "leader_assessment", "administration", "wrong_numbers"];
 async function expandExistingParentGrants() {
   let added = 0;
   for (const parent of HIERARCHICAL_PARENTS) {
-    const children = childKeysOf(parent).filter(isValidPageKey);
+    // Recursive: copy a parent grant to EVERY descendant (any depth), so a user
+    // who used to have the whole module keeps full access.
+    const children = descendantKeysOf(parent).filter(isValidPageKey);
     for (const child of children) {
       // Copy the parent grant to the child (same user + same granted_by, so the
       // repair cleanup never treats it as machine-injected). INSERT IGNORE keeps
