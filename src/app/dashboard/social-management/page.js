@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import SupervisorGuard from "@/components/SupervisorGuard";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { usePageGuard } from "@/components/usePageGuard";
 import { canAccessSocial } from "@/lib/permissions";
 import { formatDateTimeDot } from "@/lib/dateFormat";
 import {
@@ -50,7 +52,23 @@ const TABS = [
 ];
 
 export default function Page() {
-  return <SupervisorGuard allow={canAccessSocial}><Body /></SupervisorGuard>;
+  const { data: session, status } = useSession();
+  const router = useRouter();
+  // Access = the role baseline (Oversight / Social Media) OR an explicit Page
+  // Access grant for "social_management". usePageGuard mirrors the backend
+  // exactly (managed user → must hold the grant; unmanaged → role check) and
+  // WAITS for /api/my-pages to resolve before deciding, so a granted Caller
+  // never gets a false Access-Denied flicker. This is the same key the sidebar,
+  // the layout route-guard and the /api/social-management* routes authorize on.
+  const { ready, allowed } = usePageGuard("social_management", canAccessSocial(session));
+  useEffect(() => {
+    if (status === "unauthenticated") router.push("/login");
+    else if (ready && !allowed) router.push("/dashboard");
+  }, [status, ready, allowed, router]);
+  if (!ready || !allowed) {
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
+  }
+  return <Body />;
 }
 
 function fmt(n) {

@@ -3,6 +3,11 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePageKeys, isPageRestricted } from "@/lib/pageAccess";
 
+// Session-dependent + must never be cached — always compute the CURRENT user's
+// pages fresh from the DB. Without force-dynamic a prerendered/edge-cached
+// response could be served, which reads as a spurious 401 or a stale page set.
+export const dynamic = "force-dynamic";
+
 // BUG 14 — the caller's OWN effective page access (baseline role pages ∪ any
 // explicit grants), computed server-side from the DB. This is the single
 // source the dynamic sidebar and the client page-guard both read, so what a

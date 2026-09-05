@@ -16,7 +16,13 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // 401 = not signed in; 403 = signed in but no Social Command access. A Caller
+    // granted "social_management" via Page Access passes pageAllowed (managed
+    // grant branch), so this serves them exactly like an Oversight/Social user.
+    if (!session?.user) return NextResponse.json({ message: "Not signed in." }, { status: 401 });
+    if (!(await pageAllowed(session, "social_management", canAccessSocial(session)))) {
+      return NextResponse.json({ message: "You don't have access to Social Command." }, { status: 403 });
+    }
     // Make sure the DP column + destinations table exist.
     await ensureSocialPageSchema();
     await ensureSocialPostSchema();

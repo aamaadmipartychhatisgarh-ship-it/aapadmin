@@ -5,6 +5,11 @@ import { normalizeRole, ROLES, canAccessSocial } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { resolveRange } from "@/lib/reports/timeRanges";
+import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
+import { ensureSocialPostSchema } from "@/lib/socialPostSchema";
+
+// Always per-request (session-dependent) — never a cached/prerendered response.
+export const dynamic = "force-dynamic";
 
 // GET /api/social-management/dashboard — per-page yesterday stats (Total/
 // Scheduled/Published/Failed posts + engagement), grouped into Facebook/
@@ -15,7 +20,21 @@ import { resolveRange } from "@/lib/reports/timeRanges";
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!(await pageAllowed(session, "social_management", session && canAccessSocial(session)))) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // Distinguish unauthenticated (401) from authorized-but-forbidden (403), and
+    // never 500 for a permission problem. A Caller granted "social_management"
+    // via Page Access passes pageAllowed (its managed-grant branch) exactly like
+    // an Oversight/Social user does via the role check.
+    if (!session?.user) {
+      return NextResponse.json({ message: "Not signed in." }, { status: 401 });
+    }
+    if (!(await pageAllowed(session, "social_management", canAccessSocial(session)))) {
+      return NextResponse.json({ message: "You don't have access to Social Command." }, { status: 403 });
+    }
+    // Make sure the social tables/columns exist before querying them, so a fresh
+    // DB (or a Caller who reaches this endpoint before the aggregate route ran)
+    // can never trigger a 500 on missing schema.
+    await ensureSocialPageSchema();
+    await ensureSocialPostSchema();
 
     const role = normalizeRole(session.user.role);
     const u = session.user;
@@ -121,7 +140,9 @@ export async function GET(req) {
       },
     });
   } catch (err) {
-    console.error("social-management dashboard error:", err);
+    // Log the real cause with context so a genuine 500 is diagnosable from the
+    // server logs (never leaked to the client).
+    console.error("social-management dashboard error:", err?.message || err, err?.stack || "");
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
