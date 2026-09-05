@@ -110,9 +110,18 @@ export async function PUT(req, { params }) {
 export async function DELETE(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    // Oversight only (never a plain caller) — server-side, so hiding the button
+    // is not the only protection.
+    if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     const { id } = await params;
-    await query("DELETE FROM tasks WHERE id = ?", [id]);
+    const taskId = Number(id);
+    if (!Number.isInteger(taskId) || taskId <= 0) return NextResponse.json({ message: "Invalid task id." }, { status: 400 });
+    // Confirm the task exists first, so a delete of a missing id is a clear 404.
+    const [existing] = await query("SELECT id FROM tasks WHERE id = ?", [taskId]);
+    if (!existing) return NextResponse.json({ message: "Task not found." }, { status: 404 });
+    // Remove the task's checklist rows first (avoid orphans), then the task.
+    await query("DELETE FROM task_subtasks WHERE task_id = ?", [taskId]).catch(() => {});
+    await query("DELETE FROM tasks WHERE id = ?", [taskId]);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("task DELETE error:", err);

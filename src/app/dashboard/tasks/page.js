@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
 import { useCallerPreview } from "@/lib/useCallerPreview";
-import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown, Users, Check, ClipboardPaste } from "lucide-react";
+import { ClipboardList, Plus, Loader2, Calendar, AlertTriangle, CheckCircle2, Clock, X, Pencil, Search, ChevronRight, ChevronDown, Users, Check, ClipboardPaste, Trash2 } from "lucide-react";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { formatDate } from "@/lib/dateFormat";
 import PageHeader from "@/components/PageHeader";
@@ -153,6 +153,29 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
     await fetch(`/api/tasks/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: newStatus }) });
     load();
   }
+  // Delete flow — confirm first, then delete by the task's real DB id via the
+  // secure (oversight-only) DELETE endpoint; refresh on success.
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  async function doDelete() {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/tasks/${deleteTarget.id}`, { method: "DELETE" });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.message || "Delete failed."); }
+      setNotice("Task deleted successfully.");
+      setDeleteTarget(null);
+      load();
+    } catch (e) {
+      setNotice(e?.message || "Could not delete the task.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+  // Which date groups are collapsed to just their first task (a multi-task date
+  // shows the first task with the rest behind an expand toggle).
+  const [expandedDates, setExpandedDates] = useState(() => new Set());
+  const toggleDate = (k) => setExpandedDates((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   const views = canManage
     ? [{ k: "all", l: "All" }, { k: "mine", l: "My Tasks" }, { k: "pending", l: "Pending" }, { k: "in_progress", l: "In Progress" }, { k: "completed", l: "Completed" }, { k: "overdue", l: "Overdue" }]
@@ -162,6 +185,108 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
   // Completed tasks are hidden by default (remembered per-browser); an
   // explicit "Completed" status filter always wins over the hide toggle.
   const visibleTasks = data.tasks.filter((t) => showCompleted || statusFilter === "completed" || t.status !== "completed");
+
+  // Group the visible tasks by their TASK DATE (the due date), preserving the
+  // list's existing order inside each group. Dates newest-first; undated last.
+  // This is a DISPLAY-ONLY grouping — every task stays its own DB record.
+  const dateGroups = (() => {
+    const map = new Map();
+    for (const t of visibleTasks) {
+      const key = t.deadline ? String(t.deadline).slice(0, 10) : "none";
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(t);
+    }
+    return [...map.keys()]
+      .sort((a, b) => (a === "none" ? 1 : b === "none" ? -1 : (a < b ? 1 : -1)))
+      .map((key) => ({ key, label: key === "none" ? "No due date" : formatDate(key), tasks: map.get(key) }));
+  })();
+
+  // One task row (its S.No is the position within its date group). Extracted so
+  // the grouped body can render it; keeps every existing column/action and adds
+  // an individual Delete button that deletes ONLY this task by its real id.
+  const renderTaskRow = (t, num) => {
+    const overdue = t.deadline && t.deadline.slice(0, 10) < today && t.status !== "completed";
+    const next = STATUS_FLOW[STATUS_FLOW.indexOf(t.status) + 1];
+    const hasSubs = (t.subtask_total || 0) > 0;
+    const isOpen = expanded.has(t.id);
+    const pct = hasSubs ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0;
+    const assignedOn = fmtAssignedOn(t.assigned_at || t.created_at);
+    const completion = completionPct(t);
+    return (
+      <Fragment key={t.id}>
+        <tr className="border-t border-gray-100 hover:bg-gray-50">
+          <td className="px-4 py-3 text-gray-500 font-medium tabular-nums">{num}</td>
+          <td className="px-4 py-3">
+            <div className="flex items-start gap-2">
+              {hasSubs && (
+                <button onClick={() => toggleExpand(t.id)} className="mt-0.5 text-gray-400 hover:text-gray-700" aria-label="Toggle checklist">
+                  {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </button>
+              )}
+              <div className="min-w-0">
+                <div className="font-medium text-gray-900">{t.title}</div>
+                {t.district_name && <div className="text-xs text-gray-400">{t.district_name}</div>}
+                {hasSubs && (
+                  <div className="flex items-center gap-2 mt-1 max-w-[200px]">
+                    <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} /></div>
+                    <span className="text-[11px] font-semibold text-gray-500 shrink-0">{t.subtask_done}/{t.subtask_total}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </td>
+          <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${PRIORITY[t.priority]}`}>{t.priority}</span></td>
+          <td className="px-4 py-3 text-gray-600">{t.assignee_name || t.team_name || "Unassigned"}</td>
+          <td className="px-4 py-3 text-gray-600">{t.created_by_name || "—"}</td>
+          <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{durationLabel(t)}</td>
+          <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
+            {typeof assignedOn === "object" ? (
+              <><div className="font-medium text-gray-800">{assignedOn.date}</div><div className="text-gray-400">{assignedOn.time}</div></>
+            ) : "—"}
+          </td>
+          <td className={`px-4 py-3 text-xs ${overdue ? "text-red-600 font-bold" : "text-gray-600"}`}>
+            {t.deadline ? formatDate(t.deadline) : "—"}{overdue ? " (overdue)" : ""}
+          </td>
+          <td className="px-4 py-3 text-xs whitespace-nowrap"><RemainingCell t={t} today={today} /></td>
+          <td className="px-4 py-3">
+            {completion === null ? <span className="text-gray-300 text-xs">—</span> : (
+              <div className="flex items-center gap-2 min-w-[70px]">
+                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3] rounded-full" style={{ width: `${completion}%` }} /></div>
+                <span className="text-[11px] font-semibold text-gray-500 shrink-0">{completion}%</span>
+              </div>
+            )}
+          </td>
+          <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[t.status]}`}>{t.status.replace("_", " ")}</span></td>
+          <td className="px-4 py-3">
+            <div className="flex items-center gap-2">
+              {hasSubs ? (
+                <button onClick={() => toggleExpand(t.id)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200">
+                  {isOpen ? "Hide" : "Checklist"}
+                </button>
+              ) : next && t.status !== "completed" ? (
+                <button onClick={() => updateStatus(t.id, next)} className="text-xs px-2.5 py-1 rounded-lg bg-[#164FA3] text-white font-semibold hover:bg-blue-800">
+                  Mark {next.replace("_", " ")}
+                </button>
+              ) : <span className="text-emerald-600 text-xs font-semibold inline-flex items-center gap-1"><CheckCircle2 size={14} /> Done</span>}
+              {canManage && (
+                <button onClick={() => setEditing(t)} title="Edit task" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
+              )}
+              {canManage && (
+                <button onClick={() => setDeleteTarget(t)} title="Delete task" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={13} /></button>
+              )}
+            </div>
+          </td>
+        </tr>
+        {hasSubs && isOpen && (
+          <tr className="bg-gray-50/60">
+            <td colSpan={12} className="px-12 py-3">
+              <SubtaskChecklist subtasks={t.subtasks} onProgress={(done, total, status) => onSubProgress(t.id, done, total, status)} />
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -308,84 +433,29 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
               </tr>
             </thead>
             <tbody>
-              {visibleTasks.map((t, idx) => {
-                const overdue = t.deadline && t.deadline.slice(0, 10) < today && t.status !== "completed";
-                const next = STATUS_FLOW[STATUS_FLOW.indexOf(t.status) + 1];
-                const hasSubs = (t.subtask_total || 0) > 0;
-                const isOpen = expanded.has(t.id);
-                const pct = hasSubs ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0;
-                const assignedOn = fmtAssignedOn(t.assigned_at || t.created_at);
-                const completion = completionPct(t);
+              {dateGroups.map((g) => {
+                const multi = g.tasks.length > 1;
+                const open = expandedDates.has(g.key);
+                // Multi-task date: show the first task; the rest expand behind the
+                // date header's toggle. Single-task date: no dropdown needed.
+                const shown = multi && !open ? g.tasks.slice(0, 1) : g.tasks;
                 return (
-                  <Fragment key={t.id}>
-                  <tr className="border-t border-gray-100 hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-500 font-medium tabular-nums">{idx + 1}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-start gap-2">
-                        {hasSubs && (
-                          <button onClick={() => toggleExpand(t.id)} className="mt-0.5 text-gray-400 hover:text-gray-700" aria-label="Toggle checklist">
-                            {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                          </button>
-                        )}
-                        <div className="min-w-0">
-                          <div className="font-medium text-gray-900">{t.title}</div>
-                          {t.district_name && <div className="text-xs text-gray-400">{t.district_name}</div>}
-                          {hasSubs && (
-                            <div className="flex items-center gap-2 mt-1 max-w-[200px]">
-                              <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} /></div>
-                              <span className="text-[11px] font-semibold text-gray-500 shrink-0">{t.subtask_done}/{t.subtask_total}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${PRIORITY[t.priority]}`}>{t.priority}</span></td>
-                    <td className="px-4 py-3 text-gray-600">{t.assignee_name || t.team_name || "Unassigned"}</td>
-                    <td className="px-4 py-3 text-gray-600">{t.created_by_name || "—"}</td>
-                    <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{durationLabel(t)}</td>
-                    <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
-                      {typeof assignedOn === "object" ? (
-                        <><div className="font-medium text-gray-800">{assignedOn.date}</div><div className="text-gray-400">{assignedOn.time}</div></>
-                      ) : "—"}
-                    </td>
-                    <td className={`px-4 py-3 text-xs ${overdue ? "text-red-600 font-bold" : "text-gray-600"}`}>
-                      {t.deadline ? formatDate(t.deadline) : "—"}{overdue ? " (overdue)" : ""}
-                    </td>
-                    <td className="px-4 py-3 text-xs whitespace-nowrap"><RemainingCell t={t} today={today} /></td>
-                    <td className="px-4 py-3">
-                      {completion === null ? <span className="text-gray-300 text-xs">—</span> : (
-                        <div className="flex items-center gap-2 min-w-[70px]">
-                          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#164FA3] rounded-full" style={{ width: `${completion}%` }} /></div>
-                          <span className="text-[11px] font-semibold text-gray-500 shrink-0">{completion}%</span>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[t.status]}`}>{t.status.replace("_", " ")}</span></td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        {/* Tasks WITH a checklist are auto-completed by ticking items — no manual status button. */}
-                        {hasSubs ? (
-                          <button onClick={() => toggleExpand(t.id)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200">
-                            {isOpen ? "Hide" : "Checklist"}
-                          </button>
-                        ) : next && t.status !== "completed" ? (
-                          <button onClick={() => updateStatus(t.id, next)} className="text-xs px-2.5 py-1 rounded-lg bg-[#164FA3] text-white font-semibold hover:bg-blue-800">
-                            Mark {next.replace("_", " ")}
-                          </button>
-                        ) : <span className="text-emerald-600 text-xs font-semibold inline-flex items-center gap-1"><CheckCircle2 size={14} /> Done</span>}
-                        {canManage && (
-                          <button onClick={() => setEditing(t)} title="Edit task" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                  {hasSubs && isOpen && (
-                    <tr className="bg-gray-50/60">
-                      <td colSpan={12} className="px-12 py-3">
-                        <SubtaskChecklist subtasks={t.subtasks} onProgress={(done, total, status) => onSubProgress(t.id, done, total, status)} />
+                  <Fragment key={g.key}>
+                    <tr className="bg-blue-50/40 border-t border-blue-100">
+                      <td colSpan={12} className="px-4 py-2">
+                        <button
+                          type="button"
+                          onClick={() => multi && toggleDate(g.key)}
+                          className={`flex items-center gap-2 text-sm font-bold text-[#0B3A82] ${multi ? "cursor-pointer" : "cursor-default"}`}
+                        >
+                          {multi ? (open ? <ChevronDown size={16} /> : <ChevronRight size={16} />) : <Calendar size={14} className="text-[#164FA3]" />}
+                          <span>{g.label}</span>
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">{g.tasks.length} Task{g.tasks.length === 1 ? "" : "s"}</span>
+                          {multi && !open && <span className="text-[11px] font-medium text-gray-400">— click to show all</span>}
+                        </button>
                       </td>
                     </tr>
-                  )}
+                    {shown.map((t, i) => renderTaskRow(t, i + 1))}
                   </Fragment>
                 );
               })}
@@ -408,6 +478,23 @@ function Body({ canManage, previewingCaller, viewAsCaller }) {
         />
       )}
       {editing && <AddTaskModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setNotice("Task updated successfully."); load(); }} />}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !deleting) setDeleteTarget(null); }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-9 h-9 rounded-full bg-red-50 text-red-600 flex items-center justify-center"><Trash2 size={17} /></div>
+              <h3 className="font-bold text-gray-900">Delete Task?</h3>
+            </div>
+            <p className="text-sm text-gray-600">Are you sure you want to delete <span className="font-semibold text-gray-900">“{deleteTarget.title}”</span>? This action cannot be undone.</p>
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button onClick={() => !deleting && setDeleteTarget(null)} className="px-4 py-2 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={doDelete} disabled={deleting} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+                {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />} Delete Task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -530,7 +617,8 @@ function AddTaskModal({ onClose, onSaved, editing }) {
   // ---- validation (mirrored on the backend; this only guards the UX) ----
   function validate() {
     const e = {};
-    if (!form.title.trim()) e.title = "Task title is required.";
+    // Task Title field removed — the title is derived on save, so it is not a
+    // required form field anymore.
     if (!form.start_date) e.start_date = "Start date is required.";
     if (form.duration_preset === "custom") {
       const dd = Number(form.duration_days);
@@ -557,8 +645,14 @@ function AddTaskModal({ onClose, onSaved, editing }) {
     // Dedup + stringify assignee ids so no duplicate/blank id is ever sent.
     const assignedToUserIds = [...new Set(form.assigned_user_ids.map((x) => String(x).trim()).filter(Boolean))];
     const cleanSubs = subtasks.map((s) => ({ id: s.id ?? null, title: s.title.trim() })).filter((s) => s.title);
+    // Derive the (now hidden) title: keep the existing one on edit; for a new
+    // task use its first checklist line, else a dated default. Never empty, so
+    // the backend's required title is always satisfied.
+    const derivedTitle = form.title.trim()
+      || cleanSubs[0]?.title
+      || `Task – ${new Date(endDate || form.start_date || todayStr).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`;
     const base = {
-      title: form.title.trim(),
+      title: derivedTitle,
       priority: form.priority,
       start_date: form.start_date,
       duration_preset: form.duration_preset,
@@ -639,17 +733,12 @@ function AddTaskModal({ onClose, onSaved, editing }) {
             </div>
           )}
 
-          {/* Task Details */}
+          {/* Task Details — the "Task Title" field was removed by request. The
+              task's title is derived internally (edit keeps its existing title;
+              a new task takes its first checklist line, else a dated default), so
+              the backend's required title is always satisfied without showing the
+              field. */}
           <Section icon={ClipboardList} title="Task Details">
-            <div>
-              <input
-                className={`${inp} ${fieldErr.title ? errInp : ""}`}
-                placeholder="Task title *"
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value })}
-              />
-              {fieldErr.title && <p className="text-xs text-red-600 mt-1">{fieldErr.title}</p>}
-            </div>
             <div>
               <div className="text-xs text-gray-500 mb-1.5">Priority</div>
               <div className="grid grid-cols-4 gap-2">
@@ -702,15 +791,16 @@ function AddTaskModal({ onClose, onSaved, editing }) {
             </div>
           </Section>
 
-          {/* Checklist */}
-          <Section icon={CheckCircle2} title="Checklist (optional)">
+          {/* Checklist — its first line also becomes the task's title (the Task
+              Title field was removed). */}
+          <Section icon={CheckCircle2} title="Task / Checklist">
             <div className="space-y-2">
               {subtasks.map((s, i) => (
                 <div key={s._k} className="flex items-center gap-2">
                   <span className="w-4 h-4 rounded border border-gray-300 shrink-0" />
                   <input
                     className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]"
-                    placeholder={`Checklist item ${i + 1}`}
+                    placeholder={i === 0 ? "What is the task?" : `Checklist item ${i + 1}`}
                     value={s.title}
                     onChange={(e) => setSub(s._k, e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSub(); } }}
