@@ -144,6 +144,12 @@ export const PAGES = [
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
   { key: "training", label: "Training", href: "/dashboard/training", prefixes: ["/dashboard/training"], icon: "GraduationCap",
     roles: [...OVERSIGHT, ROLES.CALLER] },
+  // Influencer module — SUPER ADMIN ONLY. No other role holds it by baseline, and
+  // it is deliberately NOT grantable to any other role: the API re-checks
+  // isSuperAdmin on every call. It appears in no non-super nav, dropdown, or
+  // page-access list because super_admin is the sole role in `roles`.
+  { key: "influencers", label: "Influencers", href: "/dashboard/admin/influencers", prefixes: ["/dashboard/admin/influencers"], icon: "Star",
+    roles: [ROLES.SUPER_ADMIN] },
 ];
 
 // Pages that are NEVER gated by this system — every signed-in user reaches them

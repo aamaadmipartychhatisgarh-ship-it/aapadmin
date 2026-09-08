@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2 } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -103,7 +103,7 @@ const VIEW_OPTIONS = [
 const PAGE_ICONS = {
   LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp,
   MessageSquare, ClipboardList, Gauge, Newspaper, Share2, FileText, BarChart3,
-  Trophy, CalendarClock, Flag, UserCog, GraduationCap,
+  Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star,
 };
 
 export default function DashboardLayout({ children }) {
@@ -208,6 +208,7 @@ export default function DashboardLayout({ children }) {
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
+      { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
