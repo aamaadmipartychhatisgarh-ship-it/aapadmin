@@ -13,9 +13,16 @@ export async function ensureInfluencerSchema() {
          id INT AUTO_INCREMENT PRIMARY KEY,
          name VARCHAR(150) NOT NULL,
          phone VARCHAR(30) NULL,
+         photo_url VARCHAR(512) NULL,
          address TEXT NULL,
          assembly_id INT NULL,
          assembly_name VARCHAR(160) NULL,
+         district_id INT NULL,
+         district_name VARCHAR(160) NULL,
+         lok_sabha_id INT NULL,
+         lok_sabha_name VARCHAR(160) NULL,
+         zone_id INT NULL,
+         zone_name VARCHAR(160) NULL,
          influence_type VARCHAR(80) NULL,
          influence_position TEXT NULL,
          key_activities TEXT NULL,
@@ -50,9 +57,57 @@ export async function ensureInfluencerSchema() {
          KEY idx_potential (potential_rating)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    // Existing installs: add the newer columns if the table pre-dates them
+    // (guarded ALTERs — never touch/lose existing data).
+    await ensureColumn("photo_url", "VARCHAR(512) NULL");
+    await ensureColumn("district_id", "INT NULL");
+    await ensureColumn("district_name", "VARCHAR(160) NULL");
+    await ensureColumn("lok_sabha_id", "INT NULL");
+    await ensureColumn("lok_sabha_name", "VARCHAR(160) NULL");
+    await ensureColumn("zone_id", "INT NULL");
+    await ensureColumn("zone_name", "VARCHAR(160) NULL");
     ensured = true;
   } catch (e) {
     console.error("[influencer] ensure schema:", e?.message || e);
+  }
+}
+
+// Add a column to `influencers` only if it doesn't already exist.
+async function ensureColumn(column, definition) {
+  try {
+    const rows = await query("SHOW COLUMNS FROM influencers LIKE ?", [column]);
+    if (!rows.length) await query(`ALTER TABLE influencers ADD COLUMN \`${column}\` ${definition}`);
+  } catch (e) {
+    console.error(`[influencer] ensureColumn ${column}:`, e?.message || e);
+  }
+}
+
+// Resolve an assembly's full location chain from master data (DB-driven):
+//   assembly → district → lok_sabha → zone (via locations.parent_id).
+// Returns ids + names, with nulls where the mapping is incomplete (never throws).
+export async function resolveAssemblyHierarchy(assemblyId) {
+  const empty = {
+    assembly_id: null, assembly_name: null, district_id: null, district_name: null,
+    lok_sabha_id: null, lok_sabha_name: null, zone_id: null, zone_name: null,
+  };
+  if (assemblyId == null || String(assemblyId).trim() === "") return empty;
+  try {
+    const [row] = await query(
+      `SELECT a.id AS assembly_id, a.name AS assembly_name,
+              d.id AS district_id, d.name AS district_name,
+              l.id AS lok_sabha_id, l.name AS lok_sabha_name,
+              z.id AS zone_id, z.name AS zone_name
+         FROM locations a
+         LEFT JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
+         LEFT JOIN locations l ON l.id = d.parent_id AND l.type = 'lok_sabha'
+         LEFT JOIN locations z ON z.id = l.parent_id AND z.type = 'zone'
+        WHERE a.id = ? AND a.type = 'assembly'`,
+      [assemblyId]
+    );
+    return row || empty;
+  } catch (e) {
+    console.error("[influencer] resolveAssemblyHierarchy:", e?.message || e);
+    return empty;
   }
 }
 

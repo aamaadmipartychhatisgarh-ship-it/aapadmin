@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import {
   Star, Search, Plus, Filter, Eye, Pencil, Trash2, X, ChevronLeft, ChevronRight,
-  Loader2, Shield, Phone, MapPin, Save, ArrowLeft, Users, CheckCircle2,
+  Loader2, Shield, Phone, MapPin, Save, ArrowLeft, Users, CheckCircle2, Camera, ImagePlus,
 } from "lucide-react";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 
@@ -15,10 +15,10 @@ const BRAND = "#164FA3";
 // A blank form matching every DB field. key_activities is an array of strings
 // (4–5 entries); the conditional election block is only saved when contested.
 const BLANK = {
-  name: "", phone: "", address: "", assembly_id: "", influence_type: "", influence_position: "",
+  name: "", phone: "", photo_url: "", address: "", assembly_id: "", influence_position: "",
   key_activities: ["", "", "", "", ""], political_journey: "",
   contested_election: false, election_type: "", election_year: "", election_constituency: "",
-  election_party: "", election_position: "", election_result: "", election_votes: "", election_details: "",
+  election_party: "", election_result: "", election_votes: "", election_details: "",
   org_social_activity: "", economic_status: "", economic_profile: "",
   potential_rating: "", potential_areas: "", expected_contribution: "", potential_remarks: "",
   status: "New", next_action: "", action_remarks: "", follow_up_date: "", responsible_person: "",
@@ -238,7 +238,7 @@ export default function InfluencersPage() {
                 <th className="px-4 py-3 font-semibold">Name</th>
                 <th className="px-4 py-3 font-semibold">Phone</th>
                 <th className="px-4 py-3 font-semibold">Assembly</th>
-                <th className="px-4 py-3 font-semibold">Influence</th>
+                <th className="px-4 py-3 font-semibold">District</th>
                 <th className="px-4 py-3 font-semibold">Potential</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Next Action</th>
@@ -255,10 +255,15 @@ export default function InfluencersPage() {
                 </td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{r.name}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    <div className="flex items-center gap-2.5">
+                      <Thumb src={r.photo_url} name={r.name} />
+                      <span>{r.name}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{r.phone || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{r.assembly_name || "—"}</td>
-                  <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{r.influence_type || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{r.district_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{ratingLabel(meta, r.potential_rating)}</td>
                   <td className="px-4 py-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${statusChip(r.status)}`}>{r.status || "—"}</span></td>
                   <td className="px-4 py-3 text-gray-600 max-w-[150px] truncate">{r.next_action || "—"}</td>
@@ -337,6 +342,23 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const setAct = (i, v) => setF((p) => { const a = [...p.key_activities]; a[i] = v; return { ...p, key_activities: a }; });
 
+  // Auto-resolved location chain (District / Lok Sabha / Zone) for the selected
+  // Assembly — fetched from the backend/master data, never hardcoded. Refetches
+  // whenever the Assembly changes so stale values from a previous pick are
+  // replaced. `null` = still loading; empty fields = "Not mapped".
+  const [loc, setLoc] = useState(null);
+  useEffect(() => {
+    const aid = f.assembly_id;
+    if (!aid) { setLoc(null); return; }
+    let alive = true;
+    setLoc(null);
+    fetch(`/api/influencers?location_of=${aid}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { if (alive) setLoc(d.location || {}); })
+      .catch(() => { if (alive) setLoc({}); });
+    return () => { alive = false; };
+  }, [f.assembly_id]);
+
   async function submit(e) {
     e.preventDefault();
     setError("");
@@ -379,6 +401,10 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
       <form onSubmit={submit} className="space-y-5">
         {/* Basic info */}
         <Section title="Basic Information">
+          {/* Photo */}
+          <Field label="Photo">
+            <PhotoUpload value={f.photo_url} name={f.name} onChange={(url) => set("photo_url", url)} />
+          </Field>
           <Grid>
             <Field label="Name" required>
               <input value={f.name} onChange={(e) => set("name", e.target.value)} className={inputCls} placeholder="Full name" />
@@ -386,23 +412,29 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
             <Field label="Phone">
               <input value={f.phone} onChange={(e) => set("phone", e.target.value)} className={inputCls} placeholder="Contact number" />
             </Field>
+          </Grid>
+          <Field label="Address">
+            <textarea value={f.address} onChange={(e) => set("address", e.target.value)} className={areaCls} rows={2} placeholder="Full address" />
+          </Field>
+          <Grid>
             <Field label="Assembly">
               <select value={f.assembly_id} onChange={(e) => set("assembly_id", e.target.value)} className={inputCls}>
                 <option value="">Select assembly</option>
                 {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </Field>
-            <Field label="Influence Type">
-              <select value={f.influence_type} onChange={(e) => set("influence_type", e.target.value)} className={inputCls}>
-                <option value="">Select type</option>
-                {(meta?.influenceTypes || []).map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+            {/* Auto-resolved from the selected Assembly (read-only). */}
+            <Field label="District (auto)">
+              <ReadOnly loading={f.assembly_id && loc === null} value={loc?.district_name} empty={f.assembly_id ? "Not mapped" : "Select an assembly"} />
+            </Field>
+            <Field label="Lok Sabha (auto)">
+              <ReadOnly loading={f.assembly_id && loc === null} value={loc?.lok_sabha_name} empty={f.assembly_id ? "Not mapped" : "Select an assembly"} />
+            </Field>
+            <Field label="Zone (auto)">
+              <ReadOnly loading={f.assembly_id && loc === null} value={loc?.zone_name} empty={f.assembly_id ? "Not mapped" : "Select an assembly"} />
             </Field>
           </Grid>
-          <Field label="Address">
-            <textarea value={f.address} onChange={(e) => set("address", e.target.value)} className={areaCls} rows={2} placeholder="Full address" />
-          </Field>
-          <Field label="Influence / Position (assembly-level details)">
+          <Field label="Influence / Position in Assembly">
             <textarea value={f.influence_position} onChange={(e) => set("influence_position", e.target.value)} className={areaCls} rows={2} placeholder="Position held, scope of influence, remarks" />
           </Field>
         </Section>
@@ -433,7 +465,6 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
               <Field label="Year"><input value={f.election_year} onChange={(e) => set("election_year", e.target.value)} className={inputCls} placeholder="e.g. 2018" /></Field>
               <Field label="Constituency"><input value={f.election_constituency} onChange={(e) => set("election_constituency", e.target.value)} className={inputCls} /></Field>
               <Field label="Party"><input value={f.election_party} onChange={(e) => set("election_party", e.target.value)} className={inputCls} /></Field>
-              <Field label="Position / Post"><input value={f.election_position} onChange={(e) => set("election_position", e.target.value)} className={inputCls} /></Field>
               <Field label="Result"><input value={f.election_result} onChange={(e) => set("election_result", e.target.value)} className={inputCls} placeholder="Won / Lost" /></Field>
               <Field label="Votes"><input value={f.election_votes} onChange={(e) => set("election_votes", e.target.value)} className={inputCls} /></Field>
               <Field label="Details" full><textarea value={f.election_details} onChange={(e) => set("election_details", e.target.value)} className={areaCls} rows={2} /></Field>
@@ -472,7 +503,7 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
             </Field>
           </Grid>
           <Field label="Areas of Strength"><textarea value={f.potential_areas} onChange={(e) => set("potential_areas", e.target.value)} className={areaCls} rows={2} /></Field>
-          <Field label="Expected Contribution"><textarea value={f.expected_contribution} onChange={(e) => set("expected_contribution", e.target.value)} className={areaCls} rows={2} /></Field>
+          <Field label="Expected Time Contribution"><textarea value={f.expected_contribution} onChange={(e) => set("expected_contribution", e.target.value)} className={areaCls} rows={2} /></Field>
           <Field label="Remarks"><textarea value={f.potential_remarks} onChange={(e) => set("potential_remarks", e.target.value)} className={areaCls} rows={2} /></Field>
         </Section>
 
@@ -519,7 +550,7 @@ function ViewModal({ row, meta, onClose, onEdit }) {
       <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[88vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white" style={{ background: BRAND }}><Star size={20} /></div>
+            <Thumb src={row.photo_url} name={row.name} size={48} />
             <div>
               <h3 className="text-lg font-bold text-gray-900">{row.name}</h3>
               <div className="flex items-center gap-3 text-sm text-gray-500 mt-0.5">
@@ -538,9 +569,15 @@ function ViewModal({ row, meta, onClose, onEdit }) {
             {row.next_action && <span className="px-2 py-0.5 rounded-full text-xs font-medium border bg-gray-100 text-gray-600 border-gray-200">Next: {row.next_action}</span>}
           </div>
 
+          {/* Location (auto-resolved from Assembly) */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <ViewInline label="Assembly" value={row.assembly_name} />
+            <ViewInline label="District" value={row.district_name} />
+            <ViewInline label="Lok Sabha" value={row.lok_sabha_name} />
+            <ViewInline label="Zone" value={row.zone_name} />
+          </div>
           <ViewBlock label="Address" value={row.address} />
-          <ViewBlock label="Influence Type" value={row.influence_type} />
-          <ViewBlock label="Influence / Position" value={row.influence_position} />
+          <ViewBlock label="Influence / Position in Assembly" value={row.influence_position} />
 
           {acts.length > 0 && (
             <div>
@@ -559,7 +596,6 @@ function ViewModal({ row, meta, onClose, onEdit }) {
                 <ViewInline label="Year" value={row.election_year} />
                 <ViewInline label="Constituency" value={row.election_constituency} />
                 <ViewInline label="Party" value={row.election_party} />
-                <ViewInline label="Position" value={row.election_position} />
                 <ViewInline label="Result" value={row.election_result} />
                 <ViewInline label="Votes" value={row.election_votes} />
               </div>
@@ -573,7 +609,7 @@ function ViewModal({ row, meta, onClose, onEdit }) {
           <ViewBlock label="Economic Status" value={row.economic_status} />
           <ViewBlock label="Economic Profile" value={row.economic_profile} />
           <ViewBlock label="Areas of Strength" value={row.potential_areas} />
-          <ViewBlock label="Expected Contribution" value={row.expected_contribution} />
+          <ViewBlock label="Expected Time Contribution" value={row.expected_contribution} />
           <ViewBlock label="Potential Remarks" value={row.potential_remarks} />
           <ViewBlock label="Action Remarks" value={row.action_remarks} />
           <div className="grid grid-cols-2 gap-x-4">
@@ -627,4 +663,65 @@ function ViewBlock({ label, value }) {
 function ViewInline({ label, value }) {
   if (!value) return null;
   return <div><span className="text-gray-400">{label}: </span><span className="text-gray-800 font-medium">{value}</span></div>;
+}
+
+// Round photo thumbnail with a clean initial-letter placeholder fallback.
+function Thumb({ src, name, size = 32 }) {
+  const [ok, setOk] = useState(true);
+  const px = { width: size, height: size, fontSize: Math.max(11, Math.round(size * 0.4)) };
+  if (src && ok) {
+    return <img src={src} alt={name || ""} loading="lazy" style={{ width: size, height: size }} className="rounded-full object-cover border border-gray-200 bg-white shrink-0" onError={() => setOk(false)} />;
+  }
+  return <div style={px} className="rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#164FA3] font-bold shrink-0">{String(name || "?").trim().charAt(0).toUpperCase() || "?"}</div>;
+}
+
+// Read-only display box for the auto-resolved location fields.
+function ReadOnly({ value, empty, loading }) {
+  return (
+    <div className="w-full h-10 rounded-lg border border-gray-200 bg-gray-50 text-sm px-3 flex items-center text-gray-700">
+      {loading ? <span className="text-gray-400 inline-flex items-center gap-1"><Loader2 size={13} className="animate-spin" /> Resolving…</span>
+        : value ? value : <span className="text-gray-400">{empty || "—"}</span>}
+    </div>
+  );
+}
+
+// Photo upload with live preview. Uploads to the shared persistent photo store
+// (/api/users/photo → user_photos blob, served via /uploads/<id>) and hands the
+// stored URL back — never a temporary device path, so it survives refresh/login.
+function PhotoUpload({ value, name, onChange }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setErr("Image too large (max 5 MB)."); return; }
+    setErr(""); setBusy(true);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch("/api/users/photo", { method: "POST", body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || "Upload failed."); return; }
+      onChange(d.url);
+    } catch { setErr("Upload failed. Please try again."); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="flex items-center gap-4">
+      <Thumb src={value} name={name} size={72} />
+      <div className="space-y-1">
+        <div className="flex gap-2">
+          <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
+            className="h-9 px-3 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5 disabled:opacity-60">
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />} {value ? "Change Photo" : "Upload Photo"}
+          </button>
+          {value && !busy && <button type="button" onClick={() => onChange("")} className="h-9 px-3 rounded-lg border border-gray-200 text-sm font-medium text-gray-500 hover:bg-gray-50">Remove</button>}
+        </div>
+        <p className="text-[11px] text-gray-400">JPG, PNG or WEBP · up to 5 MB</p>
+        {err && <p className="text-[11px] text-red-500">{err}</p>}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+    </div>
+  );
 }

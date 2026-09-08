@@ -58,19 +58,24 @@ export async function PUT(req, { params }) {
     if (verr) return NextResponse.json({ message: verr }, { status: 400, headers: NO_STORE });
 
     const v = await coerce(d);
+    // Influence Type and Election "Position and Post" are intentionally NOT in
+    // this SET — the columns are retained (historical data preserved) but the
+    // module no longer writes them.
     await query(
       `UPDATE influencers SET
-         name=?, phone=?, address=?, assembly_id=?, assembly_name=?, influence_type=?, influence_position=?,
+         name=?, phone=?, photo_url=?, address=?, assembly_id=?, assembly_name=?,
+         district_id=?, district_name=?, lok_sabha_id=?, lok_sabha_name=?, zone_id=?, zone_name=?, influence_position=?,
          key_activities=?, political_journey=?, contested_election=?, election_type=?, election_year=?,
-         election_constituency=?, election_party=?, election_position=?, election_result=?, election_votes=?,
+         election_constituency=?, election_party=?, election_result=?, election_votes=?,
          election_details=?, org_social_activity=?, economic_status=?, economic_profile=?, potential_rating=?,
          potential_areas=?, expected_contribution=?, potential_remarks=?, status=?, next_action=?, action_remarks=?,
          follow_up_date=?, responsible_person=?
        WHERE id=?`,
       [
-        v.name, v.phone, v.address, v.assembly_id, v.assembly_name, v.influence_type, v.influence_position,
+        v.name, v.phone, v.photo_url, v.address, v.assembly_id, v.assembly_name,
+        v.district_id, v.district_name, v.lok_sabha_id, v.lok_sabha_name, v.zone_id, v.zone_name, v.influence_position,
         v.key_activities, v.political_journey, v.contested_election, v.election_type, v.election_year,
-        v.election_constituency, v.election_party, v.election_position, v.election_result, v.election_votes,
+        v.election_constituency, v.election_party, v.election_result, v.election_votes,
         v.election_details, v.org_social_activity, v.economic_status, v.economic_profile, v.potential_rating,
         v.potential_areas, v.expected_contribution, v.potential_remarks, v.status, v.next_action, v.action_remarks,
         v.follow_up_date, v.responsible_person, iid,

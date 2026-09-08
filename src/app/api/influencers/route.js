@@ -4,8 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isSuperAdmin } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import {
-  ensureInfluencerSchema, normalizeStatus, normalizeRating,
-  INFLUENCE_TYPES, POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES,
+  ensureInfluencerSchema, normalizeStatus, normalizeRating, resolveAssemblyHierarchy,
+  POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES,
 } from "@/lib/influencerSchema";
 
 // The Influencer module is Super-Admin ONLY. Every handler re-verifies the role
@@ -17,7 +17,6 @@ export const revalidate = 0;
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
 
 const META = {
-  influenceTypes: INFLUENCE_TYPES,
   potentialRatings: POTENTIAL_RATINGS,
   statuses: STATUSES,
   nextActions: NEXT_ACTIONS,
@@ -58,6 +57,13 @@ export async function GET(req) {
     if (searchParams.get("meta") === "1") {
       return NextResponse.json({ meta: META }, { headers: NO_STORE });
     }
+    // Live location resolver for the form: given an assembly, return the mapped
+    // District / Lok Sabha / Zone from master data (DB-driven, never hardcoded).
+    const locOf = searchParams.get("location_of");
+    if (locOf) {
+      const location = await resolveAssemblyHierarchy(locOf);
+      return NextResponse.json({ location }, { headers: NO_STORE });
+    }
 
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10) || 20));
@@ -79,8 +85,6 @@ export async function GET(req) {
     if (rating) { where.push("potential_rating = ?"); params.push(rating); }
     const nextAction = (searchParams.get("next_action") || "").trim();
     if (nextAction) { where.push("next_action = ?"); params.push(nextAction); }
-    const influenceType = (searchParams.get("influence_type") || "").trim();
-    if (influenceType) { where.push("influence_type = ?"); params.push(influenceType); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const orderBy = SORT_COLS[searchParams.get("sort")] || SORT_COLS.newest;
@@ -121,17 +125,19 @@ export async function POST(req) {
     const v = await coerce(d);
     const res = await query(
       `INSERT INTO influencers
-        (name, phone, address, assembly_id, assembly_name, influence_type, influence_position,
+        (name, phone, photo_url, address, assembly_id, assembly_name,
+         district_id, district_name, lok_sabha_id, lok_sabha_name, zone_id, zone_name, influence_position,
          key_activities, political_journey, contested_election, election_type, election_year,
-         election_constituency, election_party, election_position, election_result, election_votes,
+         election_constituency, election_party, election_result, election_votes,
          election_details, org_social_activity, economic_status, economic_profile, potential_rating,
          potential_areas, expected_contribution, potential_remarks, status, next_action, action_remarks,
          follow_up_date, responsible_person, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
-        v.name, v.phone, v.address, v.assembly_id, v.assembly_name, v.influence_type, v.influence_position,
+        v.name, v.phone, v.photo_url, v.address, v.assembly_id, v.assembly_name,
+        v.district_id, v.district_name, v.lok_sabha_id, v.lok_sabha_name, v.zone_id, v.zone_name, v.influence_position,
         v.key_activities, v.political_journey, v.contested_election, v.election_type, v.election_year,
-        v.election_constituency, v.election_party, v.election_position, v.election_result, v.election_votes,
+        v.election_constituency, v.election_party, v.election_result, v.election_votes,
         v.election_details, v.org_social_activity, v.economic_status, v.economic_profile, v.potential_rating,
         v.potential_areas, v.expected_contribution, v.potential_remarks, v.status, v.next_action, v.action_remarks,
         v.follow_up_date, v.responsible_person, session.user.id || null,
@@ -165,11 +171,9 @@ export async function validate(d) {
 }
 
 export async function coerce(d) {
-  let assembly_id = null, assembly_name = null;
-  if (d.assembly_id != null && String(d.assembly_id).trim() !== "") {
-    const rows = await query("SELECT id, name FROM locations WHERE id = ? AND type = 'assembly'", [d.assembly_id]);
-    if (rows.length) { assembly_id = rows[0].id; assembly_name = rows[0].name; }
-  }
+  // Assembly → District / Lok Sabha / Zone resolved authoritatively from master
+  // data (never trusts client-supplied location names). Nulls where unmapped.
+  const h = await resolveAssemblyHierarchy(d.assembly_id);
   const s = (x, max) => {
     const v = String(x ?? "").trim();
     if (!v) return null;
@@ -182,9 +186,12 @@ export async function coerce(d) {
   return {
     name: String(d.name).trim().slice(0, 150),
     phone: s(d.phone, 30),
+    photo_url: s(d.photo_url, 512),
     address: s(d.address),
-    assembly_id, assembly_name,
-    influence_type: s(d.influence_type, 80),
+    assembly_id: h.assembly_id, assembly_name: h.assembly_name,
+    district_id: h.district_id, district_name: h.district_name,
+    lok_sabha_id: h.lok_sabha_id, lok_sabha_name: h.lok_sabha_name,
+    zone_id: h.zone_id, zone_name: h.zone_name,
     influence_position: s(d.influence_position),
     key_activities: packActivities(d.key_activities),
     political_journey: s(d.political_journey),
@@ -193,7 +200,6 @@ export async function coerce(d) {
     election_year: contested ? s(d.election_year, 12) : null,
     election_constituency: contested ? s(d.election_constituency, 160) : null,
     election_party: contested ? s(d.election_party, 120) : null,
-    election_position: contested ? s(d.election_position, 120) : null,
     election_result: contested ? s(d.election_result, 120) : null,
     election_votes: contested ? s(d.election_votes, 60) : null,
     election_details: contested ? s(d.election_details) : null,
