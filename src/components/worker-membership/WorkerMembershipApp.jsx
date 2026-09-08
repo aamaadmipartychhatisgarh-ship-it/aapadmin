@@ -68,6 +68,8 @@ export default function WorkerMembershipApp({ standalone = false }) {
   // PWA install + offline + service worker + scoped manifest.
   const [deferred, setDeferred] = useState(null);
   const [installed, setInstalled] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [offline, setOffline] = useState(false);
 
   useEffect(() => {
@@ -95,7 +97,23 @@ export default function WorkerMembershipApp({ standalone = false }) {
       window.removeEventListener("online", on); window.removeEventListener("offline", off);
     };
   }, []);
-  const doInstall = async () => { if (!deferred) return; deferred.prompt(); try { await deferred.userChoice; } catch {} setDeferred(null); };
+  // Click handler: native prompt where the browser supports it; otherwise open
+  // the "how to install" instructions (iOS Safari never fires the prompt event).
+  const doInstall = async () => {
+    if (installed) return;
+    if (deferred) {
+      setInstalling(true);
+      try {
+        deferred.prompt();
+        const choice = await deferred.userChoice;
+        if (choice?.outcome === "accepted") setInstalled(true);
+      } catch {}
+      setInstalling(false);
+      setDeferred(null);
+    } else {
+      setShowHelp(true);
+    }
+  };
 
   // Session expired / not signed in → send to the login flow (§26). Applies to
   // both the dashboard route and the standalone /wm PWA entry.
@@ -165,7 +183,14 @@ export default function WorkerMembershipApp({ standalone = false }) {
               <div className="text-[10px] text-blue-200">AAP Chhattisgarh</div>
             </div>
           </div>
-          <button onClick={() => setRefreshKey((k) => k + 1)} className="p-2 rounded-lg hover:bg-white/10" aria-label="Refresh"><RefreshCw size={18} /></button>
+          <div className="flex items-center gap-1">
+            {!installed && (
+              <button onClick={doInstall} className="h-8 px-2.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-semibold inline-flex items-center gap-1" aria-label="Install app">
+                <Download size={15} /> {installing ? "Installing…" : "Install"}
+              </button>
+            )}
+            <button onClick={() => setRefreshKey((k) => k + 1)} className="p-2 rounded-lg hover:bg-white/10" aria-label="Refresh"><RefreshCw size={18} /></button>
+          </div>
         </header>
       )}
 
@@ -181,8 +206,10 @@ export default function WorkerMembershipApp({ standalone = false }) {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {installed
+                ? <span className="h-9 px-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm font-semibold inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> App Installed</span>
+                : <InstallButton deferred={deferred} installing={installing} onClick={doInstall} />}
               <button onClick={() => setRefreshKey((k) => k + 1)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5"><RefreshCw size={15} /> <span className="hidden sm:inline">Refresh</span></button>
-              {!installed && deferred && <button onClick={doInstall} className="h-9 px-3 rounded-lg text-white text-sm font-semibold inline-flex items-center gap-1.5" style={{ background: BRAND }}><Download size={15} /> Install App</button>}
             </div>
           </div>
         )}
@@ -204,7 +231,7 @@ export default function WorkerMembershipApp({ standalone = false }) {
           <div className="md:hidden">
             <div className="flex items-center gap-2">
               <button onClick={() => setSheetOpen(true)} className="h-10 px-4 rounded-lg border border-gray-200 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-2 shadow-sm"><SlidersHorizontal size={16} /> Filters{activeChips.length ? ` (${activeChips.length})` : ""}</button>
-              {!installed && deferred && <button onClick={doInstall} className="h-10 px-3 rounded-lg text-white text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm" style={{ background: BRAND }}><Download size={15} /> Install</button>}
+              {!installed && <InstallButton deferred={deferred} installing={installing} onClick={doInstall} compact />}
             </div>
             {activeChips.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
@@ -252,6 +279,9 @@ export default function WorkerMembershipApp({ standalone = false }) {
           </div>
         </div>
       )}
+
+      {/* Install instructions (shown when the browser has no native prompt) */}
+      {showHelp && <InstallHelpModal onClose={() => setShowHelp(false)} />}
 
       {/* Standalone bottom navigation */}
       {showChrome && (
@@ -796,6 +826,58 @@ const ctrl2 = "w-full h-10 rounded-lg border border-gray-200 text-sm px-3 text-g
 
 function Field({ label, stacked, children }) {
   return <div className={stacked ? "" : ""}><label className="block text-[11px] font-medium text-gray-500 mb-1">{label}</label>{children}</div>;
+}
+
+// The Install App button. Always visible while the app is not installed. When the
+// browser exposes a native install prompt it reads "Install App"; otherwise (e.g.
+// iOS Safari) it reads "How to Install" and opens step-by-step instructions.
+function InstallButton({ deferred, installing, onClick, compact }) {
+  const label = installing ? "Installing…" : deferred ? (compact ? "Install" : "Install App") : (compact ? "Install" : "How to Install");
+  return (
+    <button onClick={onClick} disabled={installing}
+      className={`${compact ? "h-10 px-3" : "h-9 px-3"} rounded-lg text-white text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm disabled:opacity-70`}
+      style={{ background: BRAND }} title={deferred ? "Install this page as an app" : "How to install this app"}>
+      {installing ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} {label}
+    </button>
+  );
+}
+
+// Platform install instructions — shown when there is no native prompt.
+function InstallHelpModal({ onClose }) {
+  const isIOS = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent || "");
+  const Step = ({ n, children }) => (
+    <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-blue-50 text-[#164FA3] text-xs font-bold flex items-center justify-center">{n}</span><span>{children}</span></li>
+  );
+  return (
+    <Modal onClose={onClose}>
+      <div className="space-y-4">
+        <div className="flex items-center gap-2"><Download size={20} style={{ color: BRAND }} /><h3 className="text-lg font-bold text-gray-900">Install Worker &amp; Membership App</h3></div>
+        <p className="text-sm text-gray-500">Add this page to your home screen to use it as a dedicated app that opens straight to Worker &amp; Membership.</p>
+
+        <div className={`rounded-xl border p-3 ${isIOS ? "border-blue-200 bg-blue-50/40" : "border-gray-200"}`}>
+          <div className="text-sm font-bold text-gray-900 mb-2">iPhone / iPad · Safari</div>
+          <ol className="space-y-1.5 text-sm text-gray-700">
+            <Step n={1}>Open this page in <strong>Safari</strong>.</Step>
+            <Step n={2}>Tap the <strong>Share</strong> button (the square with an up arrow).</Step>
+            <Step n={3}>Choose <strong>Add to Home Screen</strong>.</Step>
+            <Step n={4}>Open <strong>Worker &amp; Membership</strong> from your home screen.</Step>
+          </ol>
+        </div>
+
+        <div className={`rounded-xl border p-3 ${!isIOS ? "border-blue-200 bg-blue-50/40" : "border-gray-200"}`}>
+          <div className="text-sm font-bold text-gray-900 mb-2">Android · Chrome (& desktop Chrome / Edge)</div>
+          <ol className="space-y-1.5 text-sm text-gray-700">
+            <Step n={1}>Open this page in <strong>Chrome</strong> or <strong>Edge</strong>.</Step>
+            <Step n={2}>Open the browser <strong>menu</strong> (⋮).</Step>
+            <Step n={3}>Tap <strong>Install app</strong> / <strong>Add to Home screen</strong>.</Step>
+            <Step n={4}>Open <strong>Worker &amp; Membership</strong> from your home screen.</Step>
+          </ol>
+        </div>
+
+        <button onClick={onClose} className="w-full h-10 rounded-lg text-white text-sm font-semibold" style={{ background: BRAND }}>Got it</button>
+      </div>
+    </Modal>
+  );
 }
 function Card({ icon: Icon, label, value, sub, tint, onClick }) {
   const Tag = onClick ? "button" : "div";
