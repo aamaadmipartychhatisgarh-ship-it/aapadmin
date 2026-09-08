@@ -209,6 +209,7 @@ export default function DashboardLayout({ children }) {
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
       { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
+      { name: "Worker & Membership", href: "/dashboard/admin/worker-membership", icon: Users },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
