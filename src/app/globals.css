@@ -266,3 +266,8 @@
 @media (prefers-reduced-motion: no-preference) {
   .pc-upcoming { animation: pcUpcomingPulse 2.4s ease-in-out infinite; }
 }
+
+/* Hide the scrollbar on horizontally-scrollable tab strips (Worker & Membership
+   mobile tabs) while keeping them scrollable/swipeable. */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

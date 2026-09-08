@@ -125,7 +125,38 @@ export async function ensureMembershipSchema() {
     ensured = true;
   } catch (e) {
     console.error("[membership] ensure schema:", e?.message || e);
+  } finally {
+    // Whatever happened, refresh the column cache so the adaptive query layer
+    // sees the real, current shape of the tables (a failed ALTER must not leave
+    // a stale "column exists" belief, and vice-versa).
+    invalidateColumns();
   }
+}
+
+// --- Schema introspection (adaptive query layer) ---------------------------
+//
+// The `members` table may be OWNED by this module (the schema above) or may
+// already exist from the worker app with a DIFFERENT shape (e.g. no per-member
+// assembly_id/ward_id — geography derived from the worker instead). To never
+// 500 on a missing column, the stats layer asks columnsOf() what actually
+// exists and references only those columns. Cached per process; invalidated
+// whenever ensureMembershipSchema() runs.
+const colCache = new Map();
+export async function columnsOf(table) {
+  if (colCache.has(table)) return colCache.get(table);
+  let set = new Set();
+  try {
+    const rows = await query(`SHOW COLUMNS FROM \`${table}\``);
+    set = new Set(rows.map((r) => r.Field));
+  } catch {
+    // Table missing / unreadable → empty set; callers degrade gracefully.
+  }
+  colCache.set(table, set);
+  return set;
+}
+export function invalidateColumns(table) {
+  if (table) colCache.delete(table);
+  else colCache.clear();
 }
 
 // Add a column only if it does not already exist (guarded ALTER).
