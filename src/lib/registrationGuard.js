@@ -49,6 +49,9 @@ export function parseRegFilters(searchParams) {
     workerId: num("worker_id"),
     ward: str("ward"),
     personType: ["voter", "worker"].includes(searchParams.get("person_type")) ? searchParams.get("person_type") : null,
+    // Which link a registration arrived through: a karyakarta's generated link,
+    // or the general /join link with nobody credited.
+    source: ["worker", "direct"].includes(searchParams.get("source")) ? searchParams.get("source") : null,
     status: ["active", "duplicate", "rejected"].includes(searchParams.get("status")) ? searchParams.get("status") : "active",
     search: str("search"),
   };

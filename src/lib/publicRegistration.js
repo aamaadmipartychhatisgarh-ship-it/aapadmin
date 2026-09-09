@@ -1,24 +1,21 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import {
-  ensureRegistrationSchema, normalizeMobile, newLinkToken, workerCodeFor, regNow, PERSON_TYPES,
+  ensureRegistrationSchema, normalizeMobile, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
 // Both public routes are thin wrappers over the two handlers at the bottom of
-// this file, so the open link and any token link behave identically.
+// this file, so every link kind behaves identically.
 //
-// A request resolves to a collector in one of three ways:
-//   • NO token (/join)      → the one standing link. It resolves to the drive
-//                             that is currently active, and the karyakarta
-//                             identifies themselves with their own mobile
-//                             number. Nothing to issue, nothing to expire.
-//   • a DRIVE token         → the same thing, but pinned to one specific drive
-//                             (useful once several drives run at once).
-//   • a WORKER token        → a personal link for a named karyakarta; they type
-//                             nothing to identify themselves.
-// In every case the worker_id written on a registration is decided server-side
-// from the link plus the mobile number — never from a name a submitter typed.
+// WHO GETS THE CREDIT IS DECIDED ENTIRELY BY THE LINK. The form never asks, and
+// there is no field a submitter could use to claim someone else's work:
+//   • NO token (/join)  → the general public link, resolving to whichever drive
+//                         is active. The registration belongs to the drive and
+//                         to no karyakarta (worker_id stays NULL).
+//   • a DRIVE token     → the same, pinned to one specific drive.
+//   • a WORKER token    → a link generated for one karyakarta and shared by
+//                         them; every registration through it is theirs.
 // Nothing else about the organisation is readable through these endpoints.
 export const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
 
@@ -92,41 +89,8 @@ async function resolveLink(token) {
   return { ...c, mode: "drive", worker_id: null };
 }
 
-// On a drive link the collector is identified by their own mobile number: the
-// same number always resolves to the same worker row, so a karyakarta's total
-// keeps accumulating no matter which phone or browser session they use. On a
-// worker link the row is already known and this is never called.
-async function findOrCreateWorker(campaignId, { name, mobile, ward, areaBooth }) {
-  const [existing] = await query(
-    `SELECT id, name, mobile, worker_code, status FROM reg_workers WHERE campaign_id = ? AND mobile = ? LIMIT 1`,
-    [campaignId, mobile]
-  );
-  if (existing) {
-    if (existing.status !== "active") return { blocked: true };
-    // Fill in details the row is still missing; never overwrite a name an admin
-    // already set.
-    await query(
-      `UPDATE reg_workers
-          SET name = COALESCE(NULLIF(name, ''), ?),
-              ward_number = COALESCE(ward_number, ?),
-              area_booth = COALESCE(area_booth, ?)
-        WHERE id = ?`,
-      [name || existing.name, ward, areaBooth, existing.id]
-    );
-    return { worker: existing };
-  }
-  const res = await query(
-    `INSERT INTO reg_workers (campaign_id, name, mobile, token, ward_number, area_booth)
-     VALUES (?,?,?,?,?,?)`,
-    [campaignId, name, mobile, newLinkToken(), ward, areaBooth]
-  );
-  await query(`UPDATE reg_workers SET worker_code = ? WHERE id = ?`, [workerCodeFor(name, res.insertId), res.insertId]);
-  const [row] = await query(`SELECT id, name, mobile, worker_code, status FROM reg_workers WHERE id = ?`, [res.insertId]);
-  return { worker: row, created: true };
-}
-
 // A worker's own running total — the only aggregate this public surface exposes,
-// and only about the worker holding the session.
+// and only about the worker whose link is open.
 async function tallyFor(workerId) {
   const [t] = await query(
     `SELECT COUNT(*) AS total,
@@ -147,9 +111,9 @@ export async function publicFormContext(token) {
     if (!link) {
       return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
     }
-    // A personal link shows that worker their running total — a small motivator
-    // in the field. On the open link there is no worker until the first submit.
-    const tally = link.worker_id ? await tallyFor(link.worker_id) : { total: 0, voters: 0, new_workers: 0 };
+    // A worker link shows that karyakarta their running total — a small
+    // motivator in the field. The general link has no worker, so no tally.
+    const tally = link.worker_id ? await tallyFor(link.worker_id) : null;
     return NextResponse.json(
       {
         mode: link.mode,
@@ -223,36 +187,17 @@ export async function submitPublicRegistration(req, token) {
     const areaBooth = clip(d.area_booth, 160) || link.worker_area || null;
     const address = String(d.address || "").trim().slice(0, 2000) || null;
 
-    // Resolve WHO is collecting. A personal link already knows; the open link
-    // identifies the karyakarta by the mobile number they enter, which is what
-    // lets one standing link serve everyone with no pre-registration.
-    let workerId = link.worker_id;
-    if (link.mode === "drive") {
-      const collectorName = clip(d.worker_name, 160);
-      const collectorMobile = normalizeMobile(d.worker_mobile);
-      if (!collectorName) {
-        return NextResponse.json({ message: "Please enter your own name (the worker filling this form)." }, { status: 400, headers: NO_STORE });
-      }
-      if (!collectorMobile) {
-        return NextResponse.json({ message: "Please enter your own valid 10-digit mobile number." }, { status: 400, headers: NO_STORE });
-      }
-      // The two mobile numbers matching is SELF-REGISTRATION, not an error: the
-      // open link goes to ordinary voters too, and many will simply fill in their
-      // own details. They are credited to themselves, which is the truthful
-      // record of who brought them in.
-      const found = await findOrCreateWorker(link.campaign_id, { name: collectorName, mobile: collectorMobile, ward, areaBooth });
-      if (found.blocked) {
-        return NextResponse.json({ message: "This worker account has been disabled. Please contact your in-charge." }, { status: 403, headers: NO_STORE });
-      }
-      workerId = found.worker.id;
-    }
+    // WHO gets the credit comes from the link, full stop. A generated worker
+    // link carries their id; the general link carries none, and the row is
+    // recorded against the drive alone.
+    const workerId = link.worker_id ?? null;
 
     // One mobile number is one person per drive. A repeat is reported plainly
     // (with who first registered them) instead of silently creating a duplicate
     // that would inflate a worker's ranking.
     const [dupe] = await query(
       `SELECT p.id, w.name AS worker_name
-         FROM reg_people p JOIN reg_workers w ON w.id = p.worker_id
+         FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worker_id
         WHERE p.campaign_id = ? AND p.mobile = ? AND p.status = 'active' LIMIT 1`,
       [link.campaign_id, mobile]
     );
@@ -272,22 +217,9 @@ export async function submitPublicRegistration(req, token) {
        ward, areaBooth, wantsWorker, workerRole, ip, regNow()]
     );
 
-    // On a personal link the karyakarta may complete details the admin left
-    // blank, but never overwrite an identity an admin already set.
-    if (link.mode === "worker") {
-      const wName = clip(d.worker_name, 160);
-      const wMobile = normalizeMobile(d.worker_mobile);
-      if ((wName && !link.worker_name) || (wMobile && !link.worker_mobile)) {
-        await query(
-          `UPDATE reg_workers
-              SET name = COALESCE(NULLIF(name, ''), ?), mobile = COALESCE(NULLIF(mobile, ''), ?)
-            WHERE id = ?`,
-          [wName || link.worker_name, wMobile || link.worker_mobile, workerId]
-        );
-      }
-    }
-
-    return NextResponse.json({ ok: true, tally: await tallyFor(workerId) }, { status: 201, headers: NO_STORE });
+    // Only a worker link has a running total to report back.
+    const tally = workerId ? await tallyFor(workerId) : null;
+    return NextResponse.json({ ok: true, tally }, { status: 201, headers: NO_STORE });
   } catch (e) {
     console.error("[registration] public POST error:", e);
     return NextResponse.json({ message: "Could not save this registration. Please try again." }, { status: 500, headers: NO_STORE });

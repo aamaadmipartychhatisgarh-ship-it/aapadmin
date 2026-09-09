@@ -76,7 +76,8 @@ export async function GET(req) {
           p.person_type === "worker" ? "Wants to be Worker" : "Voter",
           p.name, p.mobile, p.address, p.effective_ward || p.ward_number, p.area_booth,
           p.wants_worker ? "Yes" : "No", p.worker_role,
-          p.worker_name, p.worker_mobile, p.worker_code, p.status,
+          // No karyakarta = arrived through the general /join link.
+          p.worker_name || "Direct (/join)", p.worker_mobile, p.worker_code, p.status,
         ])
       );
       filename = `AAP_Registrations_${stamp}.csv`;

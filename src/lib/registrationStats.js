@@ -11,8 +11,15 @@ import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSc
 // complete rather than dropping rows into an "unknown" bucket.
 const WARD_EXPR = "NULLIF(TRIM(COALESCE(NULLIF(TRIM(p.ward_number),''), w.ward_number, '')),'')";
 
+// The worker join is a LEFT join throughout: a registration made through the
+// GENERAL /join link belongs to no karyakarta (worker_id IS NULL). Those rows
+// must still count in the drive's totals and in the ward ranking — an inner join
+// would silently drop them and under-report the whole campaign. They simply do
+// not appear in the worker ranking, which is correct: nobody collected them.
+const PEOPLE_FROM = "FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worker_id";
+
 // WHERE fragment shared by every people-side query.
-function peopleFilters({ campaignId, from, to, ward, workerId, personType, status, search }) {
+function peopleFilters({ campaignId, from, to, ward, workerId, personType, status, search, source }) {
   const cond = ["p.status = ?"];
   const params = [status || "active"];
   if (campaignId) { cond.push("p.campaign_id = ?"); params.push(campaignId); }
@@ -26,12 +33,11 @@ function peopleFilters({ campaignId, from, to, ward, workerId, personType, statu
     const like = `%${search}%`;
     params.push(like, like, like, like);
   }
+  // "Direct" = came through the general link with no karyakarta behind it.
+  if (source === "direct") cond.push("p.worker_id IS NULL");
+  if (source === "worker") cond.push("p.worker_id IS NOT NULL");
   return { where: `WHERE ${cond.join(" AND ")}`, params };
 }
-
-// Every people query joins its worker — attribution is the point of the module,
-// and the join also supplies the ward fallback above.
-const PEOPLE_FROM = "FROM reg_people p JOIN reg_workers w ON w.id = p.worker_id";
 
 // ---------------------------------------------------------------- SUMMARY
 // The dashboard header: lifetime/period totals, worker counts, the top worker and
@@ -47,7 +53,8 @@ export async function getRegSummary({ campaignId, from, to, ward } = {}) {
       `SELECT
          COUNT(*) AS total,
          SUM(p.person_type = 'voter') AS voters,
-         SUM(p.person_type = 'worker') AS new_workers
+         SUM(p.person_type = 'worker') AS new_workers,
+         SUM(p.worker_id IS NULL) AS direct
        ${PEOPLE_FROM} ${f.where}`,
       f.params
     );
@@ -55,6 +62,7 @@ export async function getRegSummary({ campaignId, from, to, ward } = {}) {
       total: Number(row?.total || 0),
       voters: Number(row?.voters || 0),
       new_workers: Number(row?.new_workers || 0),
+      direct: Number(row?.direct || 0),
     };
   };
 

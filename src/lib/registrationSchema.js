@@ -13,19 +13,19 @@ import { query } from "@/lib/db";
 //   reg_people     one registered person (voter, or someone who wants to become a
 //                  worker), permanently referencing the worker who added them.
 //
-// The public form is reached in three ways, in order of how much they are used:
-//   • /join — THE link. No token at all: it opens whichever drive is active, so
-//     the same URL can be printed and forwarded forever, and closing the drive
-//     switches it off. The karyakarta types their own name + mobile, and that
-//     mobile number find-or-creates their reg_workers row — nobody has to be
-//     entered by hand in advance and every entry still lands under the right
-//     worker.
-//   • /r/<drive token> (reg_campaigns.public_token) — the same thing pinned to
-//     one specific drive.
-//   • /r/<worker token> (reg_workers.token) — optionally pre-issued to a named
-//     karyakarta; it identifies them without them typing anything.
-// In every case the collector is resolved server-side from the link plus the
-// mobile number, never from a name a submitter could type freely.
+// There are two kinds of public link, and the difference is only WHO gets the
+// credit — the form itself is identical and never asks:
+//   • /join — the GENERAL link, for the public. It opens whichever drive is
+//     active, so the same URL is printed and forwarded forever, and closing the
+//     drive switches it off. Registrations through it belong to the drive and to
+//     no worker (reg_people.worker_id IS NULL).
+//   • /r/<worker token> (reg_workers.token) — a link GENERATED for one
+//     karyakarta, which they then share themselves. Everyone who registers
+//     through it is credited to that karyakarta.
+//   • /r/<drive token> (reg_campaigns.public_token) — the general link pinned to
+//     one specific drive rather than "whichever is active".
+// Attribution therefore comes from the link alone. Nobody types a collector's
+// name, so nobody can claim someone else's work by editing a form field.
 //
 // Only status='active' rows count toward any statistic — the single definition of
 // a "successful" registration, so duplicates/rejects never inflate a ranking.
@@ -100,7 +100,7 @@ export async function ensureRegistrationSchema() {
       `CREATE TABLE IF NOT EXISTS reg_people (
          id INT AUTO_INCREMENT PRIMARY KEY,
          campaign_id INT NOT NULL,
-         worker_id INT NOT NULL,
+         worker_id INT NULL,
          person_type ENUM('voter','worker') NOT NULL DEFAULT 'voter',
          name VARCHAR(160) NOT NULL,
          mobile VARCHAR(20) NULL,
@@ -123,6 +123,9 @@ export async function ensureRegistrationSchema() {
          KEY idx_reg_people_mobile (mobile)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    // Installs created before the general /join link existed have worker_id NOT
+    // NULL, which would reject every unattributed public registration. Relax it.
+    await ensureNullable("reg_people", "worker_id", "INT NULL");
 
     ensured = true;
   } catch (e) {
@@ -145,6 +148,19 @@ async function ensureColumn(table, column, definition) {
     }
   } catch (e) {
     console.error(`[registration] ensureColumn ${table}.${column}:`, e?.message || e);
+  }
+}
+// Relax a column to NULL only if it is currently NOT NULL — an idempotent MODIFY
+// so a table created by an earlier version accepts the newer, wider values.
+async function ensureNullable(table, column, definition) {
+  try {
+    const rows = await query(`SHOW COLUMNS FROM \`${table}\``);
+    const col = rows.find((r) => r.Field === column);
+    if (col && col.Null === "NO") {
+      await query(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` ${definition}`);
+    }
+  } catch (e) {
+    console.error(`[registration] ensureNullable ${table}.${column}:`, e?.message || e);
   }
 }
 // Add an index only if it does not already exist (same placeholder caveat).

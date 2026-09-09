@@ -3,20 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote } from "lucide-react";
 
-// The public form. It backs both entry points:
-//   • /join — no token, the one standing link for the whole state. The
-//     karyakarta types their own name and mobile once; the mobile number is what
-//     the server matches them by, and this browser remembers it so they never
-//     retype it.
-//   • /r/<token> — a link pinned to one drive, or a personal link issued to a
-//     named karyakarta whose details then arrive prefilled.
-// Either way the credit is assigned server-side, so nobody can enter someone
-// else's registrations under their own name by editing the form.
+// The public form. One form, two ways in, and the ONLY difference is who ends up
+// credited — which the link decides, not the person filling it:
+//   • /join — the general link. Anyone can register themselves; the entry
+//     belongs to the drive and to no karyakarta.
+//   • /r/<token> — a link generated for one karyakarta and shared by them.
+//     Every registration through it is theirs.
+// So the form asks nothing about who is collecting. It cannot: there is no field
+// to put a name in, which is also why nobody can claim someone else's work.
 //
-// Order matters here: the FIRST question is what the person is (voter, or wants
-// to become a karyakarta), then their details. Who gets the credit is asked at
-// the end — a voter should never open this link and meet a box labelled "Worker
-// Name" before anything about them has been asked.
+// It opens with what the person is (voter, or wants to become a karyakarta),
+// then their own details, and nothing else.
 //
 // Field-first design: one column, large touch targets, and no dependency on the
 // dashboard's chrome — this page is opened on a phone over mobile data, usually
@@ -36,7 +33,7 @@ const STRINGS = {
     assembly: "विधानसभा", lokSabha: "लोकसभा",
     savedTitle: "पंजीयन सफल!",
     savedBody: "अगला व्यक्ति जोड़ने के लिए नीचे फॉर्म भरें.",
-    section1: "1. व्यक्ति पंजीयन",
+    section1: "पंजीयन फॉर्म",
     personType: "प्रकार",
     voter: "मतदाता", wantsWorker: "कार्यकर्ता बनना है",
     name: "नाम", namePh: "पूरा नाम",
@@ -47,11 +44,7 @@ const STRINGS = {
     interested: "कार्यकर्ता बनने के इच्छुक?",
     yes: "हाँ", no: "नहीं",
     workerRole: "कार्यकर्ता भूमिका", workerRolePh: "जैसे बूथ अध्यक्ष, वार्ड प्रभारी",
-    section2: "2. पंजीयन करने वाले कार्यकर्ता",
-    section2HelpOpen: "यदि आप स्वयं पंजीयन कर रहे हैं तो अपना ही नाम व नंबर भरें. एक बार भरें — यही फ़ोन इसे याद रखेगा.",
-    section2HelpPersonal: "यह पंजीयन आपके नाम दर्ज होगा.",
-    karyakartaName: "कार्यकर्ता का नाम", karyakartaNamePh: "आपका नाम",
-    karyakartaMobile: "मोबाइल नंबर",
+    creditedTo: "यह पंजीयन दर्ज होगा:",
     myTotal: "आपके कुल पंजीयन", tallyVoters: "मतदाता", tallyWorkers: "नए कार्यकर्ता",
     autoTime: "पंजीयन दिनांक व समय स्वतः दर्ज होगा",
     submit: "सबमिट करें", saving: "सहेजा जा रहा है…",
@@ -59,8 +52,6 @@ const STRINGS = {
     invalidTitle: "लिंक मान्य नहीं है",
     errName: "कृपया नाम भरें.",
     errMobile: "कृपया सही 10 अंकों का मोबाइल नंबर भरें.",
-    errWorkerName: "कृपया अपना (कार्यकर्ता का) नाम भरें.",
-    errWorkerMobile: "कृपया अपना सही 10 अंकों का मोबाइल नंबर भरें.",
     errSave: "सहेजा नहीं जा सका. कृपया दोबारा प्रयास करें.",
     errLoad: "फॉर्म नहीं खुल सका. कृपया इंटरनेट जाँचें और दोबारा प्रयास करें.",
     switchTo: "English",
@@ -72,7 +63,7 @@ const STRINGS = {
     assembly: "Assembly", lokSabha: "Lok Sabha",
     savedTitle: "Registration saved!",
     savedBody: "Fill the form below to add the next person.",
-    section1: "1. Person Registration",
+    section1: "Registration Form",
     personType: "Person Type",
     voter: "Voter", wantsWorker: "Wants to be a Worker",
     name: "Name", namePh: "Full name",
@@ -83,11 +74,7 @@ const STRINGS = {
     interested: "Interested in becoming a Worker?",
     yes: "Yes", no: "No",
     workerRole: "Worker Role", workerRolePh: "e.g. Booth President, Ward In-charge",
-    section2: "2. Registered by",
-    section2HelpOpen: "Registering yourself? Enter your own name and number. Filled once — this phone remembers it.",
-    section2HelpPersonal: "This registration is credited to you.",
-    karyakartaName: "Karyakarta Name", karyakartaNamePh: "Your name",
-    karyakartaMobile: "Mobile Number",
+    creditedTo: "This registration is credited to:",
     myTotal: "Your total registrations", tallyVoters: "voters", tallyWorkers: "new workers",
     autoTime: "Registration date & time are recorded automatically",
     submit: "Submit", saving: "Saving…",
@@ -95,8 +82,6 @@ const STRINGS = {
     invalidTitle: "This link is not valid",
     errName: "Please enter the name.",
     errMobile: "Enter a valid 10-digit mobile number.",
-    errWorkerName: "Please enter your own name.",
-    errWorkerMobile: "Enter your own valid 10-digit mobile number.",
     errSave: "Could not save. Please try again.",
     errLoad: "Could not open this form. Please check your internet connection and try again.",
     switchTo: "हिंदी",
@@ -128,11 +113,8 @@ export default function PublicRegistrationForm({ token }) {
   const [loading, setLoading] = useState(true);
   const [lang, setLang] = useState("hi");
 
-  // Karyakarta identity (prefilled from a personal link, or typed once here).
-  const [workerName, setWorkerName] = useState("");
-  const [workerMobile, setWorkerMobile] = useState("");
-
-  // Person being registered.
+  // Person being registered. There is deliberately no collector state: who gets
+  // the credit is a property of the link, not something this form collects.
   const [personType, setPersonType] = useState("voter");
   const [wantsWorker, setWantsWorker] = useState("yes"); // only on the worker branch
   const [workerRole, setWorkerRole] = useState("");
@@ -168,9 +150,6 @@ export default function PublicRegistrationForm({ token }) {
 
   // /join has no token; a shared link has one. Both hit the same handlers.
   const endpoint = token ? `/api/public/registration/${encodeURIComponent(token)}` : "/api/public/registration";
-  // The karyakarta identifies themselves once; this phone remembers it so the
-  // next hundred entries need no retyping.
-  const memoryKey = `aap_reg_worker_${token || "join"}`;
 
   const load = useCallback(async () => {
     setLoading(true); setLoadErr("");
@@ -180,14 +159,10 @@ export default function PublicRegistrationForm({ token }) {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setLoadErr(d?.message || "This link is not valid."); setBoot(null); return; }
       setBoot(d);
-      let saved = null;
-      if (d.mode === "drive") {
-        try { saved = JSON.parse(localStorage.getItem(`aap_reg_worker_${token || "join"}`) || "null"); } catch { saved = null; }
-      }
-      setWorkerName((v) => v || d.worker?.name || saved?.name || "");
-      setWorkerMobile((v) => v || d.worker?.mobile || saved?.mobile || "");
-      setWard((v) => v || d.worker?.ward_number || saved?.ward || d.campaign?.ward_number || "");
-      setAreaBooth((v) => v || d.worker?.area_booth || saved?.area || "");
+      // A worker link carries that karyakarta's own ward/booth — a sensible
+      // default for the people they register, still editable per person.
+      setWard((v) => v || d.worker?.ward_number || d.campaign?.ward_number || "");
+      setAreaBooth((v) => v || d.worker?.area_booth || "");
     } catch {
       setLoadErr(STRINGS.hi.errLoad);
     } finally {
@@ -204,7 +179,6 @@ export default function PublicRegistrationForm({ token }) {
     setWard(boot?.worker?.ward_number || boot?.campaign?.ward_number || "");
   }
 
-  const isDriveLink = boot?.mode === "drive";
 
   async function submit(e) {
     e.preventDefault();
@@ -212,10 +186,6 @@ export default function PublicRegistrationForm({ token }) {
     const validMobile = (v) => /^[6-9]\d{9}$/.test(String(v).replace(/\D/g, "").slice(-10));
     if (!name.trim()) { setErr(t.errName); return; }
     if (!validMobile(mobile)) { setErr(t.errMobile); return; }
-    if (isDriveLink) {
-      if (!workerName.trim()) { setErr(t.errWorkerName); return; }
-      if (!validMobile(workerMobile)) { setErr(t.errWorkerMobile); return; }
-    }
     setSaving(true);
     try {
       // "Wants to become a worker" is only recorded as such when the person
@@ -232,8 +202,6 @@ export default function PublicRegistrationForm({ token }) {
           ward_number: ward.trim(),
           area_booth: areaBooth.trim(),
           worker_role: effectiveType === "worker" ? workerRole.trim() : "",
-          worker_name: workerName.trim(),
-          worker_mobile: workerMobile.trim(),
           website: honeypot.current?.value || "",
         }),
       });
@@ -242,13 +210,6 @@ export default function PublicRegistrationForm({ token }) {
       // it carries detail the client cannot reconstruct, such as who already
       // registered that number.
       if (!r.ok) { setErr(d?.message || t.errSave); return; }
-      if (isDriveLink) {
-        try {
-          localStorage.setItem(memoryKey, JSON.stringify({
-            name: workerName.trim(), mobile: workerMobile.trim(), ward: ward.trim(), area: areaBooth.trim(),
-          }));
-        } catch { /* private mode / storage disabled — the karyakarta retypes */ }
-      }
       setBoot((b) => (b ? { ...b, tally: d.tally || b.tally } : b));
       setDone(true);
       resetPerson();
@@ -294,7 +255,7 @@ export default function PublicRegistrationForm({ token }) {
 
   const c = boot.campaign || {};
   const w = boot.worker || null;
-  const tally = boot.tally || { total: 0, voters: 0, new_workers: 0 };
+  const tally = boot.tally || null;
   const electionTypeLabel = c.election_type === "lok_sabha" ? t.lokSabha : t.assembly;
 
   return (
@@ -410,34 +371,25 @@ export default function PublicRegistrationForm({ token }) {
             </div>
           )}
 
-          {/* Who is submitting. Asked last, and only where it matters: on the
-              open link the karyakarta's mobile number is what credits the entry,
-              and this phone remembers it. On a personal link it is already known. */}
-          <div className="pt-3 border-t border-gray-100">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="text-sm font-bold text-gray-900">{t.section2}</h3>
-              {w?.worker_code ? (
-                <span className="text-[11px] font-mono px-2 py-1 rounded-md bg-gray-100 text-gray-600">{w.worker_code}</span>
+          {/* Nobody types who is collecting — the link decides that. On a
+              karyakarta's own generated link this is shown back to them as a
+              statement of fact (and their running total); on the general link
+              there is nothing to show at all. */}
+          {w ? (
+            <div className="rounded-xl bg-gray-50 border border-gray-200 px-3 py-2.5">
+              <p className="text-[12px] text-gray-600">
+                {t.creditedTo} <span className="font-semibold text-gray-900">{w.name}</span>
+                {w.worker_code ? <span className="font-mono text-gray-400"> · {w.worker_code}</span> : null}
+              </p>
+              {tally?.total > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
+                  <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 font-semibold">{t.myTotal}: {tally.total}</span>
+                  <span className="px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-gray-700">{t.tallyVoters} {tally.voters}</span>
+                  <span className="px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-gray-700">{t.tallyWorkers} {tally.new_workers}</span>
+                </div>
               ) : null}
             </div>
-            <p className="text-[12px] text-gray-500 mb-3">{isDriveLink ? t.section2HelpOpen : t.section2HelpPersonal}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label={t.karyakartaName} required={isDriveLink}>
-                <input className={inputCls} value={workerName} onChange={(e) => setWorkerName(e.target.value)} placeholder={t.karyakartaNamePh} />
-              </Field>
-              <Field label={t.karyakartaMobile} required={isDriveLink}>
-                <input className={inputCls} value={workerMobile} onChange={(e) => setWorkerMobile(e.target.value)}
-                       inputMode="numeric" maxLength={15} placeholder={t.mobilePh} />
-              </Field>
-            </div>
-            {tally.total > 0 ? (
-              <div className="mt-3 flex flex-wrap gap-2 text-[12px]">
-                <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 font-semibold">{t.myTotal}: {tally.total}</span>
-                <span className="px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700">{t.tallyVoters} {tally.voters}</span>
-                <span className="px-2.5 py-1 rounded-lg bg-gray-100 text-gray-700">{t.tallyWorkers} {tally.new_workers}</span>
-              </div>
-            ) : null}
-          </div>
+          ) : null}
 
           {/* Registration date/time are recorded automatically by the server. */}
           <p className="text-[12px] text-gray-500">

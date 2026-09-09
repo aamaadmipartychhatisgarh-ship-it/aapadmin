@@ -250,7 +250,7 @@ export default function RegistrationApp() {
             </h2>
             <p className="text-xs text-gray-500 mt-0.5 max-w-2xl">
               {liveDrive
-                ? <>Share this one link with every karyakarta in Chhattisgarh. It always opens the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. They enter their own name and mobile once, and every person they add is credited to them automatically.</>
+                ? <>The general link, for the public to register themselves. It always opens the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. Registrations through it are counted for the drive but credited to no karyakarta. To credit someone, generate their own link in <span className="font-semibold text-gray-700">Workers &amp; Links</span>.</>
                 : <>The link is switched off — no drive is open, so anyone who opens it sees “Registration is not open right now”. Turn on a drive below to make it live.</>}
             </p>
           </div>
@@ -304,8 +304,12 @@ function DashboardTab({ filterQs, onWard, onError }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat icon={Vote} label="Total Voters Added" value={p.voters.toLocaleString("en-IN")} sub={`${s.lifetime.voters.toLocaleString("en-IN")} all time`} />
         <Stat icon={UserPlus} label="Total New Workers" value={p.new_workers.toLocaleString("en-IN")} sub={`${s.lifetime.new_workers.toLocaleString("en-IN")} all time`} tone="green" />
-        <Stat icon={Users} label="Total Active Workers" value={s.active_workers.toLocaleString("en-IN")} sub={`${s.total_workers.toLocaleString("en-IN")} links issued`} tone="gray" />
         <Stat icon={BarChart3} label="Total Registrations" value={p.total.toLocaleString("en-IN")} sub={`${s.lifetime.total.toLocaleString("en-IN")} all time`} tone="amber" />
+        {/* Where they came from: a karyakarta's generated link, or the general
+            /join link with nobody behind it. The split is the whole point of
+            generating links, so it belongs on the front page. */}
+        <Stat icon={Link2} label="Through worker links" value={(p.total - p.direct).toLocaleString("en-IN")}
+              sub={`${p.direct.toLocaleString("en-IN")} direct via /join · ${s.active_workers} links active`} tone="gray" />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -491,17 +495,18 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
           <a href={`/api/registration/export?${filterQs({ report: "workers" })}`} className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
             <Download size={16} />Export
           </a>
-          <button onClick={() => setAdding(true)} className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
-            <Plus size={16} />Pre-issue links
+          <button onClick={() => setAdding(true)} className={`${btnCls} text-white`} style={{ background: BRAND }}>
+            <Plus size={16} />Generate links
           </button>
         </div>
       </div>
 
-      {/* Workers normally appear here on their own, the moment they submit
-          through the drive link — nobody has to enter them first. */}
+      {/* Each row IS one generated link, and the counts beside it are exactly
+          how many people registered through it — the answer to "how is this
+          karyakarta doing", with no cross-referencing. */}
       <p className="text-xs text-gray-500">
-        Workers are added automatically when they submit through the public form link. Use “Pre-issue links” only when you want a named
-        karyakarta to get a personal link that needs no typing at all.
+        Generate a link for each karyakarta and send it to them to share. Everyone who registers through their link is credited to them, and
+        the counts below are that link&apos;s own totals.
       </p>
 
       {adding && (
@@ -516,7 +521,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 bg-gray-50">
-                {["#", "Worker", "Mobile", "Ward / Area", "Voters", "Workers", "Total", "Unique link", "Status", ""].map((h) => (
+                {["#", "Karyakarta", "Mobile", "Ward / Area", "Voters", "New workers", "Registered via link", "Their link", "Status", ""].map((h) => (
                   <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -525,7 +530,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
               {loading ? (
                 <tr><td colSpan={10} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500">No workers yet. Add them to generate their unique links.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500">No karyakarta links yet. Generate one to start crediting registrations.</td></tr>
               ) : rows.map((w) => (
                 <tr key={w.id} className="border-t border-gray-100 hover:bg-gray-50/60">
                   <td className="px-3 py-2.5"><RankBadge rank={w.rank} /></td>
@@ -601,9 +606,9 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
     <div className={`${cardCls} p-4`}>
       <div className="flex items-start justify-between mb-3 gap-3">
         <div>
-          <h3 className="text-sm font-bold text-gray-900">Pre-issue personal links (optional)</h3>
+          <h3 className="text-sm font-bold text-gray-900">Generate karyakarta links</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Only for named karyakartas you want to hand a ready-made link. Everyone else just uses the drive link and enters their own name once.
+            One link per karyakarta. Send it to them, they share it, and every registration through it is counted as theirs.
           </p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={16} /></button>
@@ -655,13 +660,14 @@ function PeopleTab({ filterQs, onError }) {
   const [page, setPage] = useState(1);
   const [type, setType] = useState("");
   const [status, setStatus] = useState("active");
+  const [source, setSource] = useState("");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
-  const qs = useCallback((extra = {}) => filterQs({ person_type: type, status, search: debounced, ...extra }), [filterQs, type, status, debounced]);
+  const qs = useCallback((extra = {}) => filterQs({ person_type: type, status, source, search: debounced, ...extra }), [filterQs, type, status, source, debounced]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -697,6 +703,11 @@ function PeopleTab({ filterQs, onError }) {
           <option value="">All types</option>
           <option value="voter">Voters</option>
           <option value="worker">Wants to be a worker</option>
+        </select>
+        <select className={inputCls} value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }}>
+          <option value="">All sources</option>
+          <option value="worker">Through a karyakarta link</option>
+          <option value="direct">Direct via /join</option>
         </select>
         <select className={inputCls} value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
           <option value="active">Counted</option>
@@ -740,9 +751,16 @@ function PeopleTab({ filterQs, onError }) {
                   <td className="px-3 py-2.5 whitespace-nowrap">{p.mobile || "—"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{[p.effective_ward, p.area_booth].filter(Boolean).join(" · ") || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600 max-w-[240px]"><span className="line-clamp-2">{p.address || "—"}</span></td>
+                  {/* No worker means it came through the general /join link. */}
                   <td className="px-3 py-2.5">
-                    <span className="font-semibold text-gray-900">{p.worker_name}</span>
-                    <span className="block text-[11px] text-gray-400 font-mono">{p.worker_code}</span>
+                    {p.worker_name ? (
+                      <>
+                        <span className="font-semibold text-gray-900">{p.worker_name}</span>
+                        <span className="block text-[11px] text-gray-400 font-mono">{p.worker_code}</span>
+                      </>
+                    ) : (
+                      <span className="text-[11px] font-semibold px-2 py-1 rounded-md border bg-gray-100 text-gray-500 border-gray-200">Direct · /join</span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5">
                     <select className="text-[12px] border border-gray-300 rounded-md px-2 py-1 bg-white"
