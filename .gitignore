@@ -42,3 +42,9 @@ next-env.d.ts
 
 # Runtime user uploads (served via /api/media; never versioned)
 /public/uploads/
+
+# Database dumps. These carry the whole production dataset — every contact, and
+# every user's password hash — so they must never enter the repository, however
+# briefly. Restore one into the local Docker MariaDB instead (docker-compose.yml).
+*.sql
+*.sql.gz

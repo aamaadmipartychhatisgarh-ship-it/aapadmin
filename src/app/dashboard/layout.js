@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -103,7 +103,7 @@ const VIEW_OPTIONS = [
 const PAGE_ICONS = {
   LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp,
   MessageSquare, ClipboardList, Gauge, Newspaper, Share2, FileText, BarChart3,
-  Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star,
+  Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star, Users, Vote,
 };
 
 export default function DashboardLayout({ children }) {
@@ -210,6 +210,7 @@ export default function DashboardLayout({ children }) {
       { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
       { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
       { name: "Worker & Membership", href: "/dashboard/admin/worker-membership", icon: Users },
+      { name: "Voter Registration", href: "/dashboard/admin/voter-registration", icon: Vote },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
@@ -227,6 +228,7 @@ export default function DashboardLayout({ children }) {
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+      { name: "Voter Registration", href: "/dashboard/admin/voter-registration", icon: Vote },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
