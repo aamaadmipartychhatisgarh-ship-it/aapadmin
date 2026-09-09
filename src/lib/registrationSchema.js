@@ -105,6 +105,8 @@ export async function ensureRegistrationSchema() {
          name VARCHAR(160) NOT NULL,
          mobile VARCHAR(20) NULL,
          address TEXT NULL,
+         assembly_id INT NULL,
+         assembly_name VARCHAR(160) NULL,
          ward_number VARCHAR(60) NULL,
          area_booth VARCHAR(160) NULL,
          wants_worker TINYINT NOT NULL DEFAULT 0,
@@ -126,6 +128,13 @@ export async function ensureRegistrationSchema() {
     // Installs created before the general /join link existed have worker_id NOT
     // NULL, which would reject every unattributed public registration. Relax it.
     await ensureNullable("reg_people", "worker_id", "INT NULL");
+    // The constituency each person picks on the form. Stored as BOTH the master
+    // id and the name as it stood at the time: the id is what filters and joins
+    // reliably, and the name keeps a historic record readable even if a
+    // constituency is later renamed or removed from the master data.
+    await ensureColumn("reg_people", "assembly_id", "INT NULL");
+    await ensureColumn("reg_people", "assembly_name", "VARCHAR(160) NULL");
+    await ensureIndex("reg_people", "idx_reg_people_assembly", "assembly_id");
 
     ensured = true;
   } catch (e) {
@@ -259,4 +268,12 @@ export function normalizeMobile(value) {
   const digits = String(value || "").replace(/\D/g, "");
   const ten = digits.length > 10 ? digits.slice(-10) : digits;
   return /^[6-9]\d{9}$/.test(ten) ? ten : null;
+}
+
+// Ward numbers are numeric. Normalising to bare digits (and dropping a leading
+// zero) is what makes the ward ranking group correctly — otherwise "07", "7" and
+// "Ward 7" become three separate wards in the same table.
+export function normalizeWard(value) {
+  const digits = String(value ?? "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  return digits ? digits.slice(0, 10) : null;
 }

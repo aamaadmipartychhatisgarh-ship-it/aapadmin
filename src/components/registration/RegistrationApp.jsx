@@ -725,16 +725,16 @@ function PeopleTab({ filterQs, onError }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 bg-gray-50">
-                {["Date & time", "Type", "Name", "Mobile", "Ward / Area", "Address", "Added by", "Status"].map((h) => (
+                {["Date & time", "Type", "Name", "Mobile", "Constituency", "Ward / Area", "Address", "Added by", "Status"].map((h) => (
                   <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500">No registrations for these filters yet.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-500">No registrations for these filters yet.</td></tr>
               ) : rows.map((p) => (
                 <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50/60 align-top">
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">
@@ -749,7 +749,8 @@ function PeopleTab({ filterQs, onError }) {
                   </td>
                   <td className="px-3 py-2.5 font-semibold text-gray-900">{p.name}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap">{p.mobile || "—"}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{[p.effective_ward, p.area_booth].filter(Boolean).join(" · ") || "—"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{p.assembly_name || "—"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{[p.effective_ward && `Ward ${p.effective_ward}`, p.area_booth].filter(Boolean).join(" · ") || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600 max-w-[240px]"><span className="line-clamp-2">{p.address || "—"}</span></td>
                   {/* No worker means it came through the general /join link. */}
                   <td className="px-3 py-2.5">

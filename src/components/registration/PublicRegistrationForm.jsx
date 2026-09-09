@@ -29,8 +29,7 @@ const STRINGS = {
   hi: {
     org: "आम आदमी पार्टी · छत्तीसगढ़",
     fallbackTitle: "मतदाता एवं कार्यकर्ता पंजीयन",
-    constituency: "क्षेत्र", ward: "वार्ड", electionYear: "चुनाव वर्ष",
-    assembly: "विधानसभा", lokSabha: "लोकसभा",
+    constituency: "विधानसभा क्षेत्र", selectConstituency: "अपना क्षेत्र चुनें…",
     savedTitle: "पंजीयन सफल!",
     savedBody: "अगला व्यक्ति जोड़ने के लिए नीचे फॉर्म भरें.",
     section1: "पंजीयन फॉर्म",
@@ -44,14 +43,14 @@ const STRINGS = {
     interested: "कार्यकर्ता बनने के इच्छुक?",
     yes: "हाँ", no: "नहीं",
     workerRole: "कार्यकर्ता भूमिका", workerRolePh: "जैसे बूथ अध्यक्ष, वार्ड प्रभारी",
-    creditedTo: "यह पंजीयन दर्ज होगा:",
-    myTotal: "आपके कुल पंजीयन", tallyVoters: "मतदाता", tallyWorkers: "नए कार्यकर्ता",
     autoTime: "पंजीयन दिनांक व समय स्वतः दर्ज होगा",
     submit: "सबमिट करें", saving: "सहेजा जा रहा है…",
     footer: "आम आदमी पार्टी छत्तीसगढ़",
     invalidTitle: "लिंक मान्य नहीं है",
     errName: "कृपया नाम भरें.",
     errMobile: "कृपया सही 10 अंकों का मोबाइल नंबर भरें.",
+    creditedTo: "यह पंजीयन दर्ज होगा:",
+    errConstituency: "कृपया अपना विधानसभा क्षेत्र चुनें.",
     errSave: "सहेजा नहीं जा सका. कृपया दोबारा प्रयास करें.",
     errLoad: "फॉर्म नहीं खुल सका. कृपया इंटरनेट जाँचें और दोबारा प्रयास करें.",
     switchTo: "English",
@@ -59,8 +58,7 @@ const STRINGS = {
   en: {
     org: "Aam Aadmi Party · Chhattisgarh",
     fallbackTitle: "Voter & Worker Registration",
-    constituency: "Constituency", ward: "Ward", electionYear: "Election year",
-    assembly: "Assembly", lokSabha: "Lok Sabha",
+    constituency: "Constituency", selectConstituency: "Select your constituency…",
     savedTitle: "Registration saved!",
     savedBody: "Fill the form below to add the next person.",
     section1: "Registration Form",
@@ -74,14 +72,14 @@ const STRINGS = {
     interested: "Interested in becoming a Worker?",
     yes: "Yes", no: "No",
     workerRole: "Worker Role", workerRolePh: "e.g. Booth President, Ward In-charge",
-    creditedTo: "This registration is credited to:",
-    myTotal: "Your total registrations", tallyVoters: "voters", tallyWorkers: "new workers",
     autoTime: "Registration date & time are recorded automatically",
     submit: "Submit", saving: "Saving…",
     footer: "Aam Aadmi Party Chhattisgarh",
     invalidTitle: "This link is not valid",
     errName: "Please enter the name.",
     errMobile: "Enter a valid 10-digit mobile number.",
+    creditedTo: "This registration is credited to:",
+    errConstituency: "Please select your constituency.",
     errSave: "Could not save. Please try again.",
     errLoad: "Could not open this form. Please check your internet connection and try again.",
     switchTo: "हिंदी",
@@ -108,7 +106,7 @@ const inputCls =
   "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#164FA3] focus:border-transparent";
 
 export default function PublicRegistrationForm({ token }) {
-  const [boot, setBoot] = useState(null);      // { mode, campaign, worker, tally }
+  const [boot, setBoot] = useState(null);      // { campaign, constituencies, credited_to, defaults }
   const [loadErr, setLoadErr] = useState("");
   const [loading, setLoading] = useState(true);
   const [lang, setLang] = useState("hi");
@@ -121,6 +119,7 @@ export default function PublicRegistrationForm({ token }) {
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [address, setAddress] = useState("");
+  const [assemblyId, setAssemblyId] = useState("");
   const [ward, setWard] = useState("");
   const [areaBooth, setAreaBooth] = useState("");
   const honeypot = useRef(null);
@@ -159,10 +158,11 @@ export default function PublicRegistrationForm({ token }) {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setLoadErr(d?.message || "This link is not valid."); setBoot(null); return; }
       setBoot(d);
-      // A worker link carries that karyakarta's own ward/booth — a sensible
-      // default for the people they register, still editable per person.
-      setWard((v) => v || d.worker?.ward_number || d.campaign?.ward_number || "");
-      setAreaBooth((v) => v || d.worker?.area_booth || "");
+      // Editable defaults for the drive (or, on a karyakarta's link, their own
+      // patch) — the only thing the bootstrap carries besides the header.
+      setAssemblyId((v) => v || (d.defaults?.assembly_id ? String(d.defaults.assembly_id) : ""));
+      setWard((v) => v || d.defaults?.ward_number || "");
+      setAreaBooth((v) => v || d.defaults?.area_booth || "");
     } catch {
       setLoadErr(STRINGS.hi.errLoad);
     } finally {
@@ -175,8 +175,10 @@ export default function PublicRegistrationForm({ token }) {
   function resetPerson() {
     setPersonType("voter"); setWantsWorker("yes"); setWorkerRole("");
     setName(""); setMobile(""); setAddress("");
-    setAreaBooth(boot?.worker?.area_booth || "");
-    setWard(boot?.worker?.ward_number || boot?.campaign?.ward_number || "");
+    // Constituency, ward and booth are deliberately KEPT: a karyakarta works
+    // one patch, so clearing them would mean re-picking the same values for
+    // every single person they register.
+    setAreaBooth((v) => v);
   }
 
 
@@ -186,6 +188,7 @@ export default function PublicRegistrationForm({ token }) {
     const validMobile = (v) => /^[6-9]\d{9}$/.test(String(v).replace(/\D/g, "").slice(-10));
     if (!name.trim()) { setErr(t.errName); return; }
     if (!validMobile(mobile)) { setErr(t.errMobile); return; }
+    if (!assemblyId) { setErr(t.errConstituency); return; }
     setSaving(true);
     try {
       // "Wants to become a worker" is only recorded as such when the person
@@ -199,6 +202,7 @@ export default function PublicRegistrationForm({ token }) {
           name: name.trim(),
           mobile: mobile.trim(),
           address: address.trim(),
+          assembly_id: assemblyId,
           ward_number: ward.trim(),
           area_booth: areaBooth.trim(),
           worker_role: effectiveType === "worker" ? workerRole.trim() : "",
@@ -210,7 +214,6 @@ export default function PublicRegistrationForm({ token }) {
       // it carries detail the client cannot reconstruct, such as who already
       // registered that number.
       if (!r.ok) { setErr(d?.message || t.errSave); return; }
-      setBoot((b) => (b ? { ...b, tally: d.tally || b.tally } : b));
       setDone(true);
       resetPerson();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -254,9 +257,6 @@ export default function PublicRegistrationForm({ token }) {
   }
 
   const c = boot.campaign || {};
-  const w = boot.worker || null;
-  const tally = boot.tally || null;
-  const electionTypeLabel = c.election_type === "lok_sabha" ? t.lokSabha : t.assembly;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -269,18 +269,6 @@ export default function PublicRegistrationForm({ token }) {
               <h1 className="text-lg font-bold mt-0.5">{c.name || t.fallbackTitle}</h1>
             </div>
             {LangButton}
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">
-            <div>
-              <div className="text-white/60 text-[11px]">{t.constituency}</div>
-              <div className="font-semibold">{c.constituency || "—"}</div>
-              <div className="text-white/60 text-[11px]">{electionTypeLabel}</div>
-            </div>
-            <div>
-              <div className="text-white/60 text-[11px]">{t.ward}</div>
-              <div className="font-semibold">{c.ward_number || w?.ward_number || "—"}</div>
-              <div className="text-white/60 text-[11px]">{t.electionYear} {c.election_year || "—"}</div>
-            </div>
           </div>
         </div>
       </header>
@@ -296,8 +284,8 @@ export default function PublicRegistrationForm({ token }) {
           </div>
         )}
 
-        {/* The person being registered comes FIRST — the very first question is
-            what they are. Who gets the credit is asked at the end. */}
+        {/* The very first question is what the person is; everything after it is
+            about them. Nothing on this page concerns who gets the credit. */}
         <form onSubmit={submit} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm space-y-4">
           <h2 className="text-sm font-bold text-gray-900">{t.section1}</h2>
 
@@ -337,9 +325,21 @@ export default function PublicRegistrationForm({ token }) {
                       onChange={(e) => setAddress(e.target.value)} placeholder={t.addressPh} />
           </Field>
 
+          {/* Constituency is chosen from the master list, never typed — free text
+              would fill the reports with spelling variants of the same place. */}
+          <Field label={t.constituency} required>
+            <select className={inputCls} value={assemblyId} onChange={(e) => setAssemblyId(e.target.value)} required>
+              <option value="">{t.selectConstituency}</option>
+              {(boot.constituencies || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </Field>
+
           <div className="grid grid-cols-2 gap-3">
             <Field label={t.wardNo}>
-              <input className={inputCls} value={ward} onChange={(e) => setWard(e.target.value)} placeholder={t.wardPh} />
+              {/* Digits only, enforced as they type and again on the server, so
+                  "07", "7" and "Ward 7" cannot become three separate wards. */}
+              <input className={inputCls} value={ward} onChange={(e) => setWard(e.target.value.replace(/\D/g, ""))}
+                     inputMode="numeric" pattern="[0-9]*" maxLength={10} placeholder={t.wardPh} />
             </Field>
             <Field label={t.areaBooth}>
               <input className={inputCls} value={areaBooth} onChange={(e) => setAreaBooth(e.target.value)} placeholder={t.areaPh} />
@@ -371,24 +371,13 @@ export default function PublicRegistrationForm({ token }) {
             </div>
           )}
 
-          {/* Nobody types who is collecting — the link decides that. On a
-              karyakarta's own generated link this is shown back to them as a
-              statement of fact (and their running total); on the general link
-              there is nothing to show at all. */}
-          {w ? (
-            <div className="rounded-xl bg-gray-50 border border-gray-200 px-3 py-2.5">
-              <p className="text-[12px] text-gray-600">
-                {t.creditedTo} <span className="font-semibold text-gray-900">{w.name}</span>
-                {w.worker_code ? <span className="font-mono text-gray-400"> · {w.worker_code}</span> : null}
-              </p>
-              {tally?.total > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
-                  <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-800 font-semibold">{t.myTotal}: {tally.total}</span>
-                  <span className="px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-gray-700">{t.tallyVoters} {tally.voters}</span>
-                  <span className="px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-gray-700">{t.tallyWorkers} {tally.new_workers}</span>
-                </div>
-              ) : null}
-            </div>
+          {/* On a karyakarta's link, who the entry is credited to — the name and
+              nothing else. This page is shared WITH THE PUBLIC, so the internal
+              worker code and that karyakarta's running totals stay off it. */}
+          {boot.credited_to ? (
+            <p className="text-[12px] text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+              {t.creditedTo} <span className="font-semibold text-gray-900">{boot.credited_to}</span>
+            </p>
           ) : null}
 
           {/* Registration date/time are recorded automatically by the server. */}

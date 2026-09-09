@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import {
-  ensureRegistrationSchema, normalizeMobile, regNow, PERSON_TYPES,
+  ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
@@ -48,7 +48,7 @@ function clientIp(req) {
   return (fwd.split(",")[0] || req.headers.get("x-real-ip") || "unknown").trim().slice(0, 64);
 }
 
-const CAMPAIGN_COLS = `id AS campaign_id, name AS campaign_name, election_type, constituency,
+const CAMPAIGN_COLS = `id AS campaign_id, name AS campaign_name, election_type, constituency, constituency_id,
                        ward_number AS campaign_ward, election_year, status AS campaign_status`;
 
 // Resolve the request to { campaign, worker? }. Returns null for an unknown
@@ -72,7 +72,7 @@ async function resolveLink(token) {
   const [w] = await query(
     `SELECT w.id AS worker_id, w.name AS worker_name, w.mobile AS worker_mobile,
             w.worker_code, w.ward_number AS worker_ward, w.area_booth AS worker_area, w.status AS worker_status,
-            c.id AS campaign_id, c.name AS campaign_name, c.election_type, c.constituency,
+            c.id AS campaign_id, c.name AS campaign_name, c.election_type, c.constituency, c.constituency_id,
             c.ward_number AS campaign_ward, c.election_year, c.status AS campaign_status
        FROM reg_workers w
        JOIN reg_campaigns c ON c.id = w.campaign_id
@@ -89,21 +89,13 @@ async function resolveLink(token) {
   return { ...c, mode: "drive", worker_id: null };
 }
 
-// A worker's own running total — the only aggregate this public surface exposes,
-// and only about the worker whose link is open.
-async function tallyFor(workerId) {
-  const [t] = await query(
-    `SELECT COUNT(*) AS total,
-            SUM(person_type = 'voter') AS voters,
-            SUM(person_type = 'worker') AS new_workers
-       FROM reg_people WHERE worker_id = ? AND status = 'active'`,
-    [workerId]
-  );
-  return { total: Number(t?.total || 0), voters: Number(t?.voters || 0), new_workers: Number(t?.new_workers || 0) };
-}
-
-// GET — the form's bootstrap: the election header to display, and on a personal
-// link the worker's saved details to prefill. Returns no other person's data.
+// GET — the form's bootstrap. It returns the ELECTION HEADER AND NOTHING ELSE.
+//
+// A karyakarta's link is shared with the public, so anyone holding it can call
+// this endpoint. It therefore exposes no worker name, no worker code, no tallies
+// and no other person's data — only what the form has to print at the top. The
+// ward/booth defaults ride along because they are properties of the drive that
+// the form fills in for the person anyway.
 export async function publicFormContext(token) {
   try {
     await ensureRegistrationSchema();
@@ -111,26 +103,32 @@ export async function publicFormContext(token) {
     if (!link) {
       return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
     }
-    // A worker link shows that karyakarta their running total — a small
-    // motivator in the field. The general link has no worker, so no tally.
-    const tally = link.worker_id ? await tallyFor(link.worker_id) : null;
+    // The constituency list people choose from. Constituency names are public
+    // information (they are on every ballot), so serving them here exposes
+    // nothing — and choosing from the master list is what keeps the data
+    // clean enough to group by, which free text never is.
+    const constituencies = await query(
+      `SELECT id, name FROM locations WHERE type = 'assembly' ORDER BY name ASC`
+    );
+
     return NextResponse.json(
       {
-        mode: link.mode,
-        campaign: {
-          name: link.campaign_name,
-          election_type: link.election_type,
-          constituency: link.constituency,
-          ward_number: link.campaign_ward,
-          election_year: link.election_year,
+        campaign: { name: link.campaign_name, election_year: link.election_year },
+        constituencies,
+        // On a karyakarta's link, the NAME of the person the entry is credited
+        // to — reassuring for the voter, who was sent the link by that
+        // karyakarta and already knows them. Deliberately just the name: the
+        // internal worker code and their running totals are organisation data
+        // and have no business on a page shared with the public.
+        credited_to: link.mode === "worker" ? link.worker_name : null,
+        // Editable defaults. On a karyakarta's link the ward/booth come from
+        // their own patch, which beats the drive's — but they reveal nothing
+        // about whose link it is.
+        defaults: {
+          assembly_id: link.constituency_id || null,
+          ward_number: normalizeWard(link.worker_ward || link.campaign_ward),
+          area_booth: link.worker_area || null,
         },
-        worker: link.mode === "worker"
-          ? {
-              name: link.worker_name, mobile: link.worker_mobile, worker_code: link.worker_code,
-              ward_number: link.worker_ward, area_booth: link.worker_area,
-            }
-          : null,
-        tally,
       },
       { headers: NO_STORE }
     );
@@ -183,9 +181,24 @@ export async function submitPublicRegistration(req, token) {
     const workerRole = wantsWorker ? (String(d.worker_role || "").trim().slice(0, 160) || null) : null;
 
     const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
-    const ward = clip(d.ward_number, 60) || link.worker_ward || link.campaign_ward || null;
+    const ward = normalizeWard(d.ward_number) || normalizeWard(link.worker_ward || link.campaign_ward);
     const areaBooth = clip(d.area_booth, 160) || link.worker_area || null;
     const address = String(d.address || "").trim().slice(0, 2000) || null;
+
+    // The constituency must be one from the master list. Resolving the id here
+    // rather than trusting a submitted name is what keeps the ward and
+    // constituency reports groupable — a free-text field would fill them with
+    // spelling variants of the same place.
+    let assemblyId = null;
+    let assemblyName = null;
+    const pickedId = /^\d+$/.test(String(d.assembly_id || "")) ? Number(d.assembly_id) : null;
+    if (pickedId) {
+      const [loc] = await query(`SELECT id, name FROM locations WHERE id = ? AND type = 'assembly' LIMIT 1`, [pickedId]);
+      if (loc) { assemblyId = loc.id; assemblyName = loc.name; }
+    }
+    if (!assemblyId) {
+      return NextResponse.json({ message: "Please select your constituency." }, { status: 400, headers: NO_STORE });
+    }
 
     // WHO gets the credit comes from the link, full stop. A generated worker
     // link carries their id; the general link carries none, and the row is
@@ -210,16 +223,16 @@ export async function submitPublicRegistration(req, token) {
 
     await query(
       `INSERT INTO reg_people
-         (campaign_id, worker_id, person_type, name, mobile, address, ward_number, area_booth,
-          wants_worker, worker_role, status, source_ip, registered_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
+         (campaign_id, worker_id, person_type, name, mobile, address, assembly_id, assembly_name,
+          ward_number, area_booth, wants_worker, worker_role, status, source_ip, registered_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
       [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
-       ward, areaBooth, wantsWorker, workerRole, ip, regNow()]
+       assemblyId, assemblyName, ward, areaBooth, wantsWorker, workerRole, ip, regNow()]
     );
 
-    // Only a worker link has a running total to report back.
-    const tally = workerId ? await tallyFor(workerId) : null;
-    return NextResponse.json({ ok: true, tally }, { status: 201, headers: NO_STORE });
+    // Just an acknowledgement — no counts, for the same reason the bootstrap
+    // returns none: whoever is holding this link is a member of the public.
+    return NextResponse.json({ ok: true }, { status: 201, headers: NO_STORE });
   } catch (e) {
     console.error("[registration] public POST error:", e);
     return NextResponse.json({ message: "Could not save this registration. Please try again." }, { status: 500, headers: NO_STORE });
