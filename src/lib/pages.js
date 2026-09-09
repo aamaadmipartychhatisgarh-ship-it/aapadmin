@@ -156,6 +156,13 @@ export const PAGES = [
   // isSuperAdmin server-side.
   { key: "worker_membership", label: "Worker & Membership", href: "/dashboard/admin/worker-membership", prefixes: ["/dashboard/admin/worker-membership"], icon: "Users",
     roles: [ROLES.SUPER_ADMIN] },
+  // Voter & Worker Registration — the public link drive. State-level by baseline
+  // (the drive is run centrally), and grantable to anyone else through Page
+  // Access; every /api/registration route re-checks this key server-side. The
+  // PUBLIC form at /r/<token> is deliberately outside this model — it is
+  // unauthenticated by design and gated only by the worker's link token.
+  { key: "voter_registration", label: "Voter & Worker Registration", href: "/dashboard/admin/voter-registration", prefixes: ["/dashboard/admin/voter-registration"], icon: "Vote",
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN] },
 ];
 
 // Pages that are NEVER gated by this system — every signed-in user reaches them

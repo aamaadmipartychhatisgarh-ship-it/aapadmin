@@ -1,18 +1,24 @@
 services:
   mysql:
-    image: mysql:8
+    # MariaDB, not MySQL: production (Hostinger) runs MariaDB 11.8, and its dumps
+    # carry MariaDB-only collations (utf8mb4_uca1400_ai_ci) that MySQL 8 refuses
+    # to import. Matching the production engine keeps a restored dump loadable and
+    # local behaviour faithful.
+    image: mariadb:11.8
     container_name: aapadmin_mysql
     restart: unless-stopped
     environment:
       # App defaults to an empty root password (see src/lib/db.js & SETUP.md)
-      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
-      MYSQL_DATABASE: aapadmin
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+      MARIADB_DATABASE: aapadmin
     ports:
       - "3306:3306"
     volumes:
       - aapadmin_mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      # MariaDB 11 dropped the `mysqladmin` compatibility symlink — use the
+      # image's own healthcheck helper instead.
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
       timeout: 5s
       retries: 20
