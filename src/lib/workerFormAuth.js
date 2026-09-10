@@ -38,6 +38,14 @@ export function signSession({ worker_id, phone }) {
   return `${body}.${hmac(body)}`;
 }
 
+// Generic signer for any small payload (e.g. the reg-link handler session),
+// reusing the same secret + HMAC so there is one signing mechanism. Verify with
+// verifySessionToken (it checks the `exp` field the caller must include).
+export function signPayload(obj) {
+  const body = b64urlJson(obj);
+  return `${body}.${hmac(body)}`;
+}
+
 export function verifySessionToken(token) {
   if (!token || typeof token !== "string") return null;
   const i = token.lastIndexOf(".");

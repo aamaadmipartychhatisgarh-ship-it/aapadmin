@@ -22,6 +22,13 @@ export async function ensureWorkerFormSchema() {
          KEY idx_wfo_created (created_at)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    // Isolate the two OTP flows that share this table: the /worker-form OTP
+    // (scope 'worker_form', default) and the reg-link handler OTP (scope
+    // 'reg_link', bound to the link token via ref_token). Guarded ALTERs — the
+    // LIKE-free column check works on MariaDB's prepared protocol.
+    await ensureColumn("worker_form_otps", "scope", "VARCHAR(20) NOT NULL DEFAULT 'worker_form'");
+    await ensureColumn("worker_form_otps", "ref_token", "VARCHAR(64) NULL");
+
     await query(
       `CREATE TABLE IF NOT EXISTS worker_form_submissions (
          id INT AUTO_INCREMENT PRIMARY KEY,
@@ -37,5 +44,18 @@ export async function ensureWorkerFormSchema() {
     ensured = true;
   } catch (e) {
     console.error("[worker-form] ensure schema:", e?.message || e);
+  }
+}
+
+// Add a column only if it does not already exist. Lists columns and filters in
+// JS (no LIKE placeholder, which MariaDB's prepared protocol rejects).
+async function ensureColumn(table, column, definition) {
+  try {
+    const rows = await query(`SHOW COLUMNS FROM \`${table}\``);
+    if (!rows.some((r) => r.Field === column)) {
+      await query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+    }
+  } catch (e) {
+    console.error(`[worker-form] ensureColumn ${table}.${column}:`, e?.message || e);
   }
 }

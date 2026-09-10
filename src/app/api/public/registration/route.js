@@ -10,7 +10,7 @@ export const revalidate = 0;
 
 export async function GET(req) {
   const list = new URL(req.url).searchParams.get("list");
-  if (list) return publicOwnList(null, list);
+  if (list) return publicOwnList(req, null, list);
   return publicFormContext(null);
 }
 

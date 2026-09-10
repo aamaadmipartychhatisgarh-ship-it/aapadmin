@@ -3,6 +3,7 @@ import { query } from "@/lib/db";
 import {
   ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
+import { readRegSession } from "@/lib/regLinkAuth";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
 // Both public routes are thin wrappers over the two handlers at the bottom of
@@ -144,12 +145,19 @@ export async function publicFormContext(token) {
 // drive link scopes to the drive's direct (unattributed) registrations. So one
 // karyakarta's link can never surface another's people, and there is no id a
 // request could tamper with to widen the scope (§21–§23).
-export async function publicOwnList(token, type) {
+export async function publicOwnList(req, token, type) {
   try {
     await ensureRegistrationSchema();
     const link = await resolveLink(token);
     if (!link) {
       return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
+    }
+    // A worker link's list is private to its verified handler (§13, §19).
+    if (link.mode === "worker") {
+      const s = readRegSession(req, token);
+      if (!s || String(s.rwid) !== String(link.worker_id)) {
+        return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
+      }
     }
     const personType = type === "worker" ? "worker" : "voter";
     const where = ["p.campaign_id = ?", "p.status = 'active'", "p.person_type = ?"];
@@ -184,6 +192,17 @@ export async function submitPublicRegistration(req, token) {
     const link = await resolveLink(token);
     if (!link) {
       return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
+    }
+
+    // A worker Generate Link is OTP-gated: the submission must carry a valid
+    // handler session bound to THIS link. Attribution is then the link owner's,
+    // derived server-side — the client cannot choose it (§6, §11, §17, §18). The
+    // general /join and drive links stay anonymous and are not gated.
+    if (link.mode === "worker") {
+      const s = readRegSession(req, token);
+      if (!s || String(s.rwid) !== String(link.worker_id)) {
+        return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
+      }
     }
 
     const ip = clientIp(req);

@@ -46,6 +46,12 @@ const STRINGS = {
     list: "सूची", myVoters: "मेरे वोटर", myWorkers: "मेरे कार्यकर्ता",
     backToForm: "फॉर्म पर वापस जाएँ", totalVoters: "कुल वोटर", totalWorkers: "कुल कार्यकर्ता",
     noRecords: "अभी तक कोई रिकॉर्ड नहीं.", listLoadErr: "सूची लोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
+    handledBy: "पंजीयन कर रहे हैं", logout: "लॉगआउट",
+    handlerTitle: "कार्यकर्ता पंजीयन", enterRegdMobile: "अपना पंजीकृत मोबाइल नंबर दर्ज करें",
+    generateOtp: "OTP भेजें", otpVerifyTitle: "OTP सत्यापन", enterOtp: "OTP दर्ज करें",
+    verifyOtp: "OTP सत्यापित करें", resendOtp: "OTP दोबारा भेजें", changeMobile: "नंबर बदलें",
+    otpSentTo: "OTP भेजा गया:", notRegistered: "आप पंजीकृत नहीं हैं.", addAnother: "एक और कार्यकर्ता जोड़ें",
+    errOtp: "कृपया OTP दर्ज करें.", newOtpSent: "नया OTP भेजा गया.",
     section1: "पंजीयन फॉर्म",
     personType: "प्रकार",
     voter: "मतदाता", wantsWorker: "कार्यकर्ता बनना है",
@@ -89,6 +95,12 @@ const STRINGS = {
     list: "List", myVoters: "My Voters", myWorkers: "My Workers",
     backToForm: "Back to form", totalVoters: "Total Voters", totalWorkers: "Total Workers",
     noRecords: "No records yet.", listLoadErr: "Could not load the list. Please try again.",
+    handledBy: "Registration handled by", logout: "Logout",
+    handlerTitle: "Worker Registration", enterRegdMobile: "Enter your registered mobile number",
+    generateOtp: "Generate OTP", otpVerifyTitle: "OTP Verification", enterOtp: "Enter OTP",
+    verifyOtp: "Verify OTP", resendOtp: "Resend OTP", changeMobile: "Change number",
+    otpSentTo: "OTP sent to:", notRegistered: "You are not registered.", addAnother: "Add another worker",
+    errOtp: "Please enter the OTP.", newOtpSent: "A new OTP has been sent.",
     section1: "Registration Form",
     personType: "Person Type",
     voter: "Voter", wantsWorker: "Wants to be a Worker",
@@ -155,6 +167,21 @@ export default function PublicRegistrationForm({ token }) {
 
   // "List" view — the karyakarta's own voters / workers for THIS link.
   const [listMode, setListMode] = useState(null); // null | "voter" | "worker"
+
+  // OTP gate for a WORKER link (/r/<token>): a worker link never opens the form
+  // directly — the handler (link owner) must verify their mobile first. `session`
+  // is null while checking; { required:false } for the anonymous /join & drive
+  // links; { required:true, authenticated, handler } for a worker link.
+  const [session, setSession] = useState(token ? null : { required: false });
+  useEffect(() => {
+    if (!token) { setSession({ required: false }); return; }
+    let alive = true;
+    fetch(`/api/public/registration/${encodeURIComponent(token)}/otp/session`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { required: false }))
+      .then((d) => { if (alive) setSession(d || { required: false }); })
+      .catch(() => { if (alive) setSession({ required: false }); });
+    return () => { alive = false; };
+  }, [token]);
 
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -247,6 +274,14 @@ export default function PublicRegistrationForm({ token }) {
   }
 
 
+  async function handlerLogout() {
+    if (!token) return;
+    try { await fetch(`/api/public/registration/${encodeURIComponent(token)}/otp/logout`, { method: "POST" }); } catch { /* ignore */ }
+    setSession({ required: true, authenticated: false });
+    setSubmittedWorker(false);
+    resetPerson();
+  }
+
   async function submit(e) {
     e.preventDefault();
     setErr("");
@@ -323,6 +358,14 @@ export default function PublicRegistrationForm({ token }) {
           </div>
           <h1 className="text-xl font-bold text-gray-900">{t.workerSavedTitle}</h1>
           <p className="text-sm text-gray-600 mt-2">{t.workerSavedBody}</p>
+          {/* An OTP-verified handler can add the next worker without re-auth
+              (§14) — user-initiated, so the success-only state is not violated. */}
+          {session?.authenticated && (
+            <button type="button" onClick={() => { setSubmittedWorker(false); resetPerson(); setPersonType("worker"); }}
+                    className="mt-5 h-11 px-5 rounded-xl text-white text-sm font-bold inline-flex items-center gap-2" style={{ background: BRAND }}>
+              <UserPlus size={16} /> {t.addAnother}
+            </button>
+          )}
           <p className="text-center text-[11px] text-gray-400 mt-6">{t.footer}</p>
         </div>
       </div>
@@ -333,6 +376,16 @@ export default function PublicRegistrationForm({ token }) {
   // server-side by the link token (§18–§23).
   if (listMode) {
     return <PublicList token={token} t={t} initial={listMode} onBack={() => setListMode(null)} toggleLang={toggleLang} />;
+  }
+
+  // Still resolving whether this (worker) link needs OTP.
+  if (session === null) {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="animate-spin" size={30} style={{ color: ACCENT }} /></div>;
+  }
+  // A worker link that isn't verified yet → OTP gate, never the form (§1, §2, §8).
+  if (session.required && !session.authenticated) {
+    return <RegOtpGate token={token} t={t} campaignName={boot?.campaign?.name} toggleLang={toggleLang}
+                       onVerified={(handler) => setSession({ required: true, authenticated: true, handler })} />;
   }
 
   if (loading) {
@@ -378,6 +431,19 @@ export default function PublicRegistrationForm({ token }) {
       </header>
 
       <main className="max-w-xl mx-auto px-4 py-5 space-y-4 pb-24">
+        {/* Who is handling this session (the OTP-verified link owner) — clearly
+            distinct from the worker being added (§7, §9). */}
+        {session?.authenticated && session.handler && (
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">{t.handledBy}</p>
+              <p className="font-bold text-gray-900 truncate">{session.handler.name}</p>
+              {session.handler.mobile ? <p className="text-xs text-gray-600">{session.handler.mobile}</p> : null}
+            </div>
+            <button type="button" onClick={handlerLogout} className="text-xs font-semibold text-blue-700 hover:underline shrink-0">{t.logout}</button>
+          </div>
+        )}
+
         {done && (
           <div className="rounded-2xl border border-green-200 bg-green-50 p-4 flex items-start gap-3">
             <CheckCircle2 className="text-green-600 shrink-0 mt-0.5" size={22} />
@@ -624,4 +690,120 @@ function ListThumb({ src, name }) {
   const [ok, setOk] = useState(true);
   if (src && ok) return <img src={src} alt={name || ""} loading="lazy" className="w-11 h-11 rounded-full object-cover border border-gray-200 bg-white shrink-0" onError={() => setOk(false)} />;
   return <div className="w-11 h-11 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#164FA3] font-bold shrink-0">{String(name || "?").trim().charAt(0).toUpperCase() || "?"}</div>;
+}
+
+// The OTP gate shown before a WORKER link's form. Two steps: mobile → OTP. The
+// mobile is the LINK OWNER's; the backend validates it against reg_workers and
+// sends the OTP only to a registered handler (§2–§5).
+function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
+  const [step, setStep] = useState("mobile"); // mobile | otp
+  const [mobile, setMobile] = useState("");
+  const [otp, setOtp] = useState("");
+  const [masked, setMasked] = useState("");
+  const [otpLen, setOtpLen] = useState(6);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = setInterval(() => setCooldown((c) => (c > 0 ? c - 1 : 0)), 1000);
+    return () => clearInterval(id);
+  }, [cooldown]);
+
+  const base = `/api/public/registration/${encodeURIComponent(token)}/otp`;
+  const post = (path, body) => fetch(`${base}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+  async function requestOtp(e) {
+    e?.preventDefault?.();
+    setErr(""); setInfo("");
+    const digits = mobile.replace(/\D/g, "");
+    if (digits.slice(-10).length !== 10) { setErr(t.errMobile); return; }
+    setBusy(true);
+    try {
+      const r = await post("request", { mobile });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || t.errSave); return; }
+      setMasked(d.phone || ""); setOtpLen(d.otpLength || 6); setCooldown(d.resendIn || 30); setStep("otp");
+    } catch { setErr(t.errSave); } finally { setBusy(false); }
+  }
+  async function verifyOtp(e) {
+    e?.preventDefault?.();
+    setErr(""); setInfo("");
+    if (!otp.trim()) { setErr(t.errOtp); return; }
+    setBusy(true);
+    try {
+      const r = await post("verify", { mobile, otp });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || t.errSave); return; }
+      onVerified(d.handler || null);
+    } catch { setErr(t.errSave); } finally { setBusy(false); }
+  }
+  async function resend() {
+    if (cooldown > 0) return;
+    setErr(""); setInfo(""); setBusy(true);
+    try {
+      const r = await post("resend", { mobile });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || t.errSave); return; }
+      setInfo(t.newOtpSent); setCooldown(d.resendIn || 30);
+    } catch { setErr(t.errSave); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="text-white" style={{ background: BRAND }}>
+        <div className="max-w-md mx-auto px-4 py-5 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
+            <h1 className="text-lg font-bold mt-0.5">{campaignName || t.handlerTitle}</h1>
+          </div>
+          <button type="button" onClick={toggleLang} className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1.5 rounded-lg bg-white/15 text-white hover:bg-white/25">
+            <Languages size={14} />{t.switchTo}
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-md mx-auto px-4 py-6">
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
+          {step === "mobile" ? (
+            <form onSubmit={requestOtp} className="space-y-4">
+              <h2 className="text-base font-bold text-gray-900">{t.handlerTitle}</h2>
+              <p className="text-sm text-gray-500 -mt-2">{t.enterRegdMobile}</p>
+              <div className="flex items-center rounded-xl border border-gray-300 overflow-hidden focus-within:ring-2 focus-within:ring-[#164FA3]">
+                <span className="px-3 h-12 flex items-center text-sm text-gray-500 bg-gray-50 border-r border-gray-300">+91</span>
+                <input value={mobile} onChange={(e) => setMobile(e.target.value)} inputMode="numeric" autoFocus
+                       placeholder={t.mobilePh} className="flex-1 h-12 px-3 text-[16px] outline-none" />
+              </div>
+              {err ? <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{err}</p> : null}
+              <button type="submit" disabled={busy} className="w-full min-h-[52px] rounded-xl text-white text-base font-bold flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: BRAND }}>
+                {busy ? <Loader2 className="animate-spin" size={20} /> : null} {t.generateOtp}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={verifyOtp} className="space-y-4">
+              <button type="button" onClick={() => { setStep("mobile"); setOtp(""); setErr(""); }} className="text-xs text-gray-400 hover:text-gray-600 inline-flex items-center gap-1"><ArrowLeft size={13} /> {t.changeMobile}</button>
+              <h2 className="text-base font-bold text-gray-900">{t.otpVerifyTitle}</h2>
+              <p className="text-sm text-gray-500 -mt-2">{t.otpSentTo} <span className="font-semibold text-gray-700">{masked}</span></p>
+              <input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, otpLen))} inputMode="numeric" autoFocus
+                     maxLength={otpLen} placeholder={"•".repeat(otpLen)}
+                     className="w-full h-12 rounded-xl border border-gray-300 text-center text-lg tracking-[0.5em] font-semibold outline-none focus:ring-2 focus:ring-[#164FA3]" />
+              {err ? <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{err}</p> : null}
+              {info ? <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2">{info}</p> : null}
+              <button type="submit" disabled={busy} className="w-full min-h-[52px] rounded-xl text-white text-base font-bold flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: BRAND }}>
+                {busy ? <Loader2 className="animate-spin" size={20} /> : null} {t.verifyOtp}
+              </button>
+              <div className="text-center text-sm text-gray-500">
+                <button type="button" onClick={resend} disabled={cooldown > 0 || busy} className="font-semibold text-[#164FA3] disabled:text-gray-400">
+                  {t.resendOtp}{cooldown > 0 ? ` (${cooldown}s)` : ""}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+        <p className="text-center text-[11px] text-gray-400 mt-4">{t.footer}</p>
+      </main>
+    </div>
+  );
 }
