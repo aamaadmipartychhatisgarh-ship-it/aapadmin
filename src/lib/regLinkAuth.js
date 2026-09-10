@@ -84,7 +84,7 @@ export async function handleRegOtpRequest(token, body) {
   // (and log it as a config error) instead of a misleading "not registered" 403.
   if (!owner || owner.length !== 10) {
     console.error(`${tag} rejected: link has no valid owner mobile on file (reason=link-misconfigured, worker_id=${link.worker_id})`);
-    return json({ message: "This link is not set up for OTP login yet. Please contact your in-charge." }, 409);
+    return json({ message: "This registration link does not have a registered mobile number on file yet." }, 409);
   }
   // The mobile must be the LINK OWNER's registered number (§3, §4).
   if (entered !== owner) {
@@ -116,8 +116,10 @@ export async function handleRegOtpRequest(token, body) {
   console.log(`${tag} SMS provider request started`);
   const send = await sendOtpSms(entered, otp); // never echoed to the client
   console.log(`${tag} SMS provider response: ${send.status}`);
-  if (send.status === "failed") return json({ message: "Could not send the OTP right now. Please try again in a moment." }, 502);
-  if (send.status === "unconfigured") return json({ message: "OTP service is not set up yet. Please contact your in-charge." }, 503);
+  // A delivery problem is never framed as an approval/activation step (§1, §2, §5):
+  // the browser gets a neutral retry message, the real reason is in the server log.
+  if (send.status === "failed") return json({ message: "Unable to send the OTP. Please try again." }, 502);
+  if (send.status === "unconfigured") return json({ message: "Unable to send the OTP right now. Please try again in a moment." }, 500);
 
   await query(`UPDATE worker_form_otps SET consumed_at = NOW() WHERE scope='reg_link' AND ref_token=? AND consumed_at IS NULL`, [token]);
   const expires = new Date(Date.now() + OTP_TTL_MS);
@@ -140,7 +142,7 @@ export async function handleRegOtpVerify(token, body) {
   const otp = String(body?.otp ?? "").trim();
   const owner = phoneKey(link.worker_mobile);
   if (!entered || entered.length !== 10) return json({ message: "Please enter a valid 10-digit mobile number." }, 400);
-  if (!owner || owner.length !== 10) return json({ message: "This link is not set up for OTP login yet. Please contact your in-charge." }, 409);
+  if (!owner || owner.length !== 10) return json({ message: "This registration link does not have a registered mobile number on file yet." }, 409);
   if (entered !== owner) return json({ message: "This mobile number is not the one registered for this link." }, 403);
   if (!otp) return json({ message: "Please enter the OTP." }, 400);
 

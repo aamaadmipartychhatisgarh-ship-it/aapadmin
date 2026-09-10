@@ -124,6 +124,13 @@ export async function sendOtpSms(phoneKeyVal, otp) {
     console.log(`[otp] (no SMS provider) OTP for +91${ten} = ${otp}`);
     return { status: "debug" };
   }
-  console.warn(`[otp] OTP requested for ${maskPhone(ten)} but no SMS provider is configured (set OTP_SMS_PROVIDER).`);
+  // A clear, actionable SERVER-SIDE configuration error (§4) — not a user-facing
+  // "service not up". There is no approval / activation / incharge step anywhere;
+  // the ONLY thing missing is the provider credentials in the environment.
+  console.error(
+    "[otp] BLOCKED — no SMS provider is configured, so no OTP can be delivered. " +
+    "Set OTP_SMS_PROVIDER (msg91 | fast2sms | generic) and the matching credentials " +
+    `(e.g. MSG91_AUTHKEY + MSG91_TEMPLATE_ID, or FAST2SMS_API_KEY) in the server environment. Destination ${maskPhone(ten)}.`
+  );
   return { status: "unconfigured" };
 }
