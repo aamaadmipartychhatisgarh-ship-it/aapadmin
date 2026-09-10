@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { normalizeMobile } from "@/lib/registrationSchema";
+import { phoneKey } from "@/lib/phone";
 import { ensureWorkerFormSchema } from "@/lib/workerFormSchema";
 import {
   generateOtp, hashOtp, otpMatches, signPayload, verifySessionToken, maskPhone,
@@ -63,11 +63,14 @@ export async function handleRegOtpRequest(token, body) {
   const link = await resolveWorkerLink(token);
   if (!link) return json({ message: "This registration link is not valid or has been closed." }, 404);
 
-  const entered = normalizeMobile(body?.mobile);
-  if (!entered) return json({ message: "Please enter a valid 10-digit mobile number." }, 400);
-  const owner = normalizeMobile(link.worker_mobile);
+  // Compare on the last 10 digits (the app's phone-matching convention) so a
+  // correctly-registered handler is never falsely rejected because the stored
+  // number carries a country code / leading zero / older format (§13).
+  const entered = phoneKey(body?.mobile);
+  if (!entered || entered.length !== 10) return json({ message: "Please enter a valid 10-digit mobile number." }, 400);
+  const owner = phoneKey(link.worker_mobile);
   // The mobile must be the LINK OWNER's registered number (§3, §4).
-  if (!owner || entered !== owner) return json({ message: "You are not registered." }, 403);
+  if (!owner || owner.length !== 10 || entered !== owner) return json({ message: "You are not registered." }, 403);
 
   // Rate limiting, scoped to this link.
   const [{ recent }] = await query(
@@ -101,10 +104,10 @@ export async function handleRegOtpVerify(token, body) {
   const link = await resolveWorkerLink(token);
   if (!link) return json({ message: "This registration link is not valid or has been closed." }, 404);
 
-  const entered = normalizeMobile(body?.mobile);
+  const entered = phoneKey(body?.mobile);
   const otp = String(body?.otp ?? "").trim();
-  const owner = normalizeMobile(link.worker_mobile);
-  if (!entered || entered !== owner) return json({ message: "You are not registered." }, 403);
+  const owner = phoneKey(link.worker_mobile);
+  if (!entered || entered.length !== 10 || !owner || entered !== owner) return json({ message: "You are not registered." }, 403);
   if (!otp) return json({ message: "Please enter the OTP." }, 400);
 
   const [row] = await query(
@@ -134,7 +137,7 @@ export async function handleRegSession(req, token) {
   if (!link) return json({ required: false }); // drive/general/invalid → anonymous flow
   const s = readRegSession(req, token);
   if (s && String(s.rwid) === String(link.worker_id)) {
-    return json({ required: true, authenticated: true, handler: { name: link.worker_name, mobile: maskPhone(normalizeMobile(link.worker_mobile)), worker_code: link.worker_code } });
+    return json({ required: true, authenticated: true, handler: { name: link.worker_name, mobile: maskPhone(phoneKey(link.worker_mobile)), worker_code: link.worker_code } });
   }
   return json({ required: true, authenticated: false });
 }

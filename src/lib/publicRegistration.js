@@ -4,6 +4,7 @@ import {
   ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
 import { readRegSession } from "@/lib/regLinkAuth";
+import { phoneKey } from "@/lib/phone";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
 // Both public routes are thin wrappers over the two handlers at the bottom of
@@ -226,7 +227,12 @@ export async function submitPublicRegistration(req, token) {
     if (!name) return NextResponse.json({ message: "Please enter the person's name." }, { status: 400, headers: NO_STORE });
     if (name.length > 160) return NextResponse.json({ message: "Name is too long." }, { status: 400, headers: NO_STORE });
 
-    const mobile = normalizeMobile(d.mobile);
+    // Accept any genuine 10-digit number: prefer the strict Indian-format
+    // normalizer, but fall back to the last-10-digit key so a valid worker/voter
+    // mobile is never dropped over a formatting technicality (§1, §5). Only a
+    // number without 10 digits is rejected.
+    let mobile = normalizeMobile(d.mobile);
+    if (!mobile) { const k = phoneKey(d.mobile); if (k && k.length === 10) mobile = k; }
     if (!mobile) {
       return NextResponse.json({ message: "Please enter a valid 10-digit mobile number." }, { status: 400, headers: NO_STORE });
     }
