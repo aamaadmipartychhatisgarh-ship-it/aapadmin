@@ -2,7 +2,21 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
 import { newLinkToken, workerCodeFor, normalizeMobile } from "@/lib/registrationSchema";
+import { phoneKey, last10Sql } from "@/lib/phone";
 import { getWorkerRanking, countWorkers } from "@/lib/registrationStats";
+
+// A worker link is an OTP-gated login (the karyakarta signs in with THIS mobile
+// to use their link), so it MUST carry a usable number — a link created without
+// one can never satisfy the gate and returns 403 forever. Prefer the strict
+// Indian-mobile normaliser, but fall back to the last-10-digit key so a valid
+// number in an unusual format is never silently dropped to NULL (the same
+// matching rule the OTP gate itself uses).
+function linkMobile(v) {
+  const n = normalizeMobile(v);
+  if (n) return n;
+  const k = phoneKey(v);
+  return k && k.length === 10 ? k : null;
+}
 
 // The worker roster + their unique links. GET returns the same shape as the
 // worker ranking (rank, voters added, workers added, total) so the "Workers &
@@ -69,13 +83,15 @@ export async function POST(req) {
     const skipped = [];
     for (const e of entries) {
       const name = String(e.name).trim().slice(0, 160);
-      const mobile = normalizeMobile(e.mobile);
+      const mobile = linkMobile(e.mobile);
+      // Every worker link needs a valid mobile — without one the OTP gate can
+      // never be passed, so skip (and report) rather than mint a dead link.
+      if (!mobile) { skipped.push({ name, mobile: String(e.mobile || "").trim() || null, reason: "needs a valid 10-digit mobile number" }); continue; }
       // One link per mobile number within a drive — re-pasting the same list must
       // not silently mint a second link and split a worker's credit in two.
-      if (mobile) {
-        const [dupe] = await query(`SELECT id FROM reg_workers WHERE campaign_id = ? AND mobile = ? LIMIT 1`, [campaignId, mobile]);
-        if (dupe) { skipped.push({ name, mobile, reason: "already has a link" }); continue; }
-      }
+      // Match on the last 10 digits so an older-format stored number still dedups.
+      const [dupe] = await query(`SELECT id FROM reg_workers WHERE campaign_id = ? AND ${last10Sql("mobile")} = ? LIMIT 1`, [campaignId, mobile]);
+      if (dupe) { skipped.push({ name, mobile, reason: "already has a link" }); continue; }
       const res = await query(
         `INSERT INTO reg_workers (campaign_id, name, mobile, token, ward_number, area_booth, created_by)
          VALUES (?,?,?,?,?,?,?)`,

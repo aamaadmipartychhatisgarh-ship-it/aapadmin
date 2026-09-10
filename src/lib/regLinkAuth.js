@@ -59,36 +59,63 @@ export function readRegSession(req, token) {
 
 // --- OTP request (also serves resend) --------------------------------------
 export async function handleRegOtpRequest(token, body) {
+  // Safe, non-sensitive trace so the exact rejection reason is visible in the
+  // server log. Never logs the OTP, the full mobile, or any credential (§8).
+  const tag = `[reg-otp ${String(token || "").slice(0, 6)}…]`;
+  console.log(`${tag} OTP REQUEST START`);
   await ensureWorkerFormSchema();
   const link = await resolveWorkerLink(token);
-  if (!link) return json({ message: "This registration link is not valid or has been closed." }, 404);
+  if (!link) {
+    console.warn(`${tag} rejected: registration token invalid or closed`);
+    return json({ message: "This registration link is not valid or has been closed." }, 404);
+  }
 
   // Compare on the last 10 digits (the app's phone-matching convention) so a
   // correctly-registered handler is never falsely rejected because the stored
   // number carries a country code / leading zero / older format (§13).
   const entered = phoneKey(body?.mobile);
-  if (!entered || entered.length !== 10) return json({ message: "Please enter a valid 10-digit mobile number." }, 400);
+  if (!entered || entered.length !== 10) {
+    console.warn(`${tag} rejected: mobile failed validation`);
+    return json({ message: "Please enter a valid 10-digit mobile number." }, 400);
+  }
   const owner = phoneKey(link.worker_mobile);
+  // A link whose worker has no usable mobile on file can NEVER pass the gate.
+  // That is a setup problem with the LINK, not the caller — so report it plainly
+  // (and log it as a config error) instead of a misleading "not registered" 403.
+  if (!owner || owner.length !== 10) {
+    console.error(`${tag} rejected: link has no valid owner mobile on file (reason=link-misconfigured, worker_id=${link.worker_id})`);
+    return json({ message: "This link is not set up for OTP login yet. Please contact your in-charge." }, 409);
+  }
   // The mobile must be the LINK OWNER's registered number (§3, §4).
-  if (!owner || owner.length !== 10 || entered !== owner) return json({ message: "You are not registered." }, 403);
+  if (entered !== owner) {
+    console.warn(`${tag} rejected: entered ${maskPhone(entered)} is not the registered link owner (reason=mobile-mismatch)`);
+    return json({ message: "This mobile number is not the one registered for this link. Please use the number given to your in-charge." }, 403);
+  }
 
   // Rate limiting, scoped to this link.
   const [{ recent }] = await query(
     `SELECT COUNT(*) AS recent FROM worker_form_otps WHERE scope='reg_link' AND ref_token=? AND created_at > (NOW() - INTERVAL 1 HOUR)`,
     [token]
   );
-  if (Number(recent) >= MAX_OTP_PER_HOUR) return json({ message: "Too many OTP requests. Please try again later." }, 429);
+  if (Number(recent) >= MAX_OTP_PER_HOUR) {
+    console.warn(`${tag} rejected: hourly OTP cap reached (reason=rate-limit)`);
+    return json({ message: "Too many OTP requests. Please try again later." }, 429);
+  }
   const [{ last_ts }] = await query(
     `SELECT UNIX_TIMESTAMP(MAX(created_at)) AS last_ts FROM worker_form_otps WHERE scope='reg_link' AND ref_token=?`, [token]
   );
   if (last_ts && Date.now() - Number(last_ts) * 1000 < RESEND_COOLDOWN_MS) {
+    console.warn(`${tag} rejected: resend cooldown active (reason=rate-limit)`);
     return json({ message: "Please wait a few seconds before requesting another OTP." }, 429);
   }
 
   // Send first; only persist + invalidate the previous OTP if the provider
   // accepted, so a delivery failure never shows a false "OTP sent" (§2, §5).
+  console.log(`${tag} token + mobile OK → generating OTP`);
   const otp = generateOtp();
+  console.log(`${tag} SMS provider request started`);
   const send = await sendOtpSms(entered, otp); // never echoed to the client
+  console.log(`${tag} SMS provider response: ${send.status}`);
   if (send.status === "failed") return json({ message: "Could not send the OTP right now. Please try again in a moment." }, 502);
   if (send.status === "unconfigured") return json({ message: "OTP service is not set up yet. Please contact your in-charge." }, 503);
 
@@ -98,6 +125,7 @@ export async function handleRegOtpRequest(token, body) {
     `INSERT INTO worker_form_otps (phone, worker_id, otp_hash, expires_at, scope, ref_token) VALUES (?,?,?,?, 'reg_link', ?)`,
     [entered, link.worker_id, hashOtp(otp, entered), expires, token]
   );
+  console.log(`${tag} OTP saved; OTP REQUEST COMPLETE`);
 
   return json({ ok: true, phone: maskPhone(entered), otpLength: OTP_LENGTH, resendIn: Math.round(RESEND_COOLDOWN_MS / 1000), expiresIn: Math.round(OTP_TTL_MS / 1000) });
 }
@@ -111,7 +139,9 @@ export async function handleRegOtpVerify(token, body) {
   const entered = phoneKey(body?.mobile);
   const otp = String(body?.otp ?? "").trim();
   const owner = phoneKey(link.worker_mobile);
-  if (!entered || entered.length !== 10 || !owner || entered !== owner) return json({ message: "You are not registered." }, 403);
+  if (!entered || entered.length !== 10) return json({ message: "Please enter a valid 10-digit mobile number." }, 400);
+  if (!owner || owner.length !== 10) return json({ message: "This link is not set up for OTP login yet. Please contact your in-charge." }, 409);
+  if (entered !== owner) return json({ message: "This mobile number is not the one registered for this link." }, 403);
   if (!otp) return json({ message: "Please enter the OTP." }, 400);
 
   const [row] = await query(

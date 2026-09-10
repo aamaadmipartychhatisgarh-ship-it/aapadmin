@@ -2,6 +2,17 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
 import { newLinkToken, normalizeMobile } from "@/lib/registrationSchema";
+import { phoneKey } from "@/lib/phone";
+
+// Accept a valid Indian mobile, falling back to the last-10-digit key so a number
+// in an unusual format is not rejected — the OTP gate matches on the same key, so
+// this keeps a link's stored owner number usable by the gate.
+function linkMobile(v) {
+  const n = normalizeMobile(v);
+  if (n) return n;
+  const k = phoneKey(v);
+  return k && k.length === 10 ? k : null;
+}
 
 // Edit one worker, rotate their link, or remove them.
 //
@@ -31,8 +42,9 @@ export async function PATCH(req, { params }) {
     }
     if (d.mobile !== undefined) {
       const m = String(d.mobile || "").trim();
-      if (m && !normalizeMobile(m)) return NextResponse.json({ message: "Enter a valid 10-digit mobile number." }, { status: 400, headers: NO_STORE });
-      sets.push("mobile = ?"); vals.push(m ? normalizeMobile(m) : null);
+      const norm = m ? linkMobile(m) : null;
+      if (m && !norm) return NextResponse.json({ message: "Enter a valid 10-digit mobile number." }, { status: 400, headers: NO_STORE });
+      sets.push("mobile = ?"); vals.push(norm);
     }
     if (d.ward_number !== undefined) { sets.push("ward_number = ?"); vals.push(clip(d.ward_number, 60)); }
     if (d.area_booth !== undefined) { sets.push("area_booth = ?"); vals.push(clip(d.area_booth, 160)); }
