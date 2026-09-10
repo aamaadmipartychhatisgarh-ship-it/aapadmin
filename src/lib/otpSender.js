@@ -71,8 +71,12 @@ async function sendFast2Sms(ten, otp) {
   });
   const text = await r.text().catch(() => "");
   let data; try { data = JSON.parse(text); } catch { data = null; }
-  if (r.ok && data?.return === true) return { status: "delivered" };
-  return { status: "failed", error: `Fast2SMS ${r.status}: ${data?.message || text || "rejected"}` };
+  // Fast2SMS signals success with return:true (occasionally as the string "true").
+  const ok = data?.return === true || data?.return === "true";
+  if (r.ok && ok) return { status: "delivered" };
+  // message can be a string or an array of strings — normalise for the log.
+  const msg = Array.isArray(data?.message) ? data.message.join("; ") : (data?.message || text || "rejected");
+  return { status: "failed", error: `Fast2SMS ${r.status}: ${msg}` };
 }
 
 // --- Generic HTTP (any provider, via a URL/body template) -------------------
