@@ -553,6 +553,15 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
                         <MessageCircle size={15} />
                       </a>
                     </div>
+                    {/* The workers who registered through THIS link (server-side
+                        filtered by this worker's id) — its own page/URL. */}
+                    <div className="flex items-center gap-1.5 mt-1 text-[11px] text-gray-400">
+                      <span>/</span>
+                      <a href={`/dashboard/admin/voter-registration/workers/${w.id}?name=${encodeURIComponent(w.name || "")}`}
+                         className="inline-flex items-center gap-1 font-semibold text-[#164FA3] hover:underline">
+                        <Users size={13} /> Workers List{w.new_workers ? ` (${w.new_workers})` : ""}
+                      </a>
+                    </div>
                   </td>
                   <td className="px-3 py-2.5">
                     <button onClick={() => patch(w.id, { status: w.status === "active" ? "disabled" : "active" })}

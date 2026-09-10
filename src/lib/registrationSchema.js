@@ -135,6 +135,9 @@ export async function ensureRegistrationSchema() {
     await ensureColumn("reg_people", "assembly_id", "INT NULL");
     await ensureColumn("reg_people", "assembly_name", "VARCHAR(160) NULL");
     await ensureIndex("reg_people", "idx_reg_people_assembly", "assembly_id");
+    // Photo uploaded on the Worker Form — a persistent `/uploads/<id>` reference
+    // (the image bytes live in the shared photo store, not this row).
+    await ensureColumn("reg_people", "photo_url", "VARCHAR(512) NULL");
 
     ensured = true;
   } catch (e) {

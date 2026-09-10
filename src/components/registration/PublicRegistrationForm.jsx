@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote } from "lucide-react";
+import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus } from "lucide-react";
 
 // The public form. One form, two ways in, and the ONLY difference is who ends up
 // credited — which the link decides, not the person filling it:
@@ -32,6 +32,13 @@ const STRINGS = {
     constituency: "विधानसभा क्षेत्र", selectConstituency: "अपना क्षेत्र चुनें…",
     savedTitle: "पंजीयन सफल!",
     savedBody: "अगला व्यक्ति जोड़ने के लिए नीचे फॉर्म भरें.",
+    workerSavedTitle: "पंजीयन सफलतापूर्वक जमा हुआ",
+    workerSavedBody: "धन्यवाद. आपका पंजीयन सफलतापूर्वक जमा हो गया है.",
+    photo: "फोटो", choosePhoto: "फोटो चुनें", changePhoto: "फोटो बदलें",
+    photoHint: "JPG, PNG या WEBP · अधिकतम 5 MB", uploading: "अपलोड हो रहा है…",
+    photoTooLarge: "फोटो का आकार बहुत बड़ा है. कृपया छोटी छवि अपलोड करें.",
+    photoBadType: "कृपया JPG, JPEG, PNG या WEBP छवि अपलोड करें.",
+    photoFailed: "फोटो अपलोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
     section1: "पंजीयन फॉर्म",
     personType: "प्रकार",
     voter: "मतदाता", wantsWorker: "कार्यकर्ता बनना है",
@@ -61,6 +68,13 @@ const STRINGS = {
     constituency: "Constituency", selectConstituency: "Select your constituency…",
     savedTitle: "Registration saved!",
     savedBody: "Fill the form below to add the next person.",
+    workerSavedTitle: "Registration submitted successfully",
+    workerSavedBody: "Thank you. Your registration has been submitted successfully.",
+    photo: "Photo", choosePhoto: "Choose Photo", changePhoto: "Change Photo",
+    photoHint: "JPG, PNG or WEBP · up to 5 MB", uploading: "Uploading…",
+    photoTooLarge: "Photo size is too large. Please upload a smaller image.",
+    photoBadType: "Please upload a JPG, JPEG, PNG, or WEBP image.",
+    photoFailed: "Unable to upload photo. Please try again.",
     section1: "Registration Form",
     personType: "Person Type",
     voter: "Voter", wantsWorker: "Wants to be a Worker",
@@ -126,8 +140,18 @@ export default function PublicRegistrationForm({ token }) {
 
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState(false);          // voter add-next banner
+  const [submittedWorker, setSubmittedWorker] = useState(false); // worker → success-only
   const [now, setNow] = useState(null);
+
+  // Photo (Worker Form). `photoUrl` is the stored /uploads path sent on submit;
+  // `photoPreview` is a local object URL — the anonymous form can't read /uploads
+  // back (that needs a session), so the preview never depends on it.
+  const [photoUrl, setPhotoUrl] = useState("");
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoErr, setPhotoErr] = useState("");
+  const photoInput = useRef(null);
 
   const t = STRINGS[lang];
 
@@ -175,10 +199,32 @@ export default function PublicRegistrationForm({ token }) {
   function resetPerson() {
     setPersonType("voter"); setWantsWorker("yes"); setWorkerRole("");
     setName(""); setMobile(""); setAddress("");
+    setPhotoUrl(""); setPhotoPreview(""); setPhotoErr("");
     // Constituency, ward and booth are deliberately KEPT: a karyakarta works
     // one patch, so clearing them would mean re-picking the same values for
     // every single person they register.
     setAreaBooth((v) => v);
+  }
+
+  // Upload the chosen photo to the persistent store; keep a local preview.
+  async function onPhoto(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoErr("");
+    if (file.size > 5 * 1024 * 1024) { setPhotoErr(t.photoTooLarge); return; }
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type || "")) { setPhotoErr(t.photoBadType); return; }
+    try { if (photoPreview) URL.revokeObjectURL(photoPreview); } catch { /* ignore */ }
+    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoBusy(true);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch("/api/public/registration/photo", { method: "POST", body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setPhotoErr(d?.message || t.photoFailed); setPhotoPreview(""); return; }
+      setPhotoUrl(d.url || "");
+    } catch { setPhotoErr(t.photoFailed); setPhotoPreview(""); }
+    finally { setPhotoBusy(false); }
   }
 
 
@@ -189,6 +235,8 @@ export default function PublicRegistrationForm({ token }) {
     if (!name.trim()) { setErr(t.errName); return; }
     if (!validMobile(mobile)) { setErr(t.errMobile); return; }
     if (!assemblyId) { setErr(t.errConstituency); return; }
+    if (photoBusy) { setErr(t.uploading); return; }
+    if (saving) return; // guard against a double-click / repeat submit
     setSaving(true);
     try {
       // "Wants to become a worker" is only recorded as such when the person
@@ -206,17 +254,26 @@ export default function PublicRegistrationForm({ token }) {
           ward_number: ward.trim(),
           area_booth: areaBooth.trim(),
           worker_role: effectiveType === "worker" ? workerRole.trim() : "",
+          photo_url: effectiveType === "worker" ? photoUrl : "",
           website: honeypot.current?.value || "",
         }),
       });
       const d = await r.json().catch(() => ({}));
       // A server message (duplicate number, drive closed) is shown verbatim —
       // it carries detail the client cannot reconstruct, such as who already
-      // registered that number.
+      // registered that number. On failure we do NOT show success and keep the
+      // form so the person can retry without losing what they typed.
       if (!r.ok) { setErr(d?.message || t.errSave); return; }
-      setDone(true);
-      resetPerson();
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      if (effectiveType === "worker") {
+        // Worker Form: the form closes into a final success-only state (§9/§11).
+        setSubmittedWorker(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        // Voter entry: a karyakarta keeps adding people, so the form stays.
+        setDone(true);
+        resetPerson();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
     } catch {
       setErr(t.errSave);
     } finally {
@@ -230,6 +287,24 @@ export default function PublicRegistrationForm({ token }) {
       <Languages size={14} />{t.switchTo}
     </button>
   );
+
+  // Worker Form success-only state (§9/§11): after a successful WORKER
+  // submission the entire form is gone — only this confirmation remains, and it
+  // does not fall back to a blank form or allow a repeat submission.
+  if (submittedWorker) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl shadow-sm p-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-green-50 text-green-600 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 size={34} />
+          </div>
+          <h1 className="text-xl font-bold text-gray-900">{t.workerSavedTitle}</h1>
+          <p className="text-sm text-gray-600 mt-2">{t.workerSavedBody}</p>
+          <p className="text-center text-[11px] text-gray-400 mt-6">{t.footer}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -349,6 +424,29 @@ export default function PublicRegistrationForm({ token }) {
           {/* Worker branch — only when the person chose "wants to be a worker" */}
           {personType === "worker" && (
             <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 space-y-3">
+              {/* Photo — uploaded to the persistent store, previewed locally */}
+              <div>
+                <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo}</span>
+                <div className="flex items-center gap-3">
+                  {photoPreview ? (
+                    <img src={photoPreview} alt="" className="w-20 h-20 rounded-xl object-cover border border-gray-300 bg-white" />
+                  ) : (
+                    <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 bg-white flex items-center justify-center text-gray-400">
+                      <ImagePlus size={24} />
+                    </div>
+                  )}
+                  <div>
+                    <button type="button" onClick={() => photoInput.current?.click()} disabled={photoBusy}
+                            className="h-10 px-4 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-2 disabled:opacity-60">
+                      {photoBusy ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
+                      {photoBusy ? t.uploading : (photoPreview ? t.changePhoto : t.choosePhoto)}
+                    </button>
+                    <p className="text-[11px] text-gray-500 mt-1">{t.photoHint}</p>
+                  </div>
+                  <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onPhoto} />
+                </div>
+                {photoErr ? <p className="text-[12px] text-red-700 mt-1.5">{photoErr}</p> : null}
+              </div>
               <div>
                 <span className="block text-sm font-semibold text-gray-800 mb-2">{t.interested}</span>
                 <div className="flex gap-2">

@@ -185,6 +185,12 @@ export async function submitPublicRegistration(req, token) {
     const areaBooth = clip(d.area_booth, 160) || link.worker_area || null;
     const address = String(d.address || "").trim().slice(0, 2000) || null;
 
+    // Photo (Worker Form): accept ONLY a path produced by our own upload endpoint
+    // (/uploads/<id>.<ext>) — never an arbitrary client-supplied URL — so the row
+    // can only reference an image actually stored in our photo store.
+    const rawPhoto = String(d.photo_url || "").trim();
+    const photoUrl = /^\/uploads\/[A-Za-z0-9._-]+$/.test(rawPhoto) ? rawPhoto.slice(0, 512) : null;
+
     // The constituency must be one from the master list. Resolving the id here
     // rather than trusting a submitted name is what keeps the ward and
     // constituency reports groupable — a free-text field would fill them with
@@ -224,10 +230,10 @@ export async function submitPublicRegistration(req, token) {
     await query(
       `INSERT INTO reg_people
          (campaign_id, worker_id, person_type, name, mobile, address, assembly_id, assembly_name,
-          ward_number, area_booth, wants_worker, worker_role, status, source_ip, registered_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
+          ward_number, area_booth, wants_worker, worker_role, photo_url, status, source_ip, registered_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
       [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
-       assemblyId, assemblyName, ward, areaBooth, wantsWorker, workerRole, ip, regNow()]
+       assemblyId, assemblyName, ward, areaBooth, wantsWorker, workerRole, photoUrl, ip, regNow()]
     );
 
     // Just an acknowledgement — no counts, for the same reason the bootstrap
