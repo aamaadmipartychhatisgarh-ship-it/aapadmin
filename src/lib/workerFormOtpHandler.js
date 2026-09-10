@@ -61,7 +61,8 @@ export async function handleRequestOtp(req) {
     // A delivery problem is never framed as an approval/activation step: the
     // browser gets a neutral retry message, the real reason is in the server log.
     if (send.status === "failed") return json({ message: "Unable to send the OTP. Please try again." }, 502);
-    if (send.status === "unconfigured") return json({ message: "Unable to send the OTP right now. Please try again in a moment." }, 500);
+    // Provider-unavailable → 503, not a 500 (a service state, not an app crash).
+    if (send.status === "unconfigured") return json({ message: "Unable to send the OTP right now. Please try again in a moment." }, 503);
 
     await query(`UPDATE worker_form_otps SET consumed_at = NOW() WHERE phone = ? AND consumed_at IS NULL`, [key]);
     const expires = new Date(Date.now() + OTP_TTL_MS);

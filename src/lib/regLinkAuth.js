@@ -62,7 +62,13 @@ export async function handleRegOtpRequest(token, body) {
   // Safe, non-sensitive trace so the exact rejection reason is visible in the
   // server log. Never logs the OTP, the full mobile, or any credential (§8).
   const tag = `[reg-otp ${String(token || "").slice(0, 6)}…]`;
+  // Track the current stage so an unexpected exception is logged with the EXACT
+  // point it failed, and the caller always gets a controlled response — never an
+  // uncaught 500 with no diagnosis (§1, §2, §11).
+  let stage = "start";
+  try {
   console.log(`${tag} OTP REQUEST START`);
+  stage = "token-validation";
   await ensureWorkerFormSchema();
   const link = await resolveWorkerLink(token);
   if (!link) {
@@ -73,6 +79,7 @@ export async function handleRegOtpRequest(token, body) {
   // Compare on the last 10 digits (the app's phone-matching convention) so a
   // correctly-registered handler is never falsely rejected because the stored
   // number carries a country code / leading zero / older format (§13).
+  stage = "mobile-validation";
   const entered = phoneKey(body?.mobile);
   if (!entered || entered.length !== 10) {
     console.warn(`${tag} rejected: mobile failed validation`);
@@ -93,6 +100,7 @@ export async function handleRegOtpRequest(token, body) {
   }
 
   // Rate limiting, scoped to this link.
+  stage = "rate-limit";
   const [{ recent }] = await query(
     `SELECT COUNT(*) AS recent FROM worker_form_otps WHERE scope='reg_link' AND ref_token=? AND created_at > (NOW() - INTERVAL 1 HOUR)`,
     [token]
@@ -112,15 +120,21 @@ export async function handleRegOtpRequest(token, body) {
   // Send first; only persist + invalidate the previous OTP if the provider
   // accepted, so a delivery failure never shows a false "OTP sent" (§2, §5).
   console.log(`${tag} token + mobile OK → generating OTP`);
+  stage = "otp-generation";
   const otp = generateOtp();
+  stage = "sms-send";
   console.log(`${tag} SMS provider request started`);
   const send = await sendOtpSms(entered, otp); // never echoed to the client
   console.log(`${tag} SMS provider response: ${send.status}`);
   // A delivery problem is never framed as an approval/activation step (§1, §2, §5):
   // the browser gets a neutral retry message, the real reason is in the server log.
   if (send.status === "failed") return json({ message: "Unable to send the OTP. Please try again." }, 502);
-  if (send.status === "unconfigured") return json({ message: "Unable to send the OTP right now. Please try again in a moment." }, 500);
+  // Provider-unavailable (no provider configured on the server) → 503, not a 500:
+  // it is a service-availability state, not an application crash (§11). The real,
+  // actionable cause is logged by sendOtpSms; the browser gets a neutral message.
+  if (send.status === "unconfigured") return json({ message: "Unable to send the OTP right now. Please try again in a moment." }, 503);
 
+  stage = "db-save";
   await query(`UPDATE worker_form_otps SET consumed_at = NOW() WHERE scope='reg_link' AND ref_token=? AND consumed_at IS NULL`, [token]);
   const expires = new Date(Date.now() + OTP_TTL_MS);
   await query(
@@ -130,10 +144,19 @@ export async function handleRegOtpRequest(token, body) {
   console.log(`${tag} OTP saved; OTP REQUEST COMPLETE`);
 
   return json({ ok: true, phone: maskPhone(entered), otpLength: OTP_LENGTH, resendIn: Math.round(RESEND_COOLDOWN_MS / 1000), expiresIn: Math.round(OTP_TTL_MS / 1000) });
+  } catch (err) {
+    // Any unexpected failure (DB/schema/etc.) is logged with the exact stage and
+    // a safe message — never the OTP or a credential — and returns a controlled
+    // 500 instead of an uncaught crash.
+    console.error(`${tag} FAILED at ${stage}: ${err?.message || err}`);
+    return json({ message: "Unable to process the request right now. Please try again." }, 500);
+  }
 }
 
 // --- OTP verify → issue the handler session --------------------------------
 export async function handleRegOtpVerify(token, body) {
+  const tag = `[reg-otp ${String(token || "").slice(0, 6)}…]`;
+  try {
   await ensureWorkerFormSchema();
   const link = await resolveWorkerLink(token);
   if (!link) return json({ message: "This registration link is not valid or has been closed." }, 404);
@@ -163,6 +186,10 @@ export async function handleRegOtpVerify(token, body) {
   const res = json({ ok: true, handler: { name: link.worker_name, mobile: entered, worker_code: link.worker_code } });
   res.cookies.set(regSessionCookie(signPayload(payload)));
   return res;
+  } catch (err) {
+    console.error(`${tag} VERIFY FAILED: ${err?.message || err}`);
+    return json({ message: "Unable to verify the OTP right now. Please try again." }, 500);
+  }
 }
 
 // GET session state for the form: whether this link needs OTP, and if so whether

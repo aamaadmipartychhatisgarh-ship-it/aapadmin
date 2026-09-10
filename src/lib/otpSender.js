@@ -100,7 +100,9 @@ async function sendGeneric(ten, otp) {
 
 export async function sendOtpSms(phoneKeyVal, otp) {
   const ten = String(phoneKeyVal || "").replace(/\D/g, "").slice(-10);
-  const provider = (process.env.OTP_SMS_PROVIDER || "").toLowerCase();
+  // .trim() guards against a stray space / newline pasted into a hosting panel's
+  // env field — a very common cause of "the variable is set but not detected".
+  const provider = (process.env.OTP_SMS_PROVIDER || "").trim().toLowerCase();
 
   if (provider) {
     if (ten.length !== 10) return { status: "failed", error: "invalid destination number" };
@@ -131,10 +133,15 @@ export async function sendOtpSms(phoneKeyVal, otp) {
   // A clear, actionable SERVER-SIDE configuration error (§4) — not a user-facing
   // "service not up". There is no approval / activation / incharge step anywhere;
   // the ONLY thing missing is the provider credentials in the environment.
+  // The diagnostic names which env vars the RUNNING process can actually see
+  // (booleans / the non-secret provider value only — never a key's value), so the
+  // log pinpoints "unset" vs "set under the wrong name" without exposing secrets.
+  const seen = (n) => (process.env[n] && String(process.env[n]).trim() ? "set" : "MISSING");
   console.error(
     "[otp] BLOCKED — no SMS provider is configured, so no OTP can be delivered. " +
-    "Set OTP_SMS_PROVIDER (msg91 | fast2sms | generic) and the matching credentials " +
-    `(e.g. MSG91_AUTHKEY + MSG91_TEMPLATE_ID, or FAST2SMS_API_KEY) in the server environment. Destination ${maskPhone(ten)}.`
+    `Set OTP_SMS_PROVIDER (msg91 | fast2sms | generic) + credentials in the SERVER environment, then RESTART the app. Destination ${maskPhone(ten)}. ` +
+    `env seen by process → OTP_SMS_PROVIDER="${(process.env.OTP_SMS_PROVIDER || "").trim()}" ` +
+    `FAST2SMS_API_KEY=${seen("FAST2SMS_API_KEY")} MSG91_AUTHKEY=${seen("MSG91_AUTHKEY")} MSG91_TEMPLATE_ID=${seen("MSG91_TEMPLATE_ID")} OTP_SMS_URL=${seen("OTP_SMS_URL")}`
   );
   return { status: "unconfigured" };
 }
