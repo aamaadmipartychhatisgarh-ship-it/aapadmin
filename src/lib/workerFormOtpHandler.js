@@ -53,16 +53,20 @@ export async function handleRequestOtp(req) {
       return json({ message: "Please wait a few seconds before requesting another OTP." }, 429);
     }
 
-    // Invalidate any earlier live OTP so only the newest one can be used.
-    await query(`UPDATE worker_form_otps SET consumed_at = NOW() WHERE phone = ? AND consumed_at IS NULL`, [key]);
-
+    // Send the OTP FIRST — only persist it (and invalidate the previous one) if
+    // the SMS provider actually accepted the request, so a delivery failure never
+    // shows a false "OTP sent" nor wipes a still-valid previous OTP (§2, §5).
     const otp = generateOtp();
+    const send = await sendOtpSms(key, otp); // never returns/echoes the OTP to the client
+    if (send.status === "failed") return json({ message: "Could not send the OTP right now. Please try again in a moment." }, 502);
+    if (send.status === "unconfigured") return json({ message: "OTP service is not set up yet. Please contact the administrator." }, 503);
+
+    await query(`UPDATE worker_form_otps SET consumed_at = NOW() WHERE phone = ? AND consumed_at IS NULL`, [key]);
     const expires = new Date(Date.now() + OTP_TTL_MS);
     await query(
       `INSERT INTO worker_form_otps (phone, worker_id, otp_hash, expires_at) VALUES (?, ?, ?, ?)`,
       [key, worker.id, hashOtp(otp, key), expires]
     );
-    await sendOtpSms(key, otp); // never returns/echoes the OTP to the client
 
     return json({
       ok: true,

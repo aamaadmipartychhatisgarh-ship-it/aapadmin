@@ -85,15 +85,19 @@ export async function handleRegOtpRequest(token, body) {
     return json({ message: "Please wait a few seconds before requesting another OTP." }, 429);
   }
 
-  // Only the newest OTP for this link stays live.
-  await query(`UPDATE worker_form_otps SET consumed_at = NOW() WHERE scope='reg_link' AND ref_token=? AND consumed_at IS NULL`, [token]);
+  // Send first; only persist + invalidate the previous OTP if the provider
+  // accepted, so a delivery failure never shows a false "OTP sent" (§2, §5).
   const otp = generateOtp();
+  const send = await sendOtpSms(entered, otp); // never echoed to the client
+  if (send.status === "failed") return json({ message: "Could not send the OTP right now. Please try again in a moment." }, 502);
+  if (send.status === "unconfigured") return json({ message: "OTP service is not set up yet. Please contact your in-charge." }, 503);
+
+  await query(`UPDATE worker_form_otps SET consumed_at = NOW() WHERE scope='reg_link' AND ref_token=? AND consumed_at IS NULL`, [token]);
   const expires = new Date(Date.now() + OTP_TTL_MS);
   await query(
     `INSERT INTO worker_form_otps (phone, worker_id, otp_hash, expires_at, scope, ref_token) VALUES (?,?,?,?, 'reg_link', ?)`,
     [entered, link.worker_id, hashOtp(otp, entered), expires, token]
   );
-  await sendOtpSms(entered, otp); // never echoed to the client
 
   return json({ ok: true, phone: maskPhone(entered), otpLength: OTP_LENGTH, resendIn: Math.round(RESEND_COOLDOWN_MS / 1000), expiresIn: Math.round(OTP_TTL_MS / 1000) });
 }
