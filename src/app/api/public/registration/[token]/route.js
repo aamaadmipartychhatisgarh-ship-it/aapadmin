@@ -1,4 +1,4 @@
-import { publicFormContext, submitPublicRegistration } from "@/lib/publicRegistration";
+import { publicFormContext, submitPublicRegistration, publicOwnList } from "@/lib/publicRegistration";
 
 // Token-addressed public form endpoints — a personal karyakarta link, or a link
 // pinned to one specific drive. The open /join link uses the sibling route with
@@ -9,6 +9,8 @@ export const revalidate = 0;
 
 export async function GET(req, { params }) {
   const { token } = await params;
+  const list = new URL(req.url).searchParams.get("list");
+  if (list) return publicOwnList(token, list);
   return publicFormContext(token);
 }
 

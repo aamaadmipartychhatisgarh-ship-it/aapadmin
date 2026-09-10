@@ -138,6 +138,44 @@ export async function publicFormContext(token) {
   }
 }
 
+// GET ?list=voter|worker — the "मेरे वोटर / मेरे कार्यकर्ता" list for the link the
+// caller holds. OWNERSHIP IS DERIVED FROM THE LINK, never from the client: a
+// worker link scopes to that worker's OWN registrations; the general /join or a
+// drive link scopes to the drive's direct (unattributed) registrations. So one
+// karyakarta's link can never surface another's people, and there is no id a
+// request could tamper with to widen the scope (§21–§23).
+export async function publicOwnList(token, type) {
+  try {
+    await ensureRegistrationSchema();
+    const link = await resolveLink(token);
+    if (!link) {
+      return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
+    }
+    const personType = type === "worker" ? "worker" : "voter";
+    const where = ["p.campaign_id = ?", "p.status = 'active'", "p.person_type = ?"];
+    const params = [link.campaign_id, personType];
+    if (link.mode === "worker") { where.push("p.worker_id = ?"); params.push(link.worker_id); }
+    else { where.push("p.worker_id IS NULL"); }
+
+    const rows = await query(
+      `SELECT p.id, p.name, p.mobile, p.photo_url, p.address, p.assembly_name,
+              p.ward_number, p.ward_name, p.area_booth, p.registered_at
+         FROM reg_people p
+        WHERE ${where.join(" AND ")}
+        ORDER BY p.registered_at DESC, p.id DESC
+        LIMIT 500`,
+      params
+    );
+    return NextResponse.json(
+      { people: rows, total: rows.length, type: personType, credited_to: link.mode === "worker" ? link.worker_name : null },
+      { headers: NO_STORE }
+    );
+  } catch (e) {
+    console.error("[registration] public list error:", e);
+    return NextResponse.json({ message: "Could not load the list. Please try again." }, { status: 500, headers: NO_STORE });
+  }
+}
+
 // POST — record one person. The registration timestamp is set server-side in IST
 // (see regNow), never supplied by the client.
 export async function submitPublicRegistration(req, token) {
@@ -183,6 +221,7 @@ export async function submitPublicRegistration(req, token) {
     const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
     const ward = normalizeWard(d.ward_number) || normalizeWard(link.worker_ward || link.campaign_ward);
     const areaBooth = clip(d.area_booth, 160) || link.worker_area || null;
+    const wardName = clip(d.ward_name, 160);
     const address = String(d.address || "").trim().slice(0, 2000) || null;
 
     // Photo (Worker Form): accept ONLY a path produced by our own upload endpoint
@@ -230,10 +269,10 @@ export async function submitPublicRegistration(req, token) {
     await query(
       `INSERT INTO reg_people
          (campaign_id, worker_id, person_type, name, mobile, address, assembly_id, assembly_name,
-          ward_number, area_booth, wants_worker, worker_role, photo_url, status, source_ip, registered_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
+          ward_number, ward_name, area_booth, wants_worker, worker_role, photo_url, status, source_ip, registered_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
       [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
-       assemblyId, assemblyName, ward, areaBooth, wantsWorker, workerRole, photoUrl, ip, regNow()]
+       assemblyId, assemblyName, ward, wardName, areaBooth, wantsWorker, workerRole, photoUrl, ip, regNow()]
     );
 
     // Just an acknowledgement — no counts, for the same reason the bootstrap

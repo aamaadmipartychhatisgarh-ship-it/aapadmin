@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus } from "lucide-react";
+import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft } from "lucide-react";
 
 // The public form. One form, two ways in, and the ONLY difference is who ends up
 // credited — which the link decides, not the person filling it:
@@ -34,11 +34,18 @@ const STRINGS = {
     savedBody: "अगला व्यक्ति जोड़ने के लिए नीचे फॉर्म भरें.",
     workerSavedTitle: "पंजीयन सफलतापूर्वक जमा हुआ",
     workerSavedBody: "धन्यवाद. आपका पंजीयन सफलतापूर्वक जमा हो गया है.",
-    photo: "फोटो", choosePhoto: "फोटो चुनें", changePhoto: "फोटो बदलें",
+    photo: "फोटो", choosePhoto: "फोटो चुनें", changePhoto: "फोटो बदलें", capturePhoto: "फोटो खींचें", retakePhoto: "दोबारा खींचें",
     photoHint: "JPG, PNG या WEBP · अधिकतम 5 MB", uploading: "अपलोड हो रहा है…",
     photoTooLarge: "फोटो का आकार बहुत बड़ा है. कृपया छोटी छवि अपलोड करें.",
     photoBadType: "कृपया JPG, JPEG, PNG या WEBP छवि अपलोड करें.",
     photoFailed: "फोटो अपलोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
+    kbn: "कार्यकर्ता बनना है?",
+    wardName: "वार्ड का नाम", wardNamePh: "वार्ड का नाम",
+    booth: "बूथ",
+    errWardName: "कृपया वार्ड का नाम भरें.",
+    list: "सूची", myVoters: "मेरे वोटर", myWorkers: "मेरे कार्यकर्ता",
+    backToForm: "फॉर्म पर वापस जाएँ", totalVoters: "कुल वोटर", totalWorkers: "कुल कार्यकर्ता",
+    noRecords: "अभी तक कोई रिकॉर्ड नहीं.", listLoadErr: "सूची लोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
     section1: "पंजीयन फॉर्म",
     personType: "प्रकार",
     voter: "मतदाता", wantsWorker: "कार्यकर्ता बनना है",
@@ -70,11 +77,18 @@ const STRINGS = {
     savedBody: "Fill the form below to add the next person.",
     workerSavedTitle: "Registration submitted successfully",
     workerSavedBody: "Thank you. Your registration has been submitted successfully.",
-    photo: "Photo", choosePhoto: "Choose Photo", changePhoto: "Change Photo",
+    photo: "Photo", choosePhoto: "Choose Photo", changePhoto: "Change Photo", capturePhoto: "Capture Photo", retakePhoto: "Retake",
     photoHint: "JPG, PNG or WEBP · up to 5 MB", uploading: "Uploading…",
     photoTooLarge: "Photo size is too large. Please upload a smaller image.",
     photoBadType: "Please upload a JPG, JPEG, PNG, or WEBP image.",
     photoFailed: "Unable to upload photo. Please try again.",
+    kbn: "Want to become a Worker?",
+    wardName: "Ward Name", wardNamePh: "Ward name",
+    booth: "Booth",
+    errWardName: "Please enter the ward name.",
+    list: "List", myVoters: "My Voters", myWorkers: "My Workers",
+    backToForm: "Back to form", totalVoters: "Total Voters", totalWorkers: "Total Workers",
+    noRecords: "No records yet.", listLoadErr: "Could not load the list. Please try again.",
     section1: "Registration Form",
     personType: "Person Type",
     voter: "Voter", wantsWorker: "Wants to be a Worker",
@@ -135,8 +149,12 @@ export default function PublicRegistrationForm({ token }) {
   const [address, setAddress] = useState("");
   const [assemblyId, setAssemblyId] = useState("");
   const [ward, setWard] = useState("");
+  const [wardName, setWardName] = useState("");
   const [areaBooth, setAreaBooth] = useState("");
   const honeypot = useRef(null);
+
+  // "List" view — the karyakarta's own voters / workers for THIS link.
+  const [listMode, setListMode] = useState(null); // null | "voter" | "worker"
 
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -152,6 +170,7 @@ export default function PublicRegistrationForm({ token }) {
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoErr, setPhotoErr] = useState("");
   const photoInput = useRef(null);
+  const cameraInput = useRef(null);
 
   const t = STRINGS[lang];
 
@@ -197,7 +216,7 @@ export default function PublicRegistrationForm({ token }) {
   useEffect(() => { load(); }, [load]);
 
   function resetPerson() {
-    setPersonType("voter"); setWantsWorker("yes"); setWorkerRole("");
+    setPersonType("voter"); setWantsWorker("yes"); setWorkerRole(""); setWardName("");
     setName(""); setMobile(""); setAddress("");
     setPhotoUrl(""); setPhotoPreview(""); setPhotoErr("");
     // Constituency, ward and booth are deliberately KEPT: a karyakarta works
@@ -232,16 +251,19 @@ export default function PublicRegistrationForm({ token }) {
     e.preventDefault();
     setErr("");
     const validMobile = (v) => /^[6-9]\d{9}$/.test(String(v).replace(/\D/g, "").slice(-10));
+    // The top question decides the record type: हाँ → worker, ना → voter.
+    const isWorker = personType === "worker";
     if (!name.trim()) { setErr(t.errName); return; }
     if (!validMobile(mobile)) { setErr(t.errMobile); return; }
     if (!assemblyId) { setErr(t.errConstituency); return; }
+    // Ward Name is mandatory only on the worker branch; a voter is never blocked
+    // by it (§3, §6). Hidden worker fields are never validated.
+    if (isWorker && !wardName.trim()) { setErr(t.errWardName); return; }
     if (photoBusy) { setErr(t.uploading); return; }
     if (saving) return; // guard against a double-click / repeat submit
     setSaving(true);
     try {
-      // "Wants to become a worker" is only recorded as such when the person
-      // actually confirms Yes; a No on that branch is an ordinary voter entry.
-      const effectiveType = personType === "worker" && wantsWorker === "yes" ? "worker" : "voter";
+      const effectiveType = isWorker ? "worker" : "voter";
       const r = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -252,9 +274,10 @@ export default function PublicRegistrationForm({ token }) {
           address: address.trim(),
           assembly_id: assemblyId,
           ward_number: ward.trim(),
+          ward_name: isWorker ? wardName.trim() : "",
           area_booth: areaBooth.trim(),
-          worker_role: effectiveType === "worker" ? workerRole.trim() : "",
-          photo_url: effectiveType === "worker" ? photoUrl : "",
+          worker_role: isWorker ? workerRole.trim() : "",
+          photo_url: photoUrl, // photo is supported for both voter and worker
           website: honeypot.current?.value || "",
         }),
       });
@@ -304,6 +327,12 @@ export default function PublicRegistrationForm({ token }) {
         </div>
       </div>
     );
+  }
+
+  // "List" view — the karyakarta's own voters / workers for THIS link, scoped
+  // server-side by the link token (§18–§23).
+  if (listMode) {
+    return <PublicList token={token} t={t} initial={listMode} onBack={() => setListMode(null)} toggleLang={toggleLang} />;
   }
 
   if (loading) {
@@ -368,20 +397,23 @@ export default function PublicRegistrationForm({ token }) {
           <input ref={honeypot} name="website" tabIndex={-1} autoComplete="off" aria-hidden="true"
                  className="absolute opacity-0 h-0 w-0 -z-10 pointer-events-none" />
 
+          {/* The very first question: do they want to become a worker? हाँ shows
+              the worker fields (incl. Ward Name); ना is an ordinary voter and the
+              worker-only fields stay hidden and unvalidated. */}
           <div>
-            <span className="block text-sm font-semibold text-gray-800 mb-2">{t.personType} <span className="text-red-600">*</span></span>
+            <span className="block text-sm font-semibold text-gray-800 mb-2">{t.kbn} <span className="text-red-600">*</span></span>
             <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setPersonType("voter")}
-                      className={`h-14 rounded-xl border-2 text-sm font-semibold flex flex-col items-center justify-center gap-0.5 transition ${
-                        personType === "voter" ? "text-white border-transparent" : "bg-white text-gray-700 border-gray-300"}`}
-                      style={personType === "voter" ? { background: ACCENT } : undefined}>
-                <Vote size={17} />{t.voter}
-              </button>
               <button type="button" onClick={() => setPersonType("worker")}
                       className={`h-14 rounded-xl border-2 text-sm font-semibold flex flex-col items-center justify-center gap-0.5 transition ${
                         personType === "worker" ? "text-white border-transparent" : "bg-white text-gray-700 border-gray-300"}`}
                       style={personType === "worker" ? { background: ACCENT } : undefined}>
-                <UserPlus size={17} />{t.wantsWorker}
+                <UserPlus size={17} />{t.yes}
+              </button>
+              <button type="button" onClick={() => setPersonType("voter")}
+                      className={`h-14 rounded-xl border-2 text-sm font-semibold flex flex-col items-center justify-center gap-0.5 transition ${
+                        personType === "voter" ? "text-white border-transparent" : "bg-white text-gray-700 border-gray-300"}`}
+                      style={personType === "voter" ? { background: ACCENT } : undefined}>
+                <Vote size={17} />{t.no}
               </button>
             </div>
           </div>
@@ -409,6 +441,14 @@ export default function PublicRegistrationForm({ token }) {
             </select>
           </Field>
 
+          {/* Ward Name — worker-only and mandatory on the हाँ branch (§6). Hidden
+              (and never validated) for a voter (ना). */}
+          {personType === "worker" && (
+            <Field label={t.wardName} required>
+              <input className={inputCls} value={wardName} onChange={(e) => setWardName(e.target.value)} placeholder={t.wardNamePh} />
+            </Field>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Field label={t.wardNo}>
               {/* Digits only, enforced as they type and again on the server, so
@@ -416,57 +456,51 @@ export default function PublicRegistrationForm({ token }) {
               <input className={inputCls} value={ward} onChange={(e) => setWard(e.target.value.replace(/\D/g, ""))}
                      inputMode="numeric" pattern="[0-9]*" maxLength={10} placeholder={t.wardPh} />
             </Field>
-            <Field label={t.areaBooth}>
+            <Field label={t.booth}>
               <input className={inputCls} value={areaBooth} onChange={(e) => setAreaBooth(e.target.value)} placeholder={t.areaPh} />
             </Field>
           </div>
 
-          {/* Worker branch — only when the person chose "wants to be a worker" */}
-          {personType === "worker" && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 space-y-3">
-              {/* Photo — uploaded to the persistent store, previewed locally */}
-              <div>
-                <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo}</span>
-                <div className="flex items-center gap-3">
-                  {photoPreview ? (
-                    <img src={photoPreview} alt="" className="w-20 h-20 rounded-xl object-cover border border-gray-300 bg-white" />
-                  ) : (
-                    <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 bg-white flex items-center justify-center text-gray-400">
-                      <ImagePlus size={24} />
-                    </div>
-                  )}
-                  <div>
-                    <button type="button" onClick={() => photoInput.current?.click()} disabled={photoBusy}
-                            className="h-10 px-4 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-2 disabled:opacity-60">
-                      {photoBusy ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
-                      {photoBusy ? t.uploading : (photoPreview ? t.changePhoto : t.choosePhoto)}
-                    </button>
-                    <p className="text-[11px] text-gray-500 mt-1">{t.photoHint}</p>
-                  </div>
-                  <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onPhoto} />
+          {/* Photo — for BOTH voter and worker (§16). Capture opens the device
+              camera where allowed; Choose picks an existing image. Both go through
+              the same upload/store path. */}
+          <div>
+            <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo}</span>
+            <div className="flex items-center gap-3">
+              {photoPreview ? (
+                <img src={photoPreview} alt="" className="w-20 h-20 rounded-xl object-cover border border-gray-300 bg-white" />
+              ) : (
+                <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 bg-white flex items-center justify-center text-gray-400">
+                  <ImagePlus size={24} />
                 </div>
-                {photoErr ? <p className="text-[12px] text-red-700 mt-1.5">{photoErr}</p> : null}
-              </div>
-              <div>
-                <span className="block text-sm font-semibold text-gray-800 mb-2">{t.interested}</span>
-                <div className="flex gap-2">
-                  {[["yes", t.yes], ["no", t.no]].map(([v, label]) => (
-                    <button key={v} type="button" onClick={() => setWantsWorker(v)}
-                            className={`h-11 px-5 rounded-xl border-2 text-sm font-semibold ${
-                              wantsWorker === v ? "text-white border-transparent" : "bg-white text-gray-700 border-gray-300"}`}
-                            style={wantsWorker === v ? { background: ACCENT } : undefined}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {wantsWorker === "yes" && (
-                <Field label={t.workerRole}>
-                  <input className={inputCls} value={workerRole} onChange={(e) => setWorkerRole(e.target.value)}
-                         placeholder={t.workerRolePh} />
-                </Field>
               )}
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => cameraInput.current?.click()} disabled={photoBusy}
+                          className="h-10 px-3 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5 disabled:opacity-60">
+                    <Camera size={15} /> {t.capturePhoto}
+                  </button>
+                  <button type="button" onClick={() => photoInput.current?.click()} disabled={photoBusy}
+                          className="h-10 px-3 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5 disabled:opacity-60">
+                    {photoBusy ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
+                    {photoBusy ? t.uploading : (photoPreview ? t.changePhoto : t.choosePhoto)}
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-500">{t.photoHint}</p>
+              </div>
+              {/* Camera capture vs library choose — same handler, different source. */}
+              <input ref={cameraInput} type="file" accept="image/*" capture="user" className="hidden" onChange={onPhoto} />
+              <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onPhoto} />
             </div>
+            {photoErr ? <p className="text-[12px] text-red-700 mt-1.5">{photoErr}</p> : null}
+          </div>
+
+          {/* Worker role — worker branch only (हाँ). */}
+          {personType === "worker" && (
+            <Field label={t.workerRole}>
+              <input className={inputCls} value={workerRole} onChange={(e) => setWorkerRole(e.target.value)}
+                     placeholder={t.workerRolePh} />
+            </Field>
           )}
 
           {/* On a karyakarta's link, who the entry is credited to — the name and
@@ -494,8 +528,100 @@ export default function PublicRegistrationForm({ token }) {
           </button>
         </form>
 
+        {/* View the list of people already registered through this link. */}
+        <button type="button" onClick={() => setListMode("voter")}
+                className="w-full min-h-[48px] rounded-xl border-2 border-gray-300 bg-white text-gray-800 text-sm font-bold flex items-center justify-center gap-2 hover:bg-gray-50">
+          <ListIcon size={18} /> {t.list}
+        </button>
+
         <p className="text-center text-[11px] text-gray-400 pb-4">{t.footer}</p>
       </main>
     </div>
   );
+}
+
+// The link's own list, with two tabs (मेरे वोटर / मेरे कार्यकर्ता). The rows come
+// from a token-scoped endpoint: the server derives ownership from the link and
+// returns only this link's people, so no client-supplied id can widen the scope.
+function PublicList({ token, t, initial, onBack, toggleLang }) {
+  const [type, setType] = useState(initial === "worker" ? "worker" : "voter");
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true); setErr("");
+    const base = token ? `/api/public/registration/${encodeURIComponent(token)}` : "/api/public/registration";
+    fetch(`${base}?list=${type}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then((d) => { if (!alive) return; setRows(d.people || []); setTotal(d.total || 0); })
+      .catch(() => { if (alive) setErr(t.listLoadErr); })
+      .finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+  }, [token, type, t.listLoadErr]);
+
+  const Tab = ({ value, label }) => (
+    <button type="button" onClick={() => setType(value)}
+            className={`flex-1 h-11 rounded-xl border-2 text-sm font-semibold ${type === value ? "text-white border-transparent" : "bg-white text-gray-700 border-gray-300"}`}
+            style={type === value ? { background: ACCENT } : undefined}>
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="text-white" style={{ background: BRAND }}>
+        <div className="max-w-xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
+          <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-semibold text-white/90 hover:text-white">
+            <ArrowLeft size={16} /> {t.backToForm}
+          </button>
+          <button type="button" onClick={toggleLang} className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1.5 rounded-lg bg-white/15 text-white hover:bg-white/25">
+            <Languages size={14} />{t.switchTo}
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-xl mx-auto px-4 py-5 space-y-4">
+        <div className="flex gap-2">
+          <Tab value="voter" label={t.myVoters} />
+          <Tab value="worker" label={t.myWorkers} />
+        </div>
+
+        <div className="flex items-baseline justify-between px-1">
+          <span className="text-sm font-semibold text-gray-700">{type === "worker" ? t.totalWorkers : t.totalVoters}</span>
+          <span className="text-2xl font-bold" style={{ color: BRAND }}>{total}</span>
+        </div>
+
+        {loading ? (
+          <div className="py-14 flex justify-center"><Loader2 className="animate-spin" size={26} style={{ color: ACCENT }} /></div>
+        ) : err ? (
+          <div className="rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{err}</div>
+        ) : rows.length === 0 ? (
+          <div className="py-14 text-center text-gray-400 text-sm">{t.noRecords}</div>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((r, i) => (
+              <div key={r.id} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3">
+                <span className="w-6 text-center text-xs font-bold text-gray-400">{i + 1}</span>
+                <ListThumb src={r.photo_url} name={r.name} />
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-gray-900 truncate">{r.name}</div>
+                  <div className="text-xs text-gray-500">{r.mobile || "—"}{r.assembly_name ? ` · ${r.assembly_name}` : ""}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-center text-[11px] text-gray-400 pb-4">{t.footer}</p>
+      </main>
+    </div>
+  );
+}
+
+function ListThumb({ src, name }) {
+  const [ok, setOk] = useState(true);
+  if (src && ok) return <img src={src} alt={name || ""} loading="lazy" className="w-11 h-11 rounded-full object-cover border border-gray-200 bg-white shrink-0" onError={() => setOk(false)} />;
+  return <div className="w-11 h-11 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#164FA3] font-bold shrink-0">{String(name || "?").trim().charAt(0).toUpperCase() || "?"}</div>;
 }

@@ -138,6 +138,9 @@ export async function ensureRegistrationSchema() {
     // Photo uploaded on the Worker Form — a persistent `/uploads/<id>` reference
     // (the image bytes live in the shared photo store, not this row).
     await ensureColumn("reg_people", "photo_url", "VARCHAR(512) NULL");
+    // Ward NAME (distinct from the numeric ward_number) — collected on the worker
+    // branch of the public form.
+    await ensureColumn("reg_people", "ward_name", "VARCHAR(160) NULL");
 
     ensured = true;
   } catch (e) {

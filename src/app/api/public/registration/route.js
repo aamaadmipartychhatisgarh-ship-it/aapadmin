@@ -1,4 +1,4 @@
-import { publicFormContext, submitPublicRegistration } from "@/lib/publicRegistration";
+import { publicFormContext, submitPublicRegistration, publicOwnList } from "@/lib/publicRegistration";
 
 // The standing public form endpoint behind /join — no token at all. It resolves
 // to whichever drive is currently active, so the same URL can be printed,
@@ -8,7 +8,9 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-export async function GET() {
+export async function GET(req) {
+  const list = new URL(req.url).searchParams.get("list");
+  if (list) return publicOwnList(null, list);
   return publicFormContext(null);
 }
 
