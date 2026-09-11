@@ -52,6 +52,11 @@ const STRINGS = {
     verifyOtp: "OTP सत्यापित करें", resendOtp: "OTP दोबारा भेजें", changeMobile: "नंबर बदलें",
     otpSentTo: "OTP भेजा गया:", notRegistered: "आप पंजीकृत नहीं हैं.", addAnother: "एक और कार्यकर्ता जोड़ें",
     errOtp: "कृपया OTP दर्ज करें.", newOtpSent: "नया OTP भेजा गया.",
+    otpSending: "OTP भेजा जा रहा है…", otpInvalidFb: "गलत OTP. कृपया दोबारा प्रयास करें.",
+    otpExpiredFb: "OTP की अवधि समाप्त हो गई. कृपया नया OTP भेजें.",
+    otpTooManyFb: "बहुत अधिक प्रयास. कृपया कुछ देर बाद प्रयास करें.",
+    otpSendFailFb: "OTP भेजने में असमर्थ. कृपया दोबारा प्रयास करें.",
+    verifyUnavailable: "मोबाइल सत्यापन अभी उपलब्ध नहीं है. कृपया बाद में प्रयास करें.",
     section1: "पंजीयन फॉर्म",
     personType: "प्रकार",
     voter: "मतदाता", wantsWorker: "कार्यकर्ता बनना है",
@@ -101,6 +106,11 @@ const STRINGS = {
     verifyOtp: "Verify OTP", resendOtp: "Resend OTP", changeMobile: "Change number",
     otpSentTo: "OTP sent to:", notRegistered: "You are not registered.", addAnother: "Add another worker",
     errOtp: "Please enter the OTP.", newOtpSent: "A new OTP has been sent.",
+    otpSending: "Sending OTP…", otpInvalidFb: "Invalid OTP. Please try again.",
+    otpExpiredFb: "The OTP has expired. Please request a new one.",
+    otpTooManyFb: "Too many attempts. Please try again later.",
+    otpSendFailFb: "Unable to send OTP. Please try again.",
+    verifyUnavailable: "Mobile verification is not available right now. Please try again later.",
     section1: "Registration Form",
     personType: "Person Type",
     voter: "Voter", wantsWorker: "Wants to be a Worker",
@@ -695,16 +705,21 @@ function ListThumb({ src, name }) {
 // The OTP gate shown before a WORKER link's form. Two steps: mobile → OTP. The
 // mobile is the LINK OWNER's; the backend validates it against reg_workers and
 // sends the OTP only to a registered handler (§2–§5).
+const OTP_LEN = 6; // Firebase phone-auth codes are always 6 digits.
+
 function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
   const [step, setStep] = useState("mobile"); // mobile | otp
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
   const [masked, setMasked] = useState("");
-  const [otpLen, setOtpLen] = useState(6);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
   const [cooldown, setCooldown] = useState(0);
+  const [fbReady, setFbReady] = useState(null); // null=loading | true | false(unavailable)
+  const authRef = useRef(null);
+  const confirmRef = useRef(null);   // Firebase confirmationResult
+  const verifierRef = useRef(null);  // RecaptchaVerifier
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -712,43 +727,101 @@ function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
     return () => clearInterval(id);
   }, [cooldown]);
 
+  // Load the Firebase web config and initialise the SDK — client-side only, and
+  // only the public (non-secret) config, fetched from our backend.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/public/firebase-config`);
+        const cfg = await r.json().catch(() => ({}));
+        if (!alive) return;
+        if (!cfg?.configured) { setFbReady(false); return; }
+        const { initializeApp, getApps, getApp } = await import("firebase/app");
+        const { getAuth } = await import("firebase/auth");
+        const app = getApps().length ? getApp() : initializeApp({
+          apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
+          appId: cfg.appId, messagingSenderId: cfg.messagingSenderId,
+        });
+        authRef.current = getAuth(app);
+        if (alive) setFbReady(true);
+      } catch { if (alive) setFbReady(false); }
+    })();
+    return () => { alive = false; try { verifierRef.current?.clear?.(); } catch { /* noop */ } };
+  }, []);
+
   const base = `/api/public/registration/${encodeURIComponent(token)}/otp`;
   const post = (path, body) => fetch(`${base}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+  // Map a Firebase auth error code → a friendly bilingual message (§13).
+  function fbMessage(code) {
+    switch (code) {
+      case "auth/invalid-phone-number":
+      case "auth/missing-phone-number": return t.errMobile;
+      case "auth/invalid-verification-code": return t.otpInvalidFb;
+      case "auth/code-expired": return t.otpExpiredFb;
+      case "auth/too-many-requests":
+      case "auth/quota-exceeded": return t.otpTooManyFb;
+      default: return t.otpSendFailFb;
+    }
+  }
+
+  // A fresh invisible reCAPTCHA verifier per send avoids "already rendered" reuse
+  // issues; Firebase's anti-aboise flow is never bypassed (§7).
+  async function startFirebase(e164) {
+    const { RecaptchaVerifier, signInWithPhoneNumber } = await import("firebase/auth");
+    try { verifierRef.current?.clear?.(); } catch { /* noop */ }
+    verifierRef.current = new RecaptchaVerifier(authRef.current, "reg-recaptcha", { size: "invisible" });
+    confirmRef.current = await signInWithPhoneNumber(authRef.current, e164, verifierRef.current);
+  }
 
   async function requestOtp(e) {
     e?.preventDefault?.();
     setErr(""); setInfo("");
-    const digits = mobile.replace(/\D/g, "");
-    if (digits.slice(-10).length !== 10) { setErr(t.errMobile); return; }
+    const ten = mobile.replace(/\D/g, "").slice(-10);
+    if (ten.length !== 10) { setErr(t.errMobile); return; }
+    if (fbReady === false) { setErr(t.verifyUnavailable); return; }
+    if (fbReady == null) { setErr(t.otpSending); return; } // config still loading
     setBusy(true);
     try {
+      // 1) Owner pre-check (NO SMS) → instant "not registered" and no wasted quota.
       const r = await post("request", { mobile });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(d.message || t.errSave); return; }
-      setMasked(d.phone || ""); setOtpLen(d.otpLength || 6); setCooldown(d.resendIn || 30); setStep("otp");
-    } catch { setErr(t.errSave); } finally { setBusy(false); }
+      // 2) Firebase sends + will verify the SMS to the confirmed E.164 number.
+      await startFirebase(d.e164 || `+91${ten}`);
+      setMasked(d.phone || ""); setCooldown(30); setStep("otp");
+    } catch (e2) {
+      setErr(fbMessage(e2?.code));
+    } finally { setBusy(false); }
   }
   async function verifyOtp(e) {
     e?.preventDefault?.();
     setErr(""); setInfo("");
     if (!otp.trim()) { setErr(t.errOtp); return; }
+    if (!confirmRef.current) { setStep("mobile"); setErr(t.otpExpiredFb); return; }
     setBusy(true);
     try {
-      const r = await post("verify", { mobile, otp });
+      // Firebase verifies the code; we then hand the ID token to our backend,
+      // which checks it and the owner rule. We never compare the OTP ourselves.
+      const cred = await confirmRef.current.confirm(otp.trim());
+      const idToken = await cred.user.getIdToken();
+      const r = await post("firebase", { idToken });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(d.message || t.errSave); return; }
       onVerified(d.handler || null);
-    } catch { setErr(t.errSave); } finally { setBusy(false); }
+    } catch (e2) {
+      setErr(fbMessage(e2?.code));
+    } finally { setBusy(false); }
   }
   async function resend() {
-    if (cooldown > 0) return;
+    if (cooldown > 0 || busy) return;
     setErr(""); setInfo(""); setBusy(true);
     try {
-      const r = await post("resend", { mobile });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setErr(d.message || t.errSave); return; }
-      setInfo(t.newOtpSent); setCooldown(d.resendIn || 30);
-    } catch { setErr(t.errSave); } finally { setBusy(false); }
+      const ten = mobile.replace(/\D/g, "").slice(-10);
+      await startFirebase(`+91${ten}`);
+      setInfo(t.newOtpSent); setCooldown(30);
+    } catch (e2) { setErr(fbMessage(e2?.code)); } finally { setBusy(false); }
   }
 
   return (
@@ -786,8 +859,8 @@ function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
               <button type="button" onClick={() => { setStep("mobile"); setOtp(""); setErr(""); }} className="text-xs text-gray-400 hover:text-gray-600 inline-flex items-center gap-1"><ArrowLeft size={13} /> {t.changeMobile}</button>
               <h2 className="text-base font-bold text-gray-900">{t.otpVerifyTitle}</h2>
               <p className="text-sm text-gray-500 -mt-2">{t.otpSentTo} <span className="font-semibold text-gray-700">{masked}</span></p>
-              <input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, otpLen))} inputMode="numeric" autoFocus
-                     maxLength={otpLen} placeholder={"•".repeat(otpLen)}
+              <input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LEN))} inputMode="numeric" autoFocus
+                     maxLength={OTP_LEN} placeholder={"•".repeat(OTP_LEN)}
                      className="w-full h-12 rounded-xl border border-gray-300 text-center text-lg tracking-[0.5em] font-semibold outline-none focus:ring-2 focus:ring-[#164FA3]" />
               {err ? <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{err}</p> : null}
               {info ? <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2">{info}</p> : null}
@@ -802,6 +875,8 @@ function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
             </form>
           )}
         </div>
+        {/* Invisible reCAPTCHA host for Firebase phone auth (required, never bypassed). */}
+        <div id="reg-recaptcha" />
         <p className="text-center text-[11px] text-gray-400 mt-4">{t.footer}</p>
       </main>
     </div>
