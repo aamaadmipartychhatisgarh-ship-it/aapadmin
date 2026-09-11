@@ -14,15 +14,25 @@ export const authOptions = {
       async authorize(credentials, req) {
         if (!credentials?.username || !credentials?.password) return null;
 
+        // Normalise the username: trim stray whitespace from the input (a common
+        // cause of a "correct" password being rejected). Password is compared
+        // as-typed — never trimmed — since a password may legitimately contain
+        // spaces. Lookup stays case-insensitive via the column's collation.
+        const username = String(credentials.username).trim();
+
         try {
-          const users = await query("SELECT * FROM users WHERE username = ?", [credentials.username]);
+          const users = await query("SELECT * FROM users WHERE username = ?", [username]);
           const user = users[0];
 
-          if (!user) return null;
-          if (user.is_active === 0) return null;
+          // Log the EXACT reason a sign-in is refused so a 401 is diagnosable in
+          // the server log — never logging the password or the hash (§4, §5).
+          if (!user) { console.warn(`[auth] sign-in refused: no user named "${username}"`); return null; }
+          if (user.is_active === 0) { console.warn(`[auth] sign-in refused: user "${username}" is inactive`); return null; }
+          if (!user.password) { console.warn(`[auth] sign-in refused: user "${username}" has no password set`); return null; }
 
           const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
-          if (!isPasswordValid) return null;
+          if (!isPasswordValid) { console.warn(`[auth] sign-in refused: wrong password for "${username}"`); return null; }
+          console.log(`[auth] sign-in ok: "${username}" role=${user.role}`);
 
           return {
             id: user.id.toString(),
