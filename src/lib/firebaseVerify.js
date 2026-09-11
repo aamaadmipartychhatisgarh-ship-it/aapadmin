@@ -29,12 +29,31 @@ async function googleCerts() {
 
 const b64url = (s) => Buffer.from(String(s).replace(/-/g, "+").replace(/_/g, "/"), "base64");
 
+const FIREBASE_KEYS = ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID", "FIREBASE_APP_ID", "FIREBASE_MESSAGING_SENDER_ID"];
+// API_KEY, AUTH_DOMAIN, PROJECT_ID and APP_ID are required to initialise the web
+// SDK; messagingSenderId is optional.
+const FIREBASE_REQUIRED = ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID", "FIREBASE_APP_ID"];
+
+// Detailed load: the merged env+DB config PLUS status flags for diagnosis. Only
+// booleans / key NAMES are surfaced — never a config value — so callers can log
+// safely (§6, §11). `source` says where each present value came from.
+export async function getFirebaseConfigDetailed() {
+  let db = {}, dbOk = false, dbError = null;
+  try { db = await getSettings(FIREBASE_KEYS); dbOk = true; }
+  catch (e) { dbError = e?.message || String(e); }
+  const cfg = {}, source = {};
+  for (const k of FIREBASE_KEYS) {
+    const envV = (process.env[k] || "").trim();
+    const dbV = (db[k] || "").trim();
+    cfg[k] = envV || dbV;
+    source[k] = envV ? "env" : (dbV ? "db" : "none");
+  }
+  const missing = FIREBASE_REQUIRED.filter((k) => !cfg[k]);
+  return { cfg, dbOk, dbError, missing, source, configured: missing.length === 0 };
+}
+
 export async function getFirebaseConfig() {
-  const keys = ["FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID", "FIREBASE_APP_ID", "FIREBASE_MESSAGING_SENDER_ID"];
-  let db = {};
-  try { db = await getSettings(keys); } catch { /* table may not exist yet */ }
-  const cfg = {};
-  for (const k of keys) cfg[k] = (process.env[k] || db[k] || "").trim();
+  const { cfg } = await getFirebaseConfigDetailed();
   return cfg;
 }
 

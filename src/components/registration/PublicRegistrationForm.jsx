@@ -736,7 +736,13 @@ function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
         const r = await fetch(`/api/public/firebase-config`);
         const cfg = await r.json().catch(() => ({}));
         if (!alive) return;
-        if (!cfg?.configured) { setFbReady(false); return; }
+        if (!cfg?.configured) {
+          // Safe operator hint (key NAMES only, never values) so the "not
+          // available" state is diagnosable from the browser console too.
+          console.warn("[reg-otp] Firebase phone auth not configured. Missing config keys:", cfg?.missing || "(config endpoint unreachable)");
+          setFbReady(false);
+          return;
+        }
         const { initializeApp, getApps, getApp } = await import("firebase/app");
         const { getAuth } = await import("firebase/auth");
         const app = getApps().length ? getApp() : initializeApp({
