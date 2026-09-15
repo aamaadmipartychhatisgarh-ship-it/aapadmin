@@ -4,6 +4,7 @@ import React from "react";
 import { query } from "@/lib/db";
 import { photosToDataUris } from "@/lib/photoDataUri";
 import { DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
 // Shared Excel export for the Contacts module (admin + supervisor). Both list
@@ -23,7 +24,9 @@ export async function fetchContactExportRows(where, params, orderBy) {
   // which is NOT rewritten on a designation change — so a contact changed to
   // "Member" still exported the stale "Vidhansabha Prabhari". Using the same
   // COALESCE as the list guarantees the export shows the latest saved designation.
-  const order = orderBy && String(orderBy).trim() ? orderBy : "c.id DESC";
+  // Same default as the on-screen list (photo first, then designation priority),
+  // so an unsorted export matches the list exactly.
+  const order = orderBy && String(orderBy).trim() ? orderBy : CONTACT_DEFAULT_ORDER_BY;
   return query(
     `SELECT c.*,
             w.photo_url AS worker_photo_url,

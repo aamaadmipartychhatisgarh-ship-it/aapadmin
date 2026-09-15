@@ -11,7 +11,7 @@ import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, 
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
-import { buildContactOrderBy } from "@/lib/contactSort";
+import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 
 // The contacts list (and its photos) must never be served from a cache: it is
 // per-user role/territory scoped and changes as contacts/photos are added, so a
@@ -238,7 +238,7 @@ export async function GET(req) {
           ? sortOrderBy
           : duplicates === "1"
             ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, c.id ASC"
-            : "c.is_completed ASC, c.id DESC"}
+            : CONTACT_DEFAULT_ORDER_BY}
         LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
