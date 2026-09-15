@@ -12,7 +12,7 @@ import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, 
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
-import { buildContactOrderBy } from "@/lib/contactSort";
+import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 
 // Never cache the (territory-scoped) supervisor contacts list — a cached copy is
 // what made counts differ between users / shrink over time.
@@ -188,7 +188,7 @@ export async function GET(req) {
           ? sortOrderBy
           : duplicates === "1"
             ? "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) ASC, c.id ASC"
-            : "c.is_completed ASC, c.id DESC"}
+            : CONTACT_DEFAULT_ORDER_BY}
         LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );

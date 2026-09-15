@@ -109,7 +109,10 @@ export default function ContactsModule({ session, mode }) {
       const f = new URLSearchParams(window.location.search).get("filter");
       if (f && ["all", "pending", "done", "assigned", "pool", "duplicates", "wrong"].includes(f)) return f;
     }
-    return "pending";
+    // Default is ALL (not Pending): a plain open/refresh shows every accessible
+    // contact. An explicit ?filter=<status> in the URL still wins, but nothing is
+    // read from localStorage/cookies, so a stale "pending" can never sneak back.
+    return "all";
   }); // all | pending | done | assigned | pool | duplicates | wrong
   const [districtId, setDistrictId] = useState("");
   const [assemblies, setAssemblies] = useState([]);
