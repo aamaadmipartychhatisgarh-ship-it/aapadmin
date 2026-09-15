@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { canAccessMedia } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureConferenceSchema, normalizeSpokespersonIds } from "@/lib/conferenceSchema";
+import { createWithSpokespersonNumber } from "@/lib/spokespersonNumber";
 
 export async function POST(req) {
   try {
@@ -20,12 +21,16 @@ export async function POST(req) {
     const spokespersonId = ids.length ? ids[0] : null;
     const coSpokesperson = d.co_spokesperson ? String(d.co_spokesperson).trim().slice(0, 255) || null : null;
     const videoUrl = d.video_url ? String(d.video_url).trim() : null;
-    const res = await query(
-      `INSERT INTO press_conferences (title, conference_date, venue, agenda, status, file_url, spokesperson_id, spokesperson_ids, co_spokesperson, video_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [d.title, d.conference_date, d.venue || null, d.agenda || null, d.status || "scheduled", d.file_url || null, spokespersonId, spokespersonIdsCsv, coSpokesperson, videoUrl]
+    // Backend-assigned spokesperson number (lowest available, concurrency-safe);
+    // a client-supplied value is ignored (§13, §19).
+    const { res, number } = await createWithSpokespersonNumber("press_conferences", (spokesNum) =>
+      query(
+        `INSERT INTO press_conferences (title, conference_date, venue, agenda, status, file_url, spokesperson_id, spokesperson_ids, co_spokesperson, video_url, spokesperson_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [d.title, d.conference_date, d.venue || null, d.agenda || null, d.status || "scheduled", d.file_url || null, spokespersonId, spokespersonIdsCsv, coSpokesperson, videoUrl, spokesNum]
+      )
     );
-    return NextResponse.json({ id: res.insertId }, { status: 201 });
+    return NextResponse.json({ id: res.insertId, spokesperson_number: number }, { status: 201 });
   } catch (err) {
     console.error("conferences POST error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

@@ -7,6 +7,7 @@ import { query } from "@/lib/db";
 import { ensurePressNotesSchema } from "@/lib/pressNotesSchema";
 import { ensureNewsChannelsSeed } from "@/lib/newsChannelsSeed";
 import { ensureConferenceSchema, normalizeSpokespersonIds } from "@/lib/conferenceSchema";
+import { ensureSpokespersonNumberSchema } from "@/lib/spokespersonNumber";
 import { mediaDateFilter } from "@/lib/mediaDateFilter";
 import { resolveRange } from "@/lib/reports/timeRanges";
 
@@ -36,6 +37,10 @@ export async function GET(req) {
     await ensurePressNotesSchema();
     await ensureNewsChannelsSeed();
     await ensureConferenceSchema();
+    // Add + backfill the per-module spokesperson_number so existing debates and
+    // conferences show a number and new ones auto-increment (lowest available).
+    await ensureSpokespersonNumberSchema("debates");
+    await ensureSpokespersonNumberSchema("press_conferences");
     const newspapers = await query(`SELECT * FROM newspapers ORDER BY sort_order, name`);
 
     // Per-newspaper positive / negative coverage counts — the SAME source of

@@ -826,6 +826,9 @@ function ConferencesTab({ data, onChange, filtered }) {
                   {upcoming && <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-1.5 py-0.5 rounded-full">Upcoming</span>}
                 </div>
                 <h4 className="font-bold text-gray-900 mt-1">{c.title}</h4>
+                {c.spokesperson_number != null && (
+                  <div className="mt-1 inline-flex items-center text-[11px] font-bold uppercase tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full">Spokesperson {c.spokesperson_number}</div>
+                )}
                 {c.venue && <div className="text-xs text-gray-500 mt-1">{c.venue}</div>}
                 {/* Spokesperson(s) — supports multiple (§10.1); falls back to the
                     single legacy spokesperson when the multi list is empty. */}
@@ -1537,6 +1540,14 @@ export function DebateModal({ channels, spokespersons, onClose, onSaved, editing
   }
   return (
     <Modal title={editing ? "Edit Debate" : "Schedule Debate"} onClose={onClose}>
+      <div className="mb-3">
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Spokesperson Number</label>
+        <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-800" title="Assigned automatically by the system — cannot be edited">
+          {editing?.spokesperson_number != null
+            ? <span className="font-semibold text-[#164FA3]">Spokesperson {editing.spokesperson_number}</span>
+            : <span className="text-gray-500">Assigned automatically on save</span>}
+        </div>
+      </div>
       <input className={inp} placeholder="Topic *" value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} />
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -1693,6 +1704,14 @@ function ConferenceModal({ onClose, onSaved, editing, spokespersons = [] }) {
   }
   return (
     <Modal title={editing ? "Edit Press Conference" : "Schedule Press Conference"} onClose={onClose}>
+      <div className="mb-3">
+        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Spokesperson Number</label>
+        <div className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-800" title="Assigned automatically by the system — cannot be edited">
+          {editing?.spokesperson_number != null
+            ? <span className="font-semibold text-[#164FA3]">Spokesperson {editing.spokesperson_number}</span>
+            : <span className="text-gray-500">Assigned automatically on save</span>}
+        </div>
+      </div>
       <input className={inp} placeholder="Title *" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
       <input type="datetime-local" className={inp} value={form.conference_date} onChange={(e) => setForm({ ...form, conference_date: e.target.value })} />
       <input className={inp} placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />

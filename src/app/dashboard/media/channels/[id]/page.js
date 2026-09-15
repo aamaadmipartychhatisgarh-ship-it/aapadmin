@@ -129,6 +129,7 @@ function Body({ channelId }) {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 text-left">
                       <tr>
+                        <th className="px-4 py-3 font-semibold text-gray-600 whitespace-nowrap">Spokesperson No.</th>
                         <th className="px-4 py-3 font-semibold text-gray-600">Title</th>
                         <th className="px-4 py-3 font-semibold text-gray-600">Channel</th>
                         <th className="px-4 py-3 font-semibold text-gray-600">Lok Sabha</th>
@@ -142,6 +143,7 @@ function Body({ channelId }) {
                     <tbody>
                       {debates.map((d) => (
                         <tr key={d.id} className="border-t border-gray-100 hover:bg-gray-50">
+                          <td className="px-4 py-3 whitespace-nowrap">{d.spokesperson_number != null ? <span className="inline-flex items-center text-[11px] font-bold uppercase tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-0.5 rounded-full">Spokesperson {d.spokesperson_number}</span> : <span className="text-gray-300">—</span>}</td>
                           <td className="px-4 py-3 font-medium text-gray-900">{d.topic}</td>
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{ch.name}</td>
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{ch.lok_sabha_name || <span className="text-gray-300">—</span>}</td>

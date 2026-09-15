@@ -156,7 +156,10 @@ function DayReport() {
             ) : data.conferences.map((c) => (
               <div key={c.id} className="py-2 border-b border-gray-50 last:border-0">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-gray-900 truncate">{c.title}</div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 truncate">{c.title}</div>
+                    {c.spokesperson_number != null && <div className="text-[10px] font-bold uppercase tracking-wide text-[#164FA3]">Spokesperson {c.spokesperson_number}</div>}
+                  </div>
                   <span className={`shrink-0 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${c.status === "completed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
                     {c.status === "completed" ? <><CheckCircle2 size={11} /> Done</> : c.status}
                   </span>
@@ -174,7 +177,10 @@ function DayReport() {
               <EmptyRow />
             ) : data.debates.map((d) => (
               <div key={d.id} className="py-2 border-b border-gray-50 last:border-0">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-[#164FA3]">{d.channel_name || "—"}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-[#164FA3]">{d.channel_name || "—"}</div>
+                  {d.spokesperson_number != null && <div className="text-[10px] font-bold uppercase tracking-wide text-[#164FA3]">Spokesperson {d.spokesperson_number}</div>}
+                </div>
                 <div className="text-sm font-semibold text-gray-900">{d.topic}</div>
                 <div className="flex items-center gap-1.5 flex-wrap mt-1">
                   {(d.spokespersons || []).length === 0 ? <span className="text-xs text-gray-400">No spokesperson</span> : d.spokespersons.map((s, i) => (

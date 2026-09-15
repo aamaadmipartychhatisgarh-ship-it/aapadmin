@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { canAccessMedia } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureNewsChannelsSeed } from "@/lib/newsChannelsSeed";
+import { ensureSpokespersonNumberSchema } from "@/lib/spokespersonNumber";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export async function GET(_req, { params }) {
     const session = await getServerSession(authOptions);
     if (!session || !canAccessMedia(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     await ensureNewsChannelsSeed();
+    await ensureSpokespersonNumberSchema("debates");
     const { id } = await params;
     if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid channel id." }, { status: 400 });
 
