@@ -25,7 +25,7 @@ export async function POST(req) {
     if (!d || typeof d !== "object") {
       return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
     }
-    if (!otpConfigured()) {
+    if (!(await otpConfigured())) {
       return NextResponse.json(
         { message: "Mobile verification is not configured. Please contact your in-charge." },
         { status: 503, headers: NO_STORE }

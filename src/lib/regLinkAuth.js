@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { phoneKey } from "@/lib/phone";
 import { signPayload, verifySessionToken, maskPhone, SESSION_TTL_MS } from "@/lib/workerFormAuth";
-import { verifyFirebaseIdToken } from "@/lib/firebaseVerify";
+import { requestOtp, checkOtp, otpConfigured } from "@/lib/registrationOtp";
 
 // Phone gate for a WORKER Generate Link (/r/<token>). The mobile verified here is
 // the LINK OWNER's (the karyakarta / registration handler), validated against
@@ -11,12 +11,13 @@ import { verifyFirebaseIdToken } from "@/lib/firebaseVerify";
 // submit is attributed to that reg_worker + campaign server-side, and switching
 // the URL to another token requires re-authenticating for it (§17, §18).
 //
-// OTP delivery + verification is handled ENTIRELY by Firebase Phone Auth on the
-// client. This backend never generates, sends, stores, or compares an OTP: it
-// (1) pre-checks that the entered number is the link owner's (so a wrong number
-// is caught before an SMS is spent), and (2) verifies the Firebase ID token the
-// client returns and, if the verified number matches the owner, issues the
-// handler session. No SMS provider / API key is involved anywhere.
+// OTP delivery + verification go through 2Factor (see lib/sms2factor.js). This
+// backend still never generates, stores or compares the code itself — 2Factor
+// does both, and only its opaque session id is kept — but it does now own the
+// send, which means the owner pre-check below matters more than ever: a wrong
+// number is rejected BEFORE any SMS is spent, and the per-number and per-IP
+// limits in lib/registrationOtp.js apply to this gate exactly as they do to the
+// public form, because both spend the same prepaid balance.
 
 const REG_COOKIE = "reg_link_session";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -57,11 +58,9 @@ export function readRegSession(req, token) {
   return p; // { kind, rwid, cid, token, mobile, exp }
 }
 
-// --- Pre-check: is the entered number this link's owner? (NO SMS) -----------
-// Called before the client starts Firebase phone auth, so a wrong number is
-// rejected instantly and no Firebase SMS is spent on it. Generates nothing,
-// stores nothing, sends nothing (§2, §4). Returns the E.164 number the client
-// should verify so the country code is never doubled (§6).
+// --- Owner check, then send the code ---------------------------------------
+// The number is checked against reg_workers FIRST, so a wrong number is rejected
+// instantly and no SMS is spent on it. Only a confirmed link owner gets a code.
 export async function handleRegOtpRequest(token, body) {
   const tag = `[reg-otp ${String(token || "").slice(0, 6)}…]`;
   try {
@@ -83,64 +82,66 @@ export async function handleRegOtpRequest(token, body) {
       console.warn(`${tag} precheck: entered ${maskPhone(entered)} is not the registered link owner`);
       return json({ message: "This mobile number is not the one registered for this link. Please use the number given to your in-charge." }, 403);
     }
-    console.log(`${tag} precheck OK → client starts Firebase phone verification`);
-    return json({ ok: true, phone: maskPhone(entered), e164: `+91${entered}` });
+    if (!(await otpConfigured())) {
+      console.error(`${tag} no SMS provider configured`);
+      return json({ message: "Mobile verification is not available right now. Please contact your in-charge." }, 503);
+    }
+    // Only now, with the number confirmed as this link's owner, does an SMS get
+    // spent. requestOtp applies the shared rate limits and reuses a still-live
+    // code rather than buying a second one.
+    const sent = await requestOtp({ mobile: entered, campaignId: link.campaign_id, ip: null });
+    if (!sent.ok) {
+      console.warn(`${tag} otp send refused: ${sent.message}`);
+      return json({ message: sent.message }, sent.status || 502);
+    }
+    console.log(`${tag} otp sent to ${maskPhone(entered)}${sent.reused ? " (reused live code)" : ""}`);
+    return json({ ok: true, phone: maskPhone(entered), ttlMinutes: sent.ttlMinutes });
   } catch (err) {
     console.error(`${tag} precheck FAILED: ${err?.message || err}`);
     return json({ message: "Unable to process the request right now. Please try again." }, 500);
   }
 }
 
-// --- Firebase verify → issue the handler session ---------------------------
-// The client did Firebase phone auth (Firebase sent + checked the OTP) and hands
-// us the resulting ID token. We verify it, read the VERIFIED phone number from
-// it, confirm it is this link's owner, and issue the same session cookie the old
-// OTP flow used — so every downstream business rule is unchanged (§3, §5, §11).
-export async function handleRegFirebaseVerify(token, body) {
+// --- Verify the code → issue the handler session ---------------------------
+// The client sends the code the handler received. 2Factor checks it against the
+// session it issued; we never compare it ourselves. A correct code for THIS
+// link's owner is what mints the session cookie — the number is re-derived from
+// the link here rather than trusted from the request, so a valid code for one
+// number can never open another link (§3, §5, §11).
+export async function handleRegOtpVerify(token, body) {
   const tag = `[reg-otp ${String(token || "").slice(0, 6)}…]`;
   try {
     const link = await resolveWorkerLink(token);
     if (!link) return json({ message: "This registration link is not valid or has been closed." }, 404);
 
-    const idToken = body?.idToken;
-    if (!idToken) return json({ message: "Phone verification is missing. Please verify your number again." }, 400);
-
-    const res = await verifyFirebaseIdToken(idToken);
-    if (!res.ok) {
-      console.warn(`${tag} firebase verify rejected: ${res.error}`);
-      if (res.error === "firebase-not-configured") {
-        return json({ message: "Mobile verification is not available right now. Please try again later." }, 503);
-      }
-      return json({ message: "Could not verify your phone number. Please try again." }, 401);
-    }
-
-    const verified = phoneKey(res.phone);
-    if (!verified || verified.length !== 10) {
-      return json({ message: "Could not read the verified phone number. Please try again." }, 400);
-    }
     const owner = phoneKey(link.worker_mobile);
     if (!owner || owner.length !== 10) {
       return json({ message: "This registration link does not have a registered mobile number on file yet." }, 409);
     }
-    if (verified !== owner) {
-      console.warn(`${tag} firebase-verified ${maskPhone(verified)} is not the registered link owner`);
-      return json({ message: "The verified mobile number is not the one registered for this link." }, 403);
+    const code = String(body?.otp ?? body?.code ?? "").trim();
+    if (!code) return json({ message: "Please enter the code you received." }, 400);
+
+    // Verified against the OWNER's number from the link, never a mobile the
+    // request supplied — otherwise a code sent to one phone could be replayed
+    // against a different link.
+    const res = await checkOtp({ mobile: owner, code, ip: null });
+    if (!res.ok) {
+      console.warn(`${tag} otp verify rejected: ${res.message}`);
+      return json({ message: res.message }, res.status || 401);
     }
 
-    const payload = { kind: "reg_link", rwid: link.worker_id, cid: link.campaign_id, token: String(token), mobile: verified, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS };
-    const out = json({ ok: true, handler: { name: link.worker_name, mobile: verified, worker_code: link.worker_code } });
+    const payload = { kind: "reg_link", rwid: link.worker_id, cid: link.campaign_id, token: String(token), mobile: owner, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS };
+    const out = json({ ok: true, handler: { name: link.worker_name, mobile: owner, worker_code: link.worker_code } });
     out.cookies.set(regSessionCookie(signPayload(payload)));
-    console.log(`${tag} firebase verify OK → handler session issued`);
+    console.log(`${tag} otp verify OK → handler session issued`);
     return out;
   } catch (err) {
-    console.error(`${tag} firebase verify FAILED: ${err?.message || err}`);
-    return json({ message: "Unable to verify the phone right now. Please try again." }, 500);
+    console.error(`${tag} otp verify FAILED: ${err?.message || err}`);
+    return json({ message: "Unable to verify the code right now. Please try again." }, 500);
   }
 }
 
-// Backward-compatible alias: the old /otp/verify route now performs Firebase
-// verification (body carries { idToken } instead of { otp }).
-export const handleRegOtpVerify = handleRegFirebaseVerify;
+
 
 // GET session state for the form: whether this link needs OTP, and if so whether
 // the caller is already verified (+ the handler identity to show).

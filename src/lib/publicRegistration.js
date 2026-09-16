@@ -120,7 +120,7 @@ export async function publicFormContext(token) {
         // Whether this drive demands a verified mobile. Both halves have to be
         // true — a drive can ask for OTP, but if no SMS provider is configured
         // the form must not render a verification step nobody can complete.
-        otp_required: !!link.otp_required && otpConfigured(),
+        otp_required: !!link.otp_required && (await otpConfigured()),
         constituencies,
         // On a karyakarta's link, the NAME of the person the entry is credited
         // to — reassuring for the voter, who was sent the link by that
@@ -300,7 +300,7 @@ export async function submitPublicRegistration(req, token) {
     // the database against THIS number — never taken from a "verified: true"
     // the client sent, which would make the whole step decorative.
     let verificationId = null;
-    const needsOtp = !!link.otp_required && otpConfigured();
+    const needsOtp = !!link.otp_required && (await otpConfigured());
     if (needsOtp) {
       verificationId = await isMobileVerified(mobile);
       if (!verificationId) {

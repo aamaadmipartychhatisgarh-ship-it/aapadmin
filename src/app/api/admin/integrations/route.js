@@ -3,13 +3,19 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSuperAdmin } from "@/lib/permissions";
 import { getSettings, setSetting } from "@/lib/appSettings";
-import { getFirebaseConfigDetailed } from "@/lib/firebaseVerify";
+import { smsConfigured, smsBalance, invalidateSmsConfig } from "@/lib/sms2factor";
 
-// Super-Admin-only integration settings (Firebase Phone Auth + SMS provider),
-// stored in app_settings so OTP can be configured from the browser instead of
-// SSH/scripts. The Firebase WEB config is not secret (it ships to the browser),
-// so it is shown in full; the SMS provider API key IS secret, so only its
-// presence (set/MISSING) is ever returned — never the value.
+// Super-Admin-only OTP settings: the 2Factor credentials, stored in app_settings
+// so they can be set from the browser instead of the host's environment.
+//
+// That matters on this host specifically: its env-var API is a FULL REPLACE over
+// masked values, so setting one variable means re-sending every other one blind —
+// and a wrong NEXTAUTH_SECRET there logs every admin out. Configuring the key
+// here touches nothing else. Environment variables still take precedence when
+// present, so a host that can set them properly is never overridden.
+//
+// THE API KEY IS NEVER RETURNED. Only whether one is set, plus the live credit
+// balance, which is the thing an operator actually needs to see.
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
@@ -26,21 +32,20 @@ async function guard() {
 export async function GET() {
   const { error } = await guard();
   if (error) return error;
-  const fb = await getFirebaseConfigDetailed();
-  const sms = await getSettings(["OTP_SMS_PROVIDER", "FAST2SMS_API_KEY"]).catch(() => ({}));
+  const db = await getSettings(["TWOFACTOR_API_KEY", "TWOFACTOR_SMS_TEMPLATE"]).catch(() => ({}));
+  const configured = await smsConfigured();
   return json({
-    firebase: {
-      apiKey: fb.cfg.FIREBASE_API_KEY || "",
-      authDomain: fb.cfg.FIREBASE_AUTH_DOMAIN || "",
-      projectId: fb.cfg.FIREBASE_PROJECT_ID || "",
-      appId: fb.cfg.FIREBASE_APP_ID || "",
-      messagingSenderId: fb.cfg.FIREBASE_MESSAGING_SENDER_ID || "",
-      configured: fb.configured,
-      missing: fb.missing,
-    },
     sms: {
-      provider: (process.env.OTP_SMS_PROVIDER || sms.OTP_SMS_PROVIDER || "").trim(),
-      fast2smsKeySet: Boolean((process.env.FAST2SMS_API_KEY || sms.FAST2SMS_API_KEY || "").trim()),
+      provider: "2factor",
+      // Presence only — the value never leaves the server.
+      keySet: configured,
+      // Which source won, so an operator can tell a stale database row from a
+      // host variable when the two disagree.
+      keyFrom: (process.env.TWOFACTOR_API_KEY || "").trim() ? "env" : (db.TWOFACTOR_API_KEY ? "database" : null),
+      // The template name is not secret — it is a label registered with the
+      // provider — so it is shown in full to be checked against their panel.
+      template: (process.env.TWOFACTOR_SMS_TEMPLATE || db.TWOFACTOR_SMS_TEMPLATE || "").trim() || null,
+      balance: configured ? await smsBalance() : null,
     },
   });
 }
@@ -49,28 +54,21 @@ export async function POST(req) {
   const { error } = await guard();
   if (error) return error;
   const body = await req.json().catch(() => ({}));
-
-  // Save a value only when a non-empty string is provided, so blank fields never
-  // wipe an existing setting. Values are trimmed (stray paste whitespace).
-  const saveIf = async (key, val) => {
-    if (typeof val === "string" && val.trim()) { await setSetting(key, val.trim()); return true; }
-    return false;
-  };
-
-  const saved = [];
-  const fb = body.firebase || {};
-  const map = {
-    FIREBASE_API_KEY: fb.apiKey, FIREBASE_AUTH_DOMAIN: fb.authDomain,
-    FIREBASE_PROJECT_ID: fb.projectId, FIREBASE_APP_ID: fb.appId,
-    FIREBASE_MESSAGING_SENDER_ID: fb.messagingSenderId,
-  };
-  for (const [k, v] of Object.entries(map)) { if (await saveIf(k, v)) saved.push(k); }
-
   const sms = body.sms || {};
-  if (await saveIf("OTP_SMS_PROVIDER", sms.provider)) saved.push("OTP_SMS_PROVIDER");
-  if (await saveIf("FAST2SMS_API_KEY", sms.fast2smsKey)) saved.push("FAST2SMS_API_KEY");
 
-  // Return the refreshed status (no secret values) so the UI reflects reality.
-  const after = await getFirebaseConfigDetailed();
-  return json({ ok: true, savedKeys: saved, firebaseConfigured: after.configured, missing: after.missing });
+  // A blank field never wipes an existing setting — otherwise loading the page
+  // and pressing Save would silently clear the key, since the key is never sent
+  // back to the browser to be re-submitted.
+  const saved = [];
+  const saveIf = async (key, val) => {
+    if (typeof val === "string" && val.trim()) { await setSetting(key, val.trim()); saved.push(key); }
+  };
+  await saveIf("TWOFACTOR_API_KEY", sms.apiKey);
+  await saveIf("TWOFACTOR_SMS_TEMPLATE", sms.template);
+
+  // Drop the cached credentials so the next send uses what was just saved.
+  invalidateSmsConfig();
+
+  const configured = await smsConfigured();
+  return json({ ok: true, savedKeys: saved, configured, balance: configured ? await smsBalance() : null });
 }

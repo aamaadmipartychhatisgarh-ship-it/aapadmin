@@ -21,7 +21,7 @@ const LIMITS = {
 
 const minutesAgo = (n) => `DATE_SUB(NOW(), INTERVAL ${Number(n)} MINUTE)`;
 
-export function otpConfigured() {
+export async function otpConfigured() {
   return smsConfigured();
 }
 
@@ -62,7 +62,7 @@ async function rateLimit(mobile, ip) {
 // in a dead end for the person.
 export async function requestOtp({ mobile, campaignId, ip }) {
   await ensureRegistrationSchema();
-  if (!otpConfigured()) {
+  if (!(await otpConfigured())) {
     return { ok: false, status: 503, message: "Mobile verification is not configured. Please contact your in-charge." };
   }
 

@@ -25,7 +25,7 @@ export async function GET() {
     // The SMS picture travels with the drives, because "can I switch OTP on?"
     // is answered by the credit balance and nothing else. A null balance means
     // the provider could not be reached — shown as unknown, never as zero.
-    const sms = { configured: smsConfigured(), balance: null };
+    const sms = { configured: await smsConfigured(), balance: null };
     if (sms.configured) sms.balance = await smsBalance();
     return NextResponse.json({ campaigns, sms }, { headers: NO_STORE });
   } catch (e) {

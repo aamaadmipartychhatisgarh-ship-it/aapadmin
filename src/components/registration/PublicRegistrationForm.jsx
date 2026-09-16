@@ -809,7 +809,7 @@ function ListThumb({ src, name }) {
 // The OTP gate shown before a WORKER link's form. Two steps: mobile → OTP. The
 // mobile is the LINK OWNER's; the backend validates it against reg_workers and
 // sends the OTP only to a registered handler (§2–§5).
-const OTP_LEN = 6; // Firebase phone-auth codes are always 6 digits.
+const OTP_LEN = 6; // 2Factor AUTOGEN codes are 6 digits.
 
 function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
   const [step, setStep] = useState("mobile"); // mobile | otp
@@ -820,10 +820,6 @@ function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
   const [cooldown, setCooldown] = useState(0);
-  const [fbReady, setFbReady] = useState(null); // null=loading | true | false(unavailable)
-  const authRef = useRef(null);
-  const confirmRef = useRef(null);   // Firebase confirmationResult
-  const verifierRef = useRef(null);  // RecaptchaVerifier
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -831,107 +827,52 @@ function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
     return () => clearInterval(id);
   }, [cooldown]);
 
-  // Load the Firebase web config and initialise the SDK — client-side only, and
-  // only the public (non-secret) config, fetched from our backend.
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const r = await fetch(`/api/public/firebase-config`);
-        const cfg = await r.json().catch(() => ({}));
-        if (!alive) return;
-        if (!cfg?.configured) {
-          // Safe operator hint (key NAMES only, never values) so the "not
-          // available" state is diagnosable from the browser console too.
-          console.warn("[reg-otp] Firebase phone auth not configured. Missing config keys:", cfg?.missing || "(config endpoint unreachable)");
-          setFbReady(false);
-          return;
-        }
-        const { initializeApp, getApps, getApp } = await import("firebase/app");
-        const { getAuth } = await import("firebase/auth");
-        const app = getApps().length ? getApp() : initializeApp({
-          apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
-          appId: cfg.appId, messagingSenderId: cfg.messagingSenderId,
-        });
-        authRef.current = getAuth(app);
-        if (alive) setFbReady(true);
-      } catch { if (alive) setFbReady(false); }
-    })();
-    return () => { alive = false; try { verifierRef.current?.clear?.(); } catch { /* noop */ } };
-  }, []);
-
   const base = `/api/public/registration/${encodeURIComponent(token)}/otp`;
   const post = (path, body) => fetch(`${base}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-  // Map a Firebase auth error code → a friendly bilingual message (§13).
-  function fbMessage(code) {
-    switch (code) {
-      case "auth/invalid-phone-number":
-      case "auth/missing-phone-number": return t.errMobile;
-      case "auth/invalid-verification-code": return t.otpInvalidFb;
-      case "auth/code-expired": return t.otpExpiredFb;
-      case "auth/too-many-requests":
-      case "auth/quota-exceeded": return t.otpTooManyFb;
-      default: return t.otpSendFailFb;
-    }
-  }
-
-  // A fresh invisible reCAPTCHA verifier per send avoids "already rendered" reuse
-  // issues; Firebase's anti-aboise flow is never bypassed (§7).
-  async function startFirebase(e164) {
-    const { RecaptchaVerifier, signInWithPhoneNumber } = await import("firebase/auth");
-    try { verifierRef.current?.clear?.(); } catch { /* noop */ }
-    verifierRef.current = new RecaptchaVerifier(authRef.current, "reg-recaptcha", { size: "invisible" });
-    confirmRef.current = await signInWithPhoneNumber(authRef.current, e164, verifierRef.current);
-  }
-
+  // The code is sent and checked entirely server-side by 2Factor; this component
+  // only collects it. Every message shown here comes from the backend, which is
+  // what distinguishes "not the registered number" from "out of attempts" from
+  // "provider down" without the client having to guess.
   async function requestOtp(e) {
     e?.preventDefault?.();
     setErr(""); setInfo("");
     const ten = mobile.replace(/\D/g, "").slice(-10);
     if (ten.length !== 10) { setErr(t.errMobile); return; }
-    if (fbReady === false) { setErr(t.verifyUnavailable); return; }
-    if (fbReady == null) { setErr(t.otpSending); return; } // config still loading
     setBusy(true);
     try {
-      // 1) Owner pre-check (NO SMS) → instant "not registered" and no wasted quota.
-      const r = await post("request", { mobile });
+      const r = await post("request", { mobile: ten });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(d.message || t.errSave); return; }
-      // 2) Firebase sends + will verify the SMS to the confirmed E.164 number.
-      await startFirebase(d.e164 || `+91${ten}`);
       setMasked(d.phone || ""); setCooldown(30); setStep("otp");
-    } catch (e2) {
-      setErr(fbMessage(e2?.code));
-    } finally { setBusy(false); }
+    } catch { setErr(t.otpSendFailFb); }
+    finally { setBusy(false); }
   }
+
   async function verifyOtp(e) {
     e?.preventDefault?.();
     setErr(""); setInfo("");
     if (!otp.trim()) { setErr(t.errOtp); return; }
-    if (!confirmRef.current) { setStep("mobile"); setErr(t.otpExpiredFb); return; }
     setBusy(true);
     try {
-      // Firebase verifies the code; we then hand the ID token to our backend,
-      // which checks it and the owner rule. We never compare the OTP ourselves.
-      const cred = await confirmRef.current.confirm(otp.trim());
-      const idToken = await cred.user.getIdToken();
-      const r = await post("firebase", { idToken });
+      const r = await post("verify", { mobile: mobile.replace(/\D/g, "").slice(-10), otp: otp.trim() });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(d.message || t.errSave); return; }
       onVerified(d.handler || null);
-    } catch (e2) {
-      setErr(fbMessage(e2?.code));
-    } finally { setBusy(false); }
+    } catch { setErr(t.errSave); }
+    finally { setBusy(false); }
   }
+
   async function resend() {
     if (cooldown > 0 || busy) return;
     setErr(""); setInfo(""); setBusy(true);
     try {
-      const ten = mobile.replace(/\D/g, "").slice(-10);
-      await startFirebase(`+91${ten}`);
+      const r = await post("resend", { mobile: mobile.replace(/\D/g, "").slice(-10) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || t.errSave); return; }
       setInfo(t.newOtpSent); setCooldown(30);
-    } catch (e2) { setErr(fbMessage(e2?.code)); } finally { setBusy(false); }
+    } catch { setErr(t.otpSendFailFb); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -985,8 +926,6 @@ function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
             </form>
           )}
         </div>
-        {/* Invisible reCAPTCHA host for Firebase phone auth (required, never bypassed). */}
-        <div id="reg-recaptcha" />
         <p className="text-center text-[11px] text-gray-400 mt-4">{t.footer}</p>
       </main>
     </div>
