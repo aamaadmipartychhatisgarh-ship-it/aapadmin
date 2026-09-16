@@ -35,6 +35,7 @@ export async function PATCH(req, { params }) {
     if (d.ward_number !== undefined) { sets.push("ward_number = ?"); vals.push(clip(d.ward_number, 60)); }
     if (d.election_year !== undefined) { sets.push("election_year = ?"); vals.push(clip(d.election_year, 9)); }
     if (d.status !== undefined && ["active", "closed"].includes(d.status)) { sets.push("status = ?"); vals.push(d.status); }
+    if (d.otp_required !== undefined) { sets.push("otp_required = ?"); vals.push(d.otp_required ? 1 : 0); }
     if (!sets.length) return NextResponse.json({ message: "Nothing to update." }, { status: 400, headers: NO_STORE });
 
     // /join opens the ACTIVE drive, so exactly one may be active at a time.

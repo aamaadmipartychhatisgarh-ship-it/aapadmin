@@ -5,6 +5,7 @@ import {
 } from "@/lib/registrationSchema";
 import { readRegSession } from "@/lib/regLinkAuth";
 import { phoneKey } from "@/lib/phone";
+import { isMobileVerified, consumeVerification, otpConfigured } from "@/lib/registrationOtp";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
 // Both public routes are thin wrappers over the two handlers at the bottom of
@@ -51,12 +52,12 @@ function clientIp(req) {
 }
 
 const CAMPAIGN_COLS = `id AS campaign_id, name AS campaign_name, election_type, constituency, constituency_id,
-                       ward_number AS campaign_ward, election_year, status AS campaign_status`;
+                       ward_number AS campaign_ward, election_year, otp_required, status AS campaign_status`;
 
 // Resolve the request to { campaign, worker? }. Returns null for an unknown
 // token, a disabled worker or a closed drive; the caller reports all of those
 // the same way, so probing teaches nothing about which tokens exist.
-async function resolveLink(token) {
+export async function resolveLink(token) {
   const t = String(token || "").trim();
 
   // No token → the standing /join link: whichever drive is currently active.
@@ -75,7 +76,7 @@ async function resolveLink(token) {
     `SELECT w.id AS worker_id, w.name AS worker_name, w.mobile AS worker_mobile,
             w.worker_code, w.ward_number AS worker_ward, w.area_booth AS worker_area, w.status AS worker_status,
             c.id AS campaign_id, c.name AS campaign_name, c.election_type, c.constituency, c.constituency_id,
-            c.ward_number AS campaign_ward, c.election_year, c.status AS campaign_status
+            c.ward_number AS campaign_ward, c.election_year, c.otp_required, c.status AS campaign_status
        FROM reg_workers w
        JOIN reg_campaigns c ON c.id = w.campaign_id
       WHERE w.token = ? LIMIT 1`,
@@ -116,6 +117,10 @@ export async function publicFormContext(token) {
     return NextResponse.json(
       {
         campaign: { name: link.campaign_name, election_year: link.election_year },
+        // Whether this drive demands a verified mobile. Both halves have to be
+        // true — a drive can ask for OTP, but if no SMS provider is configured
+        // the form must not render a verification step nobody can complete.
+        otp_required: !!link.otp_required && otpConfigured(),
         constituencies,
         // On a karyakarta's link, the NAME of the person the entry is credited
         // to — reassuring for the voter, who was sent the link by that
@@ -291,14 +296,34 @@ export async function submitPublicRegistration(req, token) {
       );
     }
 
+    // Mobile verification, when the drive demands it. The proof is looked up in
+    // the database against THIS number — never taken from a "verified: true"
+    // the client sent, which would make the whole step decorative.
+    let verificationId = null;
+    const needsOtp = !!link.otp_required && otpConfigured();
+    if (needsOtp) {
+      verificationId = await isMobileVerified(mobile);
+      if (!verificationId) {
+        return NextResponse.json(
+          { message: "Please verify the mobile number first.", otp_required: true },
+          { status: 403, headers: NO_STORE }
+        );
+      }
+    }
+
     await query(
       `INSERT INTO reg_people
          (campaign_id, worker_id, person_type, name, mobile, address, assembly_id, assembly_name,
-          ward_number, ward_name, area_booth, wants_worker, worker_role, photo_url, status, source_ip, registered_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
+          ward_number, ward_name, area_booth, wants_worker, worker_role, photo_url,
+          mobile_verified, status, source_ip, registered_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
       [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
-       assemblyId, assemblyName, ward, wardName, areaBooth, wantsWorker, workerRole, photoUrl, ip, regNow()]
+       assemblyId, assemblyName, ward, wardName, areaBooth, wantsWorker, workerRole, photoUrl,
+       verificationId ? 1 : 0, ip, regNow()]
     );
+    // Spend the proof so one verification cannot be replayed to push a second
+    // person through on the same number.
+    await consumeVerification(verificationId);
 
     // Just an acknowledgement — no counts, for the same reason the bootstrap
     // returns none: whoever is holding this link is a member of the public.

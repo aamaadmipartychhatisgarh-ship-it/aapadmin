@@ -49,6 +49,7 @@ export async function ensureRegistrationSchema() {
          ward_number VARCHAR(60) NULL,
          election_year VARCHAR(9) NULL,
          public_token VARCHAR(64) NULL,
+         otp_required TINYINT NOT NULL DEFAULT 0,
          status ENUM('active','closed') NOT NULL DEFAULT 'active',
          created_by INT NULL,
          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -111,6 +112,7 @@ export async function ensureRegistrationSchema() {
          area_booth VARCHAR(160) NULL,
          wants_worker TINYINT NOT NULL DEFAULT 0,
          worker_role VARCHAR(160) NULL,
+         mobile_verified TINYINT NOT NULL DEFAULT 0,
          status ENUM('active','duplicate','rejected') NOT NULL DEFAULT 'active',
          source_ip VARCHAR(64) NULL,
          registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -125,9 +127,50 @@ export async function ensureRegistrationSchema() {
          KEY idx_reg_people_mobile (mobile)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    // --- Mobile OTP verification -------------------------------------------
+    // One row per OTP request. The CODE IS NEVER STORED: 2Factor generates and
+    // checks it, and we keep only their opaque session id, so a dump of this
+    // table lets nobody log in as anybody.
+    //
+    // The row is also the rate-limit ledger — counting recent rows per mobile
+    // and per IP is what stops a script burning a prepaid SMS balance in
+    // minutes, and it has to be in the database rather than in process memory
+    // because production runs more than one worker.
+    await query(
+      `CREATE TABLE IF NOT EXISTS reg_otp_sessions (
+         id INT AUTO_INCREMENT PRIMARY KEY,
+         mobile VARCHAR(20) NOT NULL,
+         session_id VARCHAR(120) NULL,
+         campaign_id INT NULL,
+         attempts TINYINT NOT NULL DEFAULT 0,
+         verified TINYINT NOT NULL DEFAULT 0,
+         verified_at DATETIME NULL,
+         consumed TINYINT NOT NULL DEFAULT 0,
+         source_ip VARCHAR(64) NULL,
+         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         expires_at DATETIME NOT NULL,
+         KEY idx_reg_otp_mobile (mobile),
+         KEY idx_reg_otp_created (created_at),
+         KEY idx_reg_otp_ip (source_ip),
+         KEY idx_reg_otp_verified (mobile, verified)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+    );
+    // Whether a drive demands a verified mobile.
+    //
+    // Defaults to OFF, and that default is deliberate. OTP delivery in India
+    // depends on DLT registration that lives outside this system; until an SMS
+    // is demonstrably arriving, a drive that REQUIRED one would reject every
+    // registration in the state while looking perfectly healthy from the admin
+    // side. Off-by-default fails open on collection and is switched on from the
+    // console the moment SMS delivery is proven.
+    await ensureColumn("reg_campaigns", "otp_required", "TINYINT NOT NULL DEFAULT 0");
+
     // Installs created before the general /join link existed have worker_id NOT
     // NULL, which would reject every unattributed public registration. Relax it.
     await ensureNullable("reg_people", "worker_id", "INT NULL");
+    // Which mobile numbers were actually proven, so a row collected while OTP
+    // was switched off is distinguishable from a verified one forever after.
+    await ensureColumn("reg_people", "mobile_verified", "TINYINT NOT NULL DEFAULT 0");
     // The constituency each person picks on the form. Stored as BOTH the master
     // id and the name as it stood at the time: the id is what filters and joins
     // reliably, and the name keeps a historic record readable even if a

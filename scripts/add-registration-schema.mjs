@@ -149,7 +149,37 @@ try {
   await ensureColumn("reg_people", "assembly_id", "INT NULL");
   await ensureColumn("reg_people", "assembly_name", "VARCHAR(160) NULL");
   await ensureIndex("reg_people", "idx_reg_people_assembly", "assembly_id");
+  await ensureColumn("reg_people", "mobile_verified", "TINYINT NOT NULL DEFAULT 0");
   console.log("= reg_people");
+
+  // Mobile OTP. The code itself is NEVER stored — only 2Factor's opaque session
+  // id — so a dump of this table lets nobody impersonate anybody. The rows are
+  // also the rate-limit ledger that protects a prepaid SMS balance.
+  await conn.query(`
+    CREATE TABLE IF NOT EXISTS reg_otp_sessions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      mobile VARCHAR(20) NOT NULL,
+      session_id VARCHAR(120) NULL,
+      campaign_id INT NULL,
+      attempts TINYINT NOT NULL DEFAULT 0,
+      verified TINYINT NOT NULL DEFAULT 0,
+      verified_at DATETIME NULL,
+      consumed TINYINT NOT NULL DEFAULT 0,
+      source_ip VARCHAR(64) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      KEY idx_reg_otp_mobile (mobile),
+      KEY idx_reg_otp_created (created_at),
+      KEY idx_reg_otp_ip (source_ip),
+      KEY idx_reg_otp_verified (mobile, verified)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  console.log("= reg_otp_sessions");
+
+  // Defaults to 0: OTP delivery depends on DLT/provider configuration outside
+  // this system, and a drive that REQUIRED one before delivery was proven would
+  // reject every registration in the state while looking healthy.
+  await ensureColumn("reg_campaigns", "otp_required", "TINYINT NOT NULL DEFAULT 0");
 
   const [[counts]] = await conn.query(`
     SELECT (SELECT COUNT(*) FROM reg_campaigns) AS drives,

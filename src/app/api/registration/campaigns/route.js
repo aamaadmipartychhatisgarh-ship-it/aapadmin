@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
 import { ELECTION_TYPES, newLinkToken } from "@/lib/registrationSchema";
+import { smsConfigured, smsBalance } from "@/lib/sms2factor";
 
 // Election drives — the "Election Details" block every link and registration
 // hangs off. One drive is normally `active` at a time; closing a drive
@@ -21,7 +22,12 @@ export async function GET() {
          FROM reg_campaigns c
         ORDER BY c.status = 'active' DESC, c.created_at DESC`
     );
-    return NextResponse.json({ campaigns }, { headers: NO_STORE });
+    // The SMS picture travels with the drives, because "can I switch OTP on?"
+    // is answered by the credit balance and nothing else. A null balance means
+    // the provider could not be reached — shown as unknown, never as zero.
+    const sms = { configured: smsConfigured(), balance: null };
+    if (sms.configured) sms.balance = await smsBalance();
+    return NextResponse.json({ campaigns, sms }, { headers: NO_STORE });
   } catch (e) {
     console.error("[registration] campaigns GET error:", e);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

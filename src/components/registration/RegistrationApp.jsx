@@ -139,6 +139,7 @@ export default function RegistrationApp() {
 
   const [tab, setTab] = useState("dashboard");
   const [campaigns, setCampaigns] = useState([]);
+  const [sms, setSms] = useState(null);   // { configured, balance } — drives the OTP switch
   const [campaignId, setCampaignId] = useState("");
   const [period, setPeriod] = useState("");
   const [ward, setWard] = useState("");
@@ -161,6 +162,7 @@ export default function RegistrationApp() {
       if (!r.ok) return;
       const d = await r.json();
       setCampaigns(d.campaigns || []);
+      setSms(d.sms || null);
       // Default to the running drive so the dashboard opens on live numbers.
       setCampaignId((cur) => cur || String(d.campaigns?.find((c) => c.status === "active")?.id || ""));
     } catch { /* the tabs surface their own errors */ }
@@ -270,7 +272,7 @@ export default function RegistrationApp() {
       {tab === "dashboard" && <DashboardTab filterQs={filterQs} onWard={setWard} onError={setErr} />}
       {tab === "workers" && <WorkersTab filterQs={filterQs} campaignId={campaignId} campaigns={campaigns} onError={setErr} />}
       {tab === "people" && <PeopleTab filterQs={filterQs} onError={setErr} />}
-      {tab === "drives" && <DrivesTab campaigns={campaigns} reload={loadCampaigns} onError={setErr} />}
+      {tab === "drives" && <DrivesTab campaigns={campaigns} sms={sms} reload={loadCampaigns} onError={setErr} />}
     </div>
   );
 }
@@ -794,7 +796,7 @@ function PeopleTab({ filterQs, onError }) {
 // ------------------------------------------------------------------- DRIVES
 const BLANK_DRIVE = { name: "", election_type: "assembly", constituency: "", ward_number: "", election_year: String(new Date().getFullYear()), status: "active" };
 
-function DrivesTab({ campaigns, reload, onError }) {
+function DrivesTab({ campaigns, sms, reload, onError }) {
   const [form, setForm] = useState(BLANK_DRIVE);
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -815,10 +817,12 @@ function DrivesTab({ campaigns, reload, onError }) {
 
   // Opening a drive is the same action as switching the public link on, so both
   // controls route through here.
-  async function setStatus(c, status) {
+  async function setStatus(c, status) { return setStatusFields(c, { status }); }
+
+  async function setStatusFields(c, patch) {
     try {
       const r = await fetch(`/api/registration/campaigns/${c.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { onError(d?.message || "Could not change this drive."); return; }
@@ -838,6 +842,29 @@ function DrivesTab({ campaigns, reload, onError }) {
 
   return (
     <div className="space-y-3">
+      {/* Switching OTP on with no credit left would reject every registration in
+          the state, so the balance is shown next to the switch rather than
+          somewhere an admin has to go looking for it. */}
+      {sms ? (
+        <div className={`${cardCls} p-3 text-xs flex flex-wrap items-center gap-2`}>
+          <span className="font-semibold text-gray-700">Mobile verification (SMS OTP):</span>
+          {!sms.configured ? (
+            <span className="text-gray-500">No SMS provider configured — the OTP switch stays off.</span>
+          ) : (
+            <>
+              <span className={`px-2 py-1 rounded-md font-semibold ${
+                sms.balance === null ? "bg-gray-100 text-gray-600"
+                  : sms.balance <= 50 ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
+                {sms.balance === null ? "balance unknown" : `${sms.balance} SMS credits left`}
+              </span>
+              <span className="text-gray-500">
+                Each verification spends one credit. Requiring OTP with an empty balance stops registrations.
+              </span>
+            </>
+          )}
+        </div>
+      ) : null}
+
       <div className={`${cardCls} p-4`}>
         <h3 className="text-sm font-bold text-gray-900 mb-3">{editId ? "Edit election drive" : "New election drive"}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
@@ -863,14 +890,14 @@ function DrivesTab({ campaigns, reload, onError }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 bg-gray-50">
-                {["Election", "Constituency", "Ward", "Year", "Workers", "Registrations", "Public link", ""].map((h) => (
+                {["Election", "Constituency", "Ward", "Year", "Workers", "Registrations", "Public link", "OTP", ""].map((h) => (
                   <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {campaigns.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500">No election drives yet. Create one to switch the public link on.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-500">No election drives yet. Create one to switch the public link on.</td></tr>
               ) : campaigns.map((c) => (
                 <tr key={c.id} className="border-t border-gray-100">
                   <td className="px-3 py-2.5">
@@ -891,6 +918,21 @@ function DrivesTab({ campaigns, reload, onError }) {
                               c.status === "active" ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-500 border-gray-200"}`}>
                       <span className={`w-2 h-2 rounded-full ${c.status === "active" ? "bg-green-500" : "bg-gray-400"}`} />
                       {c.status === "active" ? "Live on /join" : "Off"}
+                    </button>
+                  </td>
+                  {/* Requiring OTP is only offered when an SMS provider is
+                      actually configured — a switch that silently rejects every
+                      registration is worse than no switch. */}
+                  <td className="px-3 py-2.5">
+                    <button onClick={() => setStatusFields(c, { otp_required: !c.otp_required })}
+                            disabled={!sms?.configured && !c.otp_required}
+                            title={sms?.configured
+                              ? (c.otp_required ? "Registrations require a verified mobile" : "Turn on mobile verification")
+                              : "No SMS provider configured"}
+                            className={`text-[11px] font-semibold px-2 py-1 rounded-md border inline-flex items-center gap-1.5 disabled:opacity-40 ${
+                              c.otp_required ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-gray-100 text-gray-500 border-gray-200"}`}>
+                      <span className={`w-2 h-2 rounded-full ${c.otp_required ? "bg-blue-500" : "bg-gray-400"}`} />
+                      {c.otp_required ? "Required" : "Off"}
                     </button>
                   </td>
                   <td className="px-3 py-2.5">

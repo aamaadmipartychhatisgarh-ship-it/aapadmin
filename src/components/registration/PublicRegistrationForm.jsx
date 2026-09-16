@@ -75,6 +75,12 @@ const STRINGS = {
     errName: "कृपया नाम भरें.",
     errMobile: "कृपया सही 10 अंकों का मोबाइल नंबर भरें.",
     creditedTo: "यह पंजीयन दर्ज होगा:",
+    sendOtp: "OTP भेजें", resendOtp: "दोबारा भेजें",
+    otpSent: "आपके नंबर पर 6 अंकों का कोड भेजा गया है.",
+    otpLabel: "OTP कोड", otpPh: "6 अंकों का कोड",
+    verify: "जाँचें", verified: "नंबर सत्यापित ✓",
+    verifyFirst: "कृपया पहले मोबाइल नंबर सत्यापित करें.",
+    changeNumber: "नंबर बदलें",
     errConstituency: "कृपया अपना विधानसभा क्षेत्र चुनें.",
     errSave: "सहेजा नहीं जा सका. कृपया दोबारा प्रयास करें.",
     errLoad: "फॉर्म नहीं खुल सका. कृपया इंटरनेट जाँचें और दोबारा प्रयास करें.",
@@ -129,6 +135,12 @@ const STRINGS = {
     errName: "Please enter the name.",
     errMobile: "Enter a valid 10-digit mobile number.",
     creditedTo: "This registration is credited to:",
+    sendOtp: "Send OTP", resendOtp: "Resend",
+    otpSent: "A 6-digit code has been sent to this number.",
+    otpLabel: "OTP code", otpPh: "6-digit code",
+    verify: "Verify", verified: "Number verified ✓",
+    verifyFirst: "Please verify the mobile number first.",
+    changeNumber: "Change number",
     errConstituency: "Please select your constituency.",
     errSave: "Could not save. Please try again.",
     errLoad: "Could not open this form. Please check your internet connection and try again.",
@@ -168,6 +180,14 @@ export default function PublicRegistrationForm({ token }) {
   const [workerRole, setWorkerRole] = useState("");
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
+  // Mobile verification. `otpFor` records WHICH number was proven, so editing
+  // the number after verifying silently invalidates it instead of letting a
+  // verified 9876543210 carry a registration for 9000000000.
+  const [otpStage, setOtpStage] = useState("idle"); // idle | sent | done
+  const [otpCode, setOtpCode] = useState("");
+  const [otpFor, setOtpFor] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpNote, setOtpNote] = useState("");
   const [address, setAddress] = useState("");
   const [assemblyId, setAssemblyId] = useState("");
   const [ward, setWard] = useState("");
@@ -256,6 +276,7 @@ export default function PublicRegistrationForm({ token }) {
     setPersonType("voter"); setWantsWorker("yes"); setWorkerRole(""); setWardName("");
     setName(""); setMobile(""); setAddress("");
     setPhotoUrl(""); setPhotoPreview(""); setPhotoErr("");
+    setOtpStage("idle"); setOtpCode(""); setOtpFor(""); setOtpNote("");
     // Constituency, ward and booth are deliberately KEPT: a karyakarta works
     // one patch, so clearing them would mean re-picking the same values for
     // every single person they register.
@@ -292,10 +313,50 @@ export default function PublicRegistrationForm({ token }) {
     resetPerson();
   }
 
+  // Verification is required only when the drive says so AND a provider is
+  // configured; the bootstrap already ANDs those two, so the form never shows a
+  // step nobody could complete.
+  const otpRequired = !!boot?.otp_required;
+  const mobileDigits = mobile.replace(/\D/g, "").slice(-10);
+  const validMobile = (v) => /^[6-9]\d{9}$/.test(String(v).replace(/\D/g, "").slice(-10));
+  // Editing the number after proving it drops the proof — otherwise a verified
+  // number could carry a registration for a different one.
+  const otpDone = otpStage === "done" && otpFor === mobileDigits;
+
+  async function sendCode() {
+    setErr(""); setOtpNote("");
+    if (!validMobile(mobile)) { setErr(t.errMobile); return; }
+    setOtpBusy(true);
+    try {
+      const r = await fetch("/api/public/registration/otp", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send", mobile: mobileDigits, token: token || null }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d?.message || t.errSave); return; }
+      setOtpStage("sent"); setOtpCode(""); setOtpNote(t.otpSent);
+    } catch { setErr(t.errSave); }
+    finally { setOtpBusy(false); }
+  }
+
+  async function verifyCode() {
+    setErr(""); setOtpNote("");
+    setOtpBusy(true);
+    try {
+      const r = await fetch("/api/public/registration/otp", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "verify", mobile: mobileDigits, code: otpCode, token: token || null }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d?.message || t.errSave); return; }
+      setOtpStage("done"); setOtpFor(mobileDigits); setOtpNote("");
+    } catch { setErr(t.errSave); }
+    finally { setOtpBusy(false); }
+  }
+
   async function submit(e) {
     e.preventDefault();
     setErr("");
-    const validMobile = (v) => /^[6-9]\d{9}$/.test(String(v).replace(/\D/g, "").slice(-10));
     // The top question decides the record type: हाँ → worker, ना → voter.
     const isWorker = personType === "worker";
     if (!name.trim()) { setErr(t.errName); return; }
@@ -305,6 +366,8 @@ export default function PublicRegistrationForm({ token }) {
     // by it (§3, §6). Hidden worker fields are never validated.
     if (isWorker && !wardName.trim()) { setErr(t.errWardName); return; }
     if (photoBusy) { setErr(t.uploading); return; }
+    // The registrant's own number must be proven when the drive demands it.
+    if (otpRequired && !otpDone) { setErr(t.verifyFirst); return; }
     if (saving) return; // guard against a double-click / repeat submit
     setSaving(true);
     try {
@@ -502,6 +565,47 @@ export default function PublicRegistrationForm({ token }) {
             <input className={inputCls} value={mobile} onChange={(e) => setMobile(e.target.value)}
                    inputMode="numeric" maxLength={15} placeholder={t.mobilePh} required />
           </Field>
+
+          {/* Mobile verification, only when the drive asks for it. Rendered as
+              part of the mobile question rather than as its own section: it is
+              a property of that number, not another thing to fill in. */}
+          {otpRequired ? (
+            otpDone ? (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-green-200 bg-green-50 px-3 py-2.5">
+                <span className="text-[13px] font-semibold text-green-800">{t.verified}</span>
+                <button type="button" onClick={() => { setOtpStage("idle"); setOtpFor(""); setOtpCode(""); }}
+                        className="text-[12px] font-semibold text-gray-500 underline">{t.changeNumber}</button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 space-y-2">
+                {otpStage === "sent" ? (
+                  <>
+                    {otpNote ? <p className="text-[12px] text-gray-600">{otpNote}</p> : null}
+                    <div className="flex gap-2">
+                      <input className={`${inputCls} flex-1`} value={otpCode}
+                             onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                             inputMode="numeric" maxLength={8} placeholder={t.otpPh} aria-label={t.otpLabel} />
+                      <button type="button" onClick={verifyCode} disabled={otpBusy || otpCode.length < 4}
+                              className="h-12 px-5 rounded-xl text-white text-sm font-bold disabled:opacity-60"
+                              style={{ background: ACCENT }}>
+                        {otpBusy ? <Loader2 className="animate-spin" size={17} /> : t.verify}
+                      </button>
+                    </div>
+                    <button type="button" onClick={sendCode} disabled={otpBusy}
+                            className="text-[12px] font-semibold text-gray-600 underline disabled:opacity-60">
+                      {t.resendOtp}
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" onClick={sendCode} disabled={otpBusy || !validMobile(mobile)}
+                          className="h-11 w-full rounded-xl text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-60"
+                          style={{ background: ACCENT }}>
+                    {otpBusy ? <Loader2 className="animate-spin" size={17} /> : null}{t.sendOtp}
+                  </button>
+                )}
+              </div>
+            )
+          ) : null}
 
           <Field label={t.address}>
             <textarea className={`${inputCls} h-24 py-2.5 leading-relaxed`} value={address}
