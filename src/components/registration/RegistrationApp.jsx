@@ -240,30 +240,29 @@ export default function RegistrationApp() {
         ))}
       </div>
 
-      {/* THE link. One fixed URL for the whole state — it always opens whichever
-          drive is active, so it never has to be reissued, and the switch below
-          turns it on and off. Anyone who opens it enters their own name and
-          mobile, and that mobile number is what credits their work. */}
+      {/* THE common link. One fixed URL for the whole state — it opens the login
+          screen, and each karyakarta signs in with the username + password created
+          for them in Workers & Links → Generate Links. The switch turns it on/off. */}
       <div className={`${cardCls} p-4 mb-4 border-l-4`} style={{ borderLeftColor: liveDrive ? BRAND : "#d1d5db" }}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-              <Link2 size={16} style={{ color: liveDrive ? BRAND : "#9ca3af" }} />Shared registration link (OTP&#8209;secured)
+              <Link2 size={16} style={{ color: liveDrive ? BRAND : "#9ca3af" }} />Common registration link
             </h2>
             <p className="text-xs text-gray-500 mt-0.5 max-w-2xl">
               {liveDrive
-                ? <>The shared link for the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. It is <span className="font-semibold text-gray-700">not anonymous</span>: anyone opening it must sign in with their registered karyakarta mobile and an OTP before the form appears, and every registration is credited to whoever signed in. Individual karyakarta links in <span className="font-semibold text-gray-700">Workers &amp; Links</span> work the same way.</>
+                ? <>One link for the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. It opens a login screen: every karyakarta signs in with their <span className="font-semibold text-gray-700">username and password</span> (created for them in <span className="font-semibold text-gray-700">Workers &amp; Links → Generate Links</span>), and their registrations are credited to them. No per-person link is issued.</>
                 : <>The link is switched off — no drive is open, so anyone who opens it sees “Registration is not open right now”. Turn on a drive below to make it live.</>}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <a href="/join" target="_blank" rel="noreferrer" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>Open form</a>
+            <a href="/join" target="_blank" rel="noreferrer" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>Open login</a>
             <LinkSwitch drive={liveDrive} drives={campaigns} reload={loadCampaigns} onError={setErr} />
           </div>
         </div>
         <div className="mt-3">
           <ShareLink big path="/join"
-                     message={"आम आदमी पार्टी छत्तीसगढ़ — कार्यकर्ता एवं मतदाता पंजीयन\n\nकृपया इसी लिंक से पंजीयन करें:"} />
+                     message={"आम आदमी पार्टी छत्तीसगढ़ — कार्यकर्ता एवं मतदाता पंजीयन\n\nइसी लिंक से लॉगिन करें (उपयोगकर्ता नाम व पासवर्ड आपके इन-चार्ज ने दिया है):"} />
         </div>
       </div>
 
@@ -426,9 +425,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [copied, setCopied] = useState(null);
-  const [origin, setOrigin] = useState("");
 
-  useEffect(() => { setOrigin(window.location.origin); }, []);
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
   const load = useCallback(async () => {
@@ -445,23 +442,16 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const linkOf = (token) => `${origin}/r/${token}`;
-
-  async function copyLink(w) {
+  // Copy a worker's login username (= their Name). The common link is the same
+  // for everyone (shown above); there is no per-person URL to copy.
+  async function copyUsername(w) {
     try {
-      await navigator.clipboard.writeText(linkOf(w.token));
+      await navigator.clipboard.writeText(w.username || w.name || "");
       setCopied(w.id);
       setTimeout(() => setCopied((c) => (c === w.id ? null : c)), 1800);
     } catch {
-      onError("Could not copy the link. Select and copy it manually.");
+      onError("Could not copy. Select and copy it manually.");
     }
-  }
-
-  // Pre-filled WhatsApp message the admin sends to that one worker.
-  function whatsappHref(w) {
-    const msg = `नमस्ते ${w.name},\n\nआम आदमी पार्टी छत्तीसगढ़ — कार्यकर्ता एवं मतदाता पंजीयन\n\nयह आपका व्यक्तिगत लिंक है. इसी लिंक से पंजीयन करें ताकि आपका काम आपके नाम दर्ज हो:\n${linkOf(w.token)}\n\nआपकी कार्यकर्ता ID: ${w.worker_code || ""}`;
-    const to = w.mobile ? `91${w.mobile}` : "";
-    return `https://wa.me/${to}?text=${encodeURIComponent(msg)}`;
   }
 
   async function patch(id, body) {
@@ -523,7 +513,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 bg-gray-50">
-                {["#", "Karyakarta", "Mobile", "Ward / Area", "Voters", "New workers", "Registered via link", "Their link", "Status", ""].map((h) => (
+                {["#", "Karyakarta", "Mobile", "Ward / Area", "Voters", "New workers", "Total", "Login username", "Status", ""].map((h) => (
                   <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -547,13 +537,10 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
                   <td className="px-3 py-2.5 font-bold text-gray-900">{w.total}</td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1.5">
-                      <code className="text-[11px] bg-gray-100 rounded px-2 py-1 max-w-[190px] truncate">{origin ? linkOf(w.token) : "…"}</code>
-                      <button onClick={() => copyLink(w)} title="Copy link" className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500">
+                      <code className="text-[11px] bg-gray-100 rounded px-2 py-1 max-w-[190px] truncate" title={w.username || w.name}>{w.username || w.name}</code>
+                      <button onClick={() => copyUsername(w)} title="Copy username" className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500">
                         {copied === w.id ? <Check size={15} className="text-green-600" /> : <Copy size={15} />}
                       </button>
-                      <a href={whatsappHref(w)} target="_blank" rel="noreferrer" title="Send on WhatsApp" className="p-1.5 rounded-md hover:bg-gray-100 text-green-600">
-                        <MessageCircle size={15} />
-                      </a>
                     </div>
                     {/* The workers who registered through THIS link (server-side
                         filtered by this worker's id) — its own page/URL. */}
@@ -574,8 +561,6 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1">
-                      <button onClick={() => { if (window.confirm(`Issue a NEW link for ${w.name}? Their current link will stop working immediately.`)) patch(w.id, { regenerate_token: true }); }}
-                              title="Issue a new link" className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><RefreshCw size={15} /></button>
                       <button onClick={() => remove(w)} title="Delete" className="p-1.5 rounded-md hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
                     </div>
                   </td>
@@ -596,30 +581,85 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
   const [form, setForm] = useState({ name: "", mobile: "", ward_number: "", area_booth: "" });
   const [bulk, setBulk] = useState("");
   const [saving, setSaving] = useState(false);
+  const [results, setResults] = useState(null); // created credentials — shown once
+  const [note, setNote] = useState("");
 
   async function save() {
     if (!drive) { onError("Create an election drive first, then add workers to it."); return; }
-    setSaving(true);
+    setSaving(true); setNote("");
     try {
       const body = mode === "bulk" ? { campaign_id: drive, bulk } : { campaign_id: drive, ...form };
       const r = await fetch("/api/registration/workers", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { onError(d?.message || "Could not add workers."); return; }
-      if (d.skipped?.length) onError(`${d.count} added. ${d.skipped.length} skipped — those mobile numbers already have a link.`);
-      onDone();
-    } catch { onError("Could not add workers."); }
+      if (!r.ok) { onError(d?.message || "Could not create credentials."); return; }
+      setResults(d.created || []);
+      if (d.skipped?.length) {
+        setNote(`${d.count} created. ${d.skipped.length} skipped: ` + d.skipped.map((s) => `${s.name || s.mobile || "?"} — ${s.reason}`).join("; "));
+      }
+    } catch { onError("Could not create credentials."); }
     finally { setSaving(false); }
+  }
+
+  // After generation: show the username + password for each karyakarta ONCE. The
+  // password is not stored in clear, so it cannot be shown again later.
+  if (results) {
+    const copyAll = () => {
+      const text = results.map((w) => `${w.name}\nUsername: ${w.credentials.username}\nPassword: ${w.credentials.password}`).join("\n\n");
+      try { navigator.clipboard.writeText(text); } catch { /* box stays selectable */ }
+    };
+    return (
+      <div className={`${cardCls} p-4`}>
+        <div className="flex items-start justify-between mb-3 gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900">Login credentials created</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Give these to each karyakarta — the <span className="font-semibold">password is shown only once</span> and cannot be retrieved later. They sign in at the common registration link.
+            </p>
+          </div>
+          <button onClick={onDone} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={16} /></button>
+        </div>
+        {note ? <p className="mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{note}</p> : null}
+        {results.length === 0 ? (
+          <p className="text-sm text-gray-500">No new credentials were created.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs text-gray-500 bg-gray-50">
+                {["Name", "Username", "Password", ""].map((h) => <th key={h} className="px-3 py-2 font-semibold">{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {results.map((w) => (
+                  <tr key={w.id} className="border-t border-gray-100">
+                    <td className="px-3 py-2 font-semibold text-gray-900">{w.name}{w.updated ? <span className="ml-1 text-[10px] text-amber-600">(updated)</span> : null}</td>
+                    <td className="px-3 py-2 font-mono text-gray-800">{w.credentials.username}</td>
+                    <td className="px-3 py-2 font-mono font-bold text-gray-900">{w.credentials.password}</td>
+                    <td className="px-3 py-2">
+                      <button onClick={() => { try { navigator.clipboard.writeText(`${w.credentials.username} / ${w.credentials.password}`); } catch { /* ignore */ } }}
+                              className="text-xs font-semibold text-[#164FA3] hover:underline">Copy</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="flex justify-end gap-2 mt-3">
+          {results.length > 0 ? <button onClick={copyAll} className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}><Copy size={16} />Copy all</button> : null}
+          <button onClick={onDone} className={`${btnCls} text-white`} style={{ background: BRAND }}>Done</button>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className={`${cardCls} p-4`}>
       <div className="flex items-start justify-between mb-3 gap-3">
         <div>
-          <h3 className="text-sm font-bold text-gray-900">Generate karyakarta links</h3>
+          <h3 className="text-sm font-bold text-gray-900">Generate login credentials</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            One link per karyakarta. Send it to them, they share it, and every registration through it is counted as theirs.
+            Each karyakarta gets a username (their name) and a password. Give it to them; they sign in at the common registration link, and everything they register is counted as theirs.
           </p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={16} /></button>
@@ -641,7 +681,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
       {mode === "single" ? (
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
           <input className={inputCls} placeholder="Worker name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input className={inputCls} placeholder="Mobile number" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+          <input className={inputCls} placeholder="Mobile number *" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
           <input className={inputCls} placeholder="Ward no." value={form.ward_number} onChange={(e) => setForm({ ...form, ward_number: e.target.value })} />
           <input className={inputCls} placeholder="Area / Booth" value={form.area_booth} onChange={(e) => setForm({ ...form, area_booth: e.target.value })} />
         </div>
@@ -656,7 +696,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
       <div className="flex justify-end gap-2 mt-3">
         <button onClick={onClose} className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>Cancel</button>
         <button onClick={save} disabled={saving} className={`${btnCls} text-white`} style={{ background: BRAND }}>
-          {saving ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}Create links
+          {saving ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}Create credentials
         </button>
       </div>
     </div>

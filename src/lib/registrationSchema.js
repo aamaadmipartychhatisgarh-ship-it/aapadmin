@@ -78,6 +78,8 @@ export async function ensureRegistrationSchema() {
          mobile VARCHAR(20) NULL,
          worker_code VARCHAR(24) NULL,
          token VARCHAR(64) NOT NULL,
+         username VARCHAR(160) NULL,
+         password_hash VARCHAR(255) NULL,
          ward_number VARCHAR(60) NULL,
          area_booth VARCHAR(160) NULL,
          status ENUM('active','disabled') NOT NULL DEFAULT 'active',
@@ -86,12 +88,20 @@ export async function ensureRegistrationSchema() {
          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
          UNIQUE KEY uq_reg_worker_token (token),
          UNIQUE KEY uq_reg_worker_campaign_mobile (campaign_id, mobile),
+         UNIQUE KEY uq_reg_worker_campaign_username (campaign_id, username),
          KEY idx_reg_worker_campaign (campaign_id),
          KEY idx_reg_worker_status (status),
          KEY idx_reg_worker_mobile (mobile),
          KEY idx_reg_worker_name (name)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    // Login credentials for the common registration link: the karyakarta signs in
+    // with username (= their Name) + password. Older installs get the columns and
+    // the per-drive unique-username index added here. The password is stored only
+    // as a bcrypt hash (see the workers route) — never in plain text.
+    await ensureColumn("reg_workers", "username", "VARCHAR(160) NULL");
+    await ensureColumn("reg_workers", "password_hash", "VARCHAR(255) NULL");
+    await ensureIndex("reg_workers", "uq_reg_worker_campaign_username", "campaign_id, username", true);
 
     // --- Registered people --------------------------------------------------
     // registered_at is the auto "Registration Date + Time" the form shows. It is

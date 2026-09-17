@@ -46,6 +46,10 @@ const STRINGS = {
     noRecords: "अभी तक कोई रिकॉर्ड नहीं.", listLoadErr: "सूची लोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
     handledBy: "पंजीयन कर रहे हैं", logout: "लॉगआउट",
     handlerTitle: "कार्यकर्ता पंजीयन", enterRegdMobile: "अपना पंजीकृत मोबाइल नंबर दर्ज करें",
+    loginTitle: "कार्यकर्ता लॉगिन", loginHint: "अपने इन-चार्ज से मिला उपयोगकर्ता नाम और पासवर्ड दर्ज करें.",
+    usernameLabel: "उपयोगकर्ता नाम (आपका नाम)", usernamePh: "आपका नाम", passwordLabel: "पासवर्ड", passwordPh: "पासवर्ड",
+    signIn: "साइन इन करें", signingIn: "साइन इन हो रहा है…",
+    errLogin: "गलत उपयोगकर्ता नाम या पासवर्ड.", errLoginFields: "कृपया उपयोगकर्ता नाम और पासवर्ड भरें.",
     generateOtp: "OTP भेजें", otpVerifyTitle: "OTP सत्यापन", enterOtp: "OTP दर्ज करें",
     verifyOtp: "OTP सत्यापित करें", resendOtp: "OTP दोबारा भेजें", changeMobile: "नंबर बदलें",
     otpSentTo: "OTP भेजा गया:", notRegistered: "आप पंजीकृत नहीं हैं.", addAnother: "एक और कार्यकर्ता जोड़ें",
@@ -106,6 +110,10 @@ const STRINGS = {
     noRecords: "No records yet.", listLoadErr: "Could not load the list. Please try again.",
     handledBy: "Registration handled by", logout: "Logout",
     handlerTitle: "Worker Registration", enterRegdMobile: "Enter your registered mobile number",
+    loginTitle: "Karyakarta Login", loginHint: "Enter the username and password given to you by your in-charge.",
+    usernameLabel: "Username (your name)", usernamePh: "Your name", passwordLabel: "Password", passwordPh: "Password",
+    signIn: "Sign In", signingIn: "Signing in…",
+    errLogin: "Incorrect username or password.", errLoginFields: "Please enter your username and password.",
     generateOtp: "Generate OTP", otpVerifyTitle: "OTP Verification", enterOtp: "Enter OTP",
     verifyOtp: "Verify OTP", resendOtp: "Resend OTP", changeMobile: "Change number",
     otpSentTo: "OTP sent to:", notRegistered: "You are not registered.", addAnother: "Add another worker",
@@ -510,11 +518,14 @@ export default function PublicRegistrationForm({ token }) {
   if (session === null) {
     return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="animate-spin" size={30} style={{ color: ACCENT }} /></div>;
   }
-  // Not verified yet → OTP gate, never the form. This applies to EVERY entry now
-  // (worker link, drive link, and /join) — there is no anonymous access (§1, §2, §8).
+  // Not signed in yet → the gate, never the form (there is no anonymous access).
+  // The COMMON link (/join, no token) uses a username + password login. A legacy
+  // per-worker link (/r/<token>) keeps its OTP gate for backward compatibility.
   if (session.required && !session.authenticated) {
-    return <RegOtpGate base={otpBase} t={t} campaignName={boot?.campaign?.name} toggleLang={toggleLang}
-                       onVerified={(handler) => setSession({ required: true, authenticated: true, handler })} />;
+    const onAuthed = (handler) => setSession({ required: true, authenticated: true, handler });
+    return token
+      ? <RegOtpGate base={otpBase} t={t} campaignName={boot?.campaign?.name} toggleLang={toggleLang} onVerified={onAuthed} />
+      : <RegLoginGate t={t} campaignName={boot?.campaign?.name} toggleLang={toggleLang} onLoggedIn={onAuthed} />;
   }
 
   if (loading) {
@@ -905,6 +916,71 @@ function ListThumb({ src, name }) {
   const [ok, setOk] = useState(true);
   if (src && ok) return <img src={src} alt={name || ""} loading="lazy" className="w-11 h-11 rounded-full object-cover border border-gray-200 bg-white shrink-0" onError={() => setOk(false)} />;
   return <div className="w-11 h-11 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center text-[#164FA3] font-bold shrink-0">{String(name || "?").trim().charAt(0).toUpperCase() || "?"}</div>;
+}
+
+// The login gate for the COMMON registration link (/join). The karyakarta signs
+// in with their Name (username) + generated password; the backend verifies it
+// against reg_workers (bcrypt) and issues the session. No per-user URL, no OTP.
+function RegLoginGate({ t, campaignName, toggleLang, onLoggedIn }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function submit(e) {
+    e?.preventDefault?.();
+    setErr("");
+    if (!username.trim() || !password) { setErr(t.errLoginFields); return; }
+    setBusy(true);
+    try {
+      const r = await fetch("/api/public/registration/join/login", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || t.errLogin); return; }
+      onLoggedIn(d.handler || null);
+    } catch { setErr(t.errLogin); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="text-white" style={{ background: BRAND }}>
+        <div className="max-w-md mx-auto px-4 py-5 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
+            <h1 className="text-lg font-bold mt-0.5">{campaignName || t.fallbackTitle}</h1>
+          </div>
+          <button type="button" onClick={toggleLang} className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1.5 rounded-lg bg-white/15 text-white hover:bg-white/25">
+            <Languages size={14} />{t.switchTo}
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-md mx-auto px-4 py-6">
+        <form onSubmit={submit} className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">{t.loginTitle}</h2>
+            <p className="text-sm text-gray-500 mt-1">{t.loginHint}</p>
+          </div>
+          <label className="block">
+            <span className="block text-sm font-semibold text-gray-800 mb-1.5">{t.usernameLabel}</span>
+            <input className={inputCls} value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.usernamePh} autoComplete="username" autoCapitalize="words" />
+          </label>
+          <label className="block">
+            <span className="block text-sm font-semibold text-gray-800 mb-1.5">{t.passwordLabel}</span>
+            <input type="password" className={inputCls} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPh} autoComplete="current-password" />
+          </label>
+          {err ? <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{err}</p> : null}
+          <button type="submit" disabled={busy} className="w-full min-h-[52px] rounded-xl text-white text-base font-bold flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: BRAND }}>
+            {busy ? <Loader2 className="animate-spin" size={20} /> : null} {busy ? t.signingIn : t.signIn}
+          </button>
+        </form>
+        <p className="text-center text-[11px] text-gray-400 mt-4">{t.footer}</p>
+      </main>
+    </div>
+  );
 }
 
 // The OTP gate shown before a WORKER link's form. Two steps: mobile → OTP. The

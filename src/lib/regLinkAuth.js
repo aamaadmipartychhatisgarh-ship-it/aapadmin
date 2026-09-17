@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { phoneKey, last10Sql } from "@/lib/phone";
@@ -231,6 +232,39 @@ export async function handleRegOtpVerify(token, body) {
 }
 
 
+
+// --- Username/password login for the COMMON registration link (/join) --------
+// The karyakarta signs in with their Name (username) + generated password. On
+// success they receive the SAME reg_link session an OTP verification used to
+// mint, bound to their reg_worker + campaign, so everything downstream (the form,
+// attribution, the "my people" list) is unchanged. Passwords are compared against
+// the stored bcrypt hash and are never logged; an unknown username, a disabled
+// account and a wrong password all fail with one generic message.
+export async function handleRegLogin(body) {
+  try {
+    const entry = await resolveEntry(null); // the currently active drive
+    if (!entry) return json({ message: "Registration is not open right now. Please contact your in-charge." }, 404);
+    const username = String(body?.username || "").replace(/\s+/g, " ").trim();
+    const password = String(body?.password || "");
+    if (!username || !password) return json({ message: "Enter your username and password." }, 400);
+
+    const [w] = await query(
+      `SELECT id AS worker_id, name AS worker_name, worker_code, password_hash, status
+         FROM reg_workers WHERE campaign_id = ? AND username = ? LIMIT 1`,
+      [entry.campaign_id, username]
+    );
+    const ok = !!w && w.status === "active" && !!w.password_hash && (await bcrypt.compare(password, w.password_hash));
+    if (!ok) return json({ message: "Incorrect username or password." }, 401);
+
+    const payload = { kind: "reg_link", rwid: w.worker_id, cid: entry.campaign_id, token: null, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS };
+    const out = json({ ok: true, handler: { name: w.worker_name, worker_code: w.worker_code } });
+    out.cookies.set(regSessionCookie(signPayload(payload)));
+    return out;
+  } catch (err) {
+    console.error(`[reg-login] FAILED: ${err?.message || err}`);
+    return json({ message: "Unable to sign in right now. Please try again." }, 500);
+  }
+}
 
 // GET session state for the form: whether this link needs OTP, and if so whether
 // the caller is already verified (+ the handler identity to show).

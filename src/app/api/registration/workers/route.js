@@ -1,9 +1,11 @@
+import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
 import { newLinkToken, workerCodeFor, normalizeMobile } from "@/lib/registrationSchema";
 import { phoneKey, last10Sql } from "@/lib/phone";
 import { getWorkerRanking, countWorkers } from "@/lib/registrationStats";
+import { buildRegCredentials } from "@/lib/regCredentials";
 
 // A worker link is an OTP-gated login (the karyakarta signs in with THIS mobile
 // to use their link), so it MUST carry a usable number — a link created without
@@ -79,29 +81,52 @@ export async function POST(req) {
     if (entries.length > 500) return NextResponse.json({ message: "Add at most 500 workers at a time." }, { status: 400, headers: NO_STORE });
 
     const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
+    // A sanitized worker view (never the password hash) plus the PLAINTEXT login
+    // password — returned only in this response so the admin can hand it out, and
+    // never persisted or logged in clear.
     const created = [];
     const skipped = [];
     for (const e of entries) {
-      const name = String(e.name).trim().slice(0, 160);
       const mobile = linkMobile(e.mobile);
-      // Every worker link needs a valid mobile — without one the OTP gate can
-      // never be passed, so skip (and report) rather than mint a dead link.
+      // Generate Name → username and (Name + phone) → password. A name with fewer
+      // than 4 letters, or a bad phone, produces no credential — reported, not minted.
+      const cred = buildRegCredentials(e.name, mobile);
+      if (cred.error) { skipped.push({ name: String(e.name || "").trim() || null, mobile, reason: cred.error }); continue; }
+      const name = cred.username.slice(0, 160); // tidied Name = username
       if (!mobile) { skipped.push({ name, mobile: String(e.mobile || "").trim() || null, reason: "needs a valid 10-digit mobile number" }); continue; }
-      // One link per mobile number within a drive — re-pasting the same list must
-      // not silently mint a second link and split a worker's credit in two.
-      // Match on the last 10 digits so an older-format stored number still dedups.
-      const [dupe] = await query(`SELECT id FROM reg_workers WHERE campaign_id = ? AND ${last10Sql("mobile")} = ? LIMIT 1`, [campaignId, mobile]);
-      if (dupe) { skipped.push({ name, mobile, reason: "already has a link" }); continue; }
-      const res = await query(
-        `INSERT INTO reg_workers (campaign_id, name, mobile, token, ward_number, area_booth, created_by)
-         VALUES (?,?,?,?,?,?,?)`,
-        [campaignId, name, mobile, newLinkToken(), clip(e.ward_number, 60), clip(e.area_booth, 160), session?.user?.id || null]
+      const passwordHash = await bcrypt.hash(cred.password, 10);
+
+      // One account per mobile within a drive: re-generating for the SAME person
+      // UPDATES their credentials rather than creating a duplicate. Match on the
+      // last 10 digits so an older-format stored number still dedups.
+      const [sameMobile] = await query(`SELECT id FROM reg_workers WHERE campaign_id = ? AND ${last10Sql("mobile")} = ? LIMIT 1`, [campaignId, mobile]);
+      // Username (= Name) must be unique within the drive: a different person with
+      // the same name is REJECTED so two accounts never share one login identity.
+      const [sameName] = await query(
+        `SELECT id FROM reg_workers WHERE campaign_id = ? AND username = ? ${sameMobile ? "AND id <> ?" : ""} LIMIT 1`,
+        sameMobile ? [campaignId, name, sameMobile.id] : [campaignId, name]
       );
-      // The User ID is derived from the immutable row id, so it is assigned once
-      // here and never regenerated for that worker.
-      await query(`UPDATE reg_workers SET worker_code = ? WHERE id = ?`, [workerCodeFor(name, res.insertId), res.insertId]);
-      const [row] = await query(`SELECT * FROM reg_workers WHERE id = ?`, [res.insertId]);
-      created.push(row);
+      if (sameName) { skipped.push({ name, mobile, reason: "a different karyakarta with this name already exists" }); continue; }
+
+      let workerId;
+      if (sameMobile) {
+        await query(
+          `UPDATE reg_workers SET name = ?, username = ?, password_hash = ?, status = 'active' WHERE id = ?`,
+          [name, name, passwordHash, sameMobile.id]
+        );
+        workerId = sameMobile.id;
+      } else {
+        const res = await query(
+          `INSERT INTO reg_workers (campaign_id, name, mobile, token, username, password_hash, ward_number, area_booth, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?)`,
+          [campaignId, name, mobile, newLinkToken(), name, passwordHash, clip(e.ward_number, 60), clip(e.area_booth, 160), session?.user?.id || null]
+        );
+        workerId = res.insertId;
+        // The User ID is derived from the immutable row id — assigned once, never regenerated.
+        await query(`UPDATE reg_workers SET worker_code = ? WHERE id = ?`, [workerCodeFor(name, workerId), workerId]);
+      }
+      const [row] = await query(`SELECT id, campaign_id, name, mobile, worker_code, username, status FROM reg_workers WHERE id = ?`, [workerId]);
+      created.push({ ...row, credentials: { username: cred.username, password: cred.password }, updated: !!sameMobile });
     }
 
     return NextResponse.json({ created, skipped, count: created.length }, { status: 201, headers: NO_STORE });
