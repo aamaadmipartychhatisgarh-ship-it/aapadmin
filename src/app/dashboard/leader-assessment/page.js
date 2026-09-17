@@ -1272,13 +1272,20 @@ function MlaInlineAssessment({ mla, version, onEditAssessment, onEditProfile }) 
         </div>
       </div>
 
-      {/* Competitor election result + derived margin. Absent on legacy profiles → "—". */}
+      {/* Current MLA vs the three competitors — one comparison row so it is
+          visually obvious who is in each position. The Current MLA is the first
+          card (Name · Party Logo · Votes), followed by Competitor 1/2/3 in the
+          SAME structure (each read straight from that person's own stored fields,
+          never shifted or filtered), then the derived margin. Absent values on
+          legacy profiles → "—". */}
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Election Result</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Election Result · MLA vs Competitors</div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <div className="rounded-xl border border-gray-100 p-3">
-            <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">MLA Votes</div>
-            <div className="font-semibold text-gray-900">{mla.mla_votes != null ? `${nfmt(mla.mla_votes)}` : "—"}</div>
+          <div className="rounded-xl border border-[#164FA3]/20 bg-[#164FA3]/5 p-3">
+            <div className="text-[11px] font-bold text-[#164FA3] uppercase tracking-wide">Current MLA</div>
+            <div className="font-semibold text-gray-900 truncate">{mla.name || "—"}</div>
+            <div className="text-xs text-gray-500 truncate">{mla.party ? <PartyLogo name={mla.party} byName={partyByName} size={16} /> : "—"}</div>
+            <div className="text-sm text-gray-600">{mla.mla_votes != null ? `${nfmt(mla.mla_votes)} votes` : "—"}</div>
           </div>
           <div className="rounded-xl border border-gray-100 p-3">
             <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Competitor 1</div>
