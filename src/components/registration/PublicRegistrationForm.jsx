@@ -209,10 +209,32 @@ export default function PublicRegistrationForm({ token }) {
   useEffect(() => {
     if (!token) { setSession({ required: false }); return; }
     let alive = true;
-    fetch(`/api/public/registration/${encodeURIComponent(token)}/otp/session`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { required: false }))
-      .then((d) => { if (alive) setSession(d || { required: false }); })
-      .catch(() => { if (alive) setSession({ required: false }); });
+    const url = `/api/public/registration/${encodeURIComponent(token)}/otp/session`;
+    // The authenticated state lives in an HTTP-only cookie the server verifies,
+    // so this GET only READS it back after a refresh/remount — it never mints or
+    // clears a session. Because it is authoritative, a transient network or API
+    // failure must NOT be turned into a state: collapsing to { required:false }
+    // would silently downgrade a logged-in handler to "anonymous" over one bad
+    // request (§8, §9). Instead we keep the loader up and RETRY with capped
+    // backoff, so a page refresh restores the exact session the cookie still
+    // holds the moment the endpoint answers, and only an explicit Logout (or the
+    // cookie's own expiry) ever ends it. A truly invalid/drive/general token is
+    // an OK 200 response ({ required:false }), so it resolves immediately — only
+    // real failures retry.
+    let attempt = 0;
+    (async () => {
+      while (alive) {
+        try {
+          const r = await fetch(url, { cache: "no-store" });
+          if (r.ok) {
+            const d = await r.json().catch(() => null);
+            if (alive && d) { setSession(d); return; }
+          }
+        } catch { /* transient — fall through to retry, never guess a state */ }
+        attempt += 1;
+        await new Promise((res) => setTimeout(res, Math.min(1000 * 2 ** attempt, 15000)));
+      }
+    })();
     return () => { alive = false; };
   }, [token]);
 
