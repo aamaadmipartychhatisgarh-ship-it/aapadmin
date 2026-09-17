@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { usePageGuard } from "@/components/usePageGuard";
 import { usePageAccess } from "@/components/usePageAccess";
 import { canAccessSocial } from "@/lib/permissions";
-import { formatDateTimeDot } from "@/lib/dateFormat";
 import {
   Share2, Loader2, Plus, X, Upload,
   Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil, Trash2,
@@ -454,25 +453,40 @@ function PageModal({ onClose, onSaved, editing }) {
 }
 
 // ============================================================ LOG
-// The date (YYYY-MM-DD) of a post's actual DB Date & Time (posted_at, falling
-// back to created_at) IN THE APP TIMEZONE (Asia/Kolkata) — the SAME timezone the
-// timestamps are displayed in, so a selected calendar date always matches the
-// date shown on the row (never off-by-one from a browser in another timezone).
-const IST_DAY_KEY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
-function postDateKey(p) {
-  const v = p.posted_at || p.created_at;
-  if (!v) return "";
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return "";
-  return IST_DAY_KEY.format(d); // YYYY-MM-DD in Asia/Kolkata
+// A Social Media Post's Date & Time is a manually entered WALL-CLOCK value. The
+// API returns it as a naive "YYYY-MM-DDTHH:mm" string (the value as stored, with
+// no timezone), and everything below reads those digits AS WRITTEN — never
+// through a JS Date or Intl timezone — so the time shown, filtered and edited is
+// exactly the time the user typed, on every browser and server (no UTC/DST shift,
+// no AM/PM).
+function dtParts(v) {
+  return String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
 }
-// Every Social Media timestamp renders through the app's single date/time source
-// of truth (Asia/Kolkata timezone, DD/MM/YYYY • hh:mm AM/PM — 12-hour). This
-// replaces the previous en-GB 24-hour, browser-timezone formatting so the shown
-// time is correct and consistently 12-hour with AM/PM across the module. The
-// stored timestamp is untouched — only its display conversion changed.
+// The post's calendar day (YYYY-MM-DD) for the date filter — read straight from
+// the stored wall-clock so a selected date always matches the row's shown date.
+function postDateKey(p) {
+  const m = dtParts(p.posted_at || p.created_at);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : "";
+}
+// Display: "DD-MM-YYYY HH:mm" — 24-hour, no AM/PM, exactly as stored.
 function fmtDateTime(v) {
-  return formatDateTimeDot(v) || "—";
+  const m = dtParts(v);
+  return m ? `${m[3]}-${m[2]}-${m[1]} ${m[4]}:${m[5]}` : "—";
+}
+// The datetime-local value ("YYYY-MM-DDTHH:mm") from a stored wall-clock — for
+// the Edit form, so it shows exactly the saved time with no timezone conversion.
+function toLocalInput(v) {
+  const m = dtParts(v);
+  return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}` : "";
+}
+// "Now" in the app timezone (Asia/Kolkata) as a naive "YYYY-MM-DDTHH:mm" — the
+// default for a NEW post's Date & Time, i.e. the real local time, never a
+// UTC/browser-shifted one.
+const IST_NOW_FMT = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+function naiveNowLocal() {
+  const p = Object.fromEntries(IST_NOW_FMT.formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const hh = p.hour === "24" ? "00" : p.hour; // en-CA can emit 24 at midnight
+  return `${p.year}-${p.month}-${p.day}T${hh}:${p.minute}`;
 }
 
 // A post's destinations, with a legacy fallback for any pre-destinations row.
@@ -684,7 +698,7 @@ const LBL = "block text-xs font-semibold text-gray-500 mb-1";
 function emptyBlock() {
   return {
     caption: "", post_type: "photo", media_url: "",
-    posted_at: new Date().toISOString().slice(0, 16),
+    posted_at: naiveNowLocal(),
     publish_status: "published",
     platforms: [], dest: {},
     views: 0, likes: 0, comments: 0, shares: 0, reach: 0, viral: 0,
@@ -708,7 +722,7 @@ function blockFromEditing(editing) {
   return {
     caption: editing.caption || "", post_type: editing.post_type || "photo",
     media_url: editing.media_url || "",
-    posted_at: editing.posted_at ? new Date(editing.posted_at).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+    posted_at: toLocalInput(editing.posted_at) || naiveNowLocal(),
     publish_status: editing.publish_status === "scheduled" ? "scheduled" : "published",
     platforms, dest,
     views: editing.views || 0, likes: editing.likes || 0, comments: editing.comments || 0,

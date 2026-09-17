@@ -75,3 +75,23 @@ export function normalizeDestinations(input) {
   }
   return out;
 }
+
+// A Social Media Post's Date & Time is a MANUALLY ENTERED wall-clock value, not
+// an instant in UTC. We store exactly what the user typed — no timezone
+// conversion — by normalizing the datetime-local string ("YYYY-MM-DDTHH:mm",
+// seconds optional) to a plain MySQL DATETIME literal "YYYY-MM-DD HH:MM:SS".
+// The time-of-day is validated as a real 24-hour HH:mm so invalid values
+// (24:00, 25:30, 14:75, "2:30 PM", …) are REJECTED rather than silently changed.
+// null/"" pass through as { value: null } for the optional scheduled_at.
+export function normalizePostDateTime(input) {
+  if (input == null || String(input).trim() === "") return { value: null };
+  const m = String(input).trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return { error: "Enter the date and a 24-hour time (HH:mm), e.g. 2024-01-15 14:30." };
+  const [, y, mo, d, hh, mi, ss] = m;
+  const mon = +mo, day = +d, H = +hh, M = +mi, S = ss ? +ss : 0;
+  if (mon < 1 || mon > 12 || day < 1 || day > 31) return { error: "Enter a valid date." };
+  if (H > 23 || M > 59 || S > 59) {
+    return { error: "Enter a valid 24-hour time (HH:mm), e.g. 09:05, 14:30, 23:59." };
+  }
+  return { value: `${y}-${mo}-${d} ${hh}:${mi}:${String(S).padStart(2, "0")}` };
+}

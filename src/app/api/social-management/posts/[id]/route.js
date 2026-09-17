@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query, getPool } from "@/lib/db";
-import { ensureSocialPostSchema, normalizeDestinations } from "@/lib/socialPostSchema";
+import { ensureSocialPostSchema, normalizeDestinations, normalizePostDateTime } from "@/lib/socialPostSchema";
 import { resolveDestinations, syncPostDestinations } from "@/lib/socialDestinations";
 
 export async function PUT(req, { params }) {
@@ -29,6 +29,15 @@ export async function PUT(req, { params }) {
     const fields = ["title", "caption", "post_type", "media_url", "external_url",
       "scheduled_at", "posted_at", "publish_status",
       "views", "likes", "comments", "shares", "reach", "viral"];
+    // Editing keeps the manually entered Date & Time EXACTLY as typed (no
+    // timezone conversion). An invalid 24-hour time is rejected, not mangled.
+    for (const f of ["posted_at", "scheduled_at"]) {
+      if (f in d) {
+        const norm = normalizePostDateTime(d[f]);
+        if (norm.error) return NextResponse.json({ message: norm.error }, { status: 400 });
+        d[f] = norm.value;
+      }
+    }
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     // Keep the post's mirror page_id/external_url aligned with the first

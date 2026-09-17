@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { getPool } from "@/lib/db";
-import { ensureSocialPostSchema, normalizeDestinations } from "@/lib/socialPostSchema";
+import { ensureSocialPostSchema, normalizeDestinations, normalizePostDateTime } from "@/lib/socialPostSchema";
 import { resolveDestinations, syncPostDestinations } from "@/lib/socialDestinations";
 
 // Create ONE post with one or more platform/page destinations, each with its
@@ -28,6 +28,13 @@ export async function POST(req) {
     const { rows, error } = await resolveDestinations(destinations);
     if (error) return NextResponse.json({ message: error }, { status: 400 });
 
+    // Store the manually entered Date & Time EXACTLY as typed (no timezone
+    // conversion), and reject an invalid 24-hour time rather than mangling it.
+    const postedAt = normalizePostDateTime(d.posted_at);
+    if (postedAt.error) return NextResponse.json({ message: postedAt.error }, { status: 400 });
+    const scheduledAt = normalizePostDateTime(d.scheduled_at);
+    if (scheduledAt.error) return NextResponse.json({ message: scheduledAt.error }, { status: 400 });
+
     const conn = await getPool().getConnection();
     let postId;
     try {
@@ -44,7 +51,7 @@ export async function POST(req) {
         [
           first.page_id, d.title || null, d.caption || null, d.post_type || "post",
           d.media_url || null, first.post_link || null,
-          d.scheduled_at || null, d.posted_at || null,
+          scheduledAt.value, postedAt.value,
           d.approval_status || "approved", d.publish_status || "published",
           Number(d.views) || 0, Number(d.likes) || 0, Number(d.comments) || 0,
           Number(d.shares) || 0, Number(d.reach) || 0,

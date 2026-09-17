@@ -76,7 +76,16 @@ export async function GET() {
     // for any realistic manual-logging volume; total_posts (below) is the true
     // count so the card and the list agree.
     const recentPosts = await query(
-      `SELECT p.*, sp.platform, sp.handle, sp.lok_sabha_name,
+      `SELECT p.*,
+              -- Return the Date & Time as a NAIVE wall-clock string (the value as
+              -- stored, no timezone), so the manually entered time is displayed
+              -- and edited EXACTLY as typed. These aliases override the p.* Date
+              -- objects, which mysql2 would otherwise reinterpret via the server
+              -- timezone and shift the shown time.
+              DATE_FORMAT(p.posted_at,    '%Y-%m-%dT%H:%i') AS posted_at,
+              DATE_FORMAT(p.scheduled_at, '%Y-%m-%dT%H:%i') AS scheduled_at,
+              DATE_FORMAT(p.created_at,   '%Y-%m-%dT%H:%i') AS created_at,
+              sp.platform, sp.handle, sp.lok_sabha_name,
               u.username AS author_name
          FROM social_posts p
          LEFT JOIN social_pages sp ON sp.id = p.page_id
