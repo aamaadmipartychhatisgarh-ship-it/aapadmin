@@ -7,6 +7,7 @@ import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn } from "@/lib/contactExtras";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
+import { normalizeDurationSeconds } from "@/lib/callDuration";
 
 export async function GET(req) {
   try {
@@ -268,7 +269,8 @@ export async function POST(req) {
         status_id,
         remarks || null,
         actingUserId,
-        duration_seconds || null,
+        // Never persist a negative/invalid duration, whatever the client sends.
+        normalizeDurationSeconds(duration_seconds),
         finalSentiment,
         is_follow_up_required ? 1 : 0,
         follow_up_date || null,

@@ -105,7 +105,7 @@ export default function CallerPerformanceView() {
                   <td className="px-4 py-3 text-amber-600">{c.no_answer || 0}</td>
                   <td className="px-4 py-3 text-gray-500">{c.wrong_number || 0}</td>
                   <td className="px-4 py-3 text-red-600">{c.rejected || 0}</td>
-                  <td className="px-4 py-3 text-gray-700">{c.avg_duration_seconds ? `${c.avg_duration_seconds}s` : "—"}</td>
+                  <td className="px-4 py-3 text-gray-700">{c.avg_duration_seconds ? `${Math.max(0, Math.round(c.avg_duration_seconds))}s` : "—"}</td>
                   <td className="px-4 py-3 text-blue-600">{c.pending_follow_ups || 0}</td>
                   <td className="px-4 py-3 text-emerald-700 font-medium">{c.interested || 0}</td>
                 </tr>

@@ -33,8 +33,11 @@ const SENTIMENT_ORDER = ["positive", "supporter", "neutral", "negative", "not_su
 
 function fmtDur(seconds) {
   if (!seconds && seconds !== 0) return "—";
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
+  // Never render a negative/invalid duration — clamp to 0 (shows as 0:00).
+  let n = Math.floor(Number(seconds));
+  if (!Number.isFinite(n) || n < 0) n = 0;
+  const m = Math.floor(n / 60);
+  const s = n % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 

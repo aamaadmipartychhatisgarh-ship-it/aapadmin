@@ -225,7 +225,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   useEffect(() => {
     if (active) {
       timerRef.current = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - active.started_at) / 1000));
+        // Clamp at the source: a resumed lock time (server timestamp) can land
+        // slightly ahead of the browser clock, so guard against a negative.
+        setElapsed(Math.max(0, Math.floor((Date.now() - active.started_at) / 1000)));
       }, 1000);
       return () => clearInterval(timerRef.current);
     }
@@ -341,7 +343,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   function startActive(contact, startedAtMs = Date.now()) {
     setActive({ ...contact, started_at: startedAtMs });
     setForm({ ...initialForm(), person_name: contact.person_name, phone_number: contact.phone_number });
-    setElapsed(Math.floor((Date.now() - startedAtMs) / 1000));
+    setElapsed(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
     setMessage("");
     setError("");
   }
@@ -1511,8 +1513,11 @@ const editSelectCls = "w-full bg-white/10 border border-white/20 rounded-lg px-3
 
 function fmtTime(s) {
   if (s == null) return "—";
-  const m = Math.floor(s / 60).toString().padStart(2, "0");
-  const sec = (s % 60).toString().padStart(2, "0");
+  // Never render a negative/NaN duration — a bad value shows as 00:00.
+  let n = Math.floor(Number(s));
+  if (!Number.isFinite(n) || n < 0) n = 0;
+  const m = Math.floor(n / 60).toString().padStart(2, "0");
+  const sec = (n % 60).toString().padStart(2, "0");
   return `${m}:${sec}`;
 }
 

@@ -25,8 +25,11 @@ const SENTIMENT_LABEL = {
 
 function fmtDur(s) {
   if (s == null) return "—";
-  const m = Math.floor(s / 60);
-  const r = s % 60;
+  // Never render a negative/invalid duration — clamp to 0 (shows as 0:00).
+  let n = Math.floor(Number(s));
+  if (!Number.isFinite(n) || n < 0) n = 0;
+  const m = Math.floor(n / 60);
+  const r = n % 60;
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
