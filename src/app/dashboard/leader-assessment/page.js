@@ -3119,7 +3119,7 @@ function voteText(v) {
 function LeadBadge({ row }) {
   if (row.mla_votes == null || row.aap_votes == null) return <span className="text-gray-400">—</span>;
   if (row.leader === "Current MLA") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">Current MLA</span>;
-  if (row.leader === "AAP Candidate") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">AAP Competitor</span>;
+  if (row.leader === "AAP Candidate") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Competitor 3</span>;
   return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Equal Votes</span>;
 }
 
@@ -3256,9 +3256,9 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
       )}
 
       <Card
-        title="Current MLA vs AAP Competitor — Vote Comparison"
+        title="Current MLA vs Competitor 3 — Vote Comparison"
         icon={BarChart3}
-        sub="Assembly-wise comparison of vote counts only. Data comes from the MLA Profile (MLA votes) and Election History (AAP competitor votes, same election year)."
+        sub="Assembly-wise comparison of vote counts only. Data comes from the MLA Profile (MLA votes) and Election History (Competitor 3 votes, same election year)."
         right={
           <div className="flex items-center gap-2">
             <button onClick={() => exportAs("xlsx")} disabled={!!exporting || loading}
@@ -3295,8 +3295,8 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
                     <th className="py-2 pr-3">District</th>
                     <th className="py-2 pr-3">Current MLA</th>
                     <th className="py-2 pr-3 text-right">MLA Votes</th>
-                    <th className="py-2 pr-3">AAP Competitor</th>
-                    <th className="py-2 pr-3 text-right">AAP Votes</th>
+                    <th className="py-2 pr-3">Competitor 3</th>
+                    <th className="py-2 pr-3 text-right">Competitor 3 Votes</th>
                     <th className="py-2 pr-3 text-right">Difference</th>
                     <th className="py-2 pr-3">Vote Lead</th>
                   </tr>

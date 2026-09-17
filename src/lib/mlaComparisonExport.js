@@ -25,8 +25,8 @@ const COLUMNS = [
   { header: "Assembly", width: 24, get: (r) => r.assembly_name || "" },
   { header: "Current MLA", width: 24, get: (r) => r.mla_name || "Not Available" },
   { header: "Current MLA Votes", width: 18, align: "right", raw: (r) => r.mla_votes, get: (r) => num(r.mla_votes) },
-  { header: "AAP Competitor", width: 24, get: (r) => r.aap_candidate || "Not Available" },
-  { header: "AAP Competitor Votes", width: 18, align: "right", raw: (r) => r.aap_votes, get: (r) => num(r.aap_votes) },
+  { header: "Competitor 3", width: 24, get: (r) => r.aap_candidate || "Not Available" },
+  { header: "Competitor 3 Votes", width: 18, align: "right", raw: (r) => r.aap_votes, get: (r) => num(r.aap_votes) },
   { header: "Vote Difference", width: 16, align: "right", raw: (r) => r.difference, get: (r) => num(r.difference, "—") },
   { header: "Vote Lead", width: 16, get: (r) => leadLabel(r) },
   { header: "Election Year", width: 13, align: "right", raw: (r) => r.election_year, get: (r) => (r.election_year != null ? String(r.election_year) : "—") },
@@ -35,7 +35,7 @@ const COLUMNS = [
 // Human label for the lead column, consistent with the on-screen wording.
 function leadLabel(r) {
   if (r.leader === "Current MLA") return "Current MLA";
-  if (r.leader === "AAP Candidate") return "AAP Competitor";
+  if (r.leader === "AAP Candidate") return "Competitor 3";
   if (r.leader === "Equal") return "Equal Votes";
   return "—"; // incomplete data
 }
@@ -88,8 +88,8 @@ const PDF_COLUMNS = [
   { header: "Assembly", flex: 2.0, get: (r) => r.assembly_name || "" },
   { header: "Current MLA", flex: 2.0, get: (r) => r.mla_name || "Not Available" },
   { header: "MLA Votes", flex: 1.2, align: "right", get: (r) => num(r.mla_votes) },
-  { header: "AAP Competitor", flex: 2.0, get: (r) => r.aap_candidate || "Not Available" },
-  { header: "AAP Votes", flex: 1.2, align: "right", get: (r) => num(r.aap_votes) },
+  { header: "Competitor 3", flex: 2.0, get: (r) => r.aap_candidate || "Not Available" },
+  { header: "Competitor 3 Votes", flex: 1.2, align: "right", get: (r) => num(r.aap_votes) },
   { header: "Difference", flex: 1.2, align: "right", get: (r) => num(r.difference, "—") },
   { header: "Vote Lead", flex: 1.3, get: (r) => leadLabel(r) },
 ];
@@ -100,8 +100,8 @@ function ComparisonPdfDoc({ rows, subtitle, headerPhoto }) {
   );
   return React.createElement(Document, null,
     React.createElement(Page, { size: "A4", orientation: "landscape", style: pdfStyles.page, wrap: true },
-      React.createElement(PdfHeader, { photo: headerPhoto, subtitle: "MLA vs AAP Vote Comparison" }),
-      React.createElement(Text, { style: pdfStyles.title }, "Current MLA vs AAP Competitor – Vote Comparison"),
+      React.createElement(PdfHeader, { photo: headerPhoto, subtitle: "MLA vs Competitor 3 Vote Comparison" }),
+      React.createElement(Text, { style: pdfStyles.title }, "Current MLA vs Competitor 3 – Vote Comparison"),
       React.createElement(Text, { style: pdfStyles.subtitle }, subtitle),
       // Fixed header repeats at the top of every page.
       React.createElement(View, { style: pdfStyles.headerRow, fixed: true }, headerEls),
