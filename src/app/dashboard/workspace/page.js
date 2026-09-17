@@ -11,6 +11,7 @@ import CallActionIcons, { WRONG_NUMBER_REASONS } from "@/components/CallActionIc
 import ProfilePhoto from "@/components/ProfilePhoto";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { MultiSelect } from "@/components/MultiSelect";
+import { ACTIVE_STATUS_LABEL } from "@/lib/activeStatus";
 
 // Friendly labels for who assigned a contact.
 const ROLE_LABELS = { super_admin: "Super Admin", supervisor: "Supervisor", caller: "Caller" };
@@ -25,15 +26,16 @@ function fmtAssigned(v) {
   return `${date} • ${time}`;
 }
 
-// The caller's self-reported working status shown in the calling area. Stored
-// values are canonical; labels are what the caller sees. Exactly these four.
-const ACTIVE_STATUS_OPTIONS = [
-  { value: "VERY_ACTIVE", label: "Very Active" },
-  { value: "ACTIVE", label: "Active" },
-  { value: "AVERAGE", label: "Average" },
-  { value: "NOT_ACTIVE", label: "Not Active" },
-];
-const ACTIVE_STATUS_LABEL = Object.fromEntries(ACTIVE_STATUS_OPTIONS.map((o) => [o.value, o.label]));
+// Active Status is now MANAGED on the Active Worker page (by authorized users)
+// and only DISPLAYED here in the Log Outcome section — the caller no longer
+// self-sets it. The label map comes from the shared canonical source.
+// Colour chip for the read-only Active Status shown in Log Outcome.
+const ACTIVE_STATUS_CHIP = {
+  VERY_ACTIVE: "bg-emerald-100 text-emerald-700",
+  ACTIVE: "bg-blue-100 text-blue-700",
+  AVERAGE: "bg-amber-100 text-amber-700",
+  NOT_ACTIVE: "bg-gray-100 text-gray-500",
+};
 
 export default function WorkspacePage() {
   const { data: session, status } = useSession();
@@ -95,8 +97,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [queueTab, setQueueTab] = useState("all");
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
-  const [activeStatus, setActiveStatus] = useState(null); // caller's self-reported working status
-  const [savingActiveStatus, setSavingActiveStatus] = useState(false);
+  const [activeStatus, setActiveStatus] = useState(null); // read-only: managed on the Active Worker page
   const [statuses, setStatuses] = useState([]);
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -176,6 +177,14 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     fetch("/api/locations?type=assembly").then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(sortDesignations(d.designations || [])));
   }, []);
+
+  // When a call is opened (Log Outcome becomes visible for a contact), pull the
+  // latest Active Status from the backend so it reflects whatever the Active
+  // Worker page last saved — one authoritative value, always current.
+  useEffect(() => {
+    if (!active?.id) return;
+    fetch("/api/workspace/active-status").then((r) => r.json()).then((d) => setActiveStatus(d.active_status || null)).catch(() => {});
+  }, [active?.id]);
 
   // Deep-link support: arriving from My Calls' "Edit in Workspace" carries a
   // ?contact_id=, so the console opens straight onto that exact contact. Fires
@@ -545,26 +554,6 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // selected/deselected like any other option in the multi-select.
   const designationOptions = [...designations.map((d) => ({ id: String(d.id), name: d.name })), { id: "none", name: "No Designation" }];
 
-  async function saveActiveStatus(value) {
-    if (value === activeStatus || savingActiveStatus) return;
-    const prev = activeStatus;
-    setActiveStatus(value); // optimistic
-    setSavingActiveStatus(true);
-    try {
-      const r = await fetch("/api/workspace/active-status", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active_status: value }),
-      });
-      if (!r.ok) { setActiveStatus(prev); return; } // revert on failure
-      const d = await r.json().catch(() => ({}));
-      if (d.active_status) setActiveStatus(d.active_status);
-    } catch {
-      setActiveStatus(prev);
-    } finally {
-      setSavingActiveStatus(false);
-    }
-  }
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
       {/* LEFT: queue */}
@@ -587,31 +576,6 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               : <span className="text-amber-600">No zone set. Ask an admin.</span>}
           </div>
 
-          {/* Active Status — the caller's self-reported working status, saved to
-              their own user record. Visible + editable here in the calling area. */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Active Status</span>
-              <span className="text-xs font-semibold text-[#164FA3]">{activeStatus ? ACTIVE_STATUS_LABEL[activeStatus] : "Not set"}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {ACTIVE_STATUS_OPTIONS.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => saveActiveStatus(o.value)}
-                  disabled={savingActiveStatus}
-                  className={`text-xs font-semibold px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-60 ${
-                    activeStatus === o.value
-                      ? "bg-[#164FA3] text-white border-[#164FA3]"
-                      : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
-                  }`}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          </div>
 
           <button
             onClick={next}
@@ -1091,11 +1055,22 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
 
             {/* Outcome form */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                 <h3 className="font-bold text-gray-900 flex items-center gap-2"><Square size={16} /> Log Outcome</h3>
-                <button onClick={() => setReportOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg">
-                  <Flag size={13} /> Report number issue
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Active Status — READ-ONLY here; it is the one authoritative value
+                      (users.active_status) set on the Active Worker page, so it always
+                      reflects the latest saved status. */}
+                  <span className="inline-flex items-center gap-1.5 text-xs">
+                    <span className="font-semibold uppercase tracking-wide text-gray-400">Active Status</span>
+                    <span className={`px-2 py-0.5 rounded-full font-semibold ${activeStatus ? ACTIVE_STATUS_CHIP[activeStatus] : "bg-gray-100 text-gray-400"}`}>
+                      {activeStatus ? ACTIVE_STATUS_LABEL[activeStatus] : "Not set"}
+                    </span>
+                  </span>
+                  <button onClick={() => setReportOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg">
+                    <Flag size={13} /> Report number issue
+                  </button>
+                </div>
               </div>
 
               {reportOpen && (

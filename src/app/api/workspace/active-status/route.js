@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { resolveActingUserId } from "@/lib/actAs";
+import { normalizeActiveStatus } from "@/lib/activeStatus";
 
 // The caller's self-reported working Active Status, shown/managed in My
 // Workspace. Persisted on the user row (users.active_status), never only in the
@@ -11,8 +12,6 @@ import { resolveActingUserId } from "@/lib/actAs";
 // logging uses — so nobody edits another caller's status by accident.
 export const dynamic = "force-dynamic";
 
-// Canonical stored values ↔ the four UI options. No other value is accepted.
-const ALLOWED = new Set(["VERY_ACTIVE", "ACTIVE", "AVERAGE", "NOT_ACTIVE"]);
 const NO_STORE = { "Cache-Control": "no-store" };
 
 let ensured = false;
@@ -46,9 +45,9 @@ export async function POST(req) {
   if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
   await ensureColumn();
   const body = await req.json().catch(() => ({}));
-  const value = String(body?.active_status || "").trim().toUpperCase();
   // Server-side validation — reject anything outside the four allowed values.
-  if (!ALLOWED.has(value)) {
+  const value = normalizeActiveStatus(body?.active_status);
+  if (!value) {
     return NextResponse.json({ message: "Invalid active status." }, { status: 400, headers: NO_STORE });
   }
   // Save against the acting user only (self, or the previewed caller).

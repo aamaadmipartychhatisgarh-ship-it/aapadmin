@@ -5,6 +5,27 @@ import { scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
+import { normalizeActiveStatus } from "@/lib/activeStatus";
+
+// The Active Status lives on users.active_status (the ONE authoritative value,
+// shared with the caller's Log Outcome display). Ensure the column exists before
+// reading/writing it here — the same lazy guard the workspace route uses.
+let ensuredCol = false;
+async function ensureActiveStatusColumn() {
+  if (ensuredCol) return;
+  try {
+    const rows = await query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'active_status'`
+    );
+    if (Number(rows[0]?.n || 0) === 0) {
+      await query(`ALTER TABLE users ADD COLUMN active_status VARCHAR(20) NULL`);
+    }
+    ensuredCol = true;
+  } catch (e) {
+    console.error("[active-workers] ensureActiveStatusColumn:", e?.message || e);
+  }
+}
 
 // GET /api/contacts/active-workers
 // User-wise Active Workers = contacts ASSIGNED to a caller and still active
@@ -21,6 +42,7 @@ export async function GET(req) {
     if (!(await pageAllowed(session, "contacts", session && isSupervisor(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
+    await ensureActiveStatusColumn();
     const { searchParams } = new URL(req.url);
     const search = (searchParams.get("search") || "").trim();
     const district_id = searchParams.get("district_id");
@@ -39,14 +61,14 @@ export async function GET(req) {
     params.push(...scope.params);
 
     const rows = await query(
-      `SELECT c.assigned_to_user_id AS user_id, u.username,
+      `SELECT c.assigned_to_user_id AS user_id, u.username, u.active_status,
               COUNT(*) AS active_count,
               COALESCE(SUM(c.is_completed = 1), 0) AS done_count,
               COALESCE(SUM(c.is_completed = 0), 0) AS pending_count
          FROM contacts c
          JOIN users u ON u.id = c.assigned_to_user_id
         ${where}
-        GROUP BY c.assigned_to_user_id, u.username
+        GROUP BY c.assigned_to_user_id, u.username, u.active_status
         ORDER BY active_count DESC, u.username ASC`,
       params
     );
@@ -54,6 +76,7 @@ export async function GET(req) {
     const groups = rows.map((r) => ({
       user_id: r.user_id,
       username: r.username,
+      active_status: r.active_status || null, // the ONE authoritative value (users.active_status)
       active_count: Number(r.active_count) || 0,
       done_count: Number(r.done_count) || 0,
       pending_count: Number(r.pending_count) || 0,
@@ -62,6 +85,44 @@ export async function GET(req) {
     return NextResponse.json({ groups, total, callers: groups.length }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("active-workers GET error:", err);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}
+
+// POST /api/contacts/active-workers  { user_id, active_status }
+// Add/update ONE worker's Active Status. This is the authoritative place the
+// status is managed (§2). Gated by the SAME permission as the page itself
+// (Page Access "contacts" + supervisor/admin) — so no one gains edit rights just
+// because the page exists, and the caller's own calling permissions are untouched.
+// Writes users.active_status (the single authoritative value the Log Outcome
+// display reads back), never a duplicate field.
+export async function POST(req) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!(await pageAllowed(session, "contacts", session && isSupervisor(session)))) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+    await ensureActiveStatusColumn();
+    const body = await req.json().catch(() => ({}));
+    const userId = Number(body?.user_id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return NextResponse.json({ message: "A valid user is required." }, { status: 400 });
+    }
+    const value = normalizeActiveStatus(body?.active_status);
+    if (!value) {
+      return NextResponse.json({ message: "Invalid active status." }, { status: 400 });
+    }
+    const res = await query(`UPDATE users SET active_status = ? WHERE id = ?`, [value, userId]);
+    if (!res?.affectedRows) {
+      return NextResponse.json({ message: "User not found." }, { status: 404 });
+    }
+    const [row] = await query(`SELECT active_status FROM users WHERE id = ?`, [userId]);
+    return NextResponse.json(
+      { ok: true, user_id: userId, active_status: row?.active_status || value },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+  } catch (err) {
+    console.error("active-workers POST error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
