@@ -27,22 +27,13 @@ import { query } from "@/lib/db";
 // Party matchers against the free-text party name (there is no party flag; parties
 // are stored by their Party-Master name). Each covers the common English + Hindi
 // forms, case-insensitively, so the stored name resolves regardless of exact form.
-const AAP_MATCH_SQL = `(
-  UPPER(TRIM(e.party)) = 'AAP'
-  OR LOWER(e.party) LIKE '%aam aadmi%'
-  OR e.party LIKE '%आम आदमी%'
-)`;
-const BJP_MATCH_SQL = `(
-  UPPER(TRIM(e.party)) = 'BJP'
-  OR LOWER(e.party) LIKE '%bharatiya janata%'
-  OR e.party LIKE '%भारतीय जनता%'
-)`;
-const INC_MATCH_SQL = `(
-  UPPER(TRIM(e.party)) IN ('INC', 'CONGRESS')
-  OR LOWER(e.party) LIKE '%indian national congress%'
-  OR LOWER(e.party) LIKE '%congress%'
-  OR e.party LIKE '%कांग्रेस%'
-)`;
+// Parameterized by the column so the SAME canonical mapping identifies the party of
+// the Current MLA, of each competitor (mp.party / mp.competitorN_party), and of an
+// election-history row (e.party) — one rule, never divergent name matching.
+const aapMatch = (c) => `(UPPER(TRIM(${c})) = 'AAP' OR LOWER(${c}) LIKE '%aam aadmi%' OR ${c} LIKE '%आम आदमी%')`;
+const bjpMatch = (c) => `(UPPER(TRIM(${c})) = 'BJP' OR LOWER(${c}) LIKE '%bharatiya janata%' OR ${c} LIKE '%भारतीय जनता%')`;
+const incMatch = (c) => `(UPPER(TRIM(${c})) IN ('INC', 'CONGRESS') OR LOWER(${c}) LIKE '%indian national congress%' OR LOWER(${c}) LIKE '%congress%' OR ${c} LIKE '%कांग्रेस%')`;
+const AAP_MATCH_SQL = aapMatch("e.party"); // still used to pick the AAP candidate column
 
 // Normalize a filter value (single id, array of ids, or comma-separated string)
 // to an array of positive integers.
@@ -196,35 +187,43 @@ export function comparisonSummary(rows) {
   };
 }
 
-// PARTY-WISE VOTE TOTALS for the summary cards (BJP / INC / AAP). For every
-// master assembly in the current filter scope, we take that assembly's MOST
-// RECENT election year (the applicable election — same anchor the AAP column
-// uses) and SUM the votes of EVERY row of each party in that year (so multiple
-// candidate records of the same party are all counted, never just one), then add
-// those sums across all filtered assemblies. Read live from la_mla_elections, so
-// the totals update whenever the source vote data changes. Also returns the
-// AAP-vs-BJP margin and who leads.
+// PARTY-WISE VOTE TOTALS for the summary cards (BJP / INC / AAP), computed from
+// the SOURCE OF TRUTH — the MLA Profile of every filtered assembly. For each
+// assembly the profile carries FOUR people with a party and a vote count:
+//   • the Current MLA               (mp.party            / mp.mla_votes)
+//   • Competitor 1 / 2 / 3          (mp.competitorN_party / mp.competitorN_votes)
+// Each person's votes are added to THEIR OWN party's total (party read via the
+// same canonical matcher, not position — so a competitor is credited to whatever
+// party is actually stored for them, and the Current MLA's votes ARE included in
+// their party). Every one of the four vote fields is summed EXACTLY ONCE, so
+// there is no double counting, and the whole filtered dataset is aggregated in
+// the database — never a paginated subset. Also returns the AAP-vs-BJP margin.
 export async function fetchComparisonPartyTotals(filters = {}) {
   const { where: geoWhere, params: geoParams } = geoFilter(filters);
   const whereSql = geoWhere.length ? `AND ${geoWhere.join(" AND ")}` : "";
 
+  // The four (party column, votes column) pairs a profile contributes.
+  const PEOPLE = [
+    ["mp.party", "mp.mla_votes"],
+    ["mp.competitor1_party", "mp.competitor1_votes"],
+    ["mp.competitor2_party", "mp.competitor2_votes"],
+    ["mp.competitor3_party", "mp.competitor3_votes"],
+  ];
+  // Sum of every person's votes whose party matches, each counted once.
+  const partySum = (match) =>
+    `COALESCE(SUM(${PEOPLE.map(([p, v]) => `CASE WHEN ${match(p)} THEN COALESCE(${v}, 0) ELSE 0 END`).join(" + ")}), 0)`;
+
   const [row] = await query(
     `SELECT
-        COALESCE(SUM(CASE WHEN ${BJP_MATCH_SQL} THEN e.votes ELSE 0 END), 0) AS bjp_total,
-        COALESCE(SUM(CASE WHEN ${INC_MATCH_SQL} THEN e.votes ELSE 0 END), 0) AS inc_total,
-        COALESCE(SUM(CASE WHEN ${AAP_MATCH_SQL} THEN e.votes ELSE 0 END), 0) AS aap_total
-       FROM la_mla_elections e
-       JOIN la_assemblies a  ON a.id = e.assembly_id
+        ${partySum(bjpMatch)} AS bjp_total,
+        ${partySum(incMatch)} AS inc_total,
+        ${partySum(aapMatch)} AS aap_total
+       FROM la_mla_profiles mp
+       JOIN la_assemblies a  ON a.id = mp.assembly_id
        JOIN locations al  ON al.id = a.location_id AND al.type = 'assembly'
        LEFT JOIN locations dl  ON dl.id  = al.parent_id  AND dl.type  = 'district'
        LEFT JOIN locations lsl ON lsl.id = dl.parent_id  AND lsl.type = 'lok_sabha'
        LEFT JOIN locations zl  ON zl.id  = lsl.parent_id AND zl.type  = 'zone'
-       JOIN (
-         SELECT assembly_id, MAX(election_year) AS yr
-           FROM la_mla_elections
-          WHERE election_year IS NOT NULL
-          GROUP BY assembly_id
-       ) latest ON latest.assembly_id = e.assembly_id AND e.election_year = latest.yr
       WHERE a.location_id IS NOT NULL
         ${whereSql}`,
     geoParams
