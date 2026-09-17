@@ -99,6 +99,37 @@ export async function resolveLink(token) {
 // and no other person's data — only what the form has to print at the top. The
 // ward/booth defaults ride along because they are properties of the drive that
 // the form fills in for the person anyway.
+// The public form shows constituency names in Hindi. The master (locations)
+// holds the canonical name in `name`; if a deployment has ALSO captured a Hindi
+// name in a dedicated column, we DISPLAY that and fall back to `name` for any
+// record without one — so the dropdown reads Hindi wherever the master has it,
+// and never breaks or drops a constituency where it doesn't. Only the label
+// changes: the id stays the key that is submitted and stored (see the resolver
+// on POST), so district/Lok Sabha/zone relationships are untouched, and nothing
+// is hardcoded. The detected column is one of a fixed whitelist, so interpolating
+// its name is injection-safe. Cached for the process after the first check.
+let assemblyNameColCache; // undefined = unchecked; string = column; null = none
+const HI_NAME_COLS = ["name_hi", "name_hindi", "hindi_name", "name_hn"];
+async function assemblyNameExpr() {
+  if (assemblyNameColCache === undefined) {
+    try {
+      const rows = await query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'locations'
+            AND COLUMN_NAME IN (?, ?, ?, ?)`,
+        HI_NAME_COLS
+      );
+      const found = new Set(rows.map((r) => r.COLUMN_NAME));
+      assemblyNameColCache = HI_NAME_COLS.find((c) => found.has(c)) || null;
+    } catch {
+      assemblyNameColCache = null; // schema probe unavailable → behave as today
+    }
+  }
+  return assemblyNameColCache
+    ? `COALESCE(NULLIF(TRIM(\`${assemblyNameColCache}\`), ''), name)`
+    : "name";
+}
+
 export async function publicFormContext(token) {
   try {
     await ensureRegistrationSchema();
@@ -109,9 +140,12 @@ export async function publicFormContext(token) {
     // The constituency list people choose from. Constituency names are public
     // information (they are on every ballot), so serving them here exposes
     // nothing — and choosing from the master list is what keeps the data
-    // clean enough to group by, which free text never is.
+    // clean enough to group by, which free text never is. Displayed in Hindi
+    // when the master carries a Hindi name (see assemblyNameExpr), else the
+    // canonical name; the id (the value submitted) is unchanged either way.
+    const nameExpr = await assemblyNameExpr();
     const constituencies = await query(
-      `SELECT id, name FROM locations WHERE type = 'assembly' ORDER BY name ASC`
+      `SELECT id, ${nameExpr} AS name FROM locations WHERE type = 'assembly' ORDER BY ${nameExpr} ASC, name ASC`
     );
 
     return NextResponse.json(
