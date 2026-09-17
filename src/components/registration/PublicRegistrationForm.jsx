@@ -60,6 +60,12 @@ const STRINGS = {
     section1: "पंजीयन फॉर्म",
     personType: "प्रकार",
     voter: "मतदाता", wantsWorker: "कार्यकर्ता बनना है",
+    worker: "कार्यकर्ता",
+    chooseTypeTitle: "आप किसका पंजीयन करना चाहते हैं?",
+    chooseTypeSub: "आरंभ करने के लिए प्रकार चुनें",
+    workerDesc: "पार्टी कार्यकर्ता के रूप में पंजीयन करें",
+    voterDesc: "मतदाता के रूप में पंजीयन करें",
+    changeType: "प्रकार बदलें",
     name: "नाम", namePh: "पूरा नाम",
     mobile: "मोबाइल नंबर", mobilePh: "10 अंकों का नंबर",
     address: "पूरा पता", addressPh: "मकान नं., मोहल्ला, शहर",
@@ -120,6 +126,12 @@ const STRINGS = {
     section1: "Registration Form",
     personType: "Person Type",
     voter: "Voter", wantsWorker: "Wants to be a Worker",
+    worker: "Worker",
+    chooseTypeTitle: "What would you like to register?",
+    chooseTypeSub: "Choose a type to begin",
+    workerDesc: "Register as a party worker",
+    voterDesc: "Register as a voter",
+    changeType: "Change type",
     name: "Name", namePh: "Full name",
     mobile: "Mobile Number", mobilePh: "10-digit number",
     address: "Full Address", addressPh: "House no., locality, city",
@@ -176,7 +188,12 @@ export default function PublicRegistrationForm({ token }) {
   // Person being registered. There is deliberately no collector state: who gets
   // the credit is a property of the link, not something this form collects.
   const [personType, setPersonType] = useState("voter");
-  const [wantsWorker, setWantsWorker] = useState("yes"); // only on the worker branch
+  // The FIRST step: what is being registered — Worker or Voter. It gates the
+  // whole form (no field is shown until it is chosen), so the record type is a
+  // deliberate up-front choice, not a buried Yes/No. Kept in sessionStorage so a
+  // refresh mid-session cannot silently flip Worker↔Voter (§7); browser
+  // back/forward never touch it because it is pure client state, not the URL (§8).
+  const [regType, setRegType] = useState(null); // null | "worker" | "voter"
   const [workerRole, setWorkerRole] = useState("");
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -231,10 +248,18 @@ export default function PublicRegistrationForm({ token }) {
 
   const t = STRINGS[lang];
 
+  // Per-tab, per-link key: /join and each /r/<token> keep their own choice, so a
+  // choice made on one link never leaks into another opened in the same tab.
+  const REGTYPE_KEY = `aap_reg_type_${token || "join"}`;
+
   // Restore the language this phone last used, and keep the clock ticking for
   // the "what is about to be recorded" line (the real stamp is server-side).
   useEffect(() => {
     try { const s = localStorage.getItem(LANG_KEY); if (s === "hi" || s === "en") setLang(s); } catch { /* storage off */ }
+    // Restore a type chosen earlier in this session so a refresh keeps the same
+    // form (§7). The data fetch below keeps the loader up until it resolves, so
+    // this synchronous restore lands before the selection/form choice is drawn.
+    try { const rt = sessionStorage.getItem(REGTYPE_KEY); if (rt === "worker" || rt === "voter") { setRegType(rt); setPersonType(rt); } } catch { /* storage off */ }
     const tick = () => setNow(new Date());
     tick();
     const id = setInterval(tick, 30000);
@@ -273,7 +298,7 @@ export default function PublicRegistrationForm({ token }) {
   useEffect(() => { load(); }, [load]);
 
   function resetPerson() {
-    setPersonType("voter"); setWantsWorker("yes"); setWorkerRole(""); setWardName("");
+    setPersonType("voter"); setWorkerRole(""); setWardName("");
     setName(""); setMobile(""); setAddress("");
     setPhotoUrl(""); setPhotoPreview(""); setPhotoErr("");
     setOtpStage("idle"); setOtpCode(""); setOtpFor(""); setOtpNote("");
@@ -281,6 +306,26 @@ export default function PublicRegistrationForm({ token }) {
     // one patch, so clearing them would mean re-picking the same values for
     // every single person they register.
     setAreaBooth((v) => v);
+  }
+
+  // First-step choice: pick Worker or Voter, then the matching form opens. The
+  // choice sets the record type directly and is remembered for this session.
+  function chooseType(next) {
+    setRegType(next);
+    setPersonType(next);
+    setErr("");
+    try { sessionStorage.setItem(REGTYPE_KEY, next); } catch { /* storage off */ }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Go back to the selection screen (user-initiated) and clear the person fields
+  // so nothing typed under one type carries into the other.
+  function backToSelection() {
+    setRegType(null);
+    try { sessionStorage.removeItem(REGTYPE_KEY); } catch { /* storage off */ }
+    resetPerson();
+    setErr("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   // Upload the chosen photo to the persistent store; keep a local preview.
@@ -311,6 +356,9 @@ export default function PublicRegistrationForm({ token }) {
     setSession({ required: true, authenticated: false });
     setSubmittedWorker(false);
     resetPerson();
+    // A new handler may log in next — make them choose the type afresh.
+    setRegType(null);
+    try { sessionStorage.removeItem(REGTYPE_KEY); } catch { /* ignore */ }
   }
 
   // Verification is required only when the drive says so AND a provider is
@@ -488,6 +536,73 @@ export default function PublicRegistrationForm({ token }) {
 
   const c = boot.campaign || {};
 
+  // STEP 1 — the first thing shown once the link is valid (and, on a worker
+  // link, once the handler has verified): choose Worker or Voter. No worker
+  // fields, and no old "कार्यकर्ता बनना है?" Yes/No — the type is picked here and
+  // then the matching form opens (§1–§4).
+  if (!regType) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="text-white" style={{ background: BRAND }}>
+          <div className="max-w-xl mx-auto px-4 py-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
+                <h1 className="text-lg font-bold mt-0.5">{c.name || t.fallbackTitle}</h1>
+              </div>
+              {LangButton}
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-xl mx-auto px-4 py-6 space-y-5">
+          {/* Who is handling this session (worker link) stays visible here too. */}
+          {session?.authenticated && session.handler && (
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">{t.handledBy}</p>
+                <p className="font-bold text-gray-900 truncate">{session.handler.name}</p>
+                {session.handler.mobile ? <p className="text-xs text-gray-600">{session.handler.mobile}</p> : null}
+              </div>
+              <button type="button" onClick={handlerLogout} className="text-xs font-semibold text-blue-700 hover:underline shrink-0">{t.logout}</button>
+            </div>
+          )}
+
+          <div className="text-center pt-2">
+            <h2 className="text-lg font-bold text-gray-900">{t.chooseTypeTitle}</h2>
+            <p className="text-sm text-gray-500 mt-1">{t.chooseTypeSub}</p>
+          </div>
+
+          {/* Two large, stacked-on-mobile choices — simple and thumb-friendly. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button type="button" onClick={() => chooseType("worker")}
+                    className="rounded-2xl border-2 border-gray-200 bg-white p-5 text-left hover:border-[#164FA3] hover:shadow-sm transition flex items-start gap-3">
+              <span className="w-12 h-12 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: ACCENT }}>
+                <UserPlus size={22} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-base font-bold text-gray-900">{t.worker}</span>
+                <span className="block text-[13px] text-gray-500 mt-0.5">{t.workerDesc}</span>
+              </span>
+            </button>
+            <button type="button" onClick={() => chooseType("voter")}
+                    className="rounded-2xl border-2 border-gray-200 bg-white p-5 text-left hover:border-[#164FA3] hover:shadow-sm transition flex items-start gap-3">
+              <span className="w-12 h-12 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: ACCENT }}>
+                <Vote size={22} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-base font-bold text-gray-900">{t.voter}</span>
+                <span className="block text-[13px] text-gray-500 mt-0.5">{t.voterDesc}</span>
+              </span>
+            </button>
+          </div>
+
+          <p className="text-center text-[11px] text-gray-400 pt-2">{t.footer}</p>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Election details — the form's fixed header, set by the drive */}
@@ -536,25 +651,15 @@ export default function PublicRegistrationForm({ token }) {
           <input ref={honeypot} name="website" tabIndex={-1} autoComplete="off" aria-hidden="true"
                  className="absolute opacity-0 h-0 w-0 -z-10 pointer-events-none" />
 
-          {/* The very first question: do they want to become a worker? हाँ shows
-              the worker fields (incl. Ward Name); ना is an ordinary voter and the
-              worker-only fields stay hidden and unvalidated. */}
-          <div>
-            <span className="block text-sm font-semibold text-gray-800 mb-2">{t.kbn} <span className="text-red-600">*</span></span>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setPersonType("worker")}
-                      className={`h-14 rounded-xl border-2 text-sm font-semibold flex flex-col items-center justify-center gap-0.5 transition ${
-                        personType === "worker" ? "text-white border-transparent" : "bg-white text-gray-700 border-gray-300"}`}
-                      style={personType === "worker" ? { background: ACCENT } : undefined}>
-                <UserPlus size={17} />{t.yes}
-              </button>
-              <button type="button" onClick={() => setPersonType("voter")}
-                      className={`h-14 rounded-xl border-2 text-sm font-semibold flex flex-col items-center justify-center gap-0.5 transition ${
-                        personType === "voter" ? "text-white border-transparent" : "bg-white text-gray-700 border-gray-300"}`}
-                      style={personType === "voter" ? { background: ACCENT } : undefined}>
-                <Vote size={17} />{t.no}
-              </button>
-            </div>
+          {/* The registration type was chosen on the first step (§1–§3). It is
+              shown here as a compact, changeable summary — never the old
+              "कार्यकर्ता बनना है?" Yes/No. "Change type" returns to that step. */}
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800">
+              {personType === "worker" ? <UserPlus size={16} style={{ color: ACCENT }} /> : <Vote size={16} style={{ color: ACCENT }} />}
+              {personType === "worker" ? t.worker : t.voter}
+            </span>
+            <button type="button" onClick={backToSelection} className="text-[12px] font-semibold text-[#164FA3] underline">{t.changeType}</button>
           </div>
 
           <Field label={t.name} required>
