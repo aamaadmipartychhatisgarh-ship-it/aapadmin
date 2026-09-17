@@ -24,8 +24,12 @@ const SENTIMENT_PILL = {
   supporter: { bg: "bg-emerald-200 text-emerald-800", label: "Supporter" },
   neutral:   { bg: "bg-gray-100 text-gray-600", label: "Neutral" },
   negative:  { bg: "bg-orange-100 text-orange-700", label: "Negative" },
-  opponent:  { bg: "bg-red-100 text-red-700", label: "Opponent" },
+  not_supporter: { bg: "bg-red-100 text-red-700", label: "Not a Supporter" },
+  opponent:  { bg: "bg-red-200 text-red-800", label: "Opponent" },
 };
+// Fixed display order for the Sentiment Summary (each shown even at 0), plus a
+// "Not Set" bucket for calls with no sentiment recorded.
+const SENTIMENT_ORDER = ["positive", "supporter", "neutral", "negative", "not_supporter", "opponent"];
 
 function fmtDur(seconds) {
   if (!seconds && seconds !== 0) return "—";
@@ -48,6 +52,9 @@ export default function AdminCallRecords() {
   const [summary, setSummary] = useState({ total: 0, picked: 0, notPicked: 0, followUps: 0, avgDuration: null, totalCallMinutes: 0 });
   // Per-day Total Call Minutes for the default (no user selected) view.
   const [perDayMinutes, setPerDayMinutes] = useState([]);
+  // Sentiment + Call Status breakdowns (backend counts over the filtered set).
+  const [sentimentCounts, setSentimentCounts] = useState({});
+  const [statusCounts, setStatusCounts] = useState({});
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -120,6 +127,8 @@ export default function AdminCallRecords() {
         setCalls(d.calls || []);
         if (d.summary) setSummary(d.summary);
         setPerDayMinutes(d.perDayMinutes || []);
+        setSentimentCounts(d.sentimentCounts || {});
+        setStatusCounts(d.statusCounts || {});
       }
     } finally {
       setLoading(false);
@@ -168,6 +177,29 @@ export default function AdminCallRecords() {
         <SumCard label="Not Picked Calls" value={summary.notPicked} />
         <SumCard label="Follow-ups" value={summary.followUps} />
         <SumCard label="Total Call Minutes" value={Number(summary.totalCallMinutes || 0).toLocaleString("en-IN")} />
+      </div>
+
+      {/* Sentiment + Call Status summaries — counts over the SAME filtered
+          dataset (from backend aggregates, uncapped by the row limit). */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+          <h3 className="text-sm font-bold text-gray-900 mb-3">Sentiment Summary</h3>
+          <div className="flex flex-wrap gap-2">
+            {SENTIMENT_ORDER.map((k) => (
+              <CountChip key={k} label={SENTIMENT_PILL[k].label} count={sentimentCounts[k] || 0} className={SENTIMENT_PILL[k].bg} />
+            ))}
+            <CountChip label="Not Set" count={sentimentCounts.__none__ || 0} className="bg-gray-50 text-gray-500 border border-gray-200" />
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+          <h3 className="text-sm font-bold text-gray-900 mb-3">Call Status Summary</h3>
+          <div className="flex flex-wrap gap-2">
+            {statuses.map((s) => (
+              <CountChip key={s.id} label={s.name} count={statusCounts[s.name] || 0} className={(STATUS_PILL[s.name]?.bg) || "bg-gray-100 text-gray-600 border-gray-200"} />
+            ))}
+            {statusCounts.__none__ ? <CountChip label="Not Set" count={statusCounts.__none__} className="bg-gray-50 text-gray-500 border border-gray-200" /> : null}
+          </div>
+        </div>
       </div>
 
       {/* Default view: Total Call Minutes per Day (over the current filters).
@@ -376,6 +408,15 @@ export default function AdminCallRecords() {
 
 function Label({ children }) {
   return <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">{children}</label>;
+}
+
+function CountChip({ label, count, className = "" }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg ${className}`}>
+      {label}
+      <span className="tabular-nums font-bold">{Number(count || 0).toLocaleString("en-IN")}</span>
+    </span>
+  );
 }
 
 function SumCard({ label, value, accent }) {

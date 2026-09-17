@@ -134,6 +134,28 @@ export async function GET(req) {
       .filter((r) => r.day)
       .map((r) => ({ day: String(r.day), minutes: Math.round((Number(r.dur) || 0) / 60) }));
 
+    // Sentiment + Call Status breakdowns — backend GROUP BY over the SAME base
+    // filtered dataset (uncapped by the 1000-row list limit, and — like the other
+    // summary cards — independent of the status PILL so it shows the full mix).
+    // NULL/blank → a "Not Set" bucket, never silently reassigned. Each call is
+    // counted once per category (no double counting).
+    const sentimentRows = await query(
+      `SELECT COALESCE(NULLIF(TRIM(c.sentiment), ''), '__none__') AS k, COUNT(*) AS n
+         FROM calls c ${where}
+        GROUP BY COALESCE(NULLIF(TRIM(c.sentiment), ''), '__none__')`,
+      params
+    );
+    const statusRows = await query(
+      `SELECT COALESCE(cs.name, '__none__') AS k, COUNT(*) AS n
+         FROM calls c LEFT JOIN call_statuses cs ON c.status_id = cs.id ${where}
+        GROUP BY COALESCE(cs.name, '__none__')`,
+      params
+    );
+    const sentimentCounts = {};
+    for (const r of sentimentRows) sentimentCounts[r.k] = Number(r.n) || 0;
+    const statusCounts = {};
+    for (const r of statusRows) statusCounts[r.k] = Number(r.n) || 0;
+
     // The table/list applies the status filter (on top of the base filters) so
     // selecting a status shows only calls whose ACTUAL status matches it.
     let listWhere = where;
@@ -165,7 +187,7 @@ export async function GET(req) {
     // Total rows matching the CURRENT view (all filters incl. status), uncapped
     // by the 1000-row display limit — kept for callers that show "N matching".
     const [{ total }] = await query(`SELECT COUNT(*) AS total FROM calls c ${listWhere}`, listParams);
-    return Response.json({ calls, total: Number(total) || 0, summary, perDayMinutes }, { status: 200 });
+    return Response.json({ calls, total: Number(total) || 0, summary, perDayMinutes, sentimentCounts, statusCounts }, { status: 200 });
   } catch (error) {
     console.error("Error fetching calls:", error);
     return Response.json({ message: "Internal server error" }, { status: 500 });
