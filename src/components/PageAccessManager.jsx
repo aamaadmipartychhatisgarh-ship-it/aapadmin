@@ -6,6 +6,7 @@ import {
   Check, X, User as UserIcon, FileText, Users as UsersIcon, ChevronRight, ChevronDown, Minus,
 } from "lucide-react";
 import Avatar from "@/components/Avatar";
+import { formatDate } from "@/lib/dateFormat";
 
 // A checkbox that also supports the INDETERMINATE (partial) visual state, which
 // the DOM only exposes via a property (not an attribute) — set through a ref.
@@ -451,7 +452,7 @@ function GrantsTable({ data, pageByKey, onRevoke }) {
                     <Check size={12} /> Granted
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-gray-500 text-xs">{g.created_at ? new Date(g.created_at).toLocaleDateString() : "—"}</td>
+                <td className="px-4 py-2.5 text-gray-500 text-xs">{g.created_at ? formatDate(g.created_at) : "—"}</td>
                 <td className="px-4 py-2.5 text-right">
                   <button onClick={() => onRevoke(g.user_id, g.page_key)} className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 text-xs font-semibold">
                     <Trash2 size={13} /> Remove

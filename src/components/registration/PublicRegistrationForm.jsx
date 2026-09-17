@@ -695,7 +695,7 @@ export default function PublicRegistrationForm({ token }) {
           {/* Registration date/time are recorded automatically by the server. */}
           <p className="text-[12px] text-gray-500">
             {t.autoTime}
-            {now ? ` — ${now.toLocaleDateString("en-IN")} ${now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}
+            {now ? ` — ${now.toLocaleDateString("en-IN").replace(/\//g, "-")} ${now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}
           </p>
 
           {err ? <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{err}</p> : null}

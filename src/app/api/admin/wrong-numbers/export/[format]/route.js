@@ -61,7 +61,8 @@ export async function GET(req, { params }) {
       qp
     );
 
-    const fmtDate = (d) => d ? new Date(d).toLocaleString("en-GB") : "";
+    // DD-MM-YYYY, HH:MM:SS — dashes (not the locale's slashes) for the date part.
+    const fmtDate = (d) => d ? new Date(d).toLocaleString("en-GB").replace(/\//g, "-") : "";
     const stamp = new Date().toISOString().slice(0, 10);
 
     if (format === "xlsx") {

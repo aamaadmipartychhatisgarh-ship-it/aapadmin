@@ -129,7 +129,7 @@ async function buildSummaryReport() {
   );
   return {
     title: "Daily Calling Summary",
-    subtitle: `${new Date().toLocaleDateString("en-GB")} — Total: ${total} calls`,
+    subtitle: `${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")} — Total: ${total} calls`,
     columns: [
       { key: "status_name", label: "Status", flex: 2 },
       { key: "count", label: "Count", flex: 1 },
