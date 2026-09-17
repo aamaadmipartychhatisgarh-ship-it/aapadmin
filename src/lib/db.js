@@ -79,3 +79,17 @@ export async function query(sql, params) {
   });
   return results;
 }
+
+// Run several statements on ONE pooled connection (released afterward). Needed
+// when a sequence of statements must share connection-scoped state — e.g. the
+// MySQL LAST_INSERT_ID() sequence trick used for monotonic number allocation,
+// where the increment and the read-back must be on the same connection.
+export async function withConnection(fn) {
+  const connectionPool = getPool();
+  const conn = await connectionPool.getConnection();
+  try {
+    return await fn(conn);
+  } finally {
+    conn.release();
+  }
+}
