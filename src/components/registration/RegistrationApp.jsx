@@ -530,8 +530,10 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
       )}
 
       {confirmDel && (
-        <ConfirmDeleteWorker
-          worker={confirmDel}
+        <ConfirmDeleteDialog
+          title="Delete this worker?"
+          message={<>Are you sure you want to delete <span className="font-semibold text-gray-900">{confirmDel.name}</span>? This action cannot be undone.</>}
+          confirmLabel="Delete worker"
           deleting={deletingId === confirmDel.id}
           onCancel={() => { if (!deletingId) setConfirmDel(null); }}
           onConfirm={confirmRemove}
@@ -605,11 +607,12 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
   );
 }
 
-// Responsive delete confirmation (spec §1): a worker is NEVER deleted on the row
-// click — this dialog must be explicitly confirmed. Escape and the backdrop both
-// cancel (they never delete), and the Delete button is disabled while the request
-// is in flight so a double-click cannot send two DELETEs.
-function ConfirmDeleteWorker({ worker, deleting, onCancel, onConfirm }) {
+// Responsive delete confirmation (spec §1/§2): the record is NEVER deleted on the
+// row click — this dialog must be explicitly confirmed. Escape and the backdrop
+// both cancel (they never delete), and the Delete button is disabled while the
+// request is in flight so a double-click cannot send two DELETEs. Reused for both
+// a worker and a registration.
+function ConfirmDeleteDialog({ title, message, confirmLabel, deleting, onCancel, onConfirm }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape" && !deleting) onCancel(); };
     window.addEventListener("keydown", onKey);
@@ -617,7 +620,7 @@ function ConfirmDeleteWorker({ worker, deleting, onCancel, onConfirm }) {
   }, [deleting, onCancel]);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-         role="dialog" aria-modal="true" aria-labelledby="del-worker-title"
+         role="dialog" aria-modal="true" aria-labelledby="confirm-del-title"
          onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start gap-3">
@@ -625,10 +628,8 @@ function ConfirmDeleteWorker({ worker, deleting, onCancel, onConfirm }) {
             <Trash2 size={18} />
           </div>
           <div className="min-w-0">
-            <h3 id="del-worker-title" className="text-base font-bold text-gray-900">Delete this worker?</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              Are you sure you want to delete <span className="font-semibold text-gray-900">{worker.name}</span>? This action cannot be undone.
-            </p>
+            <h3 id="confirm-del-title" className="text-base font-bold text-gray-900">{title}</h3>
+            <p className="text-sm text-gray-600 mt-1">{message}</p>
           </div>
         </div>
         <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
@@ -638,7 +639,7 @@ function ConfirmDeleteWorker({ worker, deleting, onCancel, onConfirm }) {
           </button>
           <button type="button" onClick={onConfirm} disabled={deleting}
                   className={`${btnCls} bg-red-600 hover:bg-red-700 text-white justify-center`}>
-            {deleting ? <><Loader2 size={16} className="animate-spin" />Deleting…</> : <><Trash2 size={16} />Delete worker</>}
+            {deleting ? <><Loader2 size={16} className="animate-spin" />Deleting…</> : <><Trash2 size={16} />{confirmLabel}</>}
           </button>
         </div>
       </div>
@@ -786,6 +787,11 @@ function PeopleTab({ filterQs, onError }) {
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [loading, setLoading] = useState(true);
+  // Delete confirmation: the registration awaiting confirmation (null = closed),
+  // the id whose delete is in flight (double-click guard), and a brief success note.
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [okMsg, setOkMsg] = useState("");
 
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
@@ -814,6 +820,29 @@ function PeopleTab({ filterQs, onError }) {
     } catch { onError("Could not update this registration."); }
   }
 
+  // Delete a registration — only after explicit confirmation, guarded by
+  // deletingId so a double-click cannot fire two DELETEs. The backend enforces
+  // permission (super-admin only); on failure the row stays and the real error
+  // shows — never a false success.
+  async function confirmRemove() {
+    const p = confirmDel;
+    if (!p || deletingId) return;
+    setDeletingId(p.id);
+    try {
+      const r = await fetch(`/api/registration/people/${p.id}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { onError(d?.message || "Could not delete this registration."); setConfirmDel(null); return; }
+      setConfirmDel(null);
+      setOkMsg("Registration deleted.");
+      setTimeout(() => setOkMsg(""), 2500);
+      // If the last row on the page was removed, step back a page so the list
+      // never shows an empty page; otherwise reload in place.
+      if (rows.length === 1 && page > 1) setPage((n) => n - 1); else load();
+    } catch {
+      onError("Could not delete this registration."); setConfirmDel(null);
+    } finally { setDeletingId(null); }
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -837,6 +866,7 @@ function PeopleTab({ filterQs, onError }) {
           <option value="rejected">Rejected</option>
         </select>
         <span className="text-sm text-gray-500">{total.toLocaleString("en-IN")} record{total === 1 ? "" : "s"}</span>
+        {okMsg ? <span className="text-sm font-semibold text-green-700 inline-flex items-center gap-1"><Check size={15} />{okMsg}</span> : null}
         <a href={`/api/registration/export?${qs({ report: "registrations" })}`} className={`${btnCls} ml-auto border border-gray-300 text-gray-700 bg-white`}>
           <Download size={16} />Export CSV
         </a>
@@ -850,13 +880,14 @@ function PeopleTab({ filterQs, onError }) {
                 {["Date & time", "Type", "Name", "Mobile", "Constituency", "Ward / Area", "Address", "Added by", "Status"].map((h) => (
                   <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
+                <th className="px-3 py-2 font-semibold whitespace-nowrap text-right">Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
+                <tr><td colSpan={10} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-500">No registrations for these filters yet.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500">No registrations for these filters yet.</td></tr>
               ) : rows.map((p) => (
                 <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50/60 align-top">
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">
@@ -893,6 +924,12 @@ function PeopleTab({ filterQs, onError }) {
                       <option value="rejected">Rejected</option>
                     </select>
                   </td>
+                  {/* Delete — aligned to the right of the row (spec §2). Opens a
+                      confirmation dialog; never deletes on the first click. */}
+                  <td className="px-3 py-2.5 text-right">
+                    <button onClick={() => setConfirmDel(p)} title="Delete registration" aria-label={`Delete ${p.name}`}
+                            className="p-1.5 rounded-md hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -900,6 +937,17 @@ function PeopleTab({ filterQs, onError }) {
         </div>
         <Pager page={page} pages={pages} onPage={setPage} />
       </div>
+
+      {confirmDel && (
+        <ConfirmDeleteDialog
+          title="Delete this registration?"
+          message={<>Are you sure you want to delete the registration for <span className="font-semibold text-gray-900">{confirmDel.name}</span>? This action cannot be undone.</>}
+          confirmLabel="Delete registration"
+          deleting={deletingId === confirmDel.id}
+          onCancel={() => { if (!deletingId) setConfirmDel(null); }}
+          onConfirm={confirmRemove}
+        />
+      )}
     </div>
   );
 }

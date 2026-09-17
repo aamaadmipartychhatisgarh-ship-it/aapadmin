@@ -3118,16 +3118,46 @@ const emptyGeo = () => ({ zone_id: [], lok_sabha_id: [], district_id: [], assemb
 
 // Vote value → Indian-grouped string, or "Not Available" when the DB has no value
 // (never a fake 0 — §7).
-function voteText(v) {
-  const s = nfmt(v);
-  return s == null ? "Not Available" : s;
+// One person tile inside a Comparison card — the Current MLA or a competitor —
+// showing Name · Party Logo · Votes straight from that person's OWN stored
+// fields. Positions are never shifted and a competitor's party is whatever is
+// stored for them (never assumed to be AAP). A missing person shows a clear
+// "Not Available" / "—" rather than being hidden.
+function ComparePerson({ label, highlight, name, party, votes, partyByName }) {
+  return (
+    <div className={`rounded-xl border p-3 ${highlight ? "border-[#164FA3]/25 bg-[#164FA3]/5" : "border-gray-100"}`}>
+      <div className={`text-[11px] font-bold uppercase tracking-wide ${highlight ? "text-[#164FA3]" : "text-gray-400"}`}>{label}</div>
+      <div className="font-semibold text-gray-900 truncate mt-0.5" title={name || ""}>{name || <span className="text-gray-400 font-normal">Not Available</span>}</div>
+      <div className="text-xs text-gray-500 truncate mt-0.5">{party ? <PartyLogo name={party} byName={partyByName} size={16} /> : "—"}</div>
+      <div className="text-sm text-gray-700 mt-0.5">{votes != null ? `${nfmt(votes)} votes` : "—"}</div>
+    </div>
+  );
 }
-// Vote lead → colored label. Incomplete data (either side missing) shows "—".
-function LeadBadge({ row }) {
-  if (row.mla_votes == null || row.aap_votes == null) return <span className="text-gray-400">—</span>;
-  if (row.leader === "Current MLA") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-[#164FA3]/10 text-[#164FA3]">Current MLA</span>;
-  if (row.leader === "AAP Candidate") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Competitor 3</span>;
-  return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Equal Votes</span>;
+
+// One assembly's full comparison card: header (select-for-export, assembly, edit
+// MLA) + a responsive grid of the four people (Current MLA + Competitor 1/2/3).
+function AssemblyCompareCard({ r, partyByName, selected, onToggle, onEditMla }) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <input type="checkbox" checked={selected} onChange={onToggle} className="accent-[#164FA3] shrink-0" title="Select for export" />
+        <div className="min-w-0">
+          <div className="font-bold text-gray-900 truncate">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[11px] font-normal text-gray-400">({r.election_year})</span> : null}</div>
+          <div className="text-xs text-gray-500 truncate">{r.district_name || "—"}</div>
+        </div>
+        {r.mla_name && onEditMla ? (
+          <button onClick={() => onEditMla(r.assembly_id)} title="Edit this MLA's profile"
+            className="ml-auto p-1.5 rounded-md text-gray-500 hover:text-[#164FA3] hover:bg-[#164FA3]/10 shrink-0"><Pencil size={14} /></button>
+        ) : null}
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+        <ComparePerson label="Current MLA" highlight name={r.mla_name} party={r.mla_party} votes={r.mla_votes} partyByName={partyByName} />
+        <ComparePerson label="Competitor 1" name={r.competitor1_name} party={r.competitor1_party} votes={r.competitor1_votes} partyByName={partyByName} />
+        <ComparePerson label="Competitor 2" name={r.competitor2_name} party={r.competitor2_party} votes={r.competitor2_votes} partyByName={partyByName} />
+        <ComparePerson label="Competitor 3" name={r.competitor3_name} party={r.competitor3_party} votes={r.competitor3_votes} partyByName={partyByName} />
+      </div>
+    </div>
+  );
 }
 
 function VoteComparisonTab({ flash, fail, onEditMla }) {
@@ -3263,9 +3293,9 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
       )}
 
       <Card
-        title="Current MLA vs Competitor 3 — Vote Comparison"
+        title="Current MLA vs Competitors — Vote Comparison"
         icon={BarChart3}
-        sub="Assembly-wise comparison of vote counts only. Data comes from the MLA Profile (MLA votes) and Election History (Competitor 3 votes, same election year)."
+        sub="Assembly-wise comparison of vote counts only. Each assembly shows the Current MLA and all three competitors from the MLA Profile — name, party, party logo and votes — with no popup required."
         right={
           <div className="flex items-center gap-2">
             <button onClick={() => exportAs("xlsx")} disabled={!!exporting || loading}
@@ -3293,61 +3323,22 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
           <Empty msg="No assemblies match the current selection." />
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-[11px] uppercase tracking-wide text-gray-400 border-b border-gray-100">
-                    <th className="py-2 pr-2 w-8"><input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className="accent-[#164FA3]" title="Select page" /></th>
-                    <th className="py-2 pr-3">Assembly</th>
-                    <th className="py-2 pr-3">District</th>
-                    <th className="py-2 pr-3">Current MLA</th>
-                    <th className="py-2 pr-3 text-right">MLA Votes</th>
-                    <th className="py-2 pr-3">Competitor 3</th>
-                    <th className="py-2 pr-3 text-right">Competitor 3 Votes</th>
-                    <th className="py-2 pr-3 text-right">Difference</th>
-                    <th className="py-2 pr-3">Vote Lead</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => {
-                    const naMla = r.mla_votes == null, naAap = r.aap_votes == null;
-                    return (
-                      <tr key={r.assembly_id} className="border-b border-gray-50 hover:bg-gray-50/60">
-                        <td className="py-2 pr-2"><input type="checkbox" checked={selected.has(r.assembly_id)} onChange={() => toggleOne(r.assembly_id)} className="accent-[#164FA3]" /></td>
-                        <td className="py-2 pr-3 font-semibold text-gray-900">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[10px] font-normal text-gray-400">({r.election_year})</span> : null}</td>
-                        <td className="py-2 pr-3 text-gray-600">{r.district_name || "—"}</td>
-                        <td className="py-2 pr-3 text-gray-800">
-                          <div className="group/mla flex items-center gap-2 min-w-0">
-                            {/* The Current MLA's OWN uploaded photo (by their profile
-                                record), placeholder when none — never another MLA's. */}
-                            <ProfilePhoto name={r.mla_name || "?"} src={r.mla_photo_url} size={28} editable={false} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3]" />
-                            <div className="min-w-0">
-                              {r.mla_name || <span className="text-gray-400">Not Available</span>}
-                              {r.mla_party ? (
-                                <span className="flex items-center gap-1 text-[10px] text-gray-400">
-                                  <PartyLogo name={r.mla_party} byName={partyByName} size={14} />
-                                  <span className="truncate">{r.mla_party}</span>
-                                </span>
-                              ) : null}
-                            </div>
-                            {/* Edit the Current MLA right here — jumps to the MLA
-                                Profile tab and opens that assembly's editor. */}
-                            {r.mla_name && onEditMla ? (
-                              <button onClick={() => onEditMla(r.assembly_id)} title="Edit this MLA's profile"
-                                className="opacity-0 group-hover/mla:opacity-100 focus:opacity-100 transition-opacity p-1 rounded-md text-gray-500 hover:text-[#164FA3] hover:bg-[#164FA3]/10 shrink-0"><Pencil size={13} /></button>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className={`py-2 pr-3 text-right font-semibold ${naMla ? "text-gray-300" : "text-gray-900"}`}>{voteText(r.mla_votes)}</td>
-                        <td className="py-2 pr-3 text-gray-800">{r.aap_candidate || <span className="text-gray-400">Not Available</span>}</td>
-                        <td className={`py-2 pr-3 text-right font-semibold ${naAap ? "text-gray-300" : "text-gray-900"}`}>{voteText(r.aap_votes)}</td>
-                        <td className={`py-2 pr-3 text-right font-bold ${r.difference == null ? "text-gray-300" : "text-gray-900"}`}>{r.difference == null ? "—" : nfmt(r.difference)}</td>
-                        <td className="py-2 pr-3"><LeadBadge row={r} /></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            {/* Select-all (for export) — the per-assembly checkbox moved onto each
+                card below. */}
+            <label className="inline-flex items-center gap-2 mb-3 text-xs font-medium text-gray-500 cursor-pointer">
+              <input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className="accent-[#164FA3]" /> Select all on this page (for export)
+            </label>
+            {/* One card per assembly showing the Current MLA and ALL THREE
+                competitors directly — no popup needed (spec §1). Each person shows
+                Name · Party Logo · Votes from their OWN stored fields; Competitor 1/2/3
+                keep their positions and their actual party (never assumed AAP). The
+                grid is 2-up on mobile and 4-up from large screens, so no competitor
+                is ever hidden. */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              {rows.map((r) => (
+                <AssemblyCompareCard key={r.assembly_id} r={r} partyByName={partyByName}
+                  selected={selected.has(r.assembly_id)} onToggle={() => toggleOne(r.assembly_id)} onEditMla={onEditMla} />
+              ))}
             </div>
 
             {/* Pagination (§13) — controls only the current page. */}

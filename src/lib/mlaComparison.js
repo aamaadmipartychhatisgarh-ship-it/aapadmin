@@ -102,7 +102,17 @@ export async function fetchComparisonDataset(filters = {}) {
         mp.name         AS mla_name,
         mp.party        AS mla_party,
         mp.photo_url    AS mla_photo_url,
-        mp.mla_votes    AS mla_votes
+        mp.mla_votes    AS mla_votes,
+        mp.competitor1_name  AS competitor1_name,
+        mp.competitor1_party AS competitor1_party,
+        mp.competitor1_votes AS competitor1_votes,
+        mp.competitor2_name  AS competitor2_name,
+        mp.competitor2_party AS competitor2_party,
+        mp.competitor2_votes AS competitor2_votes,
+        mp.competitor3_name  AS competitor3_name,
+        mp.competitor3_party AS competitor3_party,
+        mp.competitor3_votes AS competitor3_votes,
+        mp.competitor_margin AS competitor_margin
        FROM la_assemblies a
        JOIN locations al  ON al.id = a.location_id AND al.type = 'assembly'
        LEFT JOIN locations dl  ON dl.id  = al.parent_id  AND dl.type  = 'district'
@@ -158,6 +168,20 @@ export async function fetchComparisonDataset(filters = {}) {
       mla_party: r.mla_party || null,
       mla_photo_url: r.mla_photo_url || null,
       mla_votes: mlaVotes,
+      // The three competitors from the MLA Profile (the same source as the MLA
+      // Profile view — each person credited to their OWN stored party/votes, never
+      // position-shifted, never assumed to be AAP). Surfaced so the Comparison page
+      // can show Current MLA + Competitor 1/2/3 directly, no popup needed.
+      competitor1_name: (r.competitor1_name && String(r.competitor1_name).trim()) ? r.competitor1_name : null,
+      competitor1_party: r.competitor1_party || null,
+      competitor1_votes: r.competitor1_votes ?? null,
+      competitor2_name: (r.competitor2_name && String(r.competitor2_name).trim()) ? r.competitor2_name : null,
+      competitor2_party: r.competitor2_party || null,
+      competitor2_votes: r.competitor2_votes ?? null,
+      competitor3_name: (r.competitor3_name && String(r.competitor3_name).trim()) ? r.competitor3_name : null,
+      competitor3_party: r.competitor3_party || null,
+      competitor3_votes: r.competitor3_votes ?? null,
+      competitor_margin: r.competitor_margin ?? null,
       aap_candidate: aapCandidate,
       aap_votes: aapVotes,
       election_year: aap?.election_year ?? null,

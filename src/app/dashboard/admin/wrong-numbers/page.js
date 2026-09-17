@@ -35,8 +35,11 @@ export default function Page() {
 }
 
 // Tabs: "Wrong Numbers" (oversight only — the existing module) + "Not Interested"
-// (all roles, data role-scoped server-side). A caller only ever sees the second.
-function WrongNumbersDashboard({ session, oversight, canDelete }) {
+// (all roles, data role-scoped server-side) + the two "10+ Times" repeat-off
+// views. A caller only ever sees Not Interested. Exported so the Contacts page can
+// render the SAME dashboard as its "Wrong Number" tab — one component, no
+// duplicate Wrong Number module/data source.
+export function WrongNumbersDashboard({ session, oversight, canDelete }) {
   const [tab, setTab] = useState(oversight ? "wrong" : "not_interested");
   const [niCount, setNiCount] = useState(null);
   // Sub-tab visibility follows Page Access: a MANAGED user sees only the tabs

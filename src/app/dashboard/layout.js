@@ -201,17 +201,15 @@ export default function DashboardLayout({ children }) {
     [ROLES.SUPER_ADMIN]: [
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers, Influencers and Wrong
-      // Numbers are nested beneath it as child pages (not standalone top-level
-      // items). Wrong Numbers is no longer a standalone side-panel item; its own
-      // page carries the Not Interested / 10+ Switched-Off / 10+ Incoming-Off
-      // tabs. Routes/pages/permissions are unchanged; only the grouping moved.
-      // Influencers stays super_admin-only (its own page-access key), so it is a
-      // child here alone and appears in no other role's menu.
+      // Contacts is a collapsible parent — Active Workers and Influencers are
+      // nested beneath it as child pages. Wrong Number is NOT a side-panel item:
+      // it opens as a tab on the Contacts page itself (with its Not Interested /
+      // 10+ Switched-Off / 10+ Incoming-Off sub-tabs). Routes/pages/permissions
+      // are unchanged. Influencers stays super_admin-only (its own page-access
+      // key), so it is a child here alone and appears in no other role's menu.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
         { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
-        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
@@ -236,14 +234,12 @@ export default function DashboardLayout({ children }) {
       // Same as super_admin except no Users management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers and Wrong Numbers are
-      // nested beneath it as child pages (not standalone top-level items). Wrong
-      // Numbers is no longer a standalone side-panel item; its own page carries
-      // the Not Interested / 10+ Times Switched-Off / 10+ Times Incoming-Off tabs.
-      // Routes/pages/permissions are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers is nested beneath it as
+      // a child page. Wrong Number is NOT a side-panel item: it opens as a tab on
+      // the Contacts page itself (with its Not Interested / 10+ Switched-Off / 10+
+      // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
-        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -263,14 +259,12 @@ export default function DashboardLayout({ children }) {
       // Zone admins manage zone operations; no Users, Master Data, or Social Command (state-level)
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers and Wrong Numbers are
-      // nested beneath it as child pages (not standalone top-level items). Wrong
-      // Numbers is no longer a standalone side-panel item; its own page carries
-      // the Not Interested / 10+ Times Switched-Off / 10+ Times Incoming-Off tabs.
-      // Routes/pages/permissions are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers is nested beneath it as
+      // a child page. Wrong Number is NOT a side-panel item: it opens as a tab on
+      // the Contacts page itself (with its Not Interested / 10+ Switched-Off / 10+
+      // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
-        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -286,14 +280,12 @@ export default function DashboardLayout({ children }) {
       // District admin: focused on field ops within one district
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers and Wrong Numbers are
-      // nested beneath it as child pages (not standalone top-level items). Wrong
-      // Numbers is no longer a standalone side-panel item; its own page carries
-      // the Not Interested / 10+ Times Switched-Off / 10+ Times Incoming-Off tabs.
-      // Routes/pages/permissions are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers is nested beneath it as
+      // a child page. Wrong Number is NOT a side-panel item: it opens as a tab on
+      // the Contacts page itself (with its Not Interested / 10+ Switched-Off / 10+
+      // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
-        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -308,14 +300,12 @@ export default function DashboardLayout({ children }) {
       // Assembly admin: very narrow — booth & ward management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers and Wrong Numbers are
-      // nested beneath it as child pages (not standalone top-level items). Wrong
-      // Numbers is no longer a standalone side-panel item; its own page carries
-      // the Not Interested / 10+ Times Switched-Off / 10+ Times Incoming-Off tabs.
-      // Routes/pages/permissions are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers is nested beneath it as
+      // a child page. Wrong Number is NOT a side-panel item: it opens as a tab on
+      // the Contacts page itself (with its Not Interested / 10+ Switched-Off / 10+
+      // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
-        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
