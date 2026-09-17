@@ -3234,9 +3234,9 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
     : "";
   const cards = summary ? [
     { label: "Total Assemblies", value: summary.total_assemblies, cls: "text-gray-900" },
-    { label: "BJP Total Vote", value: summary.bjp_total ?? 0, cls: "text-[#FF6634]" },
-    { label: "INC Total Vote", value: summary.inc_total ?? 0, cls: "text-[#19AAF8]" },
-    { label: "AAP Total Vote", value: summary.aap_total ?? 0, cls: "text-emerald-600" },
+    { label: "Total BJP Votes", value: summary.bjp_total ?? 0, cls: "text-[#FF6634]" },
+    { label: "Total INC Votes", value: summary.inc_total ?? 0, cls: "text-[#19AAF8]" },
+    { label: "Total AAP Votes", value: summary.aap_total ?? 0, cls: "text-emerald-600" },
     { label: "AAP vs BJP Margin", value: summary.aap_bjp_margin ?? 0, cls: "text-amber-600", hint: marginHint },
   ] : [];
 
