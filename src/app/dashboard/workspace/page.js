@@ -25,6 +25,16 @@ function fmtAssigned(v) {
   return `${date} • ${time}`;
 }
 
+// The caller's self-reported working status shown in the calling area. Stored
+// values are canonical; labels are what the caller sees. Exactly these four.
+const ACTIVE_STATUS_OPTIONS = [
+  { value: "VERY_ACTIVE", label: "Very Active" },
+  { value: "ACTIVE", label: "Active" },
+  { value: "AVERAGE", label: "Average" },
+  { value: "NOT_ACTIVE", label: "Not Active" },
+];
+const ACTIVE_STATUS_LABEL = Object.fromEntries(ACTIVE_STATUS_OPTIONS.map((o) => [o.value, o.label]));
+
 export default function WorkspacePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -85,6 +95,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [queueTab, setQueueTab] = useState("all");
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
+  const [activeStatus, setActiveStatus] = useState(null); // caller's self-reported working status
+  const [savingActiveStatus, setSavingActiveStatus] = useState(false);
   const [statuses, setStatuses] = useState([]);
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -157,6 +169,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     // non-fatal — the queue still loads.
     fetch("/api/workspace/topup", { method: "POST" }).catch(() => {}).finally(() => loadQueue());
     fetch("/api/statuses").then((r) => r.json()).then((d) => setStatuses(d.statuses || []));
+    fetch("/api/workspace/active-status").then((r) => r.json()).then((d) => setActiveStatus(d.active_status || null)).catch(() => {});
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/locations?type=lok_sabha").then((r) => r.json()).then((d) => setLokSabhas(d.locations || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
@@ -532,6 +545,26 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // selected/deselected like any other option in the multi-select.
   const designationOptions = [...designations.map((d) => ({ id: String(d.id), name: d.name })), { id: "none", name: "No Designation" }];
 
+  async function saveActiveStatus(value) {
+    if (value === activeStatus || savingActiveStatus) return;
+    const prev = activeStatus;
+    setActiveStatus(value); // optimistic
+    setSavingActiveStatus(true);
+    try {
+      const r = await fetch("/api/workspace/active-status", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_status: value }),
+      });
+      if (!r.ok) { setActiveStatus(prev); return; } // revert on failure
+      const d = await r.json().catch(() => ({}));
+      if (d.active_status) setActiveStatus(d.active_status);
+    } catch {
+      setActiveStatus(prev);
+    } finally {
+      setSavingActiveStatus(false);
+    }
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
       {/* LEFT: queue */}
@@ -552,6 +585,32 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
             {queue.territory
               ? <>{queue.territory.type === "zone" ? "Zone" : "District"}: <span className="font-semibold text-gray-900">{queue.territory.name}</span></>
               : <span className="text-amber-600">No zone set. Ask an admin.</span>}
+          </div>
+
+          {/* Active Status — the caller's self-reported working status, saved to
+              their own user record. Visible + editable here in the calling area. */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Active Status</span>
+              <span className="text-xs font-semibold text-[#164FA3]">{activeStatus ? ACTIVE_STATUS_LABEL[activeStatus] : "Not set"}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {ACTIVE_STATUS_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => saveActiveStatus(o.value)}
+                  disabled={savingActiveStatus}
+                  className={`text-xs font-semibold px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-60 ${
+                    activeStatus === o.value
+                      ? "bg-[#164FA3] text-white border-[#164FA3]"
+                      : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <button
