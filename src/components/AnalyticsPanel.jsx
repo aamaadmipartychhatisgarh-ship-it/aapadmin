@@ -109,7 +109,7 @@ export default function AnalyticsPanel() {
     (data?.stackedDistrict || []).map((r) => ({
       district: r.district,
       Connected: Number(r.connected),
-      "No Answer": Number(r.no_answer),
+      "Not Picked": Number(r.no_answer),
       "Wrong Number": Number(r.wrong_number),
       Rejected: Number(r.rejected),
       Busy: Number(r.busy),
@@ -191,13 +191,13 @@ export default function AnalyticsPanel() {
                     columns: [
                       { header: "District", flex: 1.6 },
                       { header: "Connected", flex: 1, align: "right" },
-                      { header: "No Answer", flex: 1, align: "right" },
+                      { header: "Not Picked", flex: 1, align: "right" },
                       { header: "Wrong No.", flex: 1, align: "right" },
                       { header: "Rejected", flex: 1, align: "right" },
                       { header: "Busy", flex: 1, align: "right" },
                       { header: "Switched Off", flex: 1, align: "right" },
                     ],
-                    rows: stackedData.map((r) => [r.district, r.Connected, r["No Answer"], r["Wrong Number"], r.Rejected, r.Busy, r["Switched Off"]]),
+                    rows: stackedData.map((r) => [r.district, r.Connected, r["Not Picked"], r["Wrong Number"], r.Rejected, r.Busy, r["Switched Off"]]),
                   },
                   {
                     title: `Workers by Assembly (Total: ${Number(workersByAssemblyTotal).toLocaleString("en-IN")})`,
@@ -332,7 +332,7 @@ export default function AnalyticsPanel() {
                       <Tooltip />
                       <Legend />
                       <Bar dataKey="Connected" stackId="a" fill="#10B981" />
-                      <Bar dataKey="No Answer" stackId="a" fill="#F59E0B" />
+                      <Bar dataKey="Not Picked" stackId="a" fill="#F59E0B" />
                       <Bar dataKey="Wrong Number" stackId="a" fill="#6B7280" />
                       <Bar dataKey="Rejected" stackId="a" fill="#EF4444" />
                       <Bar dataKey="Busy" stackId="a" fill="#8B5CF6" />

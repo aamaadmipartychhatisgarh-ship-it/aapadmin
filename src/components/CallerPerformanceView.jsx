@@ -85,7 +85,7 @@ export default function CallerPerformanceView() {
                 <th className="px-4 py-3 font-semibold text-gray-600">Caller</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Total</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Connected</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">No Answer</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Not Picked</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Wrong #</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Rejected</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Avg Dur</th>

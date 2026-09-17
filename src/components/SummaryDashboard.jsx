@@ -29,7 +29,7 @@ const TerritoryMap = dynamic(() => import("@/components/TerritoryMap"), {
 
 const BUCKET_LABELS = {
   connected: "Connected",
-  no_answer: "No Answer",
+  no_answer: "Not Picked",
   wrong_number: "Wrong Number",
   rejected: "Rude/Rejected",
   busy: "Busy",
