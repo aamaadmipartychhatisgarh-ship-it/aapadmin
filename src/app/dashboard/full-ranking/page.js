@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import StrengthView from "@/components/StrengthView";
 import RankingsView from "@/components/RankingsView";
-import { Gauge, Trophy } from "lucide-react";
+import { Gauge, Trophy, ArrowLeft } from "lucide-react";
 
 // Combined Full Ranking view — opened from the Dashboard Overview's "Full
 // ranking" button. Two tabs (Strength / Rankings) that reuse the existing
@@ -20,9 +21,18 @@ const TABS = [
 
 function Body() {
   const [tab, setTab] = useState("strength"); // default: Strength
+  const router = useRouter();
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {/* This view is drilled into from the Dashboard (not a sidebar item), so it
+          needs its own way back — to the dashboard it was opened from. */}
+      <button
+        onClick={() => router.push("/dashboard")}
+        className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-[#164FA3]"
+      >
+        <ArrowLeft size={15} /> Back to Dashboard
+      </button>
       <div>
         <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Full Ranking</h1>
         <p className="text-gray-500 mt-2 font-medium">Organization strength and performance rankings.</p>
