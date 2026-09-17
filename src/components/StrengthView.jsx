@@ -44,7 +44,6 @@ export default function StrengthView() {
               <th className="px-4 py-3 font-semibold text-gray-600">District</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Required Workers</th>
               <th className="px-4 py-3 font-semibold text-gray-600">Workers</th>
-              <th className="px-4 py-3 font-semibold text-gray-600">Attempt Calls</th>
               <th className="px-4 py-3 font-semibold text-gray-600 w-64">Strength</th>
             </tr>
           </thead>
@@ -57,7 +56,6 @@ export default function StrengthView() {
                   <td className="px-4 py-3 font-medium text-gray-900">{a.district ?? a.name}</td>
                   <td className="px-4 py-3 text-gray-600">{Number(a.requiredWorkers || 0).toLocaleString()}</td>
                   <td className="px-4 py-3 text-gray-600">{Number(a.workers ?? a.worker_count ?? 0).toLocaleString()}</td>
-                  <td className="px-4 py-3 text-gray-600">{Number(a.attemptCalls ?? a.call_count ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${meta.color}`} style={{ width: `${Math.max(0, Math.min(100, Number(a.score) || 0))}%` }} /></div>
