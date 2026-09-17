@@ -8,7 +8,7 @@ import { Phone, Plus, Search, Loader2, Star, X, Pencil, MapPin } from "lucide-re
 import { isOversight } from "@/lib/permissions";
 import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 import { formatDate } from "@/lib/dateFormat";
-import { formatDurationHrMin } from "@/lib/callDuration";
+import { formatDurationHrMinSec } from "@/lib/callDuration";
 import CollapsibleSection from "@/components/CollapsibleSection";
 
 const STATUS_PILL = {
@@ -185,7 +185,7 @@ export default function CallsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-700 text-xs">{c.sentiment ? SENTIMENT_LABEL[c.sentiment] : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-4 py-3 text-right text-xs text-gray-700 whitespace-nowrap">{formatDurationHrMin(c.duration_seconds)}</td>
+                    <td className="px-4 py-3 text-right text-xs text-gray-700 whitespace-nowrap">{formatDurationHrMinSec(c.duration_seconds)}</td>
                     <td className="px-4 py-3 text-gray-600 max-w-xs">
                       <div className="line-clamp-2">{c.remarks || <span className="text-gray-300">—</span>}</div>
                     </td>
@@ -264,7 +264,7 @@ function CallDetailModal({ call, statuses, onClose, onSaved }) {
         </div>
         <div className="text-xs text-gray-500">
           {new Date(call.called_at).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-          {call.duration_seconds != null && <> · {formatDurationHrMin(call.duration_seconds)} talk time</>}
+          {call.duration_seconds != null && <> · {formatDurationHrMinSec(call.duration_seconds)} talk time</>}
         </div>
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
 

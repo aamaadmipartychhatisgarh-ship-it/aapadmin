@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, PhoneOff } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -201,24 +201,19 @@ export default function DashboardLayout({ children }) {
     [ROLES.SUPER_ADMIN]: [
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers and Influencers are
-      // nested beneath it as child pages (not standalone top-level items). Their
-      // routes/pages/permissions are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers, Influencers and Wrong
+      // Numbers are nested beneath it as child pages (not standalone top-level
+      // items). Wrong Numbers is no longer a standalone side-panel item; its own
+      // page carries the Not Interested / 10+ Switched-Off / 10+ Incoming-Off
+      // tabs. Routes/pages/permissions are unchanged; only the grouping moved.
       // Influencers stays super_admin-only (its own page-access key), so it is a
       // child here alone and appears in no other role's menu.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
         { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
+        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
-      // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
-      // are nested beneath it as child pages (not standalone top-level items).
-      // Their routes/pages/permissions are unchanged; only the sidebar grouping
-      // moved. Access is still governed by each page's own "contacts" page key.
-      { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle, children: [
-        { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
-        { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
-      ] },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
@@ -241,21 +236,16 @@ export default function DashboardLayout({ children }) {
       // Same as super_admin except no Users management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers is nested beneath it as
-      // a child page (not a standalone top-level item). Routes/pages/permissions
-      // are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers and Wrong Numbers are
+      // nested beneath it as child pages (not standalone top-level items). Wrong
+      // Numbers is no longer a standalone side-panel item; its own page carries
+      // the Not Interested / 10+ Times Switched-Off / 10+ Times Incoming-Off tabs.
+      // Routes/pages/permissions are unchanged; only the sidebar grouping moved.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
-      // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
-      // are nested beneath it as child pages (not standalone top-level items).
-      // Their routes/pages/permissions are unchanged; only the sidebar grouping
-      // moved. Access is still governed by each page's own "contacts" page key.
-      { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle, children: [
-        { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
-        { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
-      ] },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -273,21 +263,16 @@ export default function DashboardLayout({ children }) {
       // Zone admins manage zone operations; no Users, Master Data, or Social Command (state-level)
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers is nested beneath it as
-      // a child page (not a standalone top-level item). Routes/pages/permissions
-      // are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers and Wrong Numbers are
+      // nested beneath it as child pages (not standalone top-level items). Wrong
+      // Numbers is no longer a standalone side-panel item; its own page carries
+      // the Not Interested / 10+ Times Switched-Off / 10+ Times Incoming-Off tabs.
+      // Routes/pages/permissions are unchanged; only the sidebar grouping moved.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
-      // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
-      // are nested beneath it as child pages (not standalone top-level items).
-      // Their routes/pages/permissions are unchanged; only the sidebar grouping
-      // moved. Access is still governed by each page's own "contacts" page key.
-      { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle, children: [
-        { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
-        { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
-      ] },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -301,21 +286,16 @@ export default function DashboardLayout({ children }) {
       // District admin: focused on field ops within one district
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers is nested beneath it as
-      // a child page (not a standalone top-level item). Routes/pages/permissions
-      // are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers and Wrong Numbers are
+      // nested beneath it as child pages (not standalone top-level items). Wrong
+      // Numbers is no longer a standalone side-panel item; its own page carries
+      // the Not Interested / 10+ Times Switched-Off / 10+ Times Incoming-Off tabs.
+      // Routes/pages/permissions are unchanged; only the sidebar grouping moved.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
-      // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
-      // are nested beneath it as child pages (not standalone top-level items).
-      // Their routes/pages/permissions are unchanged; only the sidebar grouping
-      // moved. Access is still governed by each page's own "contacts" page key.
-      { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle, children: [
-        { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
-        { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
-      ] },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -328,21 +308,16 @@ export default function DashboardLayout({ children }) {
       // Assembly admin: very narrow — booth & ward management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers is nested beneath it as
-      // a child page (not a standalone top-level item). Routes/pages/permissions
-      // are unchanged; only the sidebar grouping moved.
+      // Contacts is a collapsible parent — Active Workers and Wrong Numbers are
+      // nested beneath it as child pages (not standalone top-level items). Wrong
+      // Numbers is no longer a standalone side-panel item; its own page carries
+      // the Not Interested / 10+ Times Switched-Off / 10+ Times Incoming-Off tabs.
+      // Routes/pages/permissions are unchanged; only the sidebar grouping moved.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
-      // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
-      // are nested beneath it as child pages (not standalone top-level items).
-      // Their routes/pages/permissions are unchanged; only the sidebar grouping
-      // moved. Access is still governed by each page's own "contacts" page key.
-      { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle, children: [
-        { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
-        { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
-      ] },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },

@@ -6,12 +6,13 @@ import { useRouter } from "next/navigation";
 import { isOversight, isAdmin, isCaller } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 import { usePageAccess } from "@/components/usePageAccess";
-import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X, GitMerge, Send, HeartCrack } from "lucide-react";
+import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X, GitMerge, Send, HeartCrack, PhoneOff } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import Avatar from "@/components/Avatar";
 import NotInterestedView from "@/components/NotInterestedView";
+import RepeatOffPanel from "@/components/RepeatOffPanel";
 import { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 
 const REASON_LABEL = Object.fromEntries(WRONG_NUMBER_REASONS.map((r) => [r.value, r.label]));
@@ -46,6 +47,11 @@ function WrongNumbersDashboard({ session, oversight, canDelete }) {
   const has = (k) => Array.isArray(myPages) && myPages.includes(k);
   const showWrong = oversight && (pageRestricted ? has("wn_wrong_list") : true);
   const showNI = pageRestricted ? has("not_interested") : true;
+  // The "10+ Times" repeat-off views (spec §4) — the same oversight audience as
+  // the Wrong Numbers list (and honoring the same Page-Access restriction), so a
+  // managed user gains NO new access. Callers only ever see Not Interested, so
+  // these never show for them.
+  const showRepeat = showWrong;
   useEffect(() => {
     // Keep the active tab valid for what this user may see.
     if (tab === "wrong" && !showWrong) setTab(showNI ? "not_interested" : "wrong");
@@ -72,12 +78,26 @@ function WrongNumbersDashboard({ session, oversight, canDelete }) {
   );
   return (
     <div className="space-y-4 animate-in fade-in duration-500">
-      <div className="flex items-center gap-1 border-b border-gray-200">
+      {/* Tabs scroll horizontally on narrow screens so every tab (incl. the two
+          10+ views) stays reachable on mobile without hiding any (spec §10/§13). */}
+      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
         {showWrong && <Tab id="wrong">Wrong Numbers</Tab>}
         {showNI && <Tab id="not_interested">Not Interested{niCount != null ? ` (${niCount.toLocaleString()})` : ""}</Tab>}
+        {showRepeat && <Tab id="switched">10+ Times Switched Off</Tab>}
+        {showRepeat && <Tab id="incoming">10+ Times Incoming Off</Tab>}
       </div>
       {tab === "wrong" && showWrong ? (
         <Body canDelete={canDelete} embedded />
+      ) : (tab === "switched" || tab === "incoming") && showRepeat ? (
+        <div className="space-y-4">
+          <PageHeader
+            icon={PhoneOff}
+            title={tab === "incoming" ? "10+ Times Incoming Off" : "10+ Times Switched Off"}
+            description="Contacts whose calls crossed the 10+ repeat-off threshold — counted from the call history, one row per unique contact. Nothing is deleted."
+            breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Contacts", href: "/dashboard/admin/contacts" }, { label: "Wrong Numbers" }, { label: tab === "incoming" ? "10+ Times Incoming Off" : "10+ Times Switched Off" }]}
+          />
+          <RepeatOffPanel type={tab} />
+        </div>
       ) : (
         <div className="space-y-4">
           <PageHeader

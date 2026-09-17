@@ -425,6 +425,10 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [copied, setCopied] = useState(null);
+  // Delete confirmation: the worker awaiting confirmation (null = closed) and the
+  // id whose delete is in flight (guards against a double-click firing twice).
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
@@ -465,14 +469,31 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
     } catch { onError("Could not update this worker."); }
   }
 
-  async function remove(w) {
-    if (!window.confirm(`Delete the link for ${w.name}? This cannot be undone.`)) return;
+  // Runs ONLY after explicit confirmation in the dialog. Guarded by deletingId so
+  // a double-click (or a second confirm press) cannot fire two DELETE requests.
+  async function confirmRemove() {
+    const w = confirmDel;
+    if (!w || deletingId) return;
+    setDeletingId(w.id);
     try {
       const r = await fetch(`/api/registration/workers/${w.id}`, { method: "DELETE" });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { onError(d?.message || "Could not delete this worker."); return; }
-      load();
-    } catch { onError("Could not delete this worker."); }
+      if (!r.ok) {
+        // Keep the worker visible and surface the real reason (e.g. the backend
+        // blocks deleting a worker who already has registrations) — never a false
+        // success. Close the dialog so the error banner is readable.
+        onError(d?.message || "Could not delete this worker.");
+        setConfirmDel(null);
+        return;
+      }
+      setConfirmDel(null);
+      load(); // refresh roster + counts so the deleted worker disappears at once
+    } catch {
+      onError("Could not delete this worker.");
+      setConfirmDel(null);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -506,6 +527,15 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
                     onClose={() => setAdding(false)}
                     onDone={() => { setAdding(false); load(); }}
                     onError={onError} />
+      )}
+
+      {confirmDel && (
+        <ConfirmDeleteWorker
+          worker={confirmDel}
+          deleting={deletingId === confirmDel.id}
+          onCancel={() => { if (!deletingId) setConfirmDel(null); }}
+          onConfirm={confirmRemove}
+        />
       )}
 
       <div className={`${cardCls} overflow-hidden`}>
@@ -561,7 +591,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1">
-                      <button onClick={() => remove(w)} title="Delete" className="p-1.5 rounded-md hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
+                      <button onClick={() => setConfirmDel(w)} title="Delete worker" aria-label={`Delete ${w.name}`} className="p-1.5 rounded-md hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
                     </div>
                   </td>
                 </tr>
@@ -570,6 +600,47 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
           </table>
         </div>
         <Pager page={page} pages={pages} onPage={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// Responsive delete confirmation (spec §1): a worker is NEVER deleted on the row
+// click — this dialog must be explicitly confirmed. Escape and the backdrop both
+// cancel (they never delete), and the Delete button is disabled while the request
+// is in flight so a double-click cannot send two DELETEs.
+function ConfirmDeleteWorker({ worker, deleting, onCancel, onConfirm }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape" && !deleting) onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deleting, onCancel]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+         role="dialog" aria-modal="true" aria-labelledby="del-worker-title"
+         onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+            <Trash2 size={18} />
+          </div>
+          <div className="min-w-0">
+            <h3 id="del-worker-title" className="text-base font-bold text-gray-900">Delete this worker?</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              Are you sure you want to delete <span className="font-semibold text-gray-900">{worker.name}</span>? This action cannot be undone.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+          <button type="button" onClick={onCancel} disabled={deleting}
+                  className={`${btnCls} border border-gray-300 text-gray-700 bg-white justify-center`}>
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={deleting}
+                  className={`${btnCls} bg-red-600 hover:bg-red-700 text-white justify-center`}>
+            {deleting ? <><Loader2 size={16} className="animate-spin" />Deleting…</> : <><Trash2 size={16} />Delete worker</>}
+          </button>
+        </div>
       </div>
     </div>
   );

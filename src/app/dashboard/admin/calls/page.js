@@ -10,7 +10,24 @@ import ActionBar from "@/components/ActionBar";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 import { formatDate } from "@/lib/dateFormat";
-import { formatDurationHrMin } from "@/lib/callDuration";
+import { formatDurationHrMinSec } from "@/lib/callDuration";
+
+// Local YYYY-MM-DD (for <input type="date">) from a Date, in the browser's own
+// timezone — the same wall-clock day the app shows everywhere else.
+function ymdLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+// The most recent 3 CALENDAR days (today + the two days before it), from the
+// app's actual current date — never hardcoded. e.g. today 17-09 → 15-09…17-09.
+function last3DaysRange() {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 2);
+  return { from: ymdLocal(from), to: ymdLocal(to) };
+}
 
 const STATUS_PILL = {
   "Phone Picked":   { bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
@@ -44,7 +61,7 @@ export default function AdminCallRecords() {
   const [calls, setCalls] = useState([]);
   // Summary totals come from the API (computed over the whole matching dataset,
   // independent of the status filter and uncapped by the row limit).
-  const [summary, setSummary] = useState({ total: 0, picked: 0, notPicked: 0, followUps: 0, avgDuration: null, totalCallMinutes: 0 });
+  const [summary, setSummary] = useState({ total: 0, picked: 0, notPicked: 0, followUps: 0, avgDuration: null, totalCallMinutes: 0, totalDurationSeconds: 0 });
   // Per-day Total Call Minutes for the default (no user selected) view.
   const [perDayMinutes, setPerDayMinutes] = useState([]);
   // Sentiment + Call Status breakdowns (backend counts over the filtered set).
@@ -62,8 +79,11 @@ export default function AdminCallRecords() {
   const [agentFilter, setAgentFilter] = useState("");
   const [designationFilter, setDesignationFilter] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // Default the Call Records view to the most recent 3 days (spec §6) — computed
+  // from today's real date, never hardcoded. Every summary/table/per-day query
+  // then covers this range until the user widens or clears it.
+  const [dateFrom, setDateFrom] = useState(() => last3DaysRange().from);
+  const [dateTo, setDateTo] = useState(() => last3DaysRange().to);
 
   // Master data
   const [statuses, setStatuses] = useState([]);
@@ -147,7 +167,10 @@ export default function AdminCallRecords() {
     setSearch(""); setStatusFilter(""); setZoneFilter(""); setLokSabhaFilter("");
     setDistrictFilter(""); setAssemblyFilter("");
     setAgentFilter(""); setDesignationFilter(""); setSentimentFilter("");
-    setDateFrom(""); setDateTo("");
+    // Reset returns to the page's DEFAULT view — the last 3 days (spec §6) — not
+    // an all-time load; "All dates" beside the per-day table clears the range.
+    const r = last3DaysRange();
+    setDateFrom(r.from); setDateTo(r.to);
   };
 
 
@@ -171,7 +194,10 @@ export default function AdminCallRecords() {
         <SumCard label="Picked Calls" value={summary.picked} />
         <SumCard label="Not Picked Calls" value={summary.notPicked} />
         <SumCard label="Follow-ups" value={summary.followUps} />
-        <SumCard label="Total Call Minutes" value={Number(summary.totalCallMinutes || 0).toLocaleString("en-IN")} />
+        {/* Total Call Duration over the WHOLE filtered dataset (backend SUM of the
+            stored seconds, uncapped by the row limit), shown in human-readable
+            Hr/Min/Sec — never raw minutes/seconds, never negative (spec §5, §7). */}
+        <SumCard label="Total Call Duration" value={formatDurationHrMinSec(summary.totalDurationSeconds || 0, "0 Sec")} small />
       </div>
 
       {/* Sentiment + Call Status summaries — counts over the SAME filtered
@@ -202,9 +228,26 @@ export default function AdminCallRecords() {
           shows that caller's own Total Call Minutes. */}
       {!agentFilter && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-gray-900">Total Call Minutes per Day</h3>
-            <span className="text-xs text-gray-400">Across all callers matching the current filters</span>
+          <div className="px-5 py-3 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-gray-900">Total Call Minutes per Day</h3>
+              <span className="text-xs text-gray-400">Across all callers matching the current filters · defaults to the last 3 days</span>
+            </div>
+            {/* Compact date picker for the per-day view (spec §6). It drives the
+                SAME date filter used across the page, so the summary, this table
+                and the list all move together; "Last 3 days" restores the default,
+                "All dates" clears it. */}
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+              <input type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date"
+                     className="h-9 px-2.5 rounded-lg border border-gray-200 text-xs outline-none focus:ring-2 focus:ring-[#164FA3]" />
+              <span className="text-gray-400 text-xs">→</span>
+              <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} aria-label="To date"
+                     className="h-9 px-2.5 rounded-lg border border-gray-200 text-xs outline-none focus:ring-2 focus:ring-[#164FA3]" />
+              <button type="button" onClick={() => { const r = last3DaysRange(); setDateFrom(r.from); setDateTo(r.to); }}
+                      className="h-9 px-2.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">Last 3 days</button>
+              <button type="button" onClick={() => { setDateFrom(""); setDateTo(""); }}
+                      className="h-9 px-2.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap">All dates</button>
+            </div>
           </div>
           <div className="overflow-x-auto max-h-80">
             <table className="w-full text-sm">
@@ -375,7 +418,7 @@ export default function AdminCallRecords() {
                           </span>
                         ) : <span className="text-gray-300 text-xs">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-700 text-xs whitespace-nowrap">{formatDurationHrMin(c.duration_seconds)}</td>
+                      <td className="px-4 py-3 text-right text-gray-700 text-xs whitespace-nowrap">{formatDurationHrMinSec(c.duration_seconds)}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-xs">
                         <div className="line-clamp-2">{c.remarks || <span className="text-gray-300">—</span>}</div>
                       </td>
@@ -415,10 +458,13 @@ function CountChip({ label, count, className = "" }) {
   );
 }
 
-function SumCard({ label, value, accent }) {
+function SumCard({ label, value, accent, small }) {
+  // `small` renders wordy values (e.g. "2 Hr 35 Min 42 Sec") a size down and lets
+  // them wrap, so the readable Total Call Duration never overflows the card on
+  // mobile (spec §10).
   return (
     <div className={`${accent ? "bg-[#164FA3] text-white" : "bg-white border border-gray-100"} rounded-xl p-4 shadow-sm`}>
-      <div className={`text-2xl font-bold ${accent ? "" : "text-gray-900"}`}>{value}</div>
+      <div className={`${small ? "text-lg leading-tight break-words" : "text-2xl"} font-bold ${accent ? "" : "text-gray-900"}`}>{value}</div>
       <div className={`text-xs font-medium mt-1 ${accent ? "text-blue-200" : "text-gray-500"}`}>{label}</div>
     </div>
   );

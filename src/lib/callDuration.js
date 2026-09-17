@@ -38,3 +38,30 @@ export function formatDurationHrMin(v, placeholder = "—") {
   if (m > 0) parts.push(`${m} ${m === 1 ? "Minute" : "Minutes"}`);
   return parts.length ? parts.join(" ") : "0 Minutes";
 }
+
+// Compact, human-readable Call Duration for the Call Records UI: "H Hr M Min S Sec".
+//   • Input is the stored duration in SECONDS (the canonical unit) — seconds are
+//     preserved (unlike formatDurationHrMin, which truncates to minutes).
+//   • Any zero part is dropped ("1 Hr 32 Sec", "25 Min 32 Sec", "45 Sec"), so a
+//     unit is only shown when it carries a value — EXCEPT a genuine zero-duration
+//     call, which shows "0 Sec" (a valid outcome, never an error).
+//   • Never negative — a bad/inconsistent value clamps to 0, never "-5 Min".
+//   • null / blank / non-numeric → the caller's placeholder, so it is never
+//     "null", "undefined" or "NaN".
+// This is the ONE formatter for user-facing Call Records durations (table rows,
+// the Search-Card total, call detail), so every surface reads identically while
+// the stored numeric duration stays untouched for sorting/aggregation/exports.
+export function formatDurationHrMinSec(v, placeholder = "—") {
+  if (v == null || v === "") return placeholder;
+  let s = Math.floor(Number(v));
+  if (!Number.isFinite(s)) return placeholder;
+  if (s < 0) s = 0;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const parts = [];
+  if (h > 0) parts.push(`${h} Hr`);
+  if (m > 0) parts.push(`${m} Min`);
+  if (sec > 0) parts.push(`${sec} Sec`);
+  return parts.length ? parts.join(" ") : "0 Sec";
+}
