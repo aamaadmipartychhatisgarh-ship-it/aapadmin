@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, PhoneOff } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -202,6 +202,8 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
+      { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
+      { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
       { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -223,6 +225,8 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
+      { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
+      { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
       { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -244,6 +248,8 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
+      { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
+      { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
       { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -261,6 +267,8 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
+      { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
+      { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
       { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
@@ -277,6 +285,8 @@ export default function DashboardLayout({ children }) {
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
+      { name: "10+ Times Switched Off", href: "/dashboard/admin/repeat-off?type=switched", icon: PhoneOff },
+      { name: "10+ Times Incoming Off", href: "/dashboard/admin/repeat-off?type=incoming", icon: PhoneOff },
       { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },

@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
+import { ensureRepeatOffSchema } from "@/lib/repeatOff";
 
 export async function GET() {
   try {
@@ -12,6 +13,9 @@ export async function GET() {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 
+    // Ensure the "Incoming Off" disposition exists so it appears in every call
+    // status dropdown (all of which read from here).
+    await ensureRepeatOffSchema();
     const statuses = await query("SELECT id, name FROM call_statuses ORDER BY id ASC");
     return Response.json({ statuses }, { status: 200 });
   } catch (error) {

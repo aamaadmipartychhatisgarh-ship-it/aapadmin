@@ -13,6 +13,7 @@ import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
+import { repeatOffExclusion } from "@/lib/repeatOff";
 
 // Never cache the (territory-scoped) supervisor contacts list — a cached copy is
 // what made counts differ between users / shrink over time.
@@ -57,7 +58,10 @@ export async function GET(req) {
     const params = [];
     const statusCond = statusWhere(status);
     if (statusCond) where += ` AND ${statusCond}`;
-    if (wrong !== "1") where += await notWrongNumberClause("c");
+    if (wrong !== "1") {
+      where += await notWrongNumberClause("c");
+      where += await repeatOffExclusion("c");
+    }
     const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });
     where += person.where;
     params.push(...person.params);

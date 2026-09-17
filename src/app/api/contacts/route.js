@@ -12,6 +12,7 @@ import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
+import { repeatOffExclusion } from "@/lib/repeatOff";
 
 // The contacts list (and its photos) must never be served from a cache: it is
 // per-user role/territory scoped and changes as contacts/photos are added, so a
@@ -79,7 +80,12 @@ export async function GET(req) {
     // excluded from every other view of Contacts by default. The `wrong=1`
     // branch below is the one deliberate exception (it's what THAT module
     // itself queries), so skip the exclusion there.
-    if (wrong !== "1") where += await notWrongNumberClause("c");
+    if (wrong !== "1") {
+      where += await notWrongNumberClause("c");
+      // Contacts dispositioned Switched Off / Incoming Off more than 10 times drop
+      // out of the main list (they live on the dedicated "10+ Times …" pages).
+      where += await repeatOffExclusion("c");
+    }
     // Zone / Lok Sabha / District / Assembly / Designation — filter by the PERSON
     // (their linked worker) via the shared helper, so the same selection returns
     // the same people as the Add Workers page and the Distribution panel.
