@@ -10,6 +10,7 @@ import ActionBar from "@/components/ActionBar";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 import { formatDate } from "@/lib/dateFormat";
+import { formatDurationHrMin } from "@/lib/callDuration";
 
 const STATUS_PILL = {
   "Phone Picked":   { bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
@@ -31,15 +32,6 @@ const SENTIMENT_PILL = {
 // "Not Set" bucket for calls with no sentiment recorded.
 const SENTIMENT_ORDER = ["positive", "supporter", "neutral", "negative", "not_supporter", "opponent"];
 
-function fmtDur(seconds) {
-  if (!seconds && seconds !== 0) return "—";
-  // Never render a negative/invalid duration — clamp to 0 (shows as 0:00).
-  let n = Math.floor(Number(seconds));
-  if (!Number.isFinite(n) || n < 0) n = 0;
-  const m = Math.floor(n / 60);
-  const s = n % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
 
 export default function AdminCallRecords() {
   const { data: session, status } = useSession();
@@ -383,7 +375,7 @@ export default function AdminCallRecords() {
                           </span>
                         ) : <span className="text-gray-300 text-xs">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-700 font-mono text-xs">{fmtDur(c.duration_seconds)}</td>
+                      <td className="px-4 py-3 text-right text-gray-700 text-xs whitespace-nowrap">{formatDurationHrMin(c.duration_seconds)}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-xs">
                         <div className="line-clamp-2">{c.remarks || <span className="text-gray-300">—</span>}</div>
                       </td>
