@@ -161,7 +161,7 @@ export const PAGES = [
   // Access; every /api/registration route re-checks this key server-side. The
   // PUBLIC form at /r/<token> is deliberately outside this model — it is
   // unauthenticated by design and gated only by the worker's link token.
-  { key: "voter_registration", label: "Voter & Worker Registration", href: "/dashboard/admin/voter-registration", prefixes: ["/dashboard/admin/voter-registration"], icon: "Vote",
+  { key: "voter_registration", label: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", prefixes: ["/dashboard/admin/voter-registration"], icon: "Vote",
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN] },
 ];
 

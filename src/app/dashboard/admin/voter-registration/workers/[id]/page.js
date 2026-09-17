@@ -54,7 +54,7 @@ export default function LinkWorkersPage() {
   return (
     <div className="max-w-[1200px] mx-auto">
       <button onClick={() => router.push("/dashboard/admin/voter-registration")} className="text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1 mb-4">
-        <ArrowLeft size={15} /> Back to Voter &amp; Worker Registration
+        <ArrowLeft size={15} /> Back to Worker &amp; Voter Registration
       </button>
 
       <div className="flex items-center gap-3 mb-5">

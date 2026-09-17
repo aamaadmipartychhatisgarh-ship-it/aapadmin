@@ -179,7 +179,7 @@ export default function RegistrationApp() {
         <div className="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow-sm p-8 text-center">
           <div className="w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto mb-4"><Shield size={26} /></div>
           <h2 className="text-lg font-bold text-gray-900">Access Denied</h2>
-          <p className="text-sm text-gray-500 mt-2">Voter &amp; Worker Registration is restricted to state-level administrators.</p>
+          <p className="text-sm text-gray-500 mt-2">Worker &amp; Voter Registration is restricted to state-level administrators.</p>
           <button onClick={() => router.push("/dashboard")} className={`${btnCls} mt-6 text-white`} style={{ background: BRAND }}>Back to Dashboard</button>
         </div>
       </div>
@@ -204,7 +204,7 @@ export default function RegistrationApp() {
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white" style={{ background: BRAND }}><Vote size={22} /></div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Voter &amp; Worker Registration</h1>
+            <h1 className="text-xl font-bold text-gray-900">Worker &amp; Voter Registration</h1>
             <p className="text-sm text-gray-500">Unique worker links · automatic attribution</p>
           </div>
         </div>
@@ -263,7 +263,7 @@ export default function RegistrationApp() {
         </div>
         <div className="mt-3">
           <ShareLink big path="/join"
-                     message={"आम आदमी पार्टी छत्तीसगढ़ — मतदाता एवं कार्यकर्ता पंजीयन\n\nकृपया इसी लिंक से पंजीयन करें:"} />
+                     message={"आम आदमी पार्टी छत्तीसगढ़ — कार्यकर्ता एवं मतदाता पंजीयन\n\nकृपया इसी लिंक से पंजीयन करें:"} />
         </div>
       </div>
 
@@ -459,7 +459,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
 
   // Pre-filled WhatsApp message the admin sends to that one worker.
   function whatsappHref(w) {
-    const msg = `नमस्ते ${w.name},\n\nआम आदमी पार्टी छत्तीसगढ़ — मतदाता एवं कार्यकर्ता पंजीयन\n\nयह आपका व्यक्तिगत लिंक है. इसी लिंक से पंजीयन करें ताकि आपका काम आपके नाम दर्ज हो:\n${linkOf(w.token)}\n\nआपकी कार्यकर्ता ID: ${w.worker_code || ""}`;
+    const msg = `नमस्ते ${w.name},\n\nआम आदमी पार्टी छत्तीसगढ़ — कार्यकर्ता एवं मतदाता पंजीयन\n\nयह आपका व्यक्तिगत लिंक है. इसी लिंक से पंजीयन करें ताकि आपका काम आपके नाम दर्ज हो:\n${linkOf(w.token)}\n\nआपकी कार्यकर्ता ID: ${w.worker_code || ""}`;
     const to = w.mobile ? `91${w.mobile}` : "";
     return `https://wa.me/${to}?text=${encodeURIComponent(msg)}`;
   }
