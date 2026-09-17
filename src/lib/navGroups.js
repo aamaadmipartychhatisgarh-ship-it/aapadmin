@@ -65,7 +65,11 @@ export function siblingsForPath(pathname, items) {
 // (see SectionTabs / header quick-jump icons), not listed again in the sidebar.
 export function primaryItems(items) {
   const allGroupedHrefs = new Set(GROUPS.flatMap((g) => g.hrefs));
-  const ungrouped = items.filter((i) => !allGroupedHrefs.has(i.href));
+  // Keep: (a) items in no group, and (b) any collapsible SECTION — an item that
+  // carries its own children (e.g. Wrong Numbers → the "10+ Times" pages). A
+  // curated parent must survive the sidebar shortening even when its own href
+  // happens to sit inside a group, so its child pages stay reachable.
+  const ungrouped = items.filter((i) => !allGroupedHrefs.has(i.href) || (i.children && i.children.length));
   const primaries = GROUPS
     .map((g) => g.hrefs.map((h) => items.find((i) => i.href === h)).find(Boolean))
     .filter(Boolean);
