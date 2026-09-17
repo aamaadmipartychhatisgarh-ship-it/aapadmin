@@ -40,7 +40,6 @@ const STRINGS = {
     photoBadType: "कृपया JPG, JPEG, PNG या WEBP छवि अपलोड करें.",
     photoFailed: "फोटो अपलोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
     wardName: "वार्ड का नाम", wardNamePh: "वार्ड का नाम",
-    booth: "बूथ",
     errWardName: "कृपया वार्ड का नाम भरें.",
     list: "सूची", myVoters: "मेरे वोटर", myWorkers: "मेरे कार्यकर्ता",
     backToForm: "फॉर्म पर वापस जाएँ", totalVoters: "कुल वोटर", totalWorkers: "कुल कार्यकर्ता",
@@ -68,8 +67,6 @@ const STRINGS = {
     name: "नाम", namePh: "पूरा नाम",
     mobile: "मोबाइल नंबर", mobilePh: "10 अंकों का नंबर",
     address: "पूरा पता", addressPh: "मकान नं., मोहल्ला, शहर",
-    wardNo: "वार्ड नंबर", wardPh: "वार्ड",
-    areaBooth: "क्षेत्र / बूथ", areaPh: "क्षेत्र या बूथ",
     workerRole: "कार्यकर्ता भूमिका", workerRolePh: "जैसे बूथ अध्यक्ष, वार्ड प्रभारी",
     autoTime: "पंजीयन दिनांक व समय स्वतः दर्ज होगा",
     submit: "सबमिट करें", saving: "सहेजा जा रहा है…",
@@ -103,7 +100,6 @@ const STRINGS = {
     photoBadType: "Please upload a JPG, JPEG, PNG, or WEBP image.",
     photoFailed: "Unable to upload photo. Please try again.",
     wardName: "Ward Name", wardNamePh: "Ward name",
-    booth: "Booth",
     errWardName: "Please enter the ward name.",
     list: "List", myVoters: "My Voters", myWorkers: "My Workers",
     backToForm: "Back to form", totalVoters: "Total Voters", totalWorkers: "Total Workers",
@@ -131,8 +127,6 @@ const STRINGS = {
     name: "Name", namePh: "Full name",
     mobile: "Mobile Number", mobilePh: "10-digit number",
     address: "Full Address", addressPh: "House no., locality, city",
-    wardNo: "Ward Number", wardPh: "Ward",
-    areaBooth: "Area / Booth", areaPh: "Area or booth",
     workerRole: "Worker Role", workerRolePh: "e.g. Booth President, Ward In-charge",
     autoTime: "Registration date & time are recorded automatically",
     submit: "Submit", saving: "Saving…",
@@ -201,9 +195,7 @@ export default function PublicRegistrationForm({ token }) {
   const [otpNote, setOtpNote] = useState("");
   const [address, setAddress] = useState("");
   const [assemblyId, setAssemblyId] = useState("");
-  const [ward, setWard] = useState("");
   const [wardName, setWardName] = useState("");
-  const [areaBooth, setAreaBooth] = useState("");
   const honeypot = useRef(null);
 
   // "List" view — the karyakarta's own voters / workers for THIS link.
@@ -277,11 +269,11 @@ export default function PublicRegistrationForm({ token }) {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setLoadErr(d?.message || "This link is not valid."); setBoot(null); return; }
       setBoot(d);
-      // Editable defaults for the drive (or, on a karyakarta's link, their own
-      // patch) — the only thing the bootstrap carries besides the header.
+      // Editable default for the drive (or, on a karyakarta's link, their own
+      // patch) — the only thing the bootstrap carries besides the header. The
+      // link's own ward/area still ride along server-side on submit; they are
+      // just no longer fields on this form.
       setAssemblyId((v) => v || (d.defaults?.assembly_id ? String(d.defaults.assembly_id) : ""));
-      setWard((v) => v || d.defaults?.ward_number || "");
-      setAreaBooth((v) => v || d.defaults?.area_booth || "");
     } catch {
       setLoadErr(STRINGS.hi.errLoad);
     } finally {
@@ -296,10 +288,9 @@ export default function PublicRegistrationForm({ token }) {
     setName(""); setMobile(""); setAddress("");
     setPhotoUrl(""); setPhotoPreview(""); setPhotoErr("");
     setOtpStage("idle"); setOtpCode(""); setOtpFor(""); setOtpNote("");
-    // Constituency, ward and booth are deliberately KEPT: a karyakarta works
-    // one patch, so clearing them would mean re-picking the same values for
-    // every single person they register.
-    setAreaBooth((v) => v);
+    // Constituency is deliberately KEPT: a karyakarta works one patch, so
+    // clearing it would mean re-picking the same value for every person they
+    // register.
   }
 
   // First-step choice: pick Worker or Voter, then the matching form opens. The
@@ -423,9 +414,7 @@ export default function PublicRegistrationForm({ token }) {
           mobile: mobile.trim(),
           address: address.trim(),
           assembly_id: assemblyId,
-          ward_number: ward.trim(),
           ward_name: isWorker ? wardName.trim() : "",
-          area_booth: areaBooth.trim(),
           worker_role: isWorker ? workerRole.trim() : "",
           photo_url: photoUrl, // photo is supported for both voter and worker
           website: honeypot.current?.value || "",
@@ -727,18 +716,6 @@ export default function PublicRegistrationForm({ token }) {
               <input className={inputCls} value={wardName} onChange={(e) => setWardName(e.target.value)} placeholder={t.wardNamePh} />
             </Field>
           )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={t.wardNo}>
-              {/* Digits only, enforced as they type and again on the server, so
-                  "07", "7" and "Ward 7" cannot become three separate wards. */}
-              <input className={inputCls} value={ward} onChange={(e) => setWard(e.target.value.replace(/\D/g, ""))}
-                     inputMode="numeric" pattern="[0-9]*" maxLength={10} placeholder={t.wardPh} />
-            </Field>
-            <Field label={t.booth}>
-              <input className={inputCls} value={areaBooth} onChange={(e) => setAreaBooth(e.target.value)} placeholder={t.areaPh} />
-            </Field>
-          </div>
 
           {/* Photo — for BOTH voter and worker (§16). Capture opens the device
               camera where allowed; Choose picks an existing image. Both go through
