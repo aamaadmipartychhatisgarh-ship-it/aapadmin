@@ -9,6 +9,7 @@ import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
+import { formatDate } from "@/lib/dateFormat";
 
 const STATUS_PILL = {
   "Phone Picked":   { bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
@@ -44,7 +45,9 @@ export default function AdminCallRecords() {
   const [calls, setCalls] = useState([]);
   // Summary totals come from the API (computed over the whole matching dataset,
   // independent of the status filter and uncapped by the row limit).
-  const [summary, setSummary] = useState({ total: 0, picked: 0, notPicked: 0, followUps: 0, avgDuration: null });
+  const [summary, setSummary] = useState({ total: 0, picked: 0, notPicked: 0, followUps: 0, avgDuration: null, totalCallMinutes: 0 });
+  // Per-day Total Call Minutes for the default (no user selected) view.
+  const [perDayMinutes, setPerDayMinutes] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -116,6 +119,7 @@ export default function AdminCallRecords() {
         const d = await r.json();
         setCalls(d.calls || []);
         if (d.summary) setSummary(d.summary);
+        setPerDayMinutes(d.perDayMinutes || []);
       }
     } finally {
       setLoading(false);
@@ -163,8 +167,44 @@ export default function AdminCallRecords() {
         <SumCard label="Picked Calls" value={summary.picked} />
         <SumCard label="Not Picked Calls" value={summary.notPicked} />
         <SumCard label="Follow-ups" value={summary.followUps} />
-        <SumCard label="Avg Duration" value={summary.avgDuration != null ? fmtDur(summary.avgDuration) : "—"} />
+        <SumCard label="Total Call Minutes" value={Number(summary.totalCallMinutes || 0).toLocaleString("en-IN")} />
       </div>
+
+      {/* Default view: Total Call Minutes per Day (over the current filters).
+          Hidden once a specific agent is selected — the summary card above then
+          shows that caller's own Total Call Minutes. */}
+      {!agentFilter && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-gray-900">Total Call Minutes per Day</h3>
+            <span className="text-xs text-gray-400">Across all callers matching the current filters</span>
+          </div>
+          <div className="overflow-x-auto max-h-80">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left sticky top-0">
+                <tr>
+                  <th className="px-5 py-2.5 font-semibold text-gray-600">Date</th>
+                  <th className="px-5 py-2.5 font-semibold text-gray-600 text-right">Total Call Minutes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan="2" className="py-8 text-center text-gray-400"><Loader2 className="inline animate-spin text-[#164FA3]" /></td></tr>
+                ) : perDayMinutes.length === 0 ? (
+                  <tr><td colSpan="2" className="py-8 text-center text-gray-400">No calls match the current filters.</td></tr>
+                ) : (
+                  perDayMinutes.map((r) => (
+                    <tr key={r.day} className="border-t border-gray-100 hover:bg-blue-50/30">
+                      <td className="px-5 py-2.5 text-gray-700 whitespace-nowrap">{formatDate(r.day)}</td>
+                      <td className="px-5 py-2.5 text-right font-semibold text-gray-900 font-mono">{Number(r.minutes || 0).toLocaleString("en-IN")}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">

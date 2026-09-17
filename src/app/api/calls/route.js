@@ -96,19 +96,43 @@ export async function GET(req) {
          COALESCE(SUM(cs.name = 'Phone Picked'), 0) AS picked,
          COALESCE(SUM(cs.name = 'Not Picked'), 0) AS not_picked,
          COALESCE(SUM(c.is_follow_up_required = 1), 0) AS follow_ups,
-         AVG(NULLIF(c.duration_seconds, 0)) AS avg_dur
+         AVG(NULLIF(c.duration_seconds, 0)) AS avg_dur,
+         COALESCE(SUM(c.duration_seconds), 0) AS total_dur
        FROM calls c
        LEFT JOIN call_statuses cs ON c.status_id = cs.id
        ${where}`,
       params
     );
+    const totalDurationSeconds = Number(sum?.total_dur) || 0;
     const summary = {
       total: Number(sum?.total) || 0,
       picked: Number(sum?.picked) || 0,
       notPicked: Number(sum?.not_picked) || 0,
       followUps: Number(sum?.follow_ups) || 0,
       avgDuration: sum?.avg_dur != null ? Math.round(Number(sum.avg_dur)) : null,
+      // Total Call Minutes = SUM of the authoritative stored call durations
+      // (seconds → minutes), over the WHOLE filtered dataset (uncapped by the
+      // 1000-row list limit), NOT average × count.
+      totalDurationSeconds,
+      totalCallMinutes: Math.round(totalDurationSeconds / 60),
     };
+
+    // Per-day Total Call Minutes over the SAME filtered dataset — the default
+    // (no user selected) view. GROUP BY the call date; newest first. Respects
+    // every base filter (date / user / geo / designation / sentiment / search /
+    // role scope), so selecting a caller narrows this to that caller's days too.
+    const perDayRows = await query(
+      `SELECT DATE(c.called_at) AS day, COALESCE(SUM(c.duration_seconds), 0) AS dur
+         FROM calls c
+         ${where}
+        GROUP BY DATE(c.called_at)
+        ORDER BY day DESC
+        LIMIT 90`,
+      params
+    );
+    const perDayMinutes = perDayRows
+      .filter((r) => r.day)
+      .map((r) => ({ day: String(r.day), minutes: Math.round((Number(r.dur) || 0) / 60) }));
 
     // The table/list applies the status filter (on top of the base filters) so
     // selecting a status shows only calls whose ACTUAL status matches it.
@@ -141,7 +165,7 @@ export async function GET(req) {
     // Total rows matching the CURRENT view (all filters incl. status), uncapped
     // by the 1000-row display limit — kept for callers that show "N matching".
     const [{ total }] = await query(`SELECT COUNT(*) AS total FROM calls c ${listWhere}`, listParams);
-    return Response.json({ calls, total: Number(total) || 0, summary }, { status: 200 });
+    return Response.json({ calls, total: Number(total) || 0, summary, perDayMinutes }, { status: 200 });
   } catch (error) {
     console.error("Error fetching calls:", error);
     return Response.json({ message: "Internal server error" }, { status: 500 });
