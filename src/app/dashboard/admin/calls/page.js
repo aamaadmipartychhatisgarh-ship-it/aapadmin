@@ -316,6 +316,7 @@ export default function AdminCallRecords() {
               <option value="supporter">Supporter</option>
               <option value="neutral">Neutral</option>
               <option value="negative">Negative</option>
+              <option value="not_supporter">Not a Supporter</option>
               <option value="opponent">Opponent</option>
             </select>
           </div>
