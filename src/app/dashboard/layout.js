@@ -201,8 +201,15 @@ export default function DashboardLayout({ children }) {
     [ROLES.SUPER_ADMIN]: [
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
-      { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      // Contacts is a collapsible parent — Active Workers and Influencers are
+      // nested beneath it as child pages (not standalone top-level items). Their
+      // routes/pages/permissions are unchanged; only the sidebar grouping moved.
+      // Influencers stays super_admin-only (its own page-access key), so it is a
+      // child here alone and appears in no other role's menu.
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
+        { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
+      ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
       // are nested beneath it as child pages (not standalone top-level items).
@@ -216,7 +223,6 @@ export default function DashboardLayout({ children }) {
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
-      { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
       { name: "Worker & Membership", href: "/dashboard/admin/worker-membership", icon: Users },
       { name: "Voter Registration", href: "/dashboard/admin/voter-registration", icon: Vote },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
@@ -229,8 +235,12 @@ export default function DashboardLayout({ children }) {
       // Same as super_admin except no Users management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
-      { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      // Contacts is a collapsible parent — Active Workers is nested beneath it as
+      // a child page (not a standalone top-level item). Routes/pages/permissions
+      // are unchanged; only the sidebar grouping moved.
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
+        { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
       // are nested beneath it as child pages (not standalone top-level items).
@@ -257,8 +267,12 @@ export default function DashboardLayout({ children }) {
       // Zone admins manage zone operations; no Users, Master Data, or Social Command (state-level)
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
-      { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      // Contacts is a collapsible parent — Active Workers is nested beneath it as
+      // a child page (not a standalone top-level item). Routes/pages/permissions
+      // are unchanged; only the sidebar grouping moved.
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
+        { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
       // are nested beneath it as child pages (not standalone top-level items).
@@ -281,8 +295,12 @@ export default function DashboardLayout({ children }) {
       // District admin: focused on field ops within one district
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
-      { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      // Contacts is a collapsible parent — Active Workers is nested beneath it as
+      // a child page (not a standalone top-level item). Routes/pages/permissions
+      // are unchanged; only the sidebar grouping moved.
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
+        { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
       // are nested beneath it as child pages (not standalone top-level items).
@@ -304,8 +322,12 @@ export default function DashboardLayout({ children }) {
       // Assembly admin: very narrow — booth & ward management
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck },
-      { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      // Contacts is a collapsible parent — Active Workers is nested beneath it as
+      // a child page (not a standalone top-level item). Routes/pages/permissions
+      // are unchanged; only the sidebar grouping moved.
+      { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
+        { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+      ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       // Wrong Numbers is a collapsible parent — the "10+ Times" repeat-off pages
       // are nested beneath it as child pages (not standalone top-level items).
