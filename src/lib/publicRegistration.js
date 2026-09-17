@@ -3,7 +3,7 @@ import { query } from "@/lib/db";
 import {
   ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
-import { readRegSession } from "@/lib/regLinkAuth";
+import { readRegSession, resolveCampaignWorkerById } from "@/lib/regLinkAuth";
 import { phoneKey } from "@/lib/phone";
 import { isMobileVerified, consumeVerification, otpConfigured } from "@/lib/registrationOtp";
 
@@ -192,18 +192,27 @@ export async function publicOwnList(req, token, type) {
     if (!link) {
       return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
     }
-    // A worker link's list is private to its verified handler (§13, §19).
+    // The list is ALWAYS private to a verified karyakarta now, and scoped to
+    // their OWN registrations — never anonymous, never another karyakarta's
+    // people (§13, §19, §21–§23). A worker link binds to its owner; /join and
+    // drive links bind to whoever signed in for this campaign.
+    let listWorkerId;
     if (link.mode === "worker") {
       const s = readRegSession(req, token);
       if (!s || String(s.rwid) !== String(link.worker_id)) {
         return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
       }
+      listWorkerId = link.worker_id;
+    } else {
+      const s = readRegSession(req, null);
+      if (!s || !s.rwid || String(s.cid) !== String(link.campaign_id)) {
+        return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
+      }
+      listWorkerId = s.rwid;
     }
     const personType = type === "worker" ? "worker" : "voter";
-    const where = ["p.campaign_id = ?", "p.status = 'active'", "p.person_type = ?"];
-    const params = [link.campaign_id, personType];
-    if (link.mode === "worker") { where.push("p.worker_id = ?"); params.push(link.worker_id); }
-    else { where.push("p.worker_id IS NULL"); }
+    const where = ["p.campaign_id = ?", "p.status = 'active'", "p.person_type = ?", "p.worker_id = ?"];
+    const params = [link.campaign_id, personType, listWorkerId];
 
     const rows = await query(
       `SELECT p.id, p.name, p.mobile, p.photo_url, p.address, p.assembly_name,
@@ -234,15 +243,32 @@ export async function submitPublicRegistration(req, token) {
       return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
     }
 
-    // A worker Generate Link is OTP-gated: the submission must carry a valid
-    // handler session bound to THIS link. Attribution is then the link owner's,
-    // derived server-side — the client cannot choose it (§6, §11, §17, §18). The
-    // general /join and drive links stay anonymous and are not gated.
+    // EVERY registration entry point is OTP-gated now — there is no anonymous
+    // submission. The request must carry a valid, OTP-verified karyakarta session,
+    // and attribution is derived from that session server-side (the client can
+    // never choose it, §6, §11, §17, §18):
+    //   • a worker link  → the session must be that link's owner.
+    //   • /join or a drive link → the session must be a karyakarta of this drive;
+    //     the registration is credited to whoever signed in.
+    let attributedWorkerId;
     if (link.mode === "worker") {
       const s = readRegSession(req, token);
       if (!s || String(s.rwid) !== String(link.worker_id)) {
         return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
       }
+      attributedWorkerId = link.worker_id;
+    } else {
+      const s = readRegSession(req, null);
+      if (!s || !s.rwid || String(s.cid) !== String(link.campaign_id)) {
+        return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
+      }
+      // Confirm the signed-in karyakarta is still an active worker of this active
+      // drive before crediting them.
+      const w = await resolveCampaignWorkerById(link.campaign_id, s.rwid);
+      if (!w) {
+        return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
+      }
+      attributedWorkerId = w.worker_id;
     }
 
     const ip = clientIp(req);
@@ -309,10 +335,10 @@ export async function submitPublicRegistration(req, token) {
       return NextResponse.json({ message: "Please select your constituency." }, { status: 400, headers: NO_STORE });
     }
 
-    // WHO gets the credit comes from the link, full stop. A generated worker
-    // link carries their id; the general link carries none, and the row is
-    // recorded against the drive alone.
-    const workerId = link.worker_id ?? null;
+    // WHO gets the credit is the OTP-verified karyakarta from the session,
+    // resolved above (a worker link's owner, or whoever signed in on /join / a
+    // drive link). Never client-supplied.
+    const workerId = attributedWorkerId ?? link.worker_id ?? null;
 
     // One mobile number is one person per drive. A repeat is reported plainly
     // (with who first registered them) instead of silently creating a duplicate

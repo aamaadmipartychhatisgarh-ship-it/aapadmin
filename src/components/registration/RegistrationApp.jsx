@@ -248,11 +248,11 @@ export default function RegistrationApp() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-              <Link2 size={16} style={{ color: liveDrive ? BRAND : "#9ca3af" }} />Public registration link
+              <Link2 size={16} style={{ color: liveDrive ? BRAND : "#9ca3af" }} />Shared registration link (OTP&#8209;secured)
             </h2>
             <p className="text-xs text-gray-500 mt-0.5 max-w-2xl">
               {liveDrive
-                ? <>The general link, for the public to register themselves. It always opens the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. Registrations through it are counted for the drive but credited to no karyakarta. To credit someone, generate their own link in <span className="font-semibold text-gray-700">Workers &amp; Links</span>.</>
+                ? <>The shared link for the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. It is <span className="font-semibold text-gray-700">not anonymous</span>: anyone opening it must sign in with their registered karyakarta mobile and an OTP before the form appears, and every registration is credited to whoever signed in. Individual karyakarta links in <span className="font-semibold text-gray-700">Workers &amp; Links</span> work the same way.</>
                 : <>The link is switched off — no drive is open, so anyone who opens it sees “Registration is not open right now”. Turn on a drive below to make it live.</>}
             </p>
           </div>

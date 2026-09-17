@@ -3,17 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft } from "lucide-react";
 
-// The public form. One form, two ways in, and the ONLY difference is who ends up
-// credited — which the link decides, not the person filling it:
-//   • /join — the general link. Anyone can register themselves; the entry
-//     belongs to the drive and to no karyakarta.
-//   • /r/<token> — a link generated for one karyakarta and shared by them.
-//     Every registration through it is theirs.
+// The registration form. It is OTP-gated at EVERY entry — there is no anonymous
+// access — and who ends up credited is the signed-in karyakarta, derived from the
+// session server-side, never a field the form collects:
+//   • /join — the shared drive link. A registered karyakarta of the live drive
+//     signs in with their mobile + OTP; their registrations are credited to them.
+//   • /r/<token> — a link generated for one karyakarta and shared by them; its
+//     owner signs in the same way and every registration through it is theirs.
 // So the form asks nothing about who is collecting. It cannot: there is no field
 // to put a name in, which is also why nobody can claim someone else's work.
 //
-// It opens with what the person is (voter, or wants to become a karyakarta),
-// then their own details, and nothing else.
+// After OTP the person picks Worker or Voter, then fills that person's details.
 //
 // Field-first design: one column, large touch targets, and no dependency on the
 // dashboard's chrome — this page is opened on a phone over mobile data, usually
@@ -201,15 +201,18 @@ export default function PublicRegistrationForm({ token }) {
   // "List" view — the karyakarta's own voters / workers for THIS link.
   const [listMode, setListMode] = useState(null); // null | "voter" | "worker"
 
-  // OTP gate for a WORKER link (/r/<token>): a worker link never opens the form
-  // directly — the handler (link owner) must verify their mobile first. `session`
-  // is null while checking; { required:false } for the anonymous /join & drive
-  // links; { required:true, authenticated, handler } for a worker link.
-  const [session, setSession] = useState(token ? null : { required: false });
+  // OTP gate. EVERY entry point is OTP-gated now — the form never opens directly,
+  // not even /join. `session` is null while checking, then
+  // { required:true, authenticated:false } → show the OTP gate, or
+  // { required:true, authenticated:true, handler } → the signed-in karyakarta.
+  // A worker link authenticates its own owner; /join and drive links authenticate
+  // any registered karyakarta of that drive. The endpoints differ only in path:
+  // tokenless /join uses …/registration/join/*, a token uses …/<token>/otp/*.
+  const otpBase = token ? `/api/public/registration/${encodeURIComponent(token)}/otp` : `/api/public/registration/join`;
+  const [session, setSession] = useState(null);
   useEffect(() => {
-    if (!token) { setSession({ required: false }); return; }
     let alive = true;
-    const url = `/api/public/registration/${encodeURIComponent(token)}/otp/session`;
+    const url = `${otpBase}/session`;
     // The authenticated state lives in an HTTP-only cookie the server verifies,
     // so this GET only READS it back after a refresh/remount — it never mints or
     // clears a session. Because it is authoritative, a transient network or API
@@ -236,7 +239,7 @@ export default function PublicRegistrationForm({ token }) {
       }
     })();
     return () => { alive = false; };
-  }, [token]);
+  }, [otpBase]);
 
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -358,8 +361,7 @@ export default function PublicRegistrationForm({ token }) {
 
 
   async function handlerLogout() {
-    if (!token) return;
-    try { await fetch(`/api/public/registration/${encodeURIComponent(token)}/otp/logout`, { method: "POST" }); } catch { /* ignore */ }
+    try { await fetch(`${otpBase}/logout`, { method: "POST" }); } catch { /* ignore */ }
     setSession({ required: true, authenticated: false });
     setSubmittedWorker(false);
     resetPerson();
@@ -504,13 +506,14 @@ export default function PublicRegistrationForm({ token }) {
     return <PublicList token={token} t={t} initial={listMode} onBack={() => setListMode(null)} toggleLang={toggleLang} />;
   }
 
-  // Still resolving whether this (worker) link needs OTP.
+  // Still resolving the session from the server-verified cookie.
   if (session === null) {
     return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="animate-spin" size={30} style={{ color: ACCENT }} /></div>;
   }
-  // A worker link that isn't verified yet → OTP gate, never the form (§1, §2, §8).
+  // Not verified yet → OTP gate, never the form. This applies to EVERY entry now
+  // (worker link, drive link, and /join) — there is no anonymous access (§1, §2, §8).
   if (session.required && !session.authenticated) {
-    return <RegOtpGate token={token} t={t} campaignName={boot?.campaign?.name} toggleLang={toggleLang}
+    return <RegOtpGate base={otpBase} t={t} campaignName={boot?.campaign?.name} toggleLang={toggleLang}
                        onVerified={(handler) => setSession({ required: true, authenticated: true, handler })} />;
   }
 
@@ -909,7 +912,7 @@ function ListThumb({ src, name }) {
 // sends the OTP only to a registered handler (§2–§5).
 const OTP_LEN = 6; // 2Factor AUTOGEN codes are 6 digits.
 
-function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
+function RegOtpGate({ base, t, campaignName, toggleLang, onVerified }) {
   const [step, setStep] = useState("mobile"); // mobile | otp
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
@@ -925,7 +928,6 @@ function RegOtpGate({ token, t, campaignName, toggleLang, onVerified }) {
     return () => clearInterval(id);
   }, [cooldown]);
 
-  const base = `/api/public/registration/${encodeURIComponent(token)}/otp`;
   const post = (path, body) => fetch(`${base}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
   // The code is sent and checked entirely server-side by 2Factor; this component
