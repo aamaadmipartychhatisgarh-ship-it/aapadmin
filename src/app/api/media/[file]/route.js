@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { readFile } from "fs/promises";
 import path from "path";
-import { query } from "@/lib/db";
+import { mediaQuery } from "@/lib/db";
 import { getMediaFile } from "@/lib/mediaFileStore";
 
 // Serves every /uploads/... URL, from three possible backends:
@@ -71,13 +71,13 @@ export async function GET(_req, { params }) {
     // has no worker_photos / user_photos tables, so a missing table must NOT abort
     // the request (swallow per-lookup errors and fall through to the disk read).
     try {
-      const [row] = await query("SELECT data, mime_type FROM worker_photos WHERE id = ? LIMIT 1", [id]);
+      const [row] = await mediaQuery("SELECT data, mime_type FROM worker_photos WHERE id = ? LIMIT 1", [id]);
       if (row) {
         return new Response(new Uint8Array(row.data), { status: 200, headers: { ...headers, "Content-Type": row.mime_type } });
       }
     } catch { /* worker_photos table absent — ignore and try the next source */ }
     try {
-      const [userRow] = await query("SELECT data, mime_type FROM user_photos WHERE id = ? LIMIT 1", [id]);
+      const [userRow] = await mediaQuery("SELECT data, mime_type FROM user_photos WHERE id = ? LIMIT 1", [id]);
       if (userRow) {
         return new Response(new Uint8Array(userRow.data), { status: 200, headers: { ...headers, "Content-Type": userRow.mime_type } });
       }

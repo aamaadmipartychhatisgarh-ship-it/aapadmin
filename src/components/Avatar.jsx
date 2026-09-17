@@ -14,7 +14,19 @@ export function resolvePhotoUrl(src) {
   if (!src || typeof src !== "string") return src || "";
   const s = src.trim();
   if (!s) return "";
-  if (/^(https?:|data:|blob:)/i.test(s)) return s; // absolute / inline / object URL
+  if (/^(data:|blob:)/i.test(s)) return s; // inline / object URL — use as-is
+  if (/^https?:/i.test(s)) {
+    // An absolute URL that points at an /uploads/ file — often left over from an
+    // OLD environment/domain whose host is now dead — is re-pointed at THIS app's
+    // media route (served by UUID basename), so the photo resolves from our own
+    // durable store instead of 404ing against the old domain. A genuine external
+    // image (no /uploads/ segment) is left untouched.
+    try {
+      const m = new URL(s).pathname.match(/\/uploads\/(.+)$/i);
+      if (m) return "/uploads/" + m[1].split("/").pop();
+    } catch { /* malformed URL → fall through and use as-is */ }
+    return s;
+  }
   if (s.startsWith("/")) return s;                 // already rooted (e.g. /uploads/x.jpg)
   // Bare filename or relative legacy path → route through /uploads/.
   return "/uploads/" + s.replace(/^\.?\/*/, "").replace(/^uploads\//i, "");

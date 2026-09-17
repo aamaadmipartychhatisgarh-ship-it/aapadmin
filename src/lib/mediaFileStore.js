@@ -1,4 +1,32 @@
-import { query } from "@/lib/db";
+import { query, mediaQuery } from "@/lib/db";
+
+// In-process LRU cache of served blobs (id → {data, mime_type}). Photo bytes
+// never change for a given UUID, so caching them is always correct. This absorbs
+// the repeat/duplicate/pagination loads a Contact List generates, so most image
+// requests never touch the DB at all — and the ones that do use the dedicated
+// media pool. Bounded by total bytes so it can never blow the process's memory.
+const CACHE_MAX_BYTES = Math.max(8, Number(process.env.MEDIA_CACHE_MB) || 64) * 1024 * 1024;
+const cache = new Map(); // insertion-ordered → front is oldest (LRU)
+let cacheBytes = 0;
+
+function cacheGet(id) {
+  const v = cache.get(id);
+  if (v) { cache.delete(id); cache.set(id, v); } // touch → most-recently-used
+  return v || null;
+}
+function cacheSet(id, data, mime) {
+  const bytes = data?.length || 0;
+  if (!bytes || bytes > CACHE_MAX_BYTES) return; // don't cache oversized blobs
+  const prev = cache.get(id);
+  if (prev) cacheBytes -= prev.bytes;
+  cache.set(id, { data, mime_type: mime, bytes });
+  cacheBytes += bytes;
+  while (cacheBytes > CACHE_MAX_BYTES && cache.size) {
+    const oldest = cache.keys().next().value;
+    cacheBytes -= cache.get(oldest).bytes;
+    cache.delete(oldest);
+  }
+}
 
 // Durable storage for Media Center uploads (newspaper cuttings / coverage scans,
 // debate briefs, social media, etc.). Next.js only reliably static-serves files
@@ -59,9 +87,14 @@ export async function saveMediaFile({ id, mimeType, ext, size, data, userId }) {
 
 // Fetch a stored media file by its UUID (the filename without extension).
 // Returns { data, mime_type } or null. Never throws (missing table → null).
+// Serves from the in-process cache when possible; a miss reads through the
+// dedicated MEDIA pool so an image burst never competes with API queries.
 export async function getMediaFile(id) {
+  const cached = cacheGet(id);
+  if (cached) return { data: cached.data, mime_type: cached.mime_type };
   try {
-    const [row] = await query("SELECT data, mime_type FROM media_files WHERE id = ? LIMIT 1", [id]);
+    const [row] = await mediaQuery("SELECT data, mime_type FROM media_files WHERE id = ? LIMIT 1", [id]);
+    if (row && row.data) cacheSet(id, row.data, row.mime_type);
     return row || null;
   } catch {
     return null;
