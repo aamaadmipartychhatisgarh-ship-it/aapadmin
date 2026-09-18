@@ -685,6 +685,23 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
   const [saving, setSaving] = useState(false);
   const [results, setResults] = useState(null); // created credentials — shown once
   const [note, setNote] = useState("");
+  // Existing photo for the typed mobile (§1): looked up automatically (debounced)
+  // from the Contacts/registration photo store, matched by mobile only. null =
+  // nothing found (no photo shown). The admin never re-uploads it.
+  const [photoHit, setPhotoHit] = useState(null);
+  useEffect(() => {
+    const digits = (form.mobile || "").replace(/\D/g, "");
+    if (digits.length < 10) { setPhotoHit(null); return; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/registration/photo-lookup?mobile=${encodeURIComponent(digits.slice(-10))}`, { cache: "no-store" });
+        const d = await r.json().catch(() => ({}));
+        if (alive) setPhotoHit(d && d.photo_url ? d : null);
+      } catch { if (alive) setPhotoHit(null); }
+    }, 350);
+    return () => { alive = false; clearTimeout(t); };
+  }, [form.mobile]);
 
   async function save() {
     if (!drive) { onError("Registration is not open yet. Turn on the common registration link first, then add workers."); return; }
@@ -784,6 +801,17 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
           <input className={inputCls} placeholder="Mobile number *" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
           <input className={inputCls} placeholder="Ward no." value={form.ward_number} onChange={(e) => setForm({ ...form, ward_number: e.target.value })} />
           <input className={inputCls} placeholder="Area / Booth" value={form.area_booth} onChange={(e) => setForm({ ...form, area_booth: e.target.value })} />
+          {/* Existing photo for this mobile, fetched automatically (§1) — shown, not
+              re-uploaded. Appears only when a stored photo is found for the number. */}
+          {photoHit && (
+            <div className="sm:col-span-4 flex items-center gap-3 rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2">
+              <img src={photoHit.photo_url} alt={photoHit.name || "Photo"} className="w-12 h-12 rounded-full object-cover border border-white shadow-sm shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{photoHit.name || "Existing contact"}</p>
+                <p className="text-xs text-gray-500">Existing photo found for this mobile — used automatically.</p>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <>

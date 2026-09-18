@@ -4,6 +4,7 @@ import { query } from "@/lib/db";
 import { phoneKey, last10Sql } from "@/lib/phone";
 import { signPayload, verifySessionToken, maskPhone, SESSION_TTL_MS } from "@/lib/workerFormAuth";
 import { requestOtp, checkOtp, otpConfigured } from "@/lib/registrationOtp";
+import { photoByMobile } from "@/lib/photoByMobile";
 
 // Phone gate for a WORKER Generate Link (/r/<token>). The mobile verified here is
 // the LINK OWNER's (the karyakarta / registration handler), validated against
@@ -251,6 +252,33 @@ export function isPasswordExpired(basis) {
   const expiry = new Date(set);
   expiry.setMonth(expiry.getMonth() + 3);
   return Date.now() > expiry.getTime();
+}
+
+// Form Login → show the user's photo (§2). Given the username being entered, resolve
+// the matching ACTIVE worker in the active drive, then return their existing stored
+// photo (looked up by that worker's registered MOBILE, never by name) so it can be
+// shown above the password field. Reveals only { name, photo_url } for a real
+// active worker; an unknown username returns {}. photo_url is null when no photo
+// exists (the client then shows its placeholder). This is read-only — it does not
+// authenticate or change anything.
+export async function handleRegUserPhoto(username) {
+  try {
+    const entry = await resolveEntry(null); // the currently active drive
+    if (!entry) return json({}, 200);
+    const uname = String(username || "").replace(/\s+/g, " ").trim();
+    if (!uname) return json({}, 200);
+    const [w] = await query(
+      `SELECT name, mobile FROM reg_workers
+        WHERE campaign_id = ? AND username = ? AND status = 'active' LIMIT 1`,
+      [entry.campaign_id, uname]
+    );
+    if (!w) return json({}, 200);
+    const hit = await photoByMobile(w.mobile);
+    return json({ name: w.name || null, photo_url: hit?.photo_url || null }, 200);
+  } catch (err) {
+    console.error(`[reg-user-photo] ${err?.message || err}`);
+    return json({}, 200);
+  }
 }
 
 export async function handleRegLogin(body) {

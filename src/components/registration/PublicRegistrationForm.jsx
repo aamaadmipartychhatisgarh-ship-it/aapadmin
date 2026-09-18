@@ -945,6 +945,24 @@ function RegLoginGate({ t, campaignName, toggleLang, onLoggedIn }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Once the typed username identifies a real active worker, fetch their existing
+  // photo — looked up server-side by that worker's registered MOBILE (§2/§3), never
+  // by name. { name, photo_url } when identified (photo_url null → placeholder), or
+  // null when the username is not recognized (then no photo is shown). Read-only.
+  const [userPhoto, setUserPhoto] = useState(null);
+  useEffect(() => {
+    const u = username.trim();
+    if (!u) { setUserPhoto(null); return; }
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/public/registration/join/user-photo?username=${encodeURIComponent(u)}`, { cache: "no-store" });
+        const d = await r.json().catch(() => ({}));
+        if (alive) setUserPhoto(d && d.name ? d : null);
+      } catch { if (alive) setUserPhoto(null); }
+    }, 400);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [username]);
 
   async function submit(e) {
     e?.preventDefault?.();
@@ -990,6 +1008,23 @@ function RegLoginGate({ t, campaignName, toggleLang, onLoggedIn }) {
             <span className="block text-sm font-semibold text-gray-800 mb-1.5">{t.usernameLabel}</span>
             <input className={inputCls} value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.usernamePh} autoComplete="username" autoCapitalize="words" />
           </label>
+          {/* User's existing photo, shown above the password once the username
+              identifies them (§2). Placeholder (initials) when no photo exists. */}
+          {userPhoto && (
+            <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+              {userPhoto.photo_url ? (
+                <img src={userPhoto.photo_url} alt={userPhoto.name || "Photo"} className="w-14 h-14 rounded-full object-cover border border-white shadow-sm shrink-0" />
+              ) : (
+                <span className="w-14 h-14 rounded-full bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center text-lg font-bold shrink-0">
+                  {(userPhoto.name || "?").trim().charAt(0).toUpperCase()}
+                </span>
+              )}
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{userPhoto.name}</p>
+                <p className="text-xs text-gray-500 truncate">{campaignName || t.fallbackTitle}</p>
+              </div>
+            </div>
+          )}
           <label className="block">
             <span className="block text-sm font-semibold text-gray-800 mb-1.5">{t.passwordLabel}</span>
             <input type="password" className={inputCls} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPh} autoComplete="current-password" />
