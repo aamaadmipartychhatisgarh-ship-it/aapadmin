@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { usePageGuard } from "@/components/usePageGuard";
@@ -8,8 +8,8 @@ import { usePageAccess } from "@/components/usePageAccess";
 import { canAccessSocial } from "@/lib/permissions";
 import {
   Share2, Loader2, Plus, X, Upload,
-  Clock, ThumbsUp, Camera, ChevronRight, FileText, Pencil, Trash2,
-  Bird, CheckCircle2,
+  Clock, ThumbsUp, Camera, ChevronRight, ChevronLeft, FileText, Pencil, Trash2,
+  Bird, CheckCircle2, Calendar,
 } from "lucide-react";
 import SocialDashboardTab from "@/components/social/SocialDashboardTab";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -93,6 +93,7 @@ function Body() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageRestricted, myPages]);
   const [showAdd, setShowAdd] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
   const [editing, setEditing] = useState(null);
   const [msg, setMsg] = useState("");
   useEffect(() => { if (!msg) return; const t = setTimeout(() => setMsg(""), 3500); return () => clearTimeout(t); }, [msg]);
@@ -174,6 +175,16 @@ function Body() {
         </div>
       </div>
 
+      {/* Calendar — top-left, above the platform (Instagram) cards. Opens the
+          content calendar of logged posts (reuses the already-loaded posts and
+          this page's existing access). */}
+      <div className="flex">
+        <button onClick={() => setShowCalendar(true)}
+          className="inline-flex items-center gap-2 bg-white border border-gray-200 hover:border-[#164FA3] hover:text-[#164FA3] text-gray-700 px-4 py-2 rounded-xl text-sm font-semibold shadow-sm">
+          <Calendar size={16} /> Calendar
+        </button>
+      </div>
+
       {/* Search cards — Total Posts (the COMPLETE DB count, not the current page)
           followed by the four live-DB platform cards: today's FB/IG post counts
           and FB/IG follower totals. */}
@@ -203,8 +214,113 @@ function Body() {
       {tab === "pages"     && <PagesTab data={data} onReload={load} />}
       {tab === "log"       && <LogTab data={data} onEdit={setEditing} onReload={load} />}
 
+      {showCalendar && <SocialCalendarModal posts={data.recentPosts || []} onClose={() => setShowCalendar(false)} onEdit={(p) => { setShowCalendar(false); setEditing(p); }} />}
       {showAdd && <PostModal pages={data.pages} onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); setMsg("Post logged successfully."); load(); }} />}
       {editing && <PostModal editing={editing} pages={data.pages} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setMsg("Post updated successfully."); load(); }} />}
+    </div>
+  );
+}
+
+// Content calendar for the Social Command dashboard — a month grid of the logged
+// posts, built from the SAME post data + helpers the Log tab uses (postDateKey /
+// fmtDateTime / postDests / PLATFORM), so there is no duplicate calendar system or
+// data source. Days that have posts are marked with a count; selecting one lists
+// that day's posts (with a shortcut to edit). Access is inherited from this page,
+// which is already gated to Social users/admins.
+function SocialCalendarModal({ posts, onClose, onEdit }) {
+  const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [selected, setSelected] = useState("");
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const byDay = useMemo(() => {
+    const map = {};
+    for (const p of posts) {
+      const k = postDateKey(p);
+      if (!k) continue;
+      (map[k] ||= []).push(p);
+    }
+    return map;
+  }, [posts]);
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const monthKey = (day) => `${cursor.y}-${pad(cursor.m + 1)}-${pad(day)}`;
+  const first = new Date(cursor.y, cursor.m, 1);
+  const startDow = first.getDay();
+  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
+  const monthLabel = first.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const move = (delta) => { setSelected(""); setCursor((c) => { const d = new Date(c.y, c.m + delta, 1); return { y: d.getFullYear(), m: d.getMonth() }; }); };
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const selectedPosts = selected ? (byDay[selected] || []) : [];
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 sticky top-0 bg-white z-10">
+          <h3 className="text-base font-bold text-gray-900 inline-flex items-center gap-2"><Calendar size={18} className="text-[#164FA3]" /> Content Calendar</h3>
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+        </div>
+        <div className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <button onClick={() => move(-1)} aria-label="Previous month" className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50"><ChevronLeft size={16} /></button>
+            <div className="font-bold text-gray-900">{monthLabel}</div>
+            <button onClick={() => move(1)} aria-label="Next month" className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50"><ChevronRight size={16} /></button>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-gray-400 mb-1">
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} className="py-1">{d}</div>)}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((d, i) => {
+              if (d == null) return <div key={`e${i}`} />;
+              const key = monthKey(d);
+              const count = (byDay[key] || []).length;
+              const isSel = selected === key;
+              const isToday = key === todayKey;
+              return (
+                <button key={key} onClick={() => setSelected(count ? key : "")}
+                  className={`aspect-square rounded-lg border text-sm flex flex-col items-center justify-center gap-0.5 ${isSel ? "border-[#164FA3] bg-[#164FA3]/10" : isToday ? "border-[#164FA3]/40" : "border-gray-100"} ${count ? "hover:border-[#164FA3] cursor-pointer" : "text-gray-400 cursor-default"}`}>
+                  <span className={`font-semibold ${isToday ? "text-[#164FA3]" : "text-gray-800"}`}>{d}</span>
+                  {count ? <span className="text-[10px] font-bold text-white bg-[#164FA3] rounded-full px-1.5 leading-4">{count}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-4">
+            {!selected ? (
+              <p className="text-xs text-gray-400 text-center">Select a highlighted day to see its posts.</p>
+            ) : selectedPosts.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center">No posts on this day.</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-gray-500">{selectedPosts.length} post{selectedPosts.length === 1 ? "" : "s"} on {selected.split("-").reverse().join("-")}</div>
+                {selectedPosts.map((p) => (
+                  <div key={p.id} className="border border-gray-100 rounded-xl p-3 flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap text-xs text-gray-500">
+                        {postDests(p).map((d, j) => (
+                          <span key={j} className="inline-flex items-center gap-1 font-medium text-gray-600">{PLATFORM[d.platform]?.label || d.platform}{d.page_name ? ` · ${d.page_name}` : ""}</span>
+                        ))}
+                        <span className="text-gray-400">{fmtDateTime(p.posted_at || p.created_at)}</span>
+                      </div>
+                      <div className="text-sm text-gray-800 mt-1 line-clamp-2">{p.content || <span className="text-gray-400">—</span>}</div>
+                    </div>
+                    {onEdit && <button onClick={() => onEdit(p)} title="Edit post" className="p-1.5 rounded-md text-gray-400 hover:text-[#164FA3] hover:bg-[#164FA3]/10 shrink-0"><Pencil size={14} /></button>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
