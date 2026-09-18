@@ -290,7 +290,7 @@ export async function handleRegLogin(body) {
     if (!username || !password) return json({ message: "Enter your username and password." }, 400);
 
     const [w] = await query(
-      `SELECT id AS worker_id, name AS worker_name, worker_code, password_hash, status, password_set_at, created_at
+      `SELECT id AS worker_id, name AS worker_name, worker_code, mobile, password_hash, status, password_set_at, created_at
          FROM reg_workers WHERE campaign_id = ? AND username = ? LIMIT 1`,
       [entry.campaign_id, username]
     );
@@ -303,8 +303,13 @@ export async function handleRegLogin(body) {
       return json({ message: "Your password has expired. Passwords are valid for 3 months — please ask your in-charge to reissue your login." }, 403);
     }
 
+    // The signed-in data collector's own profile photo (their existing Contact
+    // photo, by their registered mobile) — shown beside their name in the form's
+    // top bar. null → the client shows its placeholder avatar. Never the photo of
+    // a worker being added through the form.
+    const photo = await photoByMobile(w.mobile);
     const payload = { kind: "reg_link", rwid: w.worker_id, cid: entry.campaign_id, token: null, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS };
-    const out = json({ ok: true, handler: { name: w.worker_name, worker_code: w.worker_code } });
+    const out = json({ ok: true, handler: { name: w.worker_name, worker_code: w.worker_code, mobile: maskPhone(phoneKey(w.mobile)), photo_url: photo?.photo_url || null } });
     out.cookies.set(regSessionCookie(signPayload(payload)));
     return out;
   } catch (err) {
@@ -324,18 +329,21 @@ export async function handleRegSession(req, token) {
   if (entry.mode === "worker") {
     const s = readRegSession(req, token);
     if (s && String(s.rwid) === String(entry.worker_id)) {
-      return json({ required: true, authenticated: true, handler: { name: entry.worker_name, mobile: maskPhone(phoneKey(entry.worker_mobile)), worker_code: entry.worker_code } });
+      const photo = await photoByMobile(entry.worker_mobile);
+      return json({ required: true, authenticated: true, handler: { name: entry.worker_name, mobile: maskPhone(phoneKey(entry.worker_mobile)), worker_code: entry.worker_code, photo_url: photo?.photo_url || null } });
     }
     return json({ required: true, authenticated: false });
   }
 
   // Drive / join: OTP is ALWAYS required now (no anonymous access). Authenticated
-  // only when the session is a valid karyakarta login for THIS campaign.
+  // only when the session is a valid karyakarta login for THIS campaign. The
+  // handler carries the collector's own profile photo so it survives a refresh.
   const s = readRegSession(req, null);
   if (s && s.rwid && String(s.cid) === String(entry.campaign_id)) {
     const w = await resolveCampaignWorkerById(entry.campaign_id, s.rwid);
     if (w) {
-      return json({ required: true, authenticated: true, handler: { name: w.worker_name, mobile: maskPhone(phoneKey(w.worker_mobile)), worker_code: w.worker_code } });
+      const photo = await photoByMobile(w.worker_mobile);
+      return json({ required: true, authenticated: true, handler: { name: w.worker_name, mobile: maskPhone(phoneKey(w.worker_mobile)), worker_code: w.worker_code, photo_url: photo?.photo_url || null } });
     }
   }
   return json({ required: true, authenticated: false });

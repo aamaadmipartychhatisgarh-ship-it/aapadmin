@@ -188,6 +188,33 @@ function LeaderPhoto() {
   );
 }
 
+// The signed-in DATA COLLECTOR's identity in the form's top bar: their own profile
+// photo (from their user/Contact record, via the authenticated session) beside
+// their username — never the worker being added (§7). A compact circular avatar;
+// initials placeholder when they have no photo (§9). Logout clears it (§8/§11).
+function HandlerBadge({ handler, onLogout, t }) {
+  const name = handler?.name || "";
+  return (
+    <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2.5 min-w-0">
+        {handler?.photo_url ? (
+          <img src={handler.photo_url} alt={name} className="w-10 h-10 rounded-full object-cover border border-white shadow-sm shrink-0" />
+        ) : (
+          <span className="w-10 h-10 rounded-full bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center font-bold shrink-0">
+            {(name || "?").trim().charAt(0).toUpperCase()}
+          </span>
+        )}
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">{t.handledBy}</p>
+          <p className="font-bold text-gray-900 truncate">{name}</p>
+          {handler?.mobile ? <p className="text-xs text-gray-600 truncate">{handler.mobile}</p> : null}
+        </div>
+      </div>
+      <button type="button" onClick={onLogout} className="text-xs font-semibold text-blue-700 hover:underline shrink-0">{t.logout}</button>
+    </div>
+  );
+}
+
 export default function PublicRegistrationForm({ token }) {
   const [boot, setBoot] = useState(null);      // { campaign, constituencies, credited_to, defaults }
   const [loadErr, setLoadErr] = useState("");
@@ -590,14 +617,7 @@ export default function PublicRegistrationForm({ token }) {
         <main className="max-w-xl mx-auto px-4 py-6 space-y-5">
           {/* Who is handling this session (worker link) stays visible here too. */}
           {session?.authenticated && session.handler && (
-            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">{t.handledBy}</p>
-                <p className="font-bold text-gray-900 truncate">{session.handler.name}</p>
-                {session.handler.mobile ? <p className="text-xs text-gray-600">{session.handler.mobile}</p> : null}
-              </div>
-              <button type="button" onClick={handlerLogout} className="text-xs font-semibold text-blue-700 hover:underline shrink-0">{t.logout}</button>
-            </div>
+            <HandlerBadge handler={session.handler} onLogout={handlerLogout} t={t} />
           )}
 
           <div className="text-center pt-2">
@@ -657,14 +677,7 @@ export default function PublicRegistrationForm({ token }) {
         {/* Who is handling this session (the OTP-verified link owner) — clearly
             distinct from the worker being added (§7, §9). */}
         {session?.authenticated && session.handler && (
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">{t.handledBy}</p>
-              <p className="font-bold text-gray-900 truncate">{session.handler.name}</p>
-              {session.handler.mobile ? <p className="text-xs text-gray-600">{session.handler.mobile}</p> : null}
-            </div>
-            <button type="button" onClick={handlerLogout} className="text-xs font-semibold text-blue-700 hover:underline shrink-0">{t.logout}</button>
-          </div>
+          <HandlerBadge handler={session.handler} onLogout={handlerLogout} t={t} />
         )}
 
         {done && (
