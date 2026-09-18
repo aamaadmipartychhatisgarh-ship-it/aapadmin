@@ -35,6 +35,52 @@ const bjpMatch = (c) => `(UPPER(TRIM(${c})) = 'BJP' OR LOWER(${c}) LIKE '%bharat
 const incMatch = (c) => `(UPPER(TRIM(${c})) IN ('INC', 'CONGRESS') OR LOWER(${c}) LIKE '%indian national congress%' OR LOWER(${c}) LIKE '%congress%' OR ${c} LIKE '%कांग्रेस%')`;
 const AAP_MATCH_SQL = aapMatch("e.party"); // still used to pick the AAP candidate column
 
+// JS mirrors of the SAME canonical party matchers — used to compute per-assembly
+// party totals + winner/runner-up in the backend (per row, before pagination), so
+// the Comparison list can show each assembly's AAP/BJP/Congress totals, the
+// AAP-vs-BJP and BJP-vs-Congress differences, and the winning margin without a
+// second competing calculation and without being affected by which rows are on
+// the current page. One rule, never divergent from the SQL matchers above.
+const jsAap = (p) => { const s = String(p ?? "").trim(); return s.toLowerCase() === "aap" || s.toLowerCase().includes("aam aadmi") || s.includes("आम आदमी"); };
+const jsBjp = (p) => { const s = String(p ?? "").trim(); return s.toLowerCase() === "bjp" || s.toLowerCase().includes("bharatiya janata") || s.includes("भारतीय जनता"); };
+const jsInc = (p) => { const s = String(p ?? "").trim(); const u = s.toUpperCase(); const l = s.toLowerCase(); return u === "INC" || u === "CONGRESS" || l.includes("indian national congress") || l.includes("congress") || s.includes("कांग्रेस"); };
+
+// Per-assembly vote analytics from the assembly's OWN candidates (Current MLA +
+// Competitor 1/2/3). `people` is [{ name, party, votes }]. Party totals credit each
+// person to their ACTUAL stored party (never position, never "Competitor 3 = AAP");
+// a party with no candidate in this assembly stays null (unavailable), never a
+// fabricated 0. Winner/runner-up are the two highest vote-getters (standard ECI
+// margin = winner − runner-up); a top-two equality is a genuine tie, not an
+// arbitrarily-picked winner. Everything is scoped to this one assembly's people.
+function assemblyVoteStats(people) {
+  const withVotes = people.filter((p) => p.votes != null && Number.isFinite(Number(p.votes)));
+  const partyTotal = (match) => {
+    const m = withVotes.filter((p) => p.party && match(p.party));
+    if (!m.length) return null;
+    return m.reduce((s, p) => s + Number(p.votes), 0);
+  };
+  const aap = partyTotal(jsAap), bjp = partyTotal(jsBjp), inc = partyTotal(jsInc);
+  const sorted = [...withVotes].sort((a, b) => Number(b.votes) - Number(a.votes));
+  let winner = null, runner_up_votes = null, winning_margin = null, winner_tie = false;
+  if (sorted.length >= 1) winner = { name: sorted[0].name || null, party: sorted[0].party || null, votes: Number(sorted[0].votes) };
+  if (sorted.length >= 2) {
+    runner_up_votes = Number(sorted[1].votes);
+    winning_margin = Number(sorted[0].votes) - Number(sorted[1].votes);
+    winner_tie = winning_margin === 0;
+  }
+  return {
+    aap_total: aap,
+    bjp_total: bjp,
+    inc_total: inc,
+    aap_bjp_diff: (aap != null && bjp != null) ? Math.abs(aap - bjp) : null,
+    bjp_inc_diff: (bjp != null && inc != null) ? Math.abs(bjp - inc) : null,
+    winner,                 // { name, party, votes } | null
+    runner_up_votes,        // number | null
+    winning_margin,         // number | null (null = insufficient data)
+    winner_tie,             // true → genuine top-two tie
+  };
+}
+
 // Normalize a filter value (single id, array of ids, or comma-separated string)
 // to an array of positive integers.
 function toIdList(v) {
@@ -154,6 +200,16 @@ export async function fetchComparisonDataset(filters = {}) {
     const aapCandidate = aap?.candidate && String(aap.candidate).trim() ? aap.candidate : null;
     const aapVotes = aap?.votes ?? null;
     const { difference, leader } = compareVotes(mlaVotes, aapVotes);
+    const c1 = (r.competitor1_name && String(r.competitor1_name).trim()) ? r.competitor1_name : null;
+    const c2 = (r.competitor2_name && String(r.competitor2_name).trim()) ? r.competitor2_name : null;
+    const c3 = (r.competitor3_name && String(r.competitor3_name).trim()) ? r.competitor3_name : null;
+    // Per-assembly analytics from THIS assembly's own four candidates only.
+    const stats = assemblyVoteStats([
+      { name: mlaName, party: r.mla_party || null, votes: mlaVotes },
+      { name: c1, party: r.competitor1_party || null, votes: r.competitor1_votes ?? null },
+      { name: c2, party: r.competitor2_party || null, votes: r.competitor2_votes ?? null },
+      { name: c3, party: r.competitor3_party || null, votes: r.competitor3_votes ?? null },
+    ]);
     return {
       assembly_id: r.assembly_id,
       assembly_loc_id: r.assembly_loc_id,
@@ -182,6 +238,10 @@ export async function fetchComparisonDataset(filters = {}) {
       competitor3_party: r.competitor3_party || null,
       competitor3_votes: r.competitor3_votes ?? null,
       competitor_margin: r.competitor_margin ?? null,
+      // Per-assembly vote analytics (party totals, AAP-vs-BJP & BJP-vs-Congress
+      // differences, winner / runner-up / winning margin) computed above from this
+      // assembly's own candidates — see assemblyVoteStats.
+      vote_stats: stats,
       aap_candidate: aapCandidate,
       aap_votes: aapVotes,
       election_year: aap?.election_year ?? null,
