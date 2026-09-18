@@ -36,6 +36,7 @@ const STRINGS = {
     workerSavedBody: "धन्यवाद. आपका पंजीयन सफलतापूर्वक जमा हो गया है.",
     photo: "फोटो", choosePhoto: "फोटो चुनें", changePhoto: "फोटो बदलें", capturePhoto: "फोटो खींचें", retakePhoto: "दोबारा खींचें",
     photoHint: "JPG, PNG या WEBP · अधिकतम 5 MB", uploading: "अपलोड हो रहा है…",
+    photoFromContacts: "यह फोटो Contacts से स्वतः ली गई है",
     photoTooLarge: "फोटो का आकार बहुत बड़ा है. कृपया छोटी छवि अपलोड करें.",
     photoBadType: "कृपया JPG, JPEG, PNG या WEBP छवि अपलोड करें.",
     photoFailed: "फोटो अपलोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
@@ -100,6 +101,7 @@ const STRINGS = {
     workerSavedBody: "Thank you. Your registration has been submitted successfully.",
     photo: "Photo", choosePhoto: "Choose Photo", changePhoto: "Change Photo", capturePhoto: "Capture Photo", retakePhoto: "Retake",
     photoHint: "JPG, PNG or WEBP · up to 5 MB", uploading: "Uploading…",
+    photoFromContacts: "Photo taken automatically from Contacts",
     photoTooLarge: "Photo size is too large. Please upload a smaller image.",
     photoBadType: "Please upload a JPG, JPEG, PNG, or WEBP image.",
     photoFailed: "Unable to upload photo. Please try again.",
@@ -305,6 +307,14 @@ export default function PublicRegistrationForm({ token }) {
   const photoInput = useRef(null);
   const cameraInput = useRef(null);
 
+  // The person-being-added's EXISTING photo, pulled from the Contacts module by the
+  // mobile they type (§ worker photo). Contacts is the source of truth: this is the
+  // SAME photo already stored against that Contact — resolved by mobile only, never
+  // by name — shown here so the collector never re-uploads a photo that exists. It
+  // is read-only and live-linked (a manual capture/upload still overrides it), and
+  // it resets for every new person so one worker's photo never lingers onto the next.
+  const [contactPhoto, setContactPhoto] = useState(null); // { photo_url, name } | null
+
   const t = STRINGS[lang];
 
   // Per-tab, per-link key: /join and each /r/<token> keep their own choice, so a
@@ -359,7 +369,7 @@ export default function PublicRegistrationForm({ token }) {
   function resetPerson() {
     setPersonType("voter"); setWorkerRole(""); setWardName("");
     setName(""); setMobile(""); setAddress("");
-    setPhotoUrl(""); setPhotoPreview(""); setPhotoErr("");
+    setPhotoUrl(""); setPhotoPreview(""); setPhotoErr(""); setContactPhoto(null);
     setOtpStage("idle"); setOtpCode(""); setOtpFor(""); setOtpNote("");
     // Constituency is deliberately KEPT: a karyakarta works one patch, so
     // clearing it would mean re-picking the same value for every person they
@@ -428,6 +438,28 @@ export default function PublicRegistrationForm({ token }) {
   // number could carry a registration for a different one.
   const otpDone = otpStage === "done" && otpFor === mobileDigits;
 
+  // Resolve the entered person's Contacts photo as their mobile is typed. It only
+  // runs for a signed-in collector (the lookup is session-gated) and once the number
+  // is a full valid 10 digits; any change to the number invalidates the previous
+  // match immediately (the cleanup drops the in-flight/late response), so one
+  // person's photo can never carry onto the next. Missing/unknown → null, and the
+  // form falls back to its placeholder + manual capture. The match is by mobile, so
+  // it applies to whoever is being added (worker or voter) — never by name.
+  useEffect(() => {
+    if (!session?.authenticated) { setContactPhoto(null); return; }
+    if (!validMobile(mobile)) { setContactPhoto(null); return; }
+    let alive = true;
+    const ten = mobile.replace(/\D/g, "").slice(-10);
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/public/registration/join/worker-photo?mobile=${encodeURIComponent(ten)}`, { cache: "no-store" });
+        const d = await r.json().catch(() => ({}));
+        if (alive) setContactPhoto(d && d.photo_url ? d : null);
+      } catch { if (alive) setContactPhoto(null); }
+    }, 400);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [mobile, session?.authenticated]);
+
   async function sendCode() {
     setErr(""); setOtpNote("");
     if (!validMobile(mobile)) { setErr(t.errMobile); return; }
@@ -488,7 +520,10 @@ export default function PublicRegistrationForm({ token }) {
           assembly_id: assemblyId,
           ward_name: isWorker ? wardName.trim() : "",
           worker_role: isWorker ? workerRole.trim() : "",
-          photo_url: photoUrl, // photo is supported for both voter and worker
+          // Manual capture/upload wins; otherwise the photo already stored against
+          // this person's Contact (same URL, not a re-upload/duplicate) so the saved
+          // record is never left photo-less when Contacts already has one.
+          photo_url: photoUrl || contactPhoto?.photo_url || "",
           website: honeypot.current?.value || "",
         }),
       });
@@ -796,8 +831,15 @@ export default function PublicRegistrationForm({ token }) {
           <div>
             <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo}</span>
             <div className="flex items-center gap-3">
+              {/* Priority: a fresh manual capture/upload → the photo already stored
+                  against this person's Contact (auto-filled, no re-upload) → the
+                  empty placeholder. The Contact photo comes straight from the
+                  Contacts store and falls back to the placeholder if its URL can't
+                  load, so a broken/missing image never blocks the collector. */}
               {photoPreview ? (
                 <img src={photoPreview} alt="" className="w-20 h-20 rounded-xl object-cover border border-gray-300 bg-white" />
+              ) : contactPhoto?.photo_url ? (
+                <ContactPhotoThumb src={contactPhoto.photo_url} />
               ) : (
                 <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 bg-white flex items-center justify-center text-gray-400">
                   <ImagePlus size={24} />
@@ -812,10 +854,17 @@ export default function PublicRegistrationForm({ token }) {
                   <button type="button" onClick={() => photoInput.current?.click()} disabled={photoBusy}
                           className="h-10 px-3 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5 disabled:opacity-60">
                     {photoBusy ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
-                    {photoBusy ? t.uploading : (photoPreview ? t.changePhoto : t.choosePhoto)}
+                    {photoBusy ? t.uploading : ((photoPreview || contactPhoto?.photo_url) ? t.changePhoto : t.choosePhoto)}
                   </button>
                 </div>
-                <p className="text-[11px] text-gray-500">{t.photoHint}</p>
+                {/* Tell the collector the photo was taken from Contacts (only when it
+                    is the auto-filled one, not a manual upload) so they know it is
+                    correct and needn't re-take it. */}
+                {!photoPreview && contactPhoto?.photo_url ? (
+                  <p className="text-[11px] font-semibold text-green-700">{t.photoFromContacts}</p>
+                ) : (
+                  <p className="text-[11px] text-gray-500">{t.photoHint}</p>
+                )}
               </div>
               {/* Camera capture vs library choose — same handler, different source. */}
               <input ref={cameraInput} type="file" accept="image/*" capture="user" className="hidden" onChange={onPhoto} />
@@ -945,6 +994,24 @@ function PublicList({ token, t, initial, onBack, toggleLang }) {
         )}
         <p className="text-center text-[11px] text-gray-400 pb-4">{t.footer}</p>
       </main>
+    </div>
+  );
+}
+
+// The worker/voter's Contacts photo in the form's photo slot. Same rounded frame as
+// the manual preview, but it carries its own load-error guard: if the stored Contact
+// URL is broken/unreachable it collapses to the empty placeholder (never a broken
+// image), so the collector can still capture one. `src` re-arms the guard, so moving
+// to the next person's photo starts clean.
+function ContactPhotoThumb({ src }) {
+  const [ok, setOk] = useState(true);
+  useEffect(() => { setOk(true); }, [src]);
+  if (src && ok) {
+    return <img src={src} alt="" className="w-20 h-20 rounded-xl object-cover border border-gray-300 bg-white" onError={() => setOk(false)} />;
+  }
+  return (
+    <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 bg-white flex items-center justify-center text-gray-400">
+      <ImagePlus size={24} />
     </div>
   );
 }

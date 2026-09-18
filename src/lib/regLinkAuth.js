@@ -281,6 +281,31 @@ export async function handleRegUserPhoto(username) {
   }
 }
 
+// Common Form → the PERSON-being-added's photo (§ worker photo). Given the mobile
+// number typed for the worker/voter being registered, return the SAME photo already
+// stored for that person in the Contacts module, so the collector never re-uploads
+// a photo that already exists. Resolution reuses the shared Contacts resolver
+// (photoByMobile): a Contact's own photo, else its linked field-worker's photo, else
+// a prior registration's photo — matched by the mobile's last-10 key only, NEVER by
+// name, so two similar names can't be confused and an unknown number returns {}.
+// Gated behind a signed-in collector session (any drive/link) so Contact photos are
+// not harvested anonymously by phone number. Returns { name, photo_url } on a match,
+// else {}; photo_url absent/null → the form keeps its placeholder and lets the
+// collector capture/upload. Read-only — it creates nothing and never re-uploads.
+export async function handleRegWorkerPhoto(req, mobile) {
+  try {
+    const s = readRegSession(req, null); // any signed-in collector of the active drive
+    if (!s || !s.rwid) return json({}, 200);
+    const key = phoneKey(mobile);
+    if (!key || key.length !== 10) return json({}, 200);
+    const hit = await photoByMobile(key);
+    return json({ name: hit?.name || null, photo_url: hit?.photo_url || null }, 200);
+  } catch (err) {
+    console.error(`[reg-worker-photo] ${err?.message || err}`);
+    return json({}, 200);
+  }
+}
+
 export async function handleRegLogin(body) {
   try {
     const entry = await resolveEntry(null); // the currently active drive
