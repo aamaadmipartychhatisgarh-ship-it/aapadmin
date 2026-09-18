@@ -758,9 +758,14 @@ export default function PublicRegistrationForm({ token }) {
             <select className={inputCls} value={assemblyId} onChange={(e) => setAssemblyId(e.target.value)} required>
               <option value="">{t.selectConstituency}</option>
               {/* Assembly name follows the Preferred Language (§5): Hindi shows the
-                  Hindi master name, English the English name. The submitted value
-                  (a.id) is identical either way, so the stored Assembly is unchanged. */}
-              {(boot.constituencies || []).map((a) => <option key={a.id} value={a.id}>{lang === "hi" ? (a.name_hi || a.name) : a.name}</option>)}
+                  Hindi master name (name_hi), English the English name (name_en).
+                  Only the DISPLAY changes — the submitted value (a.id) is identical
+                  either way, so the stored Assembly is unchanged and validation stays
+                  by id. Changing the language keeps the current selection (the option
+                  values don't change), only the labels do. */}
+              {(boot.constituencies || []).map((a) => (
+                <option key={a.id} value={a.id}>{lang === "hi" ? (a.name_hi || a.name_en || a.name) : (a.name_en || a.name)}</option>
+              ))}
             </select>
           </Field>
 

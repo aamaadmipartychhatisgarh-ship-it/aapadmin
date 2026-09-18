@@ -280,7 +280,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/registration/dashboard?${filterQs({ worker_limit: 200, ward_limit: 100 })}`, { cache: "no-store" });
+      const r = await fetch(`/api/registration/dashboard?${filterQs({ worker_limit: 200, block_limit: 100 })}`, { cache: "no-store" });
       if (!r.ok) throw new Error();
       setData(await r.json());
     } catch {
@@ -295,6 +295,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
 
   const s = data.summary;
   const p = s.period;
+  const topBlock = (data.blocks || [])[0] || null; // best block (area/booth) — §9B
 
   return (
     <div className="space-y-4">
@@ -334,9 +335,9 @@ function DashboardTab({ filterQs, onWard, onError }) {
           <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center"><Trophy size={20} /></div>
           <div className="min-w-0">
             <p className="text-xs text-gray-500">Best Performing Block</p>
-            <p className="font-bold text-gray-900 truncate">{s.top_ward ? `Block ${s.top_ward.ward_number}` : "—"}</p>
+            <p className="font-bold text-gray-900 truncate">{topBlock ? topBlock.block : "—"}</p>
             <p className="text-xs text-gray-500">
-              {s.top_ward ? `${s.top_ward.total} total · ${s.top_ward.voters} voters · ${s.top_ward.new_workers} workers` : "No registrations yet"}
+              {topBlock ? `${topBlock.total} total · ${topBlock.voters} voters · ${topBlock.new_workers} workers` : "No registrations yet"}
             </p>
           </div>
         </div>
@@ -358,14 +359,14 @@ function DashboardTab({ filterQs, onWard, onError }) {
         />
         <RankTable
           title="Block-wise Performance"
-          subtitle={`Top ${Math.min(100, data.wards.length)}`}
-          exportHref={`/api/registration/export?${filterQs({ report: "wards" })}`}
+          subtitle={`Top ${Math.min(100, (data.blocks || []).length)}`}
+          exportHref={`/api/registration/export?${filterQs({ report: "blocks" })}`}
           head={["Rank", "Block", "Voters", "Workers", "Total"]}
-          rows={data.wards.map((w) => [
-            <RankBadge key="r" rank={w.rank} />,
-            <button key="w" onClick={() => onWard(w.ward_number)} className="font-semibold text-gray-900 hover:underline">Block {w.ward_number}</button>,
-            w.voters, w.new_workers,
-            <span key="t" className="font-bold text-gray-900">{w.total}</span>,
+          rows={(data.blocks || []).map((b) => [
+            <RankBadge key="r" rank={b.rank} />,
+            <span key="b" className="font-semibold text-gray-900">{b.block}</span>,
+            b.voters, b.new_workers,
+            <span key="t" className="font-bold text-gray-900">{b.total}</span>,
           ])}
           empty="No block data yet."
         />

@@ -145,7 +145,8 @@ export async function publicFormContext(token) {
     // is identical in either language.
     const hiExpr = await assemblyNameExpr();
     const constituencies = await query(
-      `SELECT id, name AS name, ${hiExpr} AS name_hi FROM locations WHERE type = 'assembly' ORDER BY name ASC`
+      `SELECT id, name AS name, name AS name_en, ${hiExpr} AS name_hi
+         FROM locations WHERE type = 'assembly' ORDER BY name ASC`
     );
 
     return NextResponse.json(

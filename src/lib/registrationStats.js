@@ -11,6 +11,11 @@ import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSc
 // complete rather than dropping rows into an "unknown" bucket.
 const WARD_EXPR = "NULLIF(TRIM(COALESCE(NULLIF(TRIM(p.ward_number),''), w.ward_number, '')),'')";
 
+// A registration's BLOCK is its Area / Booth (§9B) — a different dimension from the
+// numeric ward. Same person-aware fallback as the ward: use the value typed on the
+// form, else the collecting worker's area/booth, so block totals stay complete.
+const BLOCK_EXPR = "NULLIF(TRIM(COALESCE(NULLIF(TRIM(p.area_booth),''), w.area_booth, '')),'')";
+
 // The worker join is a LEFT join throughout: a registration made through the
 // GENERAL /join link belongs to no karyakarta (worker_id IS NULL). Those rows
 // must still count in the drive's totals and in the ward ranking — an inner join
@@ -130,7 +135,7 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
        LEFT JOIN reg_people p ON ${on.join(" AND ")}
       WHERE ${where.join(" AND ")}
       GROUP BY w.id
-      ORDER BY total DESC, voters DESC, w.name ASC
+      ORDER BY total DESC, voters DESC, w.name ASC, w.id ASC
       LIMIT ${lim} OFFSET ${off}`,
     params
   );
@@ -176,6 +181,34 @@ export async function getWardRanking({ campaignId, from, to, limit = 20, offset 
   return rows.map((r, i) => ({
     rank: off + i + 1,
     ward_number: r.ward_number,
+    voters: Number(r.voters), new_workers: Number(r.new_workers), total: Number(r.total),
+  }));
+}
+
+// --------------------------------------------------------- BLOCK RANKING (§9B)
+// Rank | Block (Area / Booth) | Voters | Workers | Total. Groups performance by the
+// BLOCK (area_booth) — NOT the ward — using the existing registration metric, sorted
+// highest→lowest with a deterministic tie-break (block name) so the order is stable
+// across refreshes. Rows with no resolvable block are excluded (a meaningless "").
+export async function getBlockRanking({ campaignId, from, to, limit = 100, offset = 0 } = {}) {
+  await ensureRegistrationSchema();
+  const f = peopleFilters({ campaignId, from, to });
+  const lim = Math.min(500, Math.max(1, Number(limit) || 100));
+  const off = Math.max(0, Number(offset) || 0);
+  const rows = await query(
+    `SELECT ${BLOCK_EXPR} AS block,
+            SUM(p.person_type = 'voter') AS voters,
+            SUM(p.person_type = 'worker') AS new_workers,
+            COUNT(*) AS total
+       ${PEOPLE_FROM} ${f.where} AND ${BLOCK_EXPR} IS NOT NULL
+      GROUP BY block
+      ORDER BY total DESC, voters DESC, block ASC
+      LIMIT ${lim} OFFSET ${off}`,
+    f.params
+  );
+  return rows.map((r, i) => ({
+    rank: off + i + 1,
+    block: r.block,
     voters: Number(r.voters), new_workers: Number(r.new_workers), total: Number(r.total),
   }));
 }

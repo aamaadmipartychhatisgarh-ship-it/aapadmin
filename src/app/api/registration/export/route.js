@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
-import { getPeoplePage, getWorkerRanking, getWardRanking } from "@/lib/registrationStats";
+import { getPeoplePage, getWorkerRanking, getBlockRanking } from "@/lib/registrationStats";
 
 // CSV export of whatever the dashboard is currently showing:
 //   ?report=registrations  every person + the worker who added them (default)
-//   ?report=workers        worker-wise performance
-//   ?report=wards          ward-wise performance
+//   ?report=workers        worker-wise performance (Top 200)
+//   ?report=blocks         block-wise (Area/Booth) performance (Top 100)
 // The SAME filters as the on-screen view are applied, so an export always matches
 // the numbers the admin just looked at.
 export const dynamic = "force-dynamic";
@@ -50,13 +50,15 @@ export async function GET(req) {
         rows.map((r) => [r.rank, r.name, r.mobile, r.worker_code, r.ward_number, r.area_booth, r.voters, r.new_workers, r.total, r.status])
       );
       filename = `AAP_Worker_Performance_${stamp}.csv`;
-    } else if (report === "wards") {
-      const rows = await getWardRanking({ ...f, limit: 500 });
+    } else if (report === "blocks" || report === "wards") {
+      // Block-wise (Area / Booth) performance — §9B. `wards` kept as an alias so any
+      // old link still resolves to the same Block report.
+      const rows = await getBlockRanking({ ...f, limit: 500 });
       csv = toCsv(
-        ["Rank", "Ward No.", "Voters Added", "Workers Added", "Total"],
-        rows.map((r) => [r.rank, r.ward_number, r.voters, r.new_workers, r.total])
+        ["Rank", "Block (Area/Booth)", "Voters Added", "Workers Added", "Total"],
+        rows.map((r) => [r.rank, r.block, r.voters, r.new_workers, r.total])
       );
-      filename = `AAP_Ward_Performance_${stamp}.csv`;
+      filename = `AAP_Block_Performance_${stamp}.csv`;
     } else {
       // Registrations can run to tens of thousands; page through rather than
       // holding one enormous result set open.
