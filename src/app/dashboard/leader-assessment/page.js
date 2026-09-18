@@ -3118,19 +3118,41 @@ const emptyGeo = () => ({ zone_id: [], lok_sabha_id: [], district_id: [], assemb
 
 // Vote value → Indian-grouped string, or "Not Available" when the DB has no value
 // (never a fake 0 — §7).
-// One person's cell in a Comparison ROW — the Current MLA or a competitor —
-// showing Name · Party Logo + Party · Votes straight from that person's OWN
-// stored fields. Positions are never shifted and a competitor's party is whatever
-// is stored for them (never assumed to be AAP). A missing person shows a clear
-// "Not Available" / "—" rather than being hidden.
-function PersonCell({ name, party, votes, highlight, partyByName }) {
-  return (
-    <div className="min-w-0">
-      <div className={`font-semibold truncate ${highlight ? "text-[#164FA3]" : "text-gray-900"}`} title={name || ""}>{name || <span className="text-gray-400 font-normal">Not Available</span>}</div>
-      <div className="text-xs text-gray-500 mt-0.5 min-w-0">{party ? <PartyLogo name={party} byName={partyByName} size={16} /> : "—"}</div>
-      <div className="text-sm text-gray-700 mt-0.5">{votes != null ? `${nfmt(votes)} votes` : "—"}</div>
-    </div>
-  );
+// Build the candidate ROWS for one assembly's Comparison group: the Current MLA
+// plus every AVAILABLE competitor (a competitor with no name/party/votes at all is
+// skipped, so an assembly with fewer than 3 competitors renders cleanly; the MLA
+// row is always kept). Each row carries the candidate's own party/votes (positions
+// fixed, never assumed AAP), plus a Vote % (of this assembly's total candidate
+// votes) and a Won/Lost/Tie result derived from the ACTUAL highest vote count —
+// never an assumption that the Current MLA won. All scoped to this one assembly.
+function candidateRows(r) {
+  const list = [
+    { label: "Current MLA", name: r.mla_name, party: r.mla_party, votes: r.mla_votes, isMla: true },
+    { label: "Competitor 1", name: r.competitor1_name, party: r.competitor1_party, votes: r.competitor1_votes },
+    { label: "Competitor 2", name: r.competitor2_name, party: r.competitor2_party, votes: r.competitor2_votes },
+    { label: "Competitor 3", name: r.competitor3_name, party: r.competitor3_party, votes: r.competitor3_votes },
+  ];
+  const present = list.filter((c) => c.isMla || c.name || c.party || c.votes != null);
+  const val = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+  const withVotes = present.map((c) => val(c.votes)).filter((v) => v != null);
+  const total = withVotes.reduce((s, v) => s + v, 0);
+  const maxVotes = withVotes.length ? Math.max(...withVotes) : null;
+  const winnersAtMax = withVotes.filter((v) => v === maxVotes).length;
+  return present.map((c) => {
+    const v = val(c.votes);
+    const pct = v != null && total > 0 ? (v / total) * 100 : null;
+    let result = null;
+    if (v != null && maxVotes != null) result = v === maxVotes ? (winnersAtMax > 1 ? "Tie" : "Won") : "Lost";
+    return { label: c.label, name: c.name, party: c.party, votes: v, pct, result, isMla: !!c.isMla };
+  });
+}
+
+// Won / Lost / Tie status pill for a candidate row.
+function resultBadge(result) {
+  if (result === "Won") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Won</span>;
+  if (result === "Lost") return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Lost</span>;
+  if (result === "Tie") return <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Tie</span>;
+  return <span className="text-gray-400">—</span>;
 }
 
 // Per-assembly vote analytics under each Comparison row: party totals (AAP / BJP /
@@ -3345,53 +3367,67 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
           <Empty msg="No assemblies match the current selection." />
         ) : (
           <>
-            {/* Assembly-wise comparison LIST — one ROW per assembly (not cards),
-                with a column each for the Current MLA and Competitor 1/2/3. Every
-                person cell shows Name · Party Logo + Party · Votes from that
-                person's OWN stored fields; positions are fixed (Competitor 1/2/3
-                never shifted) and a competitor's party is whatever is stored (never
-                assumed AAP). The table scrolls horizontally on small screens so no
-                competitor is ever hidden. */}
+            {/* Comparison LIST — each candidate is its own ROW (Candidate · Party ·
+                Votes · Vote % · Result), grouped under their assembly. NOT cards:
+                one unified table. Every assembly shows the Current MLA and all
+                available competitors (Competitor 1/2/3), each with their OWN stored
+                party/votes — positions fixed, party never assumed AAP. Vote % and
+                Won/Lost are derived from this assembly's own candidate votes. The
+                table scrolls horizontally on small screens so nothing is cut off. */}
+            <label className="inline-flex items-center gap-2 mb-3 text-xs font-medium text-gray-500 cursor-pointer">
+              <input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className="accent-[#164FA3]" /> Select all on this page (for export)
+            </label>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[900px]">
+              <table className="w-full text-sm min-w-[720px]">
                 <thead>
                   <tr className="text-left text-[11px] uppercase tracking-wide text-gray-400 border-b border-gray-200">
-                    <th className="py-2 pr-2 w-8"><input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className="accent-[#164FA3]" title="Select page" /></th>
-                    <th className="py-2 pr-3 min-w-[150px]">Assembly</th>
-                    <th className="py-2 px-3 min-w-[160px] border-l border-gray-100">Current MLA</th>
-                    <th className="py-2 px-3 min-w-[160px] border-l border-gray-100">Competitor 1</th>
-                    <th className="py-2 px-3 min-w-[160px] border-l border-gray-100">Competitor 2</th>
-                    <th className="py-2 px-3 min-w-[160px] border-l border-gray-100">Competitor 3</th>
+                    <th className="py-2 pr-3 min-w-[160px]">Candidate</th>
+                    <th className="py-2 px-3 min-w-[140px]">Party</th>
+                    <th className="py-2 px-3 text-right min-w-[90px]">Votes</th>
+                    <th className="py-2 px-3 text-right min-w-[80px]">Vote %</th>
+                    <th className="py-2 px-3 min-w-[90px]">Result</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <Fragment key={r.assembly_id}>
-                      <tr className="border-t border-gray-200 hover:bg-gray-50/60 align-top">
-                        <td className="py-3 pr-2"><input type="checkbox" checked={selected.has(r.assembly_id)} onChange={() => toggleOne(r.assembly_id)} className="accent-[#164FA3]" /></td>
-                        <td className="py-3 pr-3">
-                          <div className="font-semibold text-gray-900">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[10px] font-normal text-gray-400">({r.election_year})</span> : null}</div>
-                          <div className="text-xs text-gray-500">{r.district_name || "—"}</div>
-                          {r.mla_name && onEditMla ? (
-                            <button onClick={() => onEditMla(r.assembly_id)} title="Edit this MLA's profile"
-                              className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-[#164FA3]"><Pencil size={12} /> Edit MLA</button>
-                          ) : null}
-                        </td>
-                        <td className="py-3 px-3 border-l border-gray-100"><PersonCell highlight name={r.mla_name} party={r.mla_party} votes={r.mla_votes} partyByName={partyByName} /></td>
-                        <td className="py-3 px-3 border-l border-gray-100"><PersonCell name={r.competitor1_name} party={r.competitor1_party} votes={r.competitor1_votes} partyByName={partyByName} /></td>
-                        <td className="py-3 px-3 border-l border-gray-100"><PersonCell name={r.competitor2_name} party={r.competitor2_party} votes={r.competitor2_votes} partyByName={partyByName} /></td>
-                        <td className="py-3 px-3 border-l border-gray-100"><PersonCell name={r.competitor3_name} party={r.competitor3_party} votes={r.competitor3_votes} partyByName={partyByName} /></td>
-                      </tr>
-                      {/* Per-assembly vote analytics — same row group, not a card.
-                          Party totals + AAP-vs-BJP / BJP-vs-Congress differences +
-                          winning margin, all from THIS assembly's own candidates
-                          (backend-computed, so pagination never changes them). */}
-                      <tr className="bg-gray-50/70">
-                        <td className="pb-3"></td>
-                        <td colSpan={5} className="pb-3 pr-3"><VoteStats stats={r.vote_stats} partyByName={partyByName} /></td>
-                      </tr>
-                    </Fragment>
-                  ))}
+                  {rows.map((r) => {
+                    const cands = candidateRows(r);
+                    return (
+                      <Fragment key={r.assembly_id}>
+                        {/* Assembly group header — its export checkbox + Edit MLA. */}
+                        <tr className="bg-gray-50 border-t border-gray-200">
+                          <td colSpan={5} className="py-2 px-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <input type="checkbox" checked={selected.has(r.assembly_id)} onChange={() => toggleOne(r.assembly_id)} className="accent-[#164FA3]" title="Select for export" />
+                              <span className="font-bold text-gray-900">{r.assembly_name || "—"}</span>
+                              {r.election_year ? <span className="text-[11px] text-gray-400">({r.election_year})</span> : null}
+                              {r.district_name ? <span className="text-xs text-gray-500">· {r.district_name}</span> : null}
+                              {r.mla_name && onEditMla ? (
+                                <button onClick={() => onEditMla(r.assembly_id)} title="Edit this MLA's profile"
+                                  className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-[#164FA3]"><Pencil size={12} /> Edit MLA</button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                        {/* One row per candidate — Current MLA + every available competitor. */}
+                        {cands.map((c, i) => (
+                          <tr key={i} className={`border-b border-gray-100 ${c.isMla ? "bg-[#164FA3]/5" : "hover:bg-gray-50/60"}`}>
+                            <td className="py-2 pr-3">
+                              <div className={`text-[10px] font-bold uppercase tracking-wide ${c.isMla ? "text-[#164FA3]" : "text-gray-400"}`}>{c.label}</div>
+                              <div className="font-semibold text-gray-900 truncate" title={c.name || ""}>{c.name || <span className="text-gray-400 font-normal">Not Available</span>}</div>
+                            </td>
+                            <td className="py-2 px-3">{c.party ? <PartyLogo name={c.party} byName={partyByName} size={16} /> : <span className="text-gray-400">—</span>}</td>
+                            <td className="py-2 px-3 text-right font-semibold text-gray-900 whitespace-nowrap">{c.votes != null ? nfmt(c.votes) : "—"}</td>
+                            <td className="py-2 px-3 text-right text-gray-700 whitespace-nowrap">{c.pct != null ? `${c.pct.toFixed(2)}%` : "—"}</td>
+                            <td className="py-2 px-3">{resultBadge(c.result)}</td>
+                          </tr>
+                        ))}
+                        {/* Per-assembly analytics — same list group, not a card. */}
+                        <tr className="bg-gray-50/70">
+                          <td colSpan={5} className="pb-3 pt-1 px-1"><VoteStats stats={r.vote_stats} /></td>
+                        </tr>
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
