@@ -5,22 +5,25 @@ import { useRouter } from "next/navigation";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import StrengthView from "@/components/StrengthView";
 import RankingsView from "@/components/RankingsView";
-import { Gauge, Trophy, ArrowLeft } from "lucide-react";
+import AssemblyRankingView from "@/components/AssemblyRankingView";
+import { Gauge, Trophy, ArrowLeft, LayoutDashboard } from "lucide-react";
 
-// Combined Full Ranking view — opened from the Dashboard Overview's "Full
-// ranking" button. Two tabs (Strength / Rankings) that reuse the existing
-// Strength and Rankings content components (same data/APIs, no duplication).
+// Combined Strength & Ranking view — opened from the Dashboard Overview's "Full
+// ranking" button. Three tabs (State Overview / Strength / Ranking) that reuse the
+// existing content components (same data/APIs, no duplication). State Overview
+// carries the Assembly-wise Ranking (§1).
 export default function Page() {
   return <SupervisorGuard><Body /></SupervisorGuard>;
 }
 
 const TABS = [
+  { key: "overview", label: "State Overview", icon: LayoutDashboard },
   { key: "strength", label: "Strength", icon: Gauge },
-  { key: "rankings", label: "Rankings", icon: Trophy },
+  { key: "rankings", label: "Ranking", icon: Trophy },
 ];
 
 function Body() {
-  const [tab, setTab] = useState("strength"); // default: Strength
+  const [tab, setTab] = useState("overview"); // default: State Overview
   const router = useRouter();
 
   return (
@@ -34,8 +37,8 @@ function Body() {
         <ArrowLeft size={15} /> Back to Dashboard
       </button>
       <div>
-        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Full Ranking</h1>
-        <p className="text-gray-500 mt-2 font-medium">Organization strength and performance rankings.</p>
+        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Strength &amp; Ranking</h1>
+        <p className="text-gray-500 mt-2 font-medium">State overview, organization strength and performance rankings.</p>
       </div>
 
       {/* Native-style tab switcher (matches the dashboard's Overview/Analytics tabs). */}
@@ -56,7 +59,17 @@ function Body() {
         })}
       </div>
 
-      {tab === "strength" ? <StrengthView /> : <RankingsView />}
+      {/* State Overview carries the Assembly-wise Ranking (§1); Strength and Ranking
+          reuse the existing content components unchanged. */}
+      {tab === "overview" ? (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">State Overview</h2>
+            <p className="text-sm text-gray-500">State-level strength at a glance, with every assembly ranked by its worker count.</p>
+          </div>
+          <AssemblyRankingView />
+        </div>
+      ) : tab === "strength" ? <StrengthView /> : <RankingsView />}
     </div>
   );
 }

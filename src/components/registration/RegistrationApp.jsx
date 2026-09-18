@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { isTopAdmin } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 
 // Voter & Worker Registration — the admin side of the public link drive.
 //
@@ -191,11 +192,13 @@ export default function RegistrationApp() {
   const liveDrive = campaigns.filter((c) => c.status === "active")
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at) || b.id - a.id)[0] || null;
 
+  // Election Drive management is removed from the UI (§4). Registrations attach to
+  // the single active drive automatically (resolved server-side); the on/off of the
+  // public link stays available on the Common-registration-link card below.
   const TABS = [
     ["dashboard", "Dashboard", BarChart3],
     ["workers", "Workers & Links", Link2],
     ["people", "Registrations", Users],
-    ["drives", "Election Drives", Settings2],
   ];
 
   return (
@@ -210,14 +213,8 @@ export default function RegistrationApp() {
         </div>
       </div>
 
-      {/* Filters shared by every tab */}
+      {/* Filters shared by every tab (Election Drive filter removed — §4). */}
       <div className={`${cardCls} p-3 mb-4 flex flex-wrap items-center gap-2`}>
-        <select className={inputCls} value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
-          <option value="">All election drives</option>
-          {campaigns.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}{c.status === "closed" ? " (closed)" : ""}</option>
-          ))}
-        </select>
         <select className={inputCls} value={period} onChange={(e) => setPeriod(e.target.value)}>
           {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
@@ -252,7 +249,7 @@ export default function RegistrationApp() {
             <p className="text-xs text-gray-500 mt-0.5 max-w-2xl">
               {liveDrive
                 ? <>One link for the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. It opens a login screen: every karyakarta signs in with their <span className="font-semibold text-gray-700">username and password</span> (created for them in <span className="font-semibold text-gray-700">Workers &amp; Links → Generate Links</span>), and their registrations are credited to them. No per-person link is issued.</>
-                : <>The link is switched off — no drive is open, so anyone who opens it sees “Registration is not open right now”. Turn on a drive below to make it live.</>}
+                : <>The link is switched off, so anyone who opens it sees “Registration is not open right now”. Use the switch to make it live.</>}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -271,7 +268,6 @@ export default function RegistrationApp() {
       {tab === "dashboard" && <DashboardTab filterQs={filterQs} onWard={setWard} onError={setErr} />}
       {tab === "workers" && <WorkersTab filterQs={filterQs} campaignId={campaignId} campaigns={campaigns} onError={setErr} />}
       {tab === "people" && <PeopleTab filterQs={filterQs} onError={setErr} />}
-      {tab === "drives" && <DrivesTab campaigns={campaigns} sms={sms} reload={loadCampaigns} onError={setErr} />}
     </div>
   );
 }
@@ -284,7 +280,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/registration/dashboard?${filterQs({ worker_limit: 10, ward_limit: 20 })}`, { cache: "no-store" });
+      const r = await fetch(`/api/registration/dashboard?${filterQs({ worker_limit: 200, ward_limit: 100 })}`, { cache: "no-store" });
       if (!r.ok) throw new Error();
       setData(await r.json());
     } catch {
@@ -337,8 +333,8 @@ function DashboardTab({ filterQs, onWard, onError }) {
         <div className={`${cardCls} p-4 flex items-center gap-3`}>
           <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center"><Trophy size={20} /></div>
           <div className="min-w-0">
-            <p className="text-xs text-gray-500">Best Performing Ward</p>
-            <p className="font-bold text-gray-900 truncate">{s.top_ward ? `Ward ${s.top_ward.ward_number}` : "—"}</p>
+            <p className="text-xs text-gray-500">Best Performing Block</p>
+            <p className="font-bold text-gray-900 truncate">{s.top_ward ? `Block ${s.top_ward.ward_number}` : "—"}</p>
             <p className="text-xs text-gray-500">
               {s.top_ward ? `${s.top_ward.total} total · ${s.top_ward.voters} voters · ${s.top_ward.new_workers} workers` : "No registrations yet"}
             </p>
@@ -349,7 +345,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <RankTable
           title="Worker-wise Performance"
-          subtitle="Top 10"
+          subtitle={`Top ${Math.min(200, data.workers.length)}`}
           exportHref={`/api/registration/export?${filterQs({ report: "workers" })}`}
           head={["Rank", "Worker Name", "Mobile", "Voters", "Workers", "Total"]}
           rows={data.workers.map((w) => [
@@ -361,18 +357,51 @@ function DashboardTab({ filterQs, onWard, onError }) {
           empty="No workers yet — add them in the Workers & Links tab."
         />
         <RankTable
-          title="Ward-wise Performance"
-          subtitle={`${data.wards.length} ward${data.wards.length === 1 ? "" : "s"}`}
+          title="Block-wise Performance"
+          subtitle={`Top ${Math.min(100, data.wards.length)}`}
           exportHref={`/api/registration/export?${filterQs({ report: "wards" })}`}
-          head={["Rank", "Ward No.", "Voters", "Workers", "Total"]}
+          head={["Rank", "Block", "Voters", "Workers", "Total"]}
           rows={data.wards.map((w) => [
             <RankBadge key="r" rank={w.rank} />,
-            <button key="w" onClick={() => onWard(w.ward_number)} className="font-semibold text-gray-900 hover:underline">Ward {w.ward_number}</button>,
+            <button key="w" onClick={() => onWard(w.ward_number)} className="font-semibold text-gray-900 hover:underline">Block {w.ward_number}</button>,
             w.voters, w.new_workers,
             <span key="t" className="font-bold text-gray-900">{w.total}</span>,
           ])}
-          empty="No ward data yet."
+          empty="No block data yet."
         />
+      </div>
+
+      {/* Assembly-wise graph — ALL assemblies (all 90) from live data, each with
+          its Voter and Worker registration counts; zero-registration assemblies
+          still appear with 0. Fixed-width chart inside a horizontal scroller so no
+          assembly is hidden on desktop or mobile (§8). */}
+      <AssemblyRegistrationGraph assemblies={data.assemblies} />
+    </div>
+  );
+}
+
+function AssemblyRegistrationGraph({ assemblies }) {
+  const rows = assemblies || [];
+  if (!rows.length) return null;
+  // ~44px per assembly so all bars stay legible; the container scrolls sideways
+  // when they don't fit (all 90 remain reachable, never hidden).
+  const width = Math.max(760, rows.length * 44);
+  return (
+    <div className={`${cardCls} p-4`}>
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <h3 className="text-sm font-bold text-gray-900">Assembly-wise Registrations</h3>
+        <span className="text-xs text-gray-500">{rows.length} assembl{rows.length === 1 ? "y" : "ies"} · Voters vs Workers</span>
+      </div>
+      <div className="overflow-x-auto">
+        <BarChart width={width} height={340} data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 96 }} barGap={2}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
+          <XAxis dataKey="name" interval={0} angle={-60} textAnchor="end" height={96} tick={{ fontSize: 10, fill: "#6b7280" }} />
+          <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#6b7280" }} />
+          <Tooltip cursor={{ fill: "rgba(22,79,163,0.05)" }} />
+          <Legend />
+          <Bar dataKey="voters" name="Voters" fill="#164FA3" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="workers" name="Workers" fill="#FCB712" radius={[3, 3, 0, 0]} />
+        </BarChart>
       </div>
     </div>
   );
@@ -648,7 +677,8 @@ function ConfirmDeleteDialog({ title, message, confirmLabel, deleting, onCancel,
 }
 
 function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
-  const [drive, setDrive] = useState(campaignId || String(campaigns.find((c) => c.status === "active")?.id || ""));
+  // The active registration (drive) is resolved automatically — no drive picker (§4).
+  const drive = campaignId || String(campaigns.find((c) => c.status === "active")?.id || "");
   const [mode, setMode] = useState("single");
   const [form, setForm] = useState({ name: "", mobile: "", ward_number: "", area_booth: "" });
   const [bulk, setBulk] = useState("");
@@ -657,7 +687,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
   const [note, setNote] = useState("");
 
   async function save() {
-    if (!drive) { onError("Create an election drive first, then add workers to it."); return; }
+    if (!drive) { onError("Registration is not open yet. Turn on the common registration link first, then add workers."); return; }
     setSaving(true); setNote("");
     try {
       const body = mode === "bulk" ? { campaign_id: drive, bulk } : { campaign_id: drive, ...form };
@@ -737,10 +767,8 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
         <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={16} /></button>
       </div>
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <select className={inputCls} value={drive} onChange={(e) => setDrive(e.target.value)}>
-          <option value="">Select election drive…</option>
-          {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        {/* Election Drive selection removed (§4) — workers attach to the active
+            registration automatically. */}
         <div className="flex rounded-lg border border-gray-300 overflow-hidden">
           {[["single", "One worker"], ["bulk", "Paste a list"]].map(([v, l]) => (
             <button key={v} onClick={() => setMode(v)}

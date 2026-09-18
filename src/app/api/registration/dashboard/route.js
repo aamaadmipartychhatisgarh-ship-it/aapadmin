@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
-import { getRegSummary, getWorkerRanking, getWardRanking, getWardOptions } from "@/lib/registrationStats";
+import { getRegSummary, getWorkerRanking, getWardRanking, getWardOptions, getAssemblyRegistrationCounts } from "@/lib/registrationStats";
 
 // One payload for the whole dashboard — KPIs, the Top 10 worker ranking, the
 // ward ranking and the ward filter options. Sending them together keeps every
@@ -16,17 +16,19 @@ export async function GET(req) {
     if (error) return error;
     const { searchParams } = new URL(req.url);
     const f = parseRegFilters(searchParams);
-    const workerLimit = Math.min(100, Math.max(1, parseInt(searchParams.get("worker_limit") || "10", 10) || 10));
-    const wardLimit = Math.min(100, Math.max(1, parseInt(searchParams.get("ward_limit") || "20", 10) || 20));
+    // Worker ranking shows the Top 200, block (ward) ranking the Top 100 (§9).
+    const workerLimit = Math.min(200, Math.max(1, parseInt(searchParams.get("worker_limit") || "200", 10) || 200));
+    const wardLimit = Math.min(100, Math.max(1, parseInt(searchParams.get("ward_limit") || "100", 10) || 100));
 
-    const [summary, workers, wards, wardOptions] = await Promise.all([
+    const [summary, workers, wards, wardOptions, assemblies] = await Promise.all([
       getRegSummary(f),
       getWorkerRanking({ ...f, limit: workerLimit }),
       getWardRanking({ ...f, limit: wardLimit }),
       getWardOptions(f.campaignId),
+      getAssemblyRegistrationCounts(f), // all 90 assemblies, voter/worker counts (§8)
     ]);
 
-    return NextResponse.json({ summary, workers, wards, wardOptions }, { headers: NO_STORE });
+    return NextResponse.json({ summary, workers, wards, wardOptions, assemblies }, { headers: NO_STORE });
   } catch (e) {
     console.error("[registration] dashboard GET error:", e);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

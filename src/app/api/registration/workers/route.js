@@ -110,15 +110,16 @@ export async function POST(req) {
 
       let workerId;
       if (sameMobile) {
+        // Re-generating a password resets its 3-month validity from now (§6).
         await query(
-          `UPDATE reg_workers SET name = ?, username = ?, password_hash = ?, status = 'active' WHERE id = ?`,
+          `UPDATE reg_workers SET name = ?, username = ?, password_hash = ?, password_set_at = NOW(), status = 'active' WHERE id = ?`,
           [name, name, passwordHash, sameMobile.id]
         );
         workerId = sameMobile.id;
       } else {
         const res = await query(
-          `INSERT INTO reg_workers (campaign_id, name, mobile, token, username, password_hash, ward_number, area_booth, created_by)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO reg_workers (campaign_id, name, mobile, token, username, password_hash, password_set_at, ward_number, area_booth, created_by)
+           VALUES (?,?,?,?,?,?,NOW(),?,?,?)`,
           [campaignId, name, mobile, newLinkToken(), name, passwordHash, clip(e.ward_number, 60), clip(e.area_booth, 160), session?.user?.id || null]
         );
         workerId = res.insertId;

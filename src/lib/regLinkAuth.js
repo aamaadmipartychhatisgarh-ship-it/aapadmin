@@ -240,6 +240,19 @@ export async function handleRegOtpVerify(token, body) {
 // attribution, the "my people" list) is unchanged. Passwords are compared against
 // the stored bcrypt hash and are never logged; an unknown username, a disabled
 // account and a wrong password all fail with one generic message.
+// Password validity (§6): a login password is valid for 3 MONTHS from the date it
+// was set (fallback: the worker's registration date). Expiry is derived here at
+// login time from that date — nothing stores a mutable "expired" flag, so it can
+// never drift. Returns true once the 3-month window has fully elapsed.
+export function isPasswordExpired(basis) {
+  if (!basis) return false; // no known set-date → never lock out (post-backfill this won't happen)
+  const set = new Date(basis);
+  if (Number.isNaN(set.getTime())) return false;
+  const expiry = new Date(set);
+  expiry.setMonth(expiry.getMonth() + 3);
+  return Date.now() > expiry.getTime();
+}
+
 export async function handleRegLogin(body) {
   try {
     const entry = await resolveEntry(null); // the currently active drive
@@ -249,12 +262,18 @@ export async function handleRegLogin(body) {
     if (!username || !password) return json({ message: "Enter your username and password." }, 400);
 
     const [w] = await query(
-      `SELECT id AS worker_id, name AS worker_name, worker_code, password_hash, status
+      `SELECT id AS worker_id, name AS worker_name, worker_code, password_hash, status, password_set_at, created_at
          FROM reg_workers WHERE campaign_id = ? AND username = ? LIMIT 1`,
       [entry.campaign_id, username]
     );
     const ok = !!w && w.status === "active" && !!w.password_hash && (await bcrypt.compare(password, w.password_hash));
     if (!ok) return json({ message: "Incorrect username or password." }, 401);
+    // Enforce the 3-month password validity on the backend (§6): a correct but
+    // expired password cannot authenticate. Checked only after the password
+    // matches, so it never reveals whether an account exists.
+    if (isPasswordExpired(w.password_set_at || w.created_at)) {
+      return json({ message: "Your password has expired. Passwords are valid for 3 months — please ask your in-charge to reissue your login." }, 403);
+    }
 
     const payload = { kind: "reg_link", rwid: w.worker_id, cid: entry.campaign_id, token: null, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS };
     const out = json({ ok: true, handler: { name: w.worker_name, worker_code: w.worker_code } });

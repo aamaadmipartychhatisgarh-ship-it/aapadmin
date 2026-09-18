@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { canAccessMedia } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureNewsChannelsSeed } from "@/lib/newsChannelsSeed";
-import { createWithSpokespersonNumber } from "@/lib/spokespersonNumber";
+import { createWithSpokespersonNumber, spokespersonForNumber } from "@/lib/spokespersonNumber";
 
 export async function POST(req) {
   try {
@@ -28,11 +28,13 @@ export async function POST(req) {
          d.status || "scheduled", spokesNum]
       )
     );
-    // Optional: assign spokespersons in same request
-    if (Array.isArray(d.spokesperson_ids)) {
-      for (const sid of d.spokesperson_ids) {
-        await query(`INSERT IGNORE INTO debate_assignments (debate_id, spokesperson_id) VALUES (?, ?)`, [res.insertId, sid]);
-      }
+    // Spokesperson is assigned AUTOMATICALLY in sequence (§3): the entry's
+    // backend-allocated number maps to the next spokesperson in the active master
+    // (round-robin). The user no longer picks one — any client-supplied list is
+    // ignored. Exactly one assignment row is created for this debate.
+    const assignedId = await spokespersonForNumber(number);
+    if (assignedId != null) {
+      await query(`INSERT IGNORE INTO debate_assignments (debate_id, spokesperson_id) VALUES (?, ?)`, [res.insertId, assignedId]);
     }
     return NextResponse.json({ id: res.insertId, spokesperson_number: number }, { status: 201 });
   } catch (err) {

@@ -1576,9 +1576,9 @@ export function DebateModal({ channels, spokespersons, onClose, onSaved, editing
         <div><label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Debate File (PDF, JPG, PNG, WEBP)</label><FileUpload value={form.brief_pdf_url} onChange={(url) => setForm({ ...form, brief_pdf_url: url })} endpoint="/api/media/uploads" accept=".pdf,.jpg,.jpeg,.png,.webp" /></div>
       </div>
       <textarea className={inp} rows={2} placeholder="Talking points" value={form.talking_points} onChange={(e) => setForm({ ...form, talking_points: e.target.value })} />
-      <div>
-        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Select Spokesperson</label>
-        <SpokespersonMultiSelect options={spokespersons} value={form.spokesperson_ids} onChange={(ids) => setForm({ ...form, spokesperson_ids: ids })} />
+      {/* Spokesperson is assigned AUTOMATICALLY in sequence (§3) — no manual pick. */}
+      <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-xs text-blue-800">
+        The spokesperson is assigned automatically, in sequence, from the spokesperson master list — no manual selection needed.
       </div>
       {editing && (
         <div className="grid grid-cols-2 gap-3">
@@ -1718,13 +1718,13 @@ function ConferenceModal({ onClose, onSaved, editing, spokespersons = [] }) {
       {/* UI label is "Press Points"; the stored field remains `agenda` so existing
           data and the backend/API are unaffected. */}
       <textarea className={inp} rows={3} placeholder="Press Points" value={form.agenda} onChange={(e) => setForm({ ...form, agenda: e.target.value })} />
-      <div>
-        <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Spokesperson(s)</label>
-        <SpokespersonMultiSelect options={spokesOptions} value={form.spokesperson_ids} onChange={(ids) => setForm({ ...form, spokesperson_ids: ids })} />
+      {/* Spokesperson is assigned AUTOMATICALLY in sequence (§3) — no manual pick. */}
+      <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-xs text-blue-800">
+        The spokesperson is assigned automatically, in sequence, from the spokesperson master list — no manual selection needed.
       </div>
       <div>
         <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1 block">Co-Spokesperson</label>
-        <input className={inp} placeholder="Type a co-spokesperson name" value={form.co_spokesperson} onChange={(e) => setForm({ ...form, co_spokesperson: e.target.value })} />
+        <input className={inp} placeholder="Type a co-spokesperson name (optional)" value={form.co_spokesperson} onChange={(e) => setForm({ ...form, co_spokesperson: e.target.value })} />
       </div>
       {editing && (
         <select className={inp} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>

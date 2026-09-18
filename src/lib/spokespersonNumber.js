@@ -140,6 +140,22 @@ export async function ensureSpokespersonNumberSchema(table) {
   }
 }
 
+// Automatic, sequential spokesperson assignment (Media §3): given a 1-based
+// entry sequence number (the same monotonic spokesperson_number this module
+// allocates), return the id of the spokesperson to assign from the ACTIVE master
+// list — entry 1 → first spokesperson, entry 2 → second, … and once the list is
+// exhausted it continues round-robin from the first ("next available"). Ordered
+// by id so the sequence is stable and never restarts incorrectly. Returns null
+// only when there are no active spokespersons (nothing to assign). Reuses the
+// existing master (`spokespersons`) — creates no records.
+export async function spokespersonForNumber(number) {
+  const rows = await query("SELECT id FROM spokespersons WHERE is_active = 1 ORDER BY id ASC");
+  if (!rows.length) return null;
+  const n = Number(number);
+  const seq = Number.isFinite(n) && n > 0 ? n : 1;
+  return rows[(seq - 1) % rows.length].id;
+}
+
 // Allocate the next monotonic number and run doInsert(number) to create the row.
 // On the rare UNIQUE clash (e.g. a hand-inserted number), recompute and retry so
 // a valid unique number is always saved and no row is half-created (§35).

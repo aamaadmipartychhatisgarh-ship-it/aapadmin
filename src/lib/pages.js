@@ -150,12 +150,6 @@ export const PAGES = [
   // page-access list because super_admin is the sole role in `roles`.
   { key: "influencers", label: "Influencers", href: "/dashboard/admin/influencers", prefixes: ["/dashboard/admin/influencers"], icon: "Star",
     roles: [ROLES.SUPER_ADMIN] },
-  // Worker & Membership Management — SUPER ADMIN ONLY. Same restriction model as
-  // Influencers: super_admin is the sole role, so it appears in no other role's
-  // nav or page-access list, and every /api/worker-membership route re-checks
-  // isSuperAdmin server-side.
-  { key: "worker_membership", label: "Worker & Membership", href: "/dashboard/admin/worker-membership", prefixes: ["/dashboard/admin/worker-membership"], icon: "Users",
-    roles: [ROLES.SUPER_ADMIN] },
   // Voter & Worker Registration — the public link drive. State-level by baseline
   // (the drive is run centrally), and grantable to anyone else through Page
   // Access; every /api/registration route re-checks this key server-side. The

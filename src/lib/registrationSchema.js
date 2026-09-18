@@ -102,6 +102,13 @@ export async function ensureRegistrationSchema() {
     await ensureColumn("reg_workers", "username", "VARCHAR(160) NULL");
     await ensureColumn("reg_workers", "password_hash", "VARCHAR(255) NULL");
     await ensureIndex("reg_workers", "uq_reg_worker_campaign_username", "campaign_id, username", true);
+    // Password validity (§6): the login password is valid for 3 months from the
+    // date it was set. `password_set_at` records that date; for existing rows it is
+    // back-filled to their registration date (created_at), so current passwords
+    // keep working until 3 months after they were created. Expiry is derived from
+    // this column at login time — no stored "expired" flag to keep in sync.
+    await ensureColumn("reg_workers", "password_set_at", "TIMESTAMP NULL");
+    await query("UPDATE reg_workers SET password_set_at = created_at WHERE password_set_at IS NULL AND password_hash IS NOT NULL").catch(() => {});
 
     // --- Registered people --------------------------------------------------
     // registered_at is the auto "Registration Date + Time" the form shows. It is

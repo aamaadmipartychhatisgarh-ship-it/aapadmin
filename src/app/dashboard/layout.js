@@ -216,14 +216,7 @@ export default function DashboardLayout({ children }) {
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
-      // Worker & Voter Registration is a collapsible parent — Worker & Membership
-      // (super_admin only) is nested beneath it as a child page, not a standalone
-      // top-level item. Routes/pages/permissions are unchanged; only the sidebar
-      // grouping moved. Worker & Membership stays gated by its own super_admin-only
-      // "worker_membership" page key.
-      { name: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", icon: Vote, children: [
-        { name: "Worker & Membership", href: "/dashboard/admin/worker-membership", icon: Users },
-      ] },
+      { name: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", icon: Vote },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },

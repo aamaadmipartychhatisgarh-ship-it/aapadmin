@@ -137,15 +137,15 @@ export async function publicFormContext(token) {
     if (!link) {
       return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
     }
-    // The constituency list people choose from. Constituency names are public
-    // information (they are on every ballot), so serving them here exposes
-    // nothing — and choosing from the master list is what keeps the data
-    // clean enough to group by, which free text never is. Displayed in Hindi
-    // when the master carries a Hindi name (see assemblyNameExpr), else the
-    // canonical name; the id (the value submitted) is unchanged either way.
-    const nameExpr = await assemblyNameExpr();
+    // The constituency list people choose from. Each row carries BOTH the
+    // canonical (English) `name` and a Hindi `name_hi` (the Hindi master column
+    // when present, else the canonical name as a safe fallback), so the form can
+    // show the Assembly name in the user's Preferred Language (§5) without any
+    // duplicate Assembly records. The id — the value actually submitted/stored —
+    // is identical in either language.
+    const hiExpr = await assemblyNameExpr();
     const constituencies = await query(
-      `SELECT id, ${nameExpr} AS name FROM locations WHERE type = 'assembly' ORDER BY ${nameExpr} ASC, name ASC`
+      `SELECT id, name AS name, ${hiExpr} AS name_hi FROM locations WHERE type = 'assembly' ORDER BY name ASC`
     );
 
     return NextResponse.json(

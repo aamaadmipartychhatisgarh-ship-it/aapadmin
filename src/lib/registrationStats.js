@@ -238,3 +238,50 @@ export async function getWardOptions(campaignId) {
   );
   return rows.map((r) => r.ward_number);
 }
+
+// ------------------------------------------------------- ASSEMBLY-WISE (§8)
+// Voter + Worker registration counts for EVERY assembly (all 90), from live data.
+// Active registrations are grouped by assembly_id, then LEFT-joined against the
+// full assembly master (locations type='assembly') so an assembly with no
+// registrations still appears with 0/0 — never dropped, never hardcoded. Honors
+// the drive/date filters so the graph matches the rest of the dashboard.
+export async function getAssemblyRegistrationCounts({ campaignId, from, to } = {}) {
+  await ensureRegistrationSchema();
+  const { where, params } = peopleFilters({ campaignId, from, to });
+  const counts = await query(
+    `SELECT p.assembly_id AS id,
+            SUM(p.person_type = 'voter')  AS voters,
+            SUM(p.person_type = 'worker') AS workers
+       ${PEOPLE_FROM} ${where} AND p.assembly_id IS NOT NULL
+      GROUP BY p.assembly_id`,
+    params
+  );
+  const byId = new Map(counts.map((r) => [Number(r.id), { voters: Number(r.voters) || 0, workers: Number(r.workers) || 0 }]));
+  // Full assembly master — English name plus a Hindi name when the column exists
+  // (so the caller can show either language). Ordered by name for a stable graph.
+  const hiCol = await assemblyHindiColumn();
+  const hiExpr = hiCol ? `COALESCE(NULLIF(TRIM(\`${hiCol}\`), ''), name)` : "name";
+  const assemblies = await query(
+    `SELECT id, name AS name, ${hiExpr} AS name_hi FROM locations WHERE type = 'assembly' ORDER BY name ASC`
+  );
+  return assemblies.map((a) => {
+    const c = byId.get(Number(a.id)) || { voters: 0, workers: 0 };
+    return { id: a.id, name: a.name, name_hi: a.name_hi, voters: c.voters, workers: c.workers };
+  });
+}
+
+// Detect a Hindi assembly-name column on `locations` once per process (mirrors the
+// public form's detection); returns the column name or null.
+let _asmHiCol; // undefined = not probed, null = none, string = column
+async function assemblyHindiColumn() {
+  if (_asmHiCol !== undefined) return _asmHiCol;
+  try {
+    const rows = await query(
+      `SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'locations'
+          AND COLUMN_NAME IN ('name_hi','name_hindi','hindi_name','name_hn')`
+    );
+    _asmHiCol = rows.length ? rows[0].c : null;
+  } catch { _asmHiCol = null; }
+  return _asmHiCol;
+}
