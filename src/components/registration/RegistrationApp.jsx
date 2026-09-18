@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { isTopAdmin } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
+import Avatar from "@/components/Avatar";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 
 // Voter & Worker Registration — the admin side of the public link drive.
@@ -589,8 +590,15 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
                 <tr key={w.id} className="border-t border-gray-100 hover:bg-gray-50/60">
                   <td className="px-3 py-2.5"><RankBadge rank={w.rank} /></td>
                   <td className="px-3 py-2.5">
-                    <span className="font-semibold text-gray-900">{w.name}</span>
-                    <span className="block text-[11px] text-gray-400 font-mono">{w.worker_code}</span>
+                    <div className="flex items-center gap-2">
+                      {/* Photo comes from the LINKED Contact (via contact_id); a
+                          worker with no linked contact shows initials. */}
+                      <Avatar name={w.contact_name || w.name} src={w.photo_url} size={30} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-[10px]" />
+                      <span className="min-w-0">
+                        <span className="font-semibold text-gray-900 block truncate">{w.name}</span>
+                        <span className="block text-[11px] text-gray-400 font-mono">{w.worker_code}</span>
+                      </span>
+                    </div>
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">{w.mobile || "—"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{[w.ward_number, w.area_booth].filter(Boolean).join(" · ") || "—"}</td>

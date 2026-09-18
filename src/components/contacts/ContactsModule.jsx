@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network, Printer } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network, Printer, Link2, Copy } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
 import ActionBar from "@/components/ActionBar";
@@ -121,6 +121,26 @@ export default function ContactsModule({ session, mode }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  // Contacts → Worker & Voter Registration: generate (or reuse) a registration link
+  // for a selected Contact. genBusyId = the contact whose link is being generated;
+  // genResult = the returned link/credentials to show once.
+  const [genBusyId, setGenBusyId] = useState(null);
+  const [genResult, setGenResult] = useState(null);
+  async function generateLink(c) {
+    if (genBusyId) return;
+    setGenBusyId(c.id); setError("");
+    try {
+      const r = await fetch("/api/registration/workers/from-contact", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: c.id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d?.message || "Could not generate the registration link."); return; }
+      setGenResult({ ...d, contact: c });
+      setMessage(d.reused ? `${c.person_name} already has a registration link — reused.` : `Registration link generated for ${c.person_name}.`);
+    } catch { setError("Could not generate the registration link."); }
+    finally { setGenBusyId(null); }
+  }
   const [showAdd, setShowAdd] = useState(false);
   const [editingIndex, setEditingIndex] = useState(null); // index into `contacts`, or null
   const [editNavBusy, setEditNavBusy] = useState(false); // fetching an adjacent page mid-edit
@@ -1105,6 +1125,15 @@ export default function ContactsModule({ session, mode }) {
                     <button onClick={() => setTaskFor(c)} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded-lg font-medium">
                       <ClipboardList size={14} /> Task
                     </button>
+                    {/* Generate (or reuse) a Worker & Voter Registration link for this
+                        Contact — uses the Contact's existing name/phone/photo; the
+                        worker row keeps the stable contact_id (admin only). */}
+                    {mode === "admin" && (
+                      <button onClick={() => generateLink(c)} disabled={genBusyId === c.id}
+                        className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">
+                        {genBusyId === c.id ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} Generate Link
+                      </button>
+                    )}
                     {/* The row-level Edit was a duplicate of the profile card's Edit
                         (open a contact via its name/avatar, then Edit there). Removed
                         to leave a single edit entry point. */}
@@ -1132,6 +1161,8 @@ export default function ContactsModule({ session, mode }) {
           onSaved={() => { setShowAdd(false); setError(""); setMessage("Contact created successfully."); load(); loadCounts(); }}
         />
       )}
+
+      {genResult && <GenerateLinkResult data={genResult} onClose={() => setGenResult(null)} />}
       {editingContact && (
         <EditContactModal
           contact={editingContact}
@@ -1189,6 +1220,62 @@ export default function ContactsModule({ session, mode }) {
 // the page buttons appear only when there's more than one page. Server-side
 // pagination means every record is reachable across pages — nothing is dropped.
 const PAGE_SIZE_OPTIONS = [20, 25, 50, 100];
+// Result of generating a registration link from a Contact: the Contact's photo +
+// name + phone (reused, not re-entered), the generated/existing User ID, the
+// password (shown ONCE for a fresh account), and the common link. On a reuse the
+// account already existed — no new password is shown. The worker now appears in
+// Worker & Voter Registration → Workers Link with this same Contact photo.
+function GenerateLinkResult({ data, onClose }) {
+  const c = data.contact || {};
+  const w = data.worker || {};
+  const cred = data.credentials || null;
+  const link = typeof window !== "undefined" ? `${window.location.origin}${data.link || "/join"}` : (data.link || "/join");
+  const [copied, setCopied] = useState("");
+  const copy = (text, key) => { try { navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(""), 1500); } catch { /* select manually */ } };
+  const Row = ({ label, value, copyKey }) => (
+    <div className="flex items-center justify-between gap-3 border border-gray-100 rounded-lg px-3 py-2">
+      <div className="min-w-0"><div className="text-[11px] text-gray-400">{label}</div><div className="font-semibold text-gray-900 truncate">{value || "—"}</div></div>
+      {value && copyKey ? (
+        <button onClick={() => copy(String(value), copyKey)} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 shrink-0" title="Copy">
+          {copied === copyKey ? <CheckCircle2 size={15} className="text-green-600" /> : <Copy size={15} />}
+        </button>
+      ) : null}
+    </div>
+  );
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+          <h3 className="text-base font-bold text-gray-900 inline-flex items-center gap-2"><Link2 size={18} className="text-[#164FA3]" /> Registration Link</h3>
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="flex items-center gap-3">
+            <Avatar name={w.contact_name || c.person_name} src={w.photo_url || c.photo_url} size={52} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
+            <div className="min-w-0">
+              <div className="font-bold text-gray-900 truncate">{c.person_name || w.name}</div>
+              <div className="text-sm text-gray-500">{w.mobile || c.phone_number}</div>
+            </div>
+          </div>
+          {data.reused ? (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2">
+              This contact already has a registration link — the existing account was reused (no duplicate created). The password was issued when it was first created.
+            </div>
+          ) : (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-3 py-2">
+              Save these credentials now — the password is shown only once.
+            </div>
+          )}
+          <Row label="User ID (username)" value={cred?.username || w.username} copyKey="user" />
+          {cred?.password ? <Row label="Password" value={cred.password} copyKey="pass" /> : null}
+          <Row label="Registration link" value={link} copyKey="link" />
+          <p className="text-[11px] text-gray-400">This contact now appears in Worker &amp; Voter Registration → Workers &amp; Links, linked by contact ID. The registration form shows this same contact photo.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Pagination({ total, page, pageSize, onPage, onPageSize, loading }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;

@@ -127,12 +127,15 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
   const lim = Math.min(500, Math.max(1, Number(limit) || 10));
   const off = Math.max(0, Number(offset) || 0);
   const rows = await query(
-    `SELECT w.id, w.name, w.mobile, w.worker_code, w.ward_number, w.area_booth, w.status, w.token,
+    `SELECT w.id, w.name, w.mobile, w.worker_code, w.ward_number, w.area_booth, w.status, w.token, w.contact_id,
+            MAX(cc.photo_url)   AS contact_photo_url,
+            MAX(cc.person_name) AS contact_name,
             COALESCE(SUM(p.person_type = 'voter'), 0) AS voters,
             COALESCE(SUM(p.person_type = 'worker'), 0) AS new_workers,
             COUNT(p.id) AS total
        FROM reg_workers w
        LEFT JOIN reg_people p ON ${on.join(" AND ")}
+       LEFT JOIN contacts cc ON cc.id = w.contact_id
       WHERE ${where.join(" AND ")}
       GROUP BY w.id
       ORDER BY total DESC, voters DESC, w.name ASC, w.id ASC
@@ -140,10 +143,15 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
     params
   );
   // Rank is the position in this ordering; offset keeps it correct when paging.
+  // A worker generated FROM a Contact carries that Contact's id + live photo/name,
+  // so the roster (Workers Link) shows the same Contact photo without a re-upload.
   return rows.map((r, i) => ({
     rank: off + i + 1,
     id: r.id, name: r.name, mobile: r.mobile, worker_code: r.worker_code,
     ward_number: r.ward_number, area_booth: r.area_booth, status: r.status, token: r.token,
+    contact_id: r.contact_id || null,
+    photo_url: r.contact_photo_url || null,
+    contact_name: r.contact_name || null,
     voters: Number(r.voters), new_workers: Number(r.new_workers), total: Number(r.total),
   }));
 }

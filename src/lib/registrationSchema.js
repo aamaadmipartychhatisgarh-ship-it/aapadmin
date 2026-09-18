@@ -109,6 +109,12 @@ export async function ensureRegistrationSchema() {
     // this column at login time — no stored "expired" flag to keep in sync.
     await ensureColumn("reg_workers", "password_set_at", "TIMESTAMP NULL");
     await query("UPDATE reg_workers SET password_set_at = created_at WHERE password_set_at IS NULL AND password_hash IS NOT NULL").catch(() => {});
+    // Contacts → Registration linkage: a worker link generated FROM a Contact keeps
+    // that Contact's stable id, so the name/phone/photo stay tied to the source
+    // Contact even if display fields change, and re-generating for the same Contact
+    // reuses this row instead of duplicating it.
+    await ensureColumn("reg_workers", "contact_id", "INT NULL");
+    await ensureIndex("reg_workers", "idx_reg_worker_contact", "contact_id");
 
     // --- Registered people --------------------------------------------------
     // registered_at is the auto "Registration Date + Time" the form shows. It is
