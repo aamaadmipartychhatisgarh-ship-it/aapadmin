@@ -24,9 +24,16 @@ export default function WorkerFormPage() {
   return (
     <div className="min-h-screen bg-[#f4f6f8] flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-md">
-        {/* Brand header */}
+        {/* Brand header — Arvind Kejriwal Ji's photo (the SAME asset the Dashboard
+            uses: public/kejriwal_new.png) shown prominently beside the AAP logo. */}
         <div className="flex flex-col items-center mb-5 text-center">
-          <img src="/aap_logo.jpg" alt="AAP" className="w-16 h-16 rounded-full object-contain bg-white border border-gray-200 mb-2" />
+          <div className="flex items-center justify-center gap-3 mb-2">
+            <span className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-white border border-gray-200 overflow-hidden shrink-0">
+              <img src="/kejriwal_new.png" alt="Arvind Kejriwal" className="h-full w-full object-contain"
+                onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }} />
+            </span>
+            <img src="/aap_logo.jpg" alt="AAP" className="w-16 h-16 rounded-full object-contain bg-white border border-gray-200" />
+          </div>
           <h1 className="text-lg font-bold text-gray-900">Vote &amp; Registration — Worker Form</h1>
           <p className="text-xs text-gray-500">Aam Aadmi Party, Chhattisgarh</p>
         </div>

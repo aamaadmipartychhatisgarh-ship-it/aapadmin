@@ -175,6 +175,19 @@ const inputCls =
   "w-full h-12 px-3.5 rounded-xl border border-gray-300 bg-white text-[16px] text-gray-900 " +
   "placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#164FA3] focus:border-transparent";
 
+// Arvind Kejriwal Ji's photo for the form's top navbar — the EXACT same asset the
+// Dashboard uses (public/kejriwal_new.png), reused so the leader photo stays
+// consistent across the app. A rounded white chip keeps it clean on the brand
+// header; if the image can't load it simply hides (no broken-image icon).
+function LeaderPhoto() {
+  return (
+    <span className="shrink-0 inline-flex items-center justify-center h-11 w-11 sm:h-12 sm:w-12 rounded-full bg-white/95 overflow-hidden ring-1 ring-white/40">
+      <img src="/kejriwal_new.png" alt="Arvind Kejriwal" className="h-full w-full object-contain"
+        onError={(e) => { e.currentTarget.parentElement.style.display = "none"; }} />
+    </span>
+  );
+}
+
 export default function PublicRegistrationForm({ token }) {
   const [boot, setBoot] = useState(null);      // { campaign, constituencies, credited_to, defaults }
   const [loadErr, setLoadErr] = useState("");
@@ -627,10 +640,13 @@ export default function PublicRegistrationForm({ token }) {
       {/* Election details — the form's fixed header, set by the drive */}
       <header className="text-white" style={{ background: BRAND }}>
         <div className="max-w-xl mx-auto px-4 py-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
-              <h1 className="text-lg font-bold mt-0.5">{c.name || t.fallbackTitle}</h1>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <LeaderPhoto />
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
+                <h1 className="text-lg font-bold mt-0.5 truncate">{c.name || t.fallbackTitle}</h1>
+              </div>
             </div>
             {LangButton}
           </div>
@@ -948,9 +964,12 @@ function RegLoginGate({ t, campaignName, toggleLang, onLoggedIn }) {
     <div className="min-h-screen bg-gray-50">
       <header className="text-white" style={{ background: BRAND }}>
         <div className="max-w-md mx-auto px-4 py-5 flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
-            <h1 className="text-lg font-bold mt-0.5">{campaignName || t.fallbackTitle}</h1>
+          <div className="flex items-center gap-3 min-w-0">
+            <LeaderPhoto />
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
+              <h1 className="text-lg font-bold mt-0.5 truncate">{campaignName || t.fallbackTitle}</h1>
+            </div>
           </div>
           <button type="button" onClick={toggleLang} className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1.5 rounded-lg bg-white/15 text-white hover:bg-white/25">
             <Languages size={14} />{t.switchTo}
@@ -1055,9 +1074,12 @@ function RegOtpGate({ base, t, campaignName, toggleLang, onVerified }) {
     <div className="min-h-screen bg-gray-50">
       <header className="text-white" style={{ background: BRAND }}>
         <div className="max-w-md mx-auto px-4 py-5 flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
-            <h1 className="text-lg font-bold mt-0.5">{campaignName || t.handlerTitle}</h1>
+          <div className="flex items-center gap-3 min-w-0">
+            <LeaderPhoto />
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-wider text-white/70">{t.org}</p>
+              <h1 className="text-lg font-bold mt-0.5 truncate">{campaignName || t.handlerTitle}</h1>
+            </div>
           </div>
           <button type="button" onClick={toggleLang} className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1.5 rounded-lg bg-white/15 text-white hover:bg-white/25">
             <Languages size={14} />{t.switchTo}
