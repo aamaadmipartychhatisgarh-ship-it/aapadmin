@@ -43,8 +43,10 @@ export async function GET(req) {
     const cols = await getCallColumns();
     const has = (c) => cols.has(c);
     // Optional-column-aware expressions.
-    const durAvg = has("duration_seconds") ? "ROUND(AVG(c.duration_seconds), 0)" : "0";
-    const durSum = has("duration_seconds") ? "COALESCE(SUM(c.duration_seconds), 0)" : "0";
+    // Clamp each row's duration to non-negative before aggregating, so a legacy
+    // invalid (negative) duration can never produce a negative average/total.
+    const durAvg = has("duration_seconds") ? "ROUND(AVG(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0)" : "0";
+    const durSum = has("duration_seconds") ? "COALESCE(SUM(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0)" : "0";
     const followUps = has("is_follow_up_required")
       ? "SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END)" : "0";
     const interested = has("sentiment")

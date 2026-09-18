@@ -254,7 +254,7 @@ export default function AdminCallRecords() {
               <thead className="bg-gray-50 text-left sticky top-0">
                 <tr>
                   <th className="px-5 py-2.5 font-semibold text-gray-600">Date</th>
-                  <th className="px-5 py-2.5 font-semibold text-gray-600 text-right">Total Call Minutes</th>
+                  <th className="px-5 py-2.5 font-semibold text-gray-600 text-right">Total Call Duration</th>
                 </tr>
               </thead>
               <tbody>
@@ -266,7 +266,7 @@ export default function AdminCallRecords() {
                   perDayMinutes.map((r) => (
                     <tr key={r.day} className="border-t border-gray-100 hover:bg-blue-50/30">
                       <td className="px-5 py-2.5 text-gray-700 whitespace-nowrap">{formatDate(r.day)}</td>
-                      <td className="px-5 py-2.5 text-right font-semibold text-gray-900 font-mono">{Number(r.minutes || 0).toLocaleString("en-IN")}</td>
+                      <td className="px-5 py-2.5 text-right font-semibold text-gray-900 whitespace-nowrap">{formatDurationHrMinSec(r.seconds ?? (r.minutes || 0) * 60, "0 Sec")}</td>
                     </tr>
                   ))
                 )}

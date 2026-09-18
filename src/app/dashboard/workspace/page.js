@@ -12,6 +12,7 @@ import ProfilePhoto from "@/components/ProfilePhoto";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { MultiSelect } from "@/components/MultiSelect";
 import { ACTIVE_STATUS_LABEL } from "@/lib/activeStatus";
+import { formatDurationHrMinSec } from "@/lib/callDuration";
 
 // Friendly labels for who assigned a contact.
 const ROLE_LABELS = { super_admin: "Super Admin", supervisor: "Supervisor", caller: "Caller" };
@@ -1043,7 +1044,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                           </div>
                           {h.remarks && <div className="text-gray-600 italic">"{h.remarks}"</div>}
                           <div className="text-xs text-gray-400 mt-1">
-                            {h.duration_seconds != null && <span>{fmtTime(h.duration_seconds)} talk</span>}
+                            {h.duration_seconds != null && <span>{formatDurationHrMinSec(h.duration_seconds, "0 Sec")} talk</span>}
                             {h.sentiment && <span> · {h.sentiment}</span>}
                             {h.is_follow_up_required && h.follow_up_date && <span> · follow-up scheduled {h.follow_up_date.slice(0, 10)}{h.follow_up_time ? ` ${String(h.follow_up_time).slice(0, 5)}` : ""}</span>}
                           </div>

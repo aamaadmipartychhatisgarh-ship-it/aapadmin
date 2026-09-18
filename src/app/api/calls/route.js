@@ -9,6 +9,24 @@ import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColum
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { normalizeDurationSeconds } from "@/lib/callDuration";
 
+// One-time, idempotent cleanup of historical INVALID durations: any row whose
+// stored duration_seconds is negative (a legacy start/end pair that resolved
+// wrong, from before the insert-time normalization existed) is set to 0. This
+// permanently stops those rows from skewing per-day/grand totals — a data fix,
+// not a display trick. A negative is reset to 0 (unknown/zero), never Math.abs'd
+// into a fabricated positive. Runs at most once per server process.
+let negativeDurationsCleaned = false;
+async function cleanupNegativeDurations() {
+  if (negativeDurationsCleaned) return;
+  negativeDurationsCleaned = true;
+  try {
+    await query("UPDATE calls SET duration_seconds = 0 WHERE duration_seconds < 0");
+  } catch (e) {
+    negativeDurationsCleaned = false; // let a later request retry if it failed
+    console.error("cleanupNegativeDurations failed:", e);
+  }
+}
+
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -25,6 +43,10 @@ export async function GET(req) {
         && !(await userCanAccessPageKey(session, "call_records"))) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
+
+    // Repair any legacy negative durations before we aggregate, so totals and
+    // per-day sums are computed over clean data (runs once per process).
+    await cleanupNegativeDurations();
 
     // When a Super Admin is previewing a specific caller, show that caller's
     // own calls (My Calls) — resolved server-side, never spoofable.
@@ -91,14 +113,24 @@ export async function GET(req) {
     // aggregates, so it is never skewed by the status filter and never capped by
     // the 1000-row display limit. Each call is classified by its ACTUAL stored
     // status (call_statuses.name), never inferred from the selected filter. ---
+    // Every duration is clamped to a non-negative value at the row level
+    // (GREATEST(…,0)) BEFORE it is summed/averaged, so a single invalid record
+    // (a historical negative duration_seconds — a start/end pair that resolved
+    // wrong) can never drag a day's total, the grand total, or the average
+    // below zero. That is the root cause of both symptoms: a negative grand
+    // total was rendering as "0 Sec" (the formatter clamps), and a negative
+    // per-day sum showed as "-5 Minutes". This is per-row invalid-data
+    // clamping (spec §12), NOT Math.abs on the aggregate. Valid durations are
+    // summed exactly as stored.
+    const DUR = "GREATEST(COALESCE(c.duration_seconds, 0), 0)";
     const [sum] = await query(
       `SELECT
          COUNT(*) AS total,
          COALESCE(SUM(cs.name = 'Phone Picked'), 0) AS picked,
          COALESCE(SUM(cs.name = 'Not Picked'), 0) AS not_picked,
          COALESCE(SUM(c.is_follow_up_required = 1), 0) AS follow_ups,
-         AVG(NULLIF(c.duration_seconds, 0)) AS avg_dur,
-         COALESCE(SUM(c.duration_seconds), 0) AS total_dur
+         AVG(NULLIF(${DUR}, 0)) AS avg_dur,
+         COALESCE(SUM(${DUR}), 0) AS total_dur
        FROM calls c
        LEFT JOIN call_statuses cs ON c.status_id = cs.id
        ${where}`,
@@ -123,7 +155,7 @@ export async function GET(req) {
     // every base filter (date / user / geo / designation / sentiment / search /
     // role scope), so selecting a caller narrows this to that caller's days too.
     const perDayRows = await query(
-      `SELECT DATE(c.called_at) AS day, COALESCE(SUM(c.duration_seconds), 0) AS dur
+      `SELECT DATE(c.called_at) AS day, COALESCE(SUM(${DUR}), 0) AS dur
          FROM calls c
          ${where}
         GROUP BY DATE(c.called_at)
@@ -133,7 +165,10 @@ export async function GET(req) {
     );
     const perDayMinutes = perDayRows
       .filter((r) => r.day)
-      .map((r) => ({ day: String(r.day), minutes: Math.round((Number(r.dur) || 0) / 60) }));
+      .map((r) => {
+        const sec = Math.max(0, Math.round(Number(r.dur) || 0));
+        return { day: String(r.day), seconds: sec, minutes: Math.round(sec / 60) };
+      });
 
     // Sentiment + Call Status breakdowns — backend GROUP BY over the SAME base
     // filtered dataset (uncapped by the 1000-row list limit, and — like the other

@@ -66,7 +66,7 @@ async function buildCallersReport({ date_from, date_to } = {}) {
             COUNT(c.id) AS total_calls,
             SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
             SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END) AS follow_ups,
-            ROUND(AVG(c.duration_seconds), 0) AS avg_dur
+            ROUND(AVG(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0) AS avg_dur
        FROM users u
        LEFT JOIN calls c ON c.user_id = u.id ${joinExtra}
        LEFT JOIN call_statuses cs ON cs.id = c.status_id

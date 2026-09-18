@@ -34,7 +34,7 @@ export async function GET(req) {
          SUM(CASE WHEN cs.name = 'Rudely Behaved' THEN 1 ELSE 0 END) AS rejected,
          SUM(CASE WHEN cs.name = 'Busy' THEN 1 ELSE 0 END) AS busy,
          SUM(CASE WHEN cs.name = 'Switched Off' THEN 1 ELSE 0 END) AS switched_off,
-         ROUND(AVG(c.duration_seconds), 0) AS avg_duration_seconds,
+         ROUND(AVG(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0) AS avg_duration_seconds,
          SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END) AS pending_follow_ups,
          SUM(CASE WHEN c.sentiment IN ('positive','supporter') THEN 1 ELSE 0 END) AS interested
        FROM users u
