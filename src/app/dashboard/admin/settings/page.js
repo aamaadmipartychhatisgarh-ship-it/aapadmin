@@ -117,6 +117,168 @@ export default function MasterDataSettings({ embedded = false }) {
 
       {/* Locations — full width */}
       <LocationsTree />
+
+      {/* Assembly-wise Block management (Political Location master) — full width */}
+      <AssemblyBlocksPanel />
+    </div>
+  );
+}
+
+// Assembly → Block management inside Political Location (Master Data). Pick an
+// Assembly and manage ONLY its Blocks — the Assembly→Block map is the single
+// source of truth, stored by ids (block.parent_id → assembly.id). Nothing is
+// hardcoded; every Block is loaded from /api/assemblies/{id}/blocks.
+function AssemblyBlocksPanel() {
+  const [assemblies, setAssemblies] = useState([]);
+  const [assemblyId, setAssemblyId] = useState("");
+  const [blocks, setBlocks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [name, setName] = useState("");
+  const [nameHi, setNameHi] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [seeding, setSeeding] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/locations?type=assembly").then((r) => r.json())
+      .then((d) => setAssemblies(d.locations || [])).catch(() => {});
+  }, []);
+
+  const loadBlocks = async (id) => {
+    if (!id) { setBlocks([]); return; }
+    setLoading(true); setErr("");
+    try {
+      const r = await fetch(`/api/assemblies/${id}/blocks`, { cache: "no-store" });
+      const d = await r.json();
+      setBlocks(d.blocks || []);
+    } catch { setErr("Could not load blocks."); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { loadBlocks(assemblyId); }, [assemblyId]);
+
+  async function addBlock(e) {
+    e.preventDefault();
+    if (!assemblyId) { setErr("Select an Assembly first."); return; }
+    if (!name.trim()) { setErr("Enter a block name."); return; }
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      const r = await fetch(`/api/assemblies/${assemblyId}/blocks`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, name_hi: nameHi }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d?.message || "Could not add the block."); return; }
+      setName(""); setNameHi(""); setMsg("Block added."); loadBlocks(assemblyId);
+    } catch { setErr("Could not add the block."); }
+    finally { setBusy(false); }
+  }
+
+  async function removeBlock(b) {
+    if (!confirm(`Delete block "${b.name_en}" from this Assembly?`)) return;
+    setErr(""); setMsg("");
+    try {
+      const r = await fetch(`/api/assemblies/${assemblyId}/blocks/${b.id}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d?.message || "Could not delete the block."); return; }
+      setMsg("Block deleted."); loadBlocks(assemblyId);
+    } catch { setErr("Could not delete the block."); }
+  }
+
+  async function seed() {
+    if (!confirm("Add/verify the standard Assembly → Block mapping? This only creates missing blocks and never duplicates.")) return;
+    setSeeding(true); setErr(""); setMsg("");
+    try {
+      const r = await fetch("/api/master-data/seed-blocks", { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d?.message || "Could not seed the mapping."); return; }
+      setMsg(`Standard mapping applied — ${d.created} block(s) created, ${d.skippedExisting} already present, ${d.assembliesMatched} assemblies matched${d.assembliesNotFound?.length ? `, not found: ${d.assembliesNotFound.join(", ")}` : ""}.`);
+      if (assemblyId) loadBlocks(assemblyId);
+    } catch { setErr("Could not seed the mapping."); }
+    finally { setSeeding(false); }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="p-6 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 text-[#164FA3]">
+          <Map size={18} />
+          <h2 className="font-bold text-lg">Assembly-wise Blocks</h2>
+        </div>
+        <button onClick={seed} disabled={seeding}
+          className="text-xs font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 px-3 py-2 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50">
+          {seeding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Load standard blocks
+        </button>
+      </div>
+
+      <div className="p-6 border-b border-gray-100 bg-gray-50">
+        <Label>Assembly (Vidhan Sabha)</Label>
+        <select value={assemblyId} onChange={(e) => { setAssemblyId(e.target.value); setErr(""); setMsg(""); }}
+          className="w-full md:w-96 bg-white border border-gray-200 h-10 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]">
+          <option value="">Select Assembly…</option>
+          {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      </div>
+
+      {msg && <div className="mx-6 mt-4 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{msg}</div>}
+      {err && <div className="mx-6 mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</div>}
+
+      {!assemblyId ? (
+        <div className="p-8 text-center text-gray-400 text-sm">Select an Assembly to view and manage its Blocks.</div>
+      ) : (
+        <div className="p-6 space-y-4">
+          {/* Add block */}
+          <form onSubmit={addBlock} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+            <div>
+              <Label>Block Name <span className="text-red-500">*</span></Label>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Block name…"
+                className="w-full bg-white border border-gray-200 h-10 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+            </div>
+            <div>
+              <Label>Block Name (Hindi)</Label>
+              <input value={nameHi} onChange={(e) => setNameHi(e.target.value)} placeholder="ब्लॉक का नाम…"
+                className="w-full bg-white border border-gray-200 h-10 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+            </div>
+            <button type="submit" disabled={busy}
+              className="bg-[#164FA3] text-white h-10 px-4 rounded-lg font-bold hover:bg-blue-800 inline-flex items-center justify-center gap-2 disabled:opacity-50">
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Add Block
+            </button>
+          </form>
+
+          {loading ? (
+            <div className="py-8 text-center text-gray-400"><Loader2 className="inline animate-spin" /></div>
+          ) : blocks.length === 0 ? (
+            <div className="py-8 text-center text-gray-400 text-sm">No blocks for this Assembly yet.</div>
+          ) : (
+            <div className="overflow-x-auto border border-gray-100 rounded-xl">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs text-gray-500">
+                  <tr>
+                    <th className="px-4 py-2.5 font-semibold">Block</th>
+                    <th className="px-4 py-2.5 font-semibold">Hindi Name</th>
+                    <th className="px-4 py-2.5 font-semibold">ID</th>
+                    <th className="px-4 py-2.5 font-semibold text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {blocks.map((b) => (
+                    <tr key={b.id} className="hover:bg-gray-50/60">
+                      <td className="px-4 py-2.5 font-medium text-gray-900">{b.name_en}</td>
+                      <td className="px-4 py-2.5 text-gray-600">{b.name_hi || "—"}</td>
+                      <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{b.id}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        <button onClick={() => removeBlock(b)} className="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium inline-flex items-center gap-1">
+                          <Trash2 size={14} /> Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
