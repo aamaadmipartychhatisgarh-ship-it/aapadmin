@@ -3118,44 +3118,17 @@ const emptyGeo = () => ({ zone_id: [], lok_sabha_id: [], district_id: [], assemb
 
 // Vote value → Indian-grouped string, or "Not Available" when the DB has no value
 // (never a fake 0 — §7).
-// One person tile inside a Comparison card — the Current MLA or a competitor —
-// showing Name · Party Logo · Votes straight from that person's OWN stored
-// fields. Positions are never shifted and a competitor's party is whatever is
-// stored for them (never assumed to be AAP). A missing person shows a clear
+// One person's cell in a Comparison ROW — the Current MLA or a competitor —
+// showing Name · Party Logo + Party · Votes straight from that person's OWN
+// stored fields. Positions are never shifted and a competitor's party is whatever
+// is stored for them (never assumed to be AAP). A missing person shows a clear
 // "Not Available" / "—" rather than being hidden.
-function ComparePerson({ label, highlight, name, party, votes, partyByName }) {
+function PersonCell({ name, party, votes, highlight, partyByName }) {
   return (
-    <div className={`rounded-xl border p-3 ${highlight ? "border-[#164FA3]/25 bg-[#164FA3]/5" : "border-gray-100"}`}>
-      <div className={`text-[11px] font-bold uppercase tracking-wide ${highlight ? "text-[#164FA3]" : "text-gray-400"}`}>{label}</div>
-      <div className="font-semibold text-gray-900 truncate mt-0.5" title={name || ""}>{name || <span className="text-gray-400 font-normal">Not Available</span>}</div>
-      <div className="text-xs text-gray-500 truncate mt-0.5">{party ? <PartyLogo name={party} byName={partyByName} size={16} /> : "—"}</div>
+    <div className="min-w-0">
+      <div className={`font-semibold truncate ${highlight ? "text-[#164FA3]" : "text-gray-900"}`} title={name || ""}>{name || <span className="text-gray-400 font-normal">Not Available</span>}</div>
+      <div className="text-xs text-gray-500 mt-0.5 min-w-0">{party ? <PartyLogo name={party} byName={partyByName} size={16} /> : "—"}</div>
       <div className="text-sm text-gray-700 mt-0.5">{votes != null ? `${nfmt(votes)} votes` : "—"}</div>
-    </div>
-  );
-}
-
-// One assembly's full comparison card: header (select-for-export, assembly, edit
-// MLA) + a responsive grid of the four people (Current MLA + Competitor 1/2/3).
-function AssemblyCompareCard({ r, partyByName, selected, onToggle, onEditMla }) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <input type="checkbox" checked={selected} onChange={onToggle} className="accent-[#164FA3] shrink-0" title="Select for export" />
-        <div className="min-w-0">
-          <div className="font-bold text-gray-900 truncate">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[11px] font-normal text-gray-400">({r.election_year})</span> : null}</div>
-          <div className="text-xs text-gray-500 truncate">{r.district_name || "—"}</div>
-        </div>
-        {r.mla_name && onEditMla ? (
-          <button onClick={() => onEditMla(r.assembly_id)} title="Edit this MLA's profile"
-            className="ml-auto p-1.5 rounded-md text-gray-500 hover:text-[#164FA3] hover:bg-[#164FA3]/10 shrink-0"><Pencil size={14} /></button>
-        ) : null}
-      </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-        <ComparePerson label="Current MLA" highlight name={r.mla_name} party={r.mla_party} votes={r.mla_votes} partyByName={partyByName} />
-        <ComparePerson label="Competitor 1" name={r.competitor1_name} party={r.competitor1_party} votes={r.competitor1_votes} partyByName={partyByName} />
-        <ComparePerson label="Competitor 2" name={r.competitor2_name} party={r.competitor2_party} votes={r.competitor2_votes} partyByName={partyByName} />
-        <ComparePerson label="Competitor 3" name={r.competitor3_name} party={r.competitor3_party} votes={r.competitor3_votes} partyByName={partyByName} />
-      </div>
     </div>
   );
 }
@@ -3323,22 +3296,45 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
           <Empty msg="No assemblies match the current selection." />
         ) : (
           <>
-            {/* Select-all (for export) — the per-assembly checkbox moved onto each
-                card below. */}
-            <label className="inline-flex items-center gap-2 mb-3 text-xs font-medium text-gray-500 cursor-pointer">
-              <input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className="accent-[#164FA3]" /> Select all on this page (for export)
-            </label>
-            {/* One card per assembly showing the Current MLA and ALL THREE
-                competitors directly — no popup needed (spec §1). Each person shows
-                Name · Party Logo · Votes from their OWN stored fields; Competitor 1/2/3
-                keep their positions and their actual party (never assumed AAP). The
-                grid is 2-up on mobile and 4-up from large screens, so no competitor
-                is ever hidden. */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              {rows.map((r) => (
-                <AssemblyCompareCard key={r.assembly_id} r={r} partyByName={partyByName}
-                  selected={selected.has(r.assembly_id)} onToggle={() => toggleOne(r.assembly_id)} onEditMla={onEditMla} />
-              ))}
+            {/* Assembly-wise comparison LIST — one ROW per assembly (not cards),
+                with a column each for the Current MLA and Competitor 1/2/3. Every
+                person cell shows Name · Party Logo + Party · Votes from that
+                person's OWN stored fields; positions are fixed (Competitor 1/2/3
+                never shifted) and a competitor's party is whatever is stored (never
+                assumed AAP). The table scrolls horizontally on small screens so no
+                competitor is ever hidden. */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[900px]">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-gray-400 border-b border-gray-200">
+                    <th className="py-2 pr-2 w-8"><input type="checkbox" checked={allPageSelected} onChange={toggleAllPage} className="accent-[#164FA3]" title="Select page" /></th>
+                    <th className="py-2 pr-3 min-w-[150px]">Assembly</th>
+                    <th className="py-2 px-3 min-w-[160px] border-l border-gray-100">Current MLA</th>
+                    <th className="py-2 px-3 min-w-[160px] border-l border-gray-100">Competitor 1</th>
+                    <th className="py-2 px-3 min-w-[160px] border-l border-gray-100">Competitor 2</th>
+                    <th className="py-2 px-3 min-w-[160px] border-l border-gray-100">Competitor 3</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.assembly_id} className="border-b border-gray-100 hover:bg-gray-50/60 align-top">
+                      <td className="py-3 pr-2"><input type="checkbox" checked={selected.has(r.assembly_id)} onChange={() => toggleOne(r.assembly_id)} className="accent-[#164FA3]" /></td>
+                      <td className="py-3 pr-3">
+                        <div className="font-semibold text-gray-900">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[10px] font-normal text-gray-400">({r.election_year})</span> : null}</div>
+                        <div className="text-xs text-gray-500">{r.district_name || "—"}</div>
+                        {r.mla_name && onEditMla ? (
+                          <button onClick={() => onEditMla(r.assembly_id)} title="Edit this MLA's profile"
+                            className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-[#164FA3]"><Pencil size={12} /> Edit MLA</button>
+                        ) : null}
+                      </td>
+                      <td className="py-3 px-3 border-l border-gray-100"><PersonCell highlight name={r.mla_name} party={r.mla_party} votes={r.mla_votes} partyByName={partyByName} /></td>
+                      <td className="py-3 px-3 border-l border-gray-100"><PersonCell name={r.competitor1_name} party={r.competitor1_party} votes={r.competitor1_votes} partyByName={partyByName} /></td>
+                      <td className="py-3 px-3 border-l border-gray-100"><PersonCell name={r.competitor2_name} party={r.competitor2_party} votes={r.competitor2_votes} partyByName={partyByName} /></td>
+                      <td className="py-3 px-3 border-l border-gray-100"><PersonCell name={r.competitor3_name} party={r.competitor3_party} votes={r.competitor3_votes} partyByName={partyByName} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
             {/* Pagination (§13) — controls only the current page. */}
