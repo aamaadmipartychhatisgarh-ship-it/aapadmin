@@ -299,7 +299,15 @@ export async function handleRegWorkerPhoto(req, mobile) {
     const key = phoneKey(mobile);
     if (!key || key.length !== 10) return json({}, 200);
     const hit = await photoByMobile(key);
-    return json({ name: hit?.name || null, photo_url: hit?.photo_url || null }, 200);
+    // name/photo_url drive the form's photo slot + worker header; contact_id and
+    // worker_code identify WHO the photo belongs to (shown as the Contact/Worker ID),
+    // so the header can never silently attach one worker's photo to another.
+    return json({
+      name: hit?.name || null,
+      photo_url: hit?.photo_url || null,
+      contact_id: hit?.contact_id ?? null,
+      worker_code: hit?.worker_code || null,
+    }, 200);
   } catch (err) {
     console.error(`[reg-worker-photo] ${err?.message || err}`);
     return json({}, 200);

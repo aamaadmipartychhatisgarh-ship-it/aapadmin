@@ -37,6 +37,7 @@ const STRINGS = {
     photo: "फोटो", choosePhoto: "फोटो चुनें", changePhoto: "फोटो बदलें", capturePhoto: "फोटो खींचें", retakePhoto: "दोबारा खींचें",
     photoHint: "JPG, PNG या WEBP · अधिकतम 5 MB", uploading: "अपलोड हो रहा है…",
     photoFromContacts: "यह फोटो Contacts से स्वतः ली गई है",
+    workerId: "कार्यकर्ता आईडी", contactId: "कॉन्टैक्ट आईडी", matchedFromContacts: "Contacts से मिलान",
     photoTooLarge: "फोटो का आकार बहुत बड़ा है. कृपया छोटी छवि अपलोड करें.",
     photoBadType: "कृपया JPG, JPEG, PNG या WEBP छवि अपलोड करें.",
     photoFailed: "फोटो अपलोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
@@ -102,6 +103,7 @@ const STRINGS = {
     photo: "Photo", choosePhoto: "Choose Photo", changePhoto: "Change Photo", capturePhoto: "Capture Photo", retakePhoto: "Retake",
     photoHint: "JPG, PNG or WEBP · up to 5 MB", uploading: "Uploading…",
     photoFromContacts: "Photo taken automatically from Contacts",
+    workerId: "Worker ID", contactId: "Contact ID", matchedFromContacts: "Matched from Contacts",
     photoTooLarge: "Photo size is too large. Please upload a smaller image.",
     photoBadType: "Please upload a JPG, JPEG, PNG, or WEBP image.",
     photoFailed: "Unable to upload photo. Please try again.",
@@ -454,11 +456,21 @@ export default function PublicRegistrationForm({ token }) {
       try {
         const r = await fetch(`/api/public/registration/join/worker-photo?mobile=${encodeURIComponent(ten)}`, { cache: "no-store" });
         const d = await r.json().catch(() => ({}));
-        if (alive) setContactPhoto(d && d.photo_url ? d : null);
+        // Tag the match with the exact number it belongs to; the render only trusts
+        // it while it still matches the field, so a resolved photo can never linger
+        // onto a different number (§8).
+        if (alive) setContactPhoto(d && d.photo_url ? { ...d, forKey: ten } : null);
       } catch { if (alive) setContactPhoto(null); }
     }, 400);
     return () => { alive = false; clearTimeout(timer); };
   }, [mobile, session?.authenticated]);
+
+  // The matched Contact photo, trusted ONLY while it still belongs to the number
+  // currently in the field. Everything on screen (the photo slot, the worker header
+  // card and the top-bar chip) reads this, so switching from Worker A to Worker B
+  // never shows A's photo for B — the moment the number differs, this is null until
+  // B's own match resolves.
+  const workerPhoto = contactPhoto && contactPhoto.forKey === mobileDigits ? contactPhoto : null;
 
   async function sendCode() {
     setErr(""); setOtpNote("");
@@ -523,7 +535,7 @@ export default function PublicRegistrationForm({ token }) {
           // Manual capture/upload wins; otherwise the photo already stored against
           // this person's Contact (same URL, not a re-upload/duplicate) so the saved
           // record is never left photo-less when Contacts already has one.
-          photo_url: photoUrl || contactPhoto?.photo_url || "",
+          photo_url: photoUrl || workerPhoto?.photo_url || "",
           website: honeypot.current?.value || "",
         }),
       });
@@ -703,7 +715,13 @@ export default function PublicRegistrationForm({ token }) {
                 <h1 className="text-lg font-bold mt-0.5 truncate">{c.name || t.fallbackTitle}</h1>
               </div>
             </div>
-            {LangButton}
+            {/* The worker whose data is being collected — their Contacts photo in the
+                header (§2). Shown only once a Contact is matched, and it is the worker,
+                not the collector (§11). The language toggle stays alongside it. */}
+            <div className="flex items-center gap-2 shrink-0">
+              {workerPhoto ? <HeaderWorkerChip photo={workerPhoto.photo_url} name={workerPhoto.name || name} /> : null}
+              {LangButton}
+            </div>
           </div>
         </div>
       </header>
@@ -744,6 +762,15 @@ export default function PublicRegistrationForm({ token }) {
             </span>
             <button type="button" onClick={backToSelection} className="text-[12px] font-semibold text-[#164FA3] underline">{t.changeType}</button>
           </div>
+
+          {/* Worker identity — the matched Contact's photo alongside the worker's
+              name, Worker/Contact ID and mobile (§1). Appears the moment the entered
+              mobile matches a Contact that has a photo, so the worker's existing photo
+              is prominent and never blank when one exists. */}
+          {workerPhoto ? (
+            <WorkerIdentityCard photo={workerPhoto.photo_url} name={workerPhoto.name || name}
+              workerCode={workerPhoto.worker_code} contactId={workerPhoto.contact_id} mobile={mobile} t={t} />
+          ) : null}
 
           <Field label={t.name} required>
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePh} required />
@@ -838,8 +865,8 @@ export default function PublicRegistrationForm({ token }) {
                   load, so a broken/missing image never blocks the collector. */}
               {photoPreview ? (
                 <img src={photoPreview} alt="" className="w-20 h-20 rounded-xl object-cover border border-gray-300 bg-white" />
-              ) : contactPhoto?.photo_url ? (
-                <ContactPhotoThumb src={contactPhoto.photo_url} />
+              ) : workerPhoto?.photo_url ? (
+                <ContactPhotoThumb src={workerPhoto.photo_url} />
               ) : (
                 <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 bg-white flex items-center justify-center text-gray-400">
                   <ImagePlus size={24} />
@@ -854,13 +881,13 @@ export default function PublicRegistrationForm({ token }) {
                   <button type="button" onClick={() => photoInput.current?.click()} disabled={photoBusy}
                           className="h-10 px-3 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5 disabled:opacity-60">
                     {photoBusy ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
-                    {photoBusy ? t.uploading : ((photoPreview || contactPhoto?.photo_url) ? t.changePhoto : t.choosePhoto)}
+                    {photoBusy ? t.uploading : ((photoPreview || workerPhoto?.photo_url) ? t.changePhoto : t.choosePhoto)}
                   </button>
                 </div>
                 {/* Tell the collector the photo was taken from Contacts (only when it
                     is the auto-filled one, not a manual upload) so they know it is
                     correct and needn't re-take it. */}
-                {!photoPreview && contactPhoto?.photo_url ? (
+                {!photoPreview && workerPhoto?.photo_url ? (
                   <p className="text-[11px] font-semibold text-green-700">{t.photoFromContacts}</p>
                 ) : (
                   <p className="text-[11px] text-gray-500">{t.photoHint}</p>
@@ -1012,6 +1039,65 @@ function ContactPhotoThumb({ src }) {
   return (
     <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 bg-white flex items-center justify-center text-gray-400">
       <ImagePlus size={24} />
+    </div>
+  );
+}
+
+// A round profile avatar with an initials fallback (the app's existing placeholder
+// style), used for the worker identity card. `photo` re-arms the load guard, so
+// moving to the next person starts clean and a broken URL degrades to initials
+// rather than a broken image.
+function FormAvatar({ photo, name, className = "w-16 h-16", textCls = "text-xl" }) {
+  const [ok, setOk] = useState(true);
+  useEffect(() => { setOk(true); }, [photo]);
+  if (photo && ok) {
+    return <img src={photo} alt={name || ""} className={`${className} rounded-full object-cover border border-white shadow-sm shrink-0 bg-white`} onError={() => setOk(false)} />;
+  }
+  return (
+    <span className={`${className} ${textCls} rounded-full bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center font-bold shrink-0`}>
+      {String(name || "?").trim().charAt(0).toUpperCase() || "?"}
+    </span>
+  );
+}
+
+// The selected worker's photo + name in the form's blue top bar (§2). It represents
+// the WORKER whose data is being collected — never the signed-in collector, whose
+// own identity stays in its own labelled badge (§11). Compact and truncating so it
+// fits the header on a phone; its initials placeholder is tuned for the blue bar.
+function HeaderWorkerChip({ photo, name }) {
+  const [ok, setOk] = useState(true);
+  useEffect(() => { setOk(true); }, [photo]);
+  return (
+    <span className="inline-flex items-center gap-2 max-w-[42vw] sm:max-w-[220px] rounded-full bg-white/15 py-1 pl-1 pr-2.5">
+      {photo && ok ? (
+        <img src={photo} alt={name || ""} className="w-8 h-8 rounded-full object-cover ring-1 ring-white/40 shrink-0" onError={() => setOk(false)} />
+      ) : (
+        <span className="w-8 h-8 rounded-full bg-white/25 text-white flex items-center justify-center text-xs font-bold shrink-0">
+          {String(name || "?").trim().charAt(0).toUpperCase() || "?"}
+        </span>
+      )}
+      <span className="text-sm font-semibold text-white truncate">{name}</span>
+    </span>
+  );
+}
+
+// The worker identity card shown at the top of the form once the entered mobile is
+// matched to a Contact (§1): the SAME photo stored in Contacts, next to the worker's
+// name, Worker/Contact ID and mobile. It only renders on a real photo match, so it
+// is never a blank card, and it reads the number-tagged match so it can only ever
+// describe the person currently in the form (§4, §8).
+function WorkerIdentityCard({ photo, name, workerCode, contactId, mobile, t }) {
+  const idLine = workerCode ? `${t.workerId}: ${workerCode}` : (contactId != null ? `${t.contactId}: ${contactId}` : "");
+  const ten = String(mobile || "").replace(/\D/g, "").slice(-10);
+  return (
+    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-3 flex items-center gap-3">
+      <FormAvatar photo={photo} name={name} />
+      <div className="min-w-0">
+        <p className="font-bold text-gray-900 truncate">{name || "—"}</p>
+        {idLine ? <p className="text-xs text-gray-600 truncate">{idLine}</p> : null}
+        {ten ? <p className="text-xs text-gray-600 truncate">{ten}</p> : null}
+        <p className="text-[11px] font-semibold text-green-700 mt-0.5">{t.matchedFromContacts}</p>
+      </div>
     </div>
   );
 }

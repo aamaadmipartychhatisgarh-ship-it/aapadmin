@@ -7,15 +7,18 @@ import { phoneKey, last10Sql } from "@/lib/phone";
 // shared photo stores already used elsewhere, in priority order:
 //   1. a Contact's own photo (or its linked field-worker's photo)
 //   2. a prior registration's photo (reg_people)
-// Returns { photo_url, name } for the first match, else null. Creates no record and
-// returns the exact stored photo — the caller never re-uploads.
+// Returns { photo_url, name, contact_id, worker_code } for the first match, else
+// null. contact_id / worker_code identify the matched Contact (and its linked
+// field-worker, if any) so a caller can show a "who this photo belongs to" header;
+// they are null for a reg_people-only match, which has no Contact row. Creates no
+// record and returns the exact stored photo — the caller never re-uploads.
 export async function photoByMobile(mobile) {
   const key = phoneKey(mobile);
   if (!key || key.length !== 10) return null;
   try {
     const [c] = await query(
       `SELECT COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
-              c.person_name AS name
+              c.person_name AS name, c.id AS contact_id, w.worker_code AS worker_code
          FROM contacts c
          LEFT JOIN workers w ON w.id = c.worker_id
         WHERE ${last10Sql("c.phone_number")} = ?
@@ -24,7 +27,7 @@ export async function photoByMobile(mobile) {
         LIMIT 1`,
       [key]
     );
-    if (c?.photo_url) return { photo_url: c.photo_url, name: c.name || null };
+    if (c?.photo_url) return { photo_url: c.photo_url, name: c.name || null, contact_id: c.contact_id ?? null, worker_code: c.worker_code || null };
   } catch (e) { console.error("[photoByMobile] contacts lookup:", e?.message || e); }
   try {
     const [p] = await query(
@@ -33,7 +36,7 @@ export async function photoByMobile(mobile) {
         ORDER BY id DESC LIMIT 1`,
       [key]
     );
-    if (p?.photo_url) return { photo_url: p.photo_url, name: p.name || null };
+    if (p?.photo_url) return { photo_url: p.photo_url, name: p.name || null, contact_id: null, worker_code: null };
   } catch (e) { console.error("[photoByMobile] reg_people lookup:", e?.message || e); }
   return null;
 }
