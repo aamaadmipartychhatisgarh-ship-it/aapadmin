@@ -41,8 +41,12 @@ const STRINGS = {
     photoTooLarge: "फोटो का आकार बहुत बड़ा है. कृपया छोटी छवि अपलोड करें.",
     photoBadType: "कृपया JPG, JPEG, PNG या WEBP छवि अपलोड करें.",
     photoFailed: "फोटो अपलोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
-    wardName: "वार्ड का नाम", wardNamePh: "वार्ड का नाम",
-    errWardName: "कृपया वार्ड का नाम भरें.",
+    blockName: "ब्लॉक का नाम", selectBlock: "ब्लॉक चुनें…",
+    selectAssemblyFirst: "पहले विधानसभा क्षेत्र चुनें",
+    noBlocks: "इस विधानसभा के लिए कोई ब्लॉक उपलब्ध नहीं",
+    loadingBlocks: "ब्लॉक लोड हो रहे हैं…",
+    errBlockName: "कृपया ब्लॉक चुनें.",
+    blocksLoadErr: "ब्लॉक लोड नहीं हो सके. कृपया दोबारा प्रयास करें.",
     list: "सूची", myVoters: "मेरे वोटर", myWorkers: "मेरे कार्यकर्ता",
     backToForm: "फॉर्म पर वापस जाएँ", totalVoters: "कुल वोटर", totalWorkers: "कुल कार्यकर्ता",
     noRecords: "अभी तक कोई रिकॉर्ड नहीं.", listLoadErr: "सूची लोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
@@ -107,8 +111,12 @@ const STRINGS = {
     photoTooLarge: "Photo size is too large. Please upload a smaller image.",
     photoBadType: "Please upload a JPG, JPEG, PNG, or WEBP image.",
     photoFailed: "Unable to upload photo. Please try again.",
-    wardName: "Ward Name", wardNamePh: "Ward name",
-    errWardName: "Please enter the ward name.",
+    blockName: "Block Name", selectBlock: "Select a Block…",
+    selectAssemblyFirst: "Select a Vidhan Sabha first",
+    noBlocks: "No Blocks available for this Vidhan Sabha",
+    loadingBlocks: "Loading Blocks…",
+    errBlockName: "Please select a Block.",
+    blocksLoadErr: "Could not load Blocks. Please try again.",
     list: "List", myVoters: "My Voters", myWorkers: "My Workers",
     backToForm: "Back to form", totalVoters: "Total Voters", totalWorkers: "Total Workers",
     noRecords: "No records yet.", listLoadErr: "Could not load the list. Please try again.",
@@ -251,7 +259,14 @@ export default function PublicRegistrationForm({ token }) {
   const [otpNote, setOtpNote] = useState("");
   const [address, setAddress] = useState("");
   const [assemblyId, setAssemblyId] = useState("");
-  const [wardName, setWardName] = useState("");
+  // Block (formerly Ward Name) — a dropdown DEPENDENT on the selected Vidhan Sabha.
+  // blockId is the chosen Block's id; `blocks` is the current assembly's mapped list
+  // fetched from the Political Location master (never hardcoded, never all-blocks
+  // filtered on the client).
+  const [blockId, setBlockId] = useState("");
+  const [blocks, setBlocks] = useState([]);
+  const [blocksLoading, setBlocksLoading] = useState(false);
+  const [blocksErr, setBlocksErr] = useState("");
   const honeypot = useRef(null);
 
   // "List" view — the karyakarta's own voters / workers for THIS link.
@@ -372,8 +387,29 @@ export default function PublicRegistrationForm({ token }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Dependent Block dropdown: whenever the selected Vidhan Sabha changes, drop any
+  // previously chosen Block (so a Block from the old assembly can never linger) and
+  // fetch ONLY that assembly's Blocks from the Political Location master. No assembly
+  // → empty list + disabled dropdown. A load failure surfaces a retryable error and
+  // leaves the dropdown empty rather than guessing.
+  useEffect(() => {
+    setBlockId("");
+    if (!assemblyId) { setBlocks([]); setBlocksErr(""); setBlocksLoading(false); return; }
+    let alive = true;
+    setBlocksLoading(true); setBlocksErr("");
+    fetch(`/api/public/registration/assemblies/${encodeURIComponent(assemblyId)}/blocks`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then((d) => { if (alive) setBlocks(Array.isArray(d.blocks) ? d.blocks : []); })
+      .catch(() => { if (alive) { setBlocks([]); setBlocksErr(STRINGS[lang].blocksLoadErr); } })
+      .finally(() => { if (alive) setBlocksLoading(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assemblyId]);
+
   function resetPerson() {
-    setPersonType("voter"); setWorkerRole(""); setWardName("");
+    // Block selection is cleared for the next person; the Block LIST is kept because
+    // the constituency is retained (below), so the same assembly's blocks stay ready.
+    setPersonType("voter"); setWorkerRole(""); setBlockId("");
     setName(""); setMobile(""); setAddress("");
     setPhotoUrl(""); setPhotoPreview(""); setPhotoErr(""); setContactPhoto(null);
     setOtpStage("idle"); setOtpCode(""); setOtpFor(""); setOtpNote("");
@@ -517,7 +553,7 @@ export default function PublicRegistrationForm({ token }) {
     if (!assemblyId) { setErr(t.errConstituency); return; }
     // Ward Name is mandatory only on the worker branch; a voter is never blocked
     // by it (§3, §6). Hidden worker fields are never validated.
-    if (isWorker && !wardName.trim()) { setErr(t.errWardName); return; }
+    if (isWorker && !blockId) { setErr(t.errBlockName); return; }
     if (photoBusy) { setErr(t.uploading); return; }
     // The registrant's own number must be proven when the drive demands it.
     if (otpRequired && !otpDone) { setErr(t.verifyFirst); return; }
@@ -534,7 +570,9 @@ export default function PublicRegistrationForm({ token }) {
           mobile: mobile.trim(),
           address: address.trim(),
           assembly_id: assemblyId,
-          ward_name: isWorker ? wardName.trim() : "",
+          // Block (Assembly-dependent). The id is validated server-side against the
+          // selected assembly; the backend resolves and stores the Block's name.
+          block_id: isWorker ? blockId : "",
           worker_role: isWorker ? workerRole.trim() : "",
           // Manual capture/upload wins; otherwise the photo already stored against
           // this person's Contact (same URL, not a re-upload/duplicate) so the saved
@@ -848,11 +886,25 @@ export default function PublicRegistrationForm({ token }) {
             </select>
           </Field>
 
-          {/* Ward Name — worker-only and mandatory on the हाँ branch (§6). Hidden
-              (and never validated) for a voter (ना). */}
+          {/* Block Name — worker-only, and a dropdown DEPENDENT on the selected
+              Vidhan Sabha. It stays disabled until a constituency is chosen, then
+              lists only that assembly's Blocks from the Political Location master.
+              Empty mapping → a "No Blocks available" option. Hidden for a voter. */}
           {personType === "worker" && (
-            <Field label={t.wardName} required>
-              <input className={inputCls} value={wardName} onChange={(e) => setWardName(e.target.value)} placeholder={t.wardNamePh} />
+            <Field label={t.blockName} required>
+              <select className={inputCls} value={blockId} onChange={(e) => setBlockId(e.target.value)}
+                      disabled={!assemblyId || blocksLoading} required>
+                <option value="">
+                  {!assemblyId ? t.selectAssemblyFirst
+                    : blocksLoading ? t.loadingBlocks
+                    : blocks.length ? t.selectBlock
+                    : t.noBlocks}
+                </option>
+                {blocks.map((b) => (
+                  <option key={b.id} value={b.id}>{lang === "hi" ? (b.name_hi || b.name_en) : (b.name_en || b.name_hi)}</option>
+                ))}
+              </select>
+              {blocksErr ? <p className="text-[12px] text-red-700 mt-1.5">{blocksErr}</p> : null}
             </Field>
           )}
 

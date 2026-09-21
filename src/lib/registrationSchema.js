@@ -205,8 +205,15 @@ export async function ensureRegistrationSchema() {
     // (the image bytes live in the shared photo store, not this row).
     await ensureColumn("reg_people", "photo_url", "VARCHAR(512) NULL");
     // Ward NAME (distinct from the numeric ward_number) — collected on the worker
-    // branch of the public form.
+    // branch of the public form. It now holds the selected BLOCK's name (the field
+    // was relabelled Ward Name → Block Name); the column name is kept for backward
+    // compatibility so existing rows/queries are unaffected.
     await ensureColumn("reg_people", "ward_name", "VARCHAR(160) NULL");
+    // The selected Block's id (a `locations` row of type='ward' whose parent is the
+    // assembly). Stored alongside ward_name so the Assembly→Block choice is captured
+    // by id — the reliable key — while ward_name keeps the readable label.
+    await ensureColumn("reg_people", "block_id", "INT NULL");
+    await ensureIndex("reg_people", "idx_reg_people_block", "block_id");
 
     ensured = true;
   } catch (e) {

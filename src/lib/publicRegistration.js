@@ -4,6 +4,7 @@ import {
   ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
 import { readRegSession, resolveCampaignWorkerById } from "@/lib/regLinkAuth";
+import { blockBelongsToAssembly } from "@/lib/politicalLocation";
 import { phoneKey } from "@/lib/phone";
 import { isMobileVerified, consumeVerification, otpConfigured } from "@/lib/registrationOtp";
 import { toPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
@@ -317,7 +318,14 @@ export async function submitPublicRegistration(req, token) {
     const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
     const ward = normalizeWard(d.ward_number) || normalizeWard(link.worker_ward || link.campaign_ward);
     const areaBooth = clip(d.area_booth, 160) || link.worker_area || null;
-    const wardName = clip(d.ward_name, 160);
+    // Block (formerly "Ward Name"): the worker branch now picks a Block from the
+    // Assembly→Block master, submitted as block_id. wardName holds the readable label
+    // (kept for backward-compat display); a legacy free-text ward_name is still
+    // accepted as a fallback for older clients. Both are finalised after the assembly
+    // is validated below, where the block↔assembly relationship is enforced.
+    let wardName = clip(d.ward_name, 160);
+    let blockId = null;
+    const rawBlockId = /^\d+$/.test(String(d.block_id || "")) ? Number(d.block_id) : null;
     const address = String(d.address || "").trim().slice(0, 2000) || null;
 
     // Photo (Worker Form): accept ONLY a path produced by our own upload endpoint
@@ -339,6 +347,24 @@ export async function submitPublicRegistration(req, token) {
     }
     if (!assemblyId) {
       return NextResponse.json({ message: "Please select your constituency." }, { status: 400, headers: NO_STORE });
+    }
+
+    // Block ↔ Assembly validation (single source of truth = the Political Location
+    // master). A submitted Block MUST belong to the selected Vidhan Sabha — enforced
+    // server-side, never trusting frontend filtering — so an invalid Assembly↔Block
+    // combination can never be saved. The Block's own name is read from the master
+    // and stored in ward_name, so a client cannot mislabel it.
+    if (rawBlockId) {
+      if (!(await blockBelongsToAssembly(rawBlockId, assemblyId))) {
+        return NextResponse.json({ message: "The selected Block does not belong to the selected Vidhan Sabha." }, { status: 400, headers: NO_STORE });
+      }
+      const [b] = await query(`SELECT name FROM locations WHERE id = ? AND type = 'ward' LIMIT 1`, [rawBlockId]);
+      blockId = rawBlockId;
+      wardName = b?.name ? String(b.name).slice(0, 160) : wardName;
+    }
+    // A worker registration must have a Block (this replaced the mandatory Ward Name).
+    if (personType === "worker" && !blockId) {
+      return NextResponse.json({ message: "Please select a Block." }, { status: 400, headers: NO_STORE });
     }
 
     // WHO gets the credit is the OTP-verified karyakarta from the session,
@@ -380,11 +406,11 @@ export async function submitPublicRegistration(req, token) {
     await query(
       `INSERT INTO reg_people
          (campaign_id, worker_id, person_type, name, mobile, address, assembly_id, assembly_name,
-          ward_number, ward_name, area_booth, wants_worker, worker_role, photo_url,
+          ward_number, ward_name, block_id, area_booth, wants_worker, worker_role, photo_url,
           mobile_verified, status, source_ip, registered_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
       [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
-       assemblyId, assemblyName, ward, wardName, areaBooth, wantsWorker, workerRole, photoUrl,
+       assemblyId, assemblyName, ward, wardName, blockId, areaBooth, wantsWorker, workerRole, photoUrl,
        verificationId ? 1 : 0, ip, regNow()]
     );
     // Spend the proof so one verification cannot be replayed to push a second
