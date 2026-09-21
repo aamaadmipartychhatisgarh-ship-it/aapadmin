@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound, Flag, Check } from "lucide-react";
+import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound, Flag, Check, Activity } from "lucide-react";
 import { isAdmin, isOversight, normalizeRole, ROLES, isPressMedia, isSocialMedia } from "@/lib/permissions";
 import { getDashboardViewAs, getViewAsUser } from "@/lib/dashboardView";
 import Avatar from "@/components/Avatar";
@@ -11,7 +11,7 @@ import CallActionIcons, { WRONG_NUMBER_REASONS } from "@/components/CallActionIc
 import ProfilePhoto from "@/components/ProfilePhoto";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { MultiSelect } from "@/components/MultiSelect";
-import { ACTIVE_STATUS_LABEL } from "@/lib/activeStatus";
+import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
 
 // Friendly labels for who assigned a contact.
@@ -27,10 +27,11 @@ function fmtAssigned(v) {
   return `${date} • ${time}`;
 }
 
-// Active Status is now MANAGED on the Active Worker page (by authorized users)
-// and only DISPLAYED here in the Log Outcome section — the caller no longer
-// self-sets it. The label map comes from the shared canonical source.
-// Colour chip for the read-only Active Status shown in Log Outcome.
+// Active Status (users.active_status) is the ONE authoritative value, shared with
+// the Active Workers page. It can be set here in My Workspace (an editable dropdown)
+// or on the Active Workers page — both read/write the same field, so a change in one
+// reflects in the other. Independent of Calling Status. The label map is the shared
+// canonical source; this colour chip decorates the current value.
 const ACTIVE_STATUS_CHIP = {
   VERY_ACTIVE: "bg-emerald-100 text-emerald-700",
   ACTIVE: "bg-blue-100 text-blue-700",
@@ -98,7 +99,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [queueTab, setQueueTab] = useState("all");
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
-  const [activeStatus, setActiveStatus] = useState(null); // read-only: managed on the Active Worker page
+  const [activeStatus, setActiveStatus] = useState(null); // users.active_status (this caller's) — editable here
+  const [savingActiveStatus, setSavingActiveStatus] = useState(false);
   const [statuses, setStatuses] = useState([]);
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -412,6 +414,35 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     loadQueue();
   }
 
+  // Manually set the caller's Active Status. Writes users.active_status (the SAME
+  // field the Active Workers page reads/writes — never a duplicate), so the change
+  // reflects there automatically. Optimistic: the new value shows immediately with
+  // no page refresh, and reverts if the save fails. The backend saves against the
+  // acting user only (self, or the previewed caller for a Super Admin), so nobody
+  // edits a status they are not authorized to manage. It never touches Calling Status.
+  async function updateActiveStatus(value) {
+    if (!value || value === activeStatus || savingActiveStatus) return;
+    const prev = activeStatus;
+    setActiveStatus(value);
+    setSavingActiveStatus(true);
+    setError("");
+    try {
+      const r = await fetch("/api/workspace/active-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_status: value }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.message || "Failed");
+      if (d?.active_status) setActiveStatus(d.active_status);
+    } catch (e) {
+      setActiveStatus(prev); // revert — the stored value is unchanged
+      setError(e?.message === "Failed" ? "Could not update Active Status. Please try again." : (e?.message || "Could not update Active Status."));
+    } finally {
+      setSavingActiveStatus(false);
+    }
+  }
+
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
     if (form.follow_up_time && !form.follow_up_date) {
@@ -597,6 +628,37 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               <div className="text-amber-900 font-bold text-2xl">{queue.pool_count}</div>
               <div className="text-amber-700 text-xs uppercase tracking-wide font-medium">In Pool</div>
             </div>
+          </div>
+        </div>
+
+        {/* My Active Status — a manual, self-set working status. It writes the same
+            users.active_status the Active Workers page shows, so setting it here is
+            immediately reflected there. Always available (not tied to being on a
+            call) and independent of Calling Status. */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2 text-[#164FA3]">
+              <Activity size={18} />
+              <h2 className="font-bold">My Active Status</h2>
+            </div>
+            {activeStatus && (
+              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${ACTIVE_STATUS_CHIP[activeStatus] || "bg-gray-100 text-gray-400"}`}>
+                {ACTIVE_STATUS_LABEL[activeStatus]}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 mb-2.5">Set your working status — it shows on the Active Workers page. This does not change any Calling Status.</p>
+          <div className="relative">
+            <select
+              value={activeStatus || ""}
+              onChange={(e) => updateActiveStatus(e.target.value)}
+              disabled={savingActiveStatus}
+              className={`${inputCls} disabled:opacity-60`}
+            >
+              <option value="" disabled>Select your active status…</option>
+              {ACTIVE_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {savingActiveStatus && <Loader2 size={15} className="animate-spin text-[#164FA3] absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />}
           </div>
         </div>
 
@@ -1061,15 +1123,21 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                 <h3 className="font-bold text-gray-900 flex items-center gap-2"><Square size={16} /> Log Outcome</h3>
                 <div className="flex items-center gap-2">
-                  {/* Active Status — READ-ONLY here; it is the one authoritative value
-                      (users.active_status) set on the Active Worker page, so it always
-                      reflects the latest saved status. */}
-                  <span className="inline-flex items-center gap-1.5 text-xs">
+                  {/* Active Status — editable here too (beside the Calling Status),
+                      writing the same users.active_status the Active Workers page
+                      reads. Changing it here never affects the Calling Status below. */}
+                  <label className="inline-flex items-center gap-1.5 text-xs">
                     <span className="font-semibold uppercase tracking-wide text-gray-400">Active Status</span>
-                    <span className={`px-2 py-0.5 rounded-full font-semibold ${activeStatus ? ACTIVE_STATUS_CHIP[activeStatus] : "bg-gray-100 text-gray-400"}`}>
-                      {activeStatus ? ACTIVE_STATUS_LABEL[activeStatus] : "Not set"}
-                    </span>
-                  </span>
+                    <select
+                      value={activeStatus || ""}
+                      onChange={(e) => updateActiveStatus(e.target.value)}
+                      disabled={savingActiveStatus}
+                      className={`text-xs font-semibold rounded-lg border px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-[#164FA3] disabled:opacity-60 ${activeStatus ? "border-gray-300 text-gray-800" : "border-gray-200 text-gray-400"}`}
+                    >
+                      <option value="" disabled>Set…</option>
+                      {ACTIVE_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </label>
                   <button onClick={() => setReportOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg">
                     <Flag size={13} /> Report number issue
                   </button>
