@@ -1720,12 +1720,14 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
     if (!adminGeo) return;
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
   }, [adminGeo]);
-  // Lok Sabha follows the chosen Zone (all Lok Sabhas when none picked).
+  // Lok Sabha is the COMPLETE master list, independent of the chosen Zone — a
+  // user's zone must NOT hide any Lok Sabha. It drives District → Assembly → Block
+  // below, so the cascade (and District/Assembly scoping) is unchanged; only the
+  // Lok Sabha choices are no longer narrowed by Zone.
   useEffect(() => {
     if (!adminGeo) return;
-    const url = form.zone_id ? `/api/locations?parent_id=${form.zone_id}` : "/api/locations?type=lok_sabha";
-    fetch(url).then((r) => r.json()).then((d) => setLokSabhas((d.locations || []).filter((l) => l.type === "lok_sabha")));
-  }, [adminGeo, form.zone_id]);
+    fetch("/api/locations?type=lok_sabha").then((r) => r.json()).then((d) => setLokSabhas((d.locations || []).filter((l) => l.type === "lok_sabha")));
+  }, [adminGeo]);
   // District follows the chosen Lok Sabha (all districts when none picked).
   useEffect(() => {
     if (!adminGeo) return;
@@ -1792,7 +1794,10 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
             locked and only the levels below their anchor are selectable. */}
         {adminGeo ? (
           <div className="grid grid-cols-2 gap-2">
-            <select className={sel} value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value, lok_sabha_id: "", district_id: "", assembly_id: "", ward_id: "" })}>
+            {/* Zone is independent of Lok Sabha now (it no longer narrows the Lok
+                Sabha list), so changing it does not clear the Lok Sabha / downstream
+                selection — Lok Sabha drives District → Assembly → Block. */}
+            <select className={sel} value={form.zone_id} onChange={(e) => setForm({ ...form, zone_id: e.target.value })}>
               <option value="">Zone</option>
               {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
             </select>

@@ -206,11 +206,12 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lok Sabha options follow the chosen zone (all lok sabhas when no zone set).
+  // Lok Sabha is the COMPLETE master list, independent of the chosen Zone — a
+  // user's zone must not hide any Lok Sabha. Loaded once; District still cascades
+  // from the district list, so this only widens the Lok Sabha choices.
   useEffect(() => {
-    const url = edit.zone_id ? `/api/locations?parent_id=${edit.zone_id}` : "/api/locations?type=lok_sabha";
-    fetch(url).then((r) => r.json()).then((d) => setEditLokSabhas(d.locations || []));
-  }, [edit.zone_id]);
+    fetch("/api/locations?type=lok_sabha").then((r) => r.json()).then((d) => setEditLokSabhas((d.locations || []).filter((l) => l.type === "lok_sabha")));
+  }, []);
   // Assembly options follow the chosen district.
   useEffect(() => {
     if (!edit.district_id) { setEditAssemblies([]); return; }
@@ -582,7 +583,10 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const distLS = {}; districts.forEach((d) => { distLS[d.id] = d.parent_id; });
   const eq = (a, b) => String(a) === String(b);
   const has = (arr, v) => arr.map(String).includes(String(v));
-  const lokSabhaOptions = callerZone ? lokSabhas.filter((l) => eq(l.parent_id, callerZone)) : lokSabhas;
+  // Lok Sabha is the COMPLETE master list for every user — the caller's assigned
+  // zone must NOT hide any Lok Sabha (only Lok Sabha; District/Assembly keep their
+  // existing zone scoping below). Selecting one still filters the assigned list.
+  const lokSabhaOptions = lokSabhas;
   const districtOptions = qLokSabha.length
     ? districts.filter((d) => has(qLokSabha, d.parent_id))
     : callerZone ? districts.filter((d) => eq(lsZone[d.parent_id], callerZone)) : districts;
@@ -955,7 +959,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                         <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Zone</label>
                         <select
                           value={edit.zone_id || ""}
-                          onChange={(e) => setEdit({ ...edit, zone_id: e.target.value, lok_sabha_id: "" })}
+                          onChange={(e) => setEdit({ ...edit, zone_id: e.target.value })}
                           className={editSelectCls}
                         >
                           <option className="text-gray-900" value="">No zone</option>
