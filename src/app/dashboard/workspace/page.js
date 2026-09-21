@@ -821,33 +821,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
           )}
         </div>
 
-        {queue.scheduled && queue.scheduled.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
-              <Calendar size={16} /> Scheduled Later
-            </h3>
-            <p className="text-[11px] text-gray-400 mb-2">Tap any contact to call back now — logging the call updates the reminder.</p>
-            <ul className="space-y-2 max-h-[200px] overflow-y-auto">
-              {queue.scheduled.slice(0, 20).map((c) => (
-                <li key={c.id}>
-                  <button
-                    disabled={!!active}
-                    onClick={() => claim(c.id)}
-                    title="Call back now — reopens this contact so you can log the call and update the reminder"
-                    className="w-full text-left p-3 rounded-lg border border-gray-100 hover:bg-blue-50 disabled:opacity-60 disabled:hover:bg-white"
-                  >
-                    <div className="font-medium text-gray-900 text-sm flex items-center gap-1 min-w-0">
-                      <span className="truncate">{c.person_name}</span>
-                      {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712] shrink-0" /> : null}
-                    </div>
-                    <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
-                    <div className="text-[11px] font-semibold text-[#164FA3] mt-1">Follow up on {c.follow_up_date?.slice(0, 10)}{c.follow_up_time ? ` at ${String(c.follow_up_time).slice(0, 5)}` : ""} · tap to call back</div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <FollowUpCalls scheduled={queue.scheduled || []} disabled={!!active} onOpen={(id) => claim(id)} />
 
         <ProgressPanel refreshKey={progressKey} />
       </div>
@@ -1295,6 +1269,105 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
           onClose={() => setShowComplaint(false)}
           onSaved={() => { setShowComplaint(false); setMessage("Complaint logged."); }}
         />
+      )}
+    </div>
+  );
+}
+
+// "21 Sep 2026" from a plain YYYY-MM-DD (built from parts → local date, so it
+// never shifts a day across timezones).
+function fmtFollowUpDate(ymd) {
+  if (!ymd) return "";
+  const [y, m, d] = String(ymd).split("-").map(Number);
+  if (!y || !m || !d) return ymd;
+  const dt = new Date(y, m - 1, d);
+  if (isNaN(dt.getTime())) return ymd;
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(dt);
+}
+
+// Follow-up Calls — the caller's scheduled follow-ups, with a date filter. Default
+// (no date) preserves the existing behaviour: the upcoming scheduled follow-ups
+// passed in from the queue. Pick a date and it loads ONLY the follow-up calls whose
+// stored follow-up date is that exact date (server-side, caller-scoped), timezone-
+// safe (DATE columns are plain 'YYYY-MM-DD'). "Show all" clears the filter.
+function FollowUpCalls({ scheduled, disabled, onOpen }) {
+  const [date, setDate] = useState("");
+  const [rows, setRows] = useState(null); // null = not date-filtering
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!date) { setRows(null); setErr(""); setLoading(false); return; }
+    let alive = true;
+    setLoading(true); setErr("");
+    fetch(`/api/workspace/follow-ups?date=${encodeURIComponent(date)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then((d) => { if (alive) setRows(Array.isArray(d.follow_ups) ? d.follow_ups : []); })
+      .catch(() => { if (alive) { setRows([]); setErr("Could not load follow-up calls. Please try again."); } })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [date]);
+
+  const filtering = !!date;
+  const list = filtering ? (rows || []) : (scheduled || []);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+          <Calendar size={16} /> Follow-up Calls
+        </h3>
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 border border-gray-200 rounded-lg px-2 py-1 bg-white focus-within:ring-2 focus-within:ring-[#164FA3]">
+            <Calendar size={14} className="text-gray-400 shrink-0" />
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              aria-label="Filter follow-up calls by date"
+              className="text-xs outline-none bg-transparent"
+            />
+          </div>
+          {filtering && (
+            <button type="button" onClick={() => setDate("")} className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline shrink-0">Show all</button>
+          )}
+        </div>
+      </div>
+
+      {filtering ? (
+        <p className="text-[11px] font-semibold text-[#164FA3] mb-2">Selected date: {fmtFollowUpDate(date)}</p>
+      ) : (
+        <p className="text-[11px] text-gray-400 mb-2">Tap any contact to call back now — logging the call updates the reminder.</p>
+      )}
+
+      {loading ? (
+        <div className="py-6 flex justify-center"><Loader2 size={20} className="animate-spin text-[#164FA3]" /></div>
+      ) : err ? (
+        <div className="text-xs text-red-600 py-2">{err}</div>
+      ) : list.length === 0 ? (
+        <div className="text-gray-400 text-sm py-3">
+          {filtering ? "No follow-up calls found for this date." : "No upcoming follow-up calls."}
+        </div>
+      ) : (
+        <ul className="space-y-2 max-h-[240px] overflow-y-auto">
+          {list.slice(0, 50).map((c) => (
+            <li key={c.id}>
+              <button
+                disabled={disabled}
+                onClick={() => onOpen(c.id)}
+                title="Call back now — reopens this contact so you can log the call and update the reminder"
+                className="w-full text-left p-3 rounded-lg border border-gray-100 hover:bg-blue-50 disabled:opacity-60 disabled:hover:bg-white"
+              >
+                <div className="font-medium text-gray-900 text-sm flex items-center gap-1 min-w-0">
+                  <span className="truncate">{c.person_name}</span>
+                  {c.is_vip ? <Star size={12} className="text-[#FCB712] fill-[#FCB712] shrink-0" /> : null}
+                </div>
+                <div className="text-xs text-gray-500">{c.phone_number} · {c.district_name || "—"}</div>
+                <div className="text-[11px] font-semibold text-[#164FA3] mt-1">Follow up on {c.follow_up_date?.slice(0, 10)}{c.follow_up_time ? ` at ${String(c.follow_up_time).slice(0, 5)}` : ""} · tap to call back</div>
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
