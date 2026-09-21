@@ -18,6 +18,23 @@ export function toPublicRegistrationPhoto(url) {
   return s;
 }
 
+// The exact inverse of toPublicRegistrationPhoto: turn a public-form image URL
+// (`/api/public/registration/media/<file>`) back into the STORED path
+// (`/uploads/<file>`) that every table in this app keeps. The form shows the
+// rewritten URL, so that is also what it submits when the collector keeps the photo
+// that was matched from Contacts instead of taking a new one. Without this reversal
+// the submit's "/uploads/<id>.<ext> only" guard rejected it and the saved
+// registration silently lost the photo the form had just displayed.
+//
+// Anything already stored-shaped is returned unchanged, and any other value → "",
+// so the caller's own validation still decides what is acceptable.
+export function fromPublicRegistrationPhoto(url) {
+  const s = String(url || "").trim();
+  if (!s) return "";
+  const m = s.match(/^\/api\/public\/registration\/media\/([^/?#]+)$/);
+  return m ? `/uploads/${m[1]}` : s;
+}
+
 // Guard for the public image route: true only when `/uploads/<file>` is actually
 // stored as someone's photo in a registration-relevant table (contacts / workers /
 // reg_people). The route serves ONLY such files, so it is never an open proxy for

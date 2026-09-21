@@ -499,7 +499,13 @@ export default function PublicRegistrationForm({ token }) {
         // Tag the match with the exact number it belongs to; the render only trusts
         // it while it still matches the field, so a resolved photo can never linger
         // onto a different number (§8).
-        if (alive) setContactPhoto(d && d.photo_url ? { ...d, forKey: ten } : null);
+        //
+        // A match is kept even when it carries NO photo (an identified person whose
+        // Contact has none): the header then shows the default initials placeholder
+        // beside their real name and ID (§9), which confirms the right person was
+        // matched, instead of showing nothing at all. It is never another worker's
+        // photo — photo_url is simply null and the capture buttons stay available.
+        if (alive) setContactPhoto(d && (d.photo_url || d.name) ? { ...d, forKey: ten } : null);
       } catch { if (alive) setContactPhoto(null); }
     }, 400);
     return () => { alive = false; clearTimeout(timer); };
@@ -1124,7 +1130,11 @@ function HeaderWorkerChip({ photo, name }) {
   const [ok, setOk] = useState(true);
   useEffect(() => { setOk(true); }, [photo]);
   return (
-    <span className="inline-flex items-center gap-2 max-w-[42vw] sm:max-w-[220px] rounded-full bg-white/15 py-1 pl-1 pr-2.5">
+    // On a phone the chip shows the photo alone: its name text used to eat ~42vw of
+    // the header and squeezed the drive's title down to a couple of characters. The
+    // worker's full name, ID and mobile are right below in the identity card, so
+    // nothing is lost — the header keeps the photo (§2) and stays readable (§10).
+    <span className="inline-flex items-center gap-2 max-w-[44vw] sm:max-w-[220px] rounded-full bg-white/15 py-1 pl-1 pr-1 sm:pr-2.5">
       {photo && ok ? (
         <img src={photo} alt={name || ""} className="w-8 h-8 rounded-full object-cover ring-1 ring-white/40 shrink-0" onError={() => setOk(false)} />
       ) : (
@@ -1132,7 +1142,7 @@ function HeaderWorkerChip({ photo, name }) {
           {String(name || "?").trim().charAt(0).toUpperCase() || "?"}
         </span>
       )}
-      <span className="text-sm font-semibold text-white truncate">{name}</span>
+      <span className="hidden sm:inline text-sm font-semibold text-white truncate">{name}</span>
     </span>
   );
 }
@@ -1152,7 +1162,10 @@ function WorkerIdentityCard({ photo, name, workerCode, contactId, mobile, t }) {
         <p className="font-bold text-gray-900 truncate">{name || "—"}</p>
         {idLine ? <p className="text-xs text-gray-600 truncate">{idLine}</p> : null}
         {ten ? <p className="text-xs text-gray-600 truncate">{ten}</p> : null}
-        <p className="text-[11px] font-semibold text-green-700 mt-0.5">{t.matchedFromContacts}</p>
+        {/* Only claim the photo came from Contacts when one actually did — a matched
+            person whose Contact has no photo shows the initials placeholder instead
+            (§9), and the collector can capture one. */}
+        {photo ? <p className="text-[11px] font-semibold text-green-700 mt-0.5">{t.matchedFromContacts}</p> : null}
       </div>
     </div>
   );

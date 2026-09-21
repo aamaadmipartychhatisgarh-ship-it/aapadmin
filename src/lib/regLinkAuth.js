@@ -4,7 +4,7 @@ import { query } from "@/lib/db";
 import { phoneKey, last10Sql } from "@/lib/phone";
 import { signPayload, verifySessionToken, maskPhone, SESSION_TTL_MS } from "@/lib/workerFormAuth";
 import { requestOtp, checkOtp, otpConfigured } from "@/lib/registrationOtp";
-import { photoByMobile, resolveWorkerPhoto } from "@/lib/photoByMobile";
+import { resolveWorkerPhoto, registeredWorkerByMobile } from "@/lib/photoByMobile";
 import { toPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
 
 // Phone gate for a WORKER Generate Link (/r/<token>). The mobile verified here is
@@ -303,15 +303,24 @@ export async function handleRegWorkerPhoto(req, mobile) {
     if (!s || !s.rwid) return json({}, 200);
     const key = phoneKey(mobile);
     if (!key || key.length !== 10) return json({}, 200);
-    const hit = await photoByMobile(key);
+    // Matching order (never by name, never by list position):
+    //   1. the registered worker's own contact_id — the Worker → Contact link, which
+    //      holds even when the number typed here is not the one stored on the Contact;
+    //   2. the mobile itself, matched against Contacts on its last-10 key.
+    // resolveWorkerPhoto applies exactly that order, so a worker whose Contact has a
+    // photo never falls back to a placeholder.
+    const reg = await registeredWorkerByMobile(key);
+    const hit = await resolveWorkerPhoto({ contactId: reg?.contact_id, mobile: key });
     // name/photo_url drive the form's photo slot + worker header; contact_id and
     // worker_code identify WHO the photo belongs to (shown as the Contact/Worker ID),
-    // so the header can never silently attach one worker's photo to another.
+    // so the header can never silently attach one worker's photo to another. The
+    // worker_code is the REGISTRATION code (JASB@0018) — `workers` has no such column
+    // on this deployment, which is what used to make this whole lookup fail.
     return json({
-      name: hit?.name || null,
+      name: hit?.name || reg?.name || null,
       photo_url: toPublicRegistrationPhoto(hit?.photo_url),
-      contact_id: hit?.contact_id ?? null,
-      worker_code: hit?.worker_code || null,
+      contact_id: hit?.contact_id ?? reg?.contact_id ?? null,
+      worker_code: reg?.worker_code || null,
     }, 200);
   } catch (err) {
     console.error(`[reg-worker-photo] ${err?.message || err}`);

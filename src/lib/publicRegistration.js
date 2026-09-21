@@ -7,7 +7,7 @@ import { readRegSession, resolveCampaignWorkerById } from "@/lib/regLinkAuth";
 import { blockBelongsToAssembly } from "@/lib/politicalLocation";
 import { phoneKey } from "@/lib/phone";
 import { isMobileVerified, consumeVerification, otpConfigured } from "@/lib/registrationOtp";
-import { toPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
+import { toPublicRegistrationPhoto, fromPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
 // Both public routes are thin wrappers over the two handlers at the bottom of
@@ -331,7 +331,14 @@ export async function submitPublicRegistration(req, token) {
     // Photo (Worker Form): accept ONLY a path produced by our own upload endpoint
     // (/uploads/<id>.<ext>) — never an arbitrary client-supplied URL — so the row
     // can only reference an image actually stored in our photo store.
-    const rawPhoto = String(d.photo_url || "").trim();
+    //
+    // A photo the form matched from Contacts arrives as the public read URL
+    // (/api/public/registration/media/<file>), because that is the only form the
+    // anonymous page can display; it points at the SAME stored file. Normalizing it
+    // back first is what lets "keep the existing Contacts photo" save that photo
+    // instead of silently storing none — the collector never re-uploads a photo the
+    // person already has. The regex below still has the final say.
+    const rawPhoto = fromPublicRegistrationPhoto(d.photo_url);
     const photoUrl = /^\/uploads\/[A-Za-z0-9._-]+$/.test(rawPhoto) ? rawPhoto.slice(0, 512) : null;
 
     // The constituency must be one from the master list. Resolving the id here
