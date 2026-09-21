@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight } from "@/lib/permissions";
+import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
+import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { hasContactPhotoColumn, hasContactPhotoUpdatedAtColumn } from "@/lib/contactExtras";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
@@ -11,18 +12,27 @@ import { deleteLocalUpload } from "@/lib/uploadCleanup";
 // Saves a profile photo directly on the contact (contacts.photo_url) — no
 // longer routes through a linked worker record (Worker Management was
 // removed; contacts are fully standalone now).
-// Allowed for the caller currently holding the contact, or any oversight user.
+//
+// Authorization MIRRORS the contact edit (PUT /api/contacts/[id]): admin role OR a
+// "contacts" Page-Access grant may set any contact's photo; otherwise a caller may
+// set the photo of a contact they currently hold (locked mid-call) OR one ASSIGNED
+// to them. Previously this required the lock holder only (and read session.user.id
+// directly), so setting a photo from My Calls / Edit-in-Workspace failed with "Could
+// not save" on a previously-called contact that was assigned to the caller but no
+// longer locked — even though editing its other details was allowed. Using
+// resolveActingUserId also keeps Super-Admin "view as caller" working, exactly like
+// the edit route.
 export async function POST(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
-    // Oversight OR a "contacts" Page-Access grant; otherwise the caller holding
-    // the contact.
-    const admin = await pageAllowed(session, "contacts", session && isOversight(session));
+    const admin = await pageAllowed(session, "contacts", session && isAdmin(session));
     if (!admin) {
-      const [row] = await query("SELECT locked_by_user_id FROM contacts WHERE id = ?", [id]);
-      if (!row || String(row.locked_by_user_id) !== String(session.user.id)) {
+      const { userId } = await resolveActingUserId(session);
+      const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
+      const mine = row && (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId));
+      if (!mine) {
         return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
       }
     }

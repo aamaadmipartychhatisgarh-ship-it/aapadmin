@@ -564,7 +564,14 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ photo_url: url }),
     });
-    if (!r.ok) throw new Error("Could not save the photo.");
+    if (!r.ok) {
+      // Surface the ACTUAL backend reason (e.g. an authorization or schema error)
+      // instead of a generic "Could not save", and log it for debugging.
+      const d = await r.json().catch(() => ({}));
+      const msg = d?.message || `Could not save the photo (error ${r.status}).`;
+      console.error("[workspace] save contact photo failed:", r.status, msg);
+      throw new Error(msg);
+    }
     return url;
   }
 
