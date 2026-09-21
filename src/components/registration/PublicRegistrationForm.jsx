@@ -198,11 +198,15 @@ function LeaderPhoto() {
 // initials placeholder when they have no photo (§9). Logout clears it (§8/§11).
 function HandlerBadge({ handler, onLogout, t }) {
   const name = handler?.name || "";
+  // Fall back to initials only if the photo genuinely fails to load — a resolved
+  // Contact photo must not show as a broken image (§6). `photo_url` re-arms the guard.
+  const [ok, setOk] = useState(true);
+  useEffect(() => { setOk(true); }, [handler?.photo_url]);
   return (
     <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 flex items-center justify-between gap-3">
       <div className="flex items-center gap-2.5 min-w-0">
-        {handler?.photo_url ? (
-          <img src={handler.photo_url} alt={name} className="w-10 h-10 rounded-full object-cover border border-white shadow-sm shrink-0" />
+        {handler?.photo_url && ok ? (
+          <img src={handler.photo_url} alt={name} className="w-10 h-10 rounded-full object-cover border border-white shadow-sm shrink-0" onError={() => setOk(false)} />
         ) : (
           <span className="w-10 h-10 rounded-full bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center font-bold shrink-0">
             {(name || "?").trim().charAt(0).toUpperCase()}
@@ -1183,13 +1187,8 @@ function RegLoginGate({ t, campaignName, toggleLang, onLoggedIn }) {
               identifies them (§2). Placeholder (initials) when no photo exists. */}
           {userPhoto && (
             <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-              {userPhoto.photo_url ? (
-                <img src={userPhoto.photo_url} alt={userPhoto.name || "Photo"} className="w-14 h-14 rounded-full object-cover border border-white shadow-sm shrink-0" />
-              ) : (
-                <span className="w-14 h-14 rounded-full bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center text-lg font-bold shrink-0">
-                  {(userPhoto.name || "?").trim().charAt(0).toUpperCase()}
-                </span>
-              )}
+              <FormAvatar photo={userPhoto.photo_url} name={userPhoto.name} className="w-14 h-14" textCls="text-lg" />
+
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-gray-900 truncate">{userPhoto.name}</p>
                 <p className="text-xs text-gray-500 truncate">{campaignName || t.fallbackTitle}</p>

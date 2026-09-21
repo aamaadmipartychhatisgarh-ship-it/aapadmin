@@ -6,6 +6,7 @@ import {
 import { readRegSession, resolveCampaignWorkerById } from "@/lib/regLinkAuth";
 import { phoneKey } from "@/lib/phone";
 import { isMobileVerified, consumeVerification, otpConfigured } from "@/lib/registrationOtp";
+import { toPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
 // Both public routes are thin wrappers over the two handlers at the bottom of
@@ -224,8 +225,12 @@ export async function publicOwnList(req, token, type) {
         LIMIT 500`,
       params
     );
+    // Rewrite each stored /uploads/... photo to the form's public image route so the
+    // "My Voters / My Workers" thumbnails load on the logged-out public form (they
+    // otherwise 401 through /api/media, which needs an admin session).
+    const people = rows.map((r) => ({ ...r, photo_url: toPublicRegistrationPhoto(r.photo_url) }));
     return NextResponse.json(
-      { people: rows, total: rows.length, type: personType, credited_to: link.mode === "worker" ? link.worker_name : null },
+      { people, total: people.length, type: personType, credited_to: link.mode === "worker" ? link.worker_name : null },
       { headers: NO_STORE }
     );
   } catch (e) {

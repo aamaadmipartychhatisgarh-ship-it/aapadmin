@@ -4,7 +4,8 @@ import { query } from "@/lib/db";
 import { phoneKey, last10Sql } from "@/lib/phone";
 import { signPayload, verifySessionToken, maskPhone, SESSION_TTL_MS } from "@/lib/workerFormAuth";
 import { requestOtp, checkOtp, otpConfigured } from "@/lib/registrationOtp";
-import { photoByMobile } from "@/lib/photoByMobile";
+import { photoByMobile, resolveWorkerPhoto } from "@/lib/photoByMobile";
+import { toPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
 
 // Phone gate for a WORKER Generate Link (/r/<token>). The mobile verified here is
 // the LINK OWNER's (the karyakarta / registration handler), validated against
@@ -31,7 +32,7 @@ export async function resolveWorkerLink(token) {
   const t = String(token || "").trim();
   if (!t || t.length > 64) return null;
   const [row] = await query(
-    `SELECT w.id AS worker_id, w.name AS worker_name, w.mobile AS worker_mobile, w.worker_code,
+    `SELECT w.id AS worker_id, w.name AS worker_name, w.mobile AS worker_mobile, w.worker_code, w.contact_id AS contact_id,
             w.status AS worker_status, c.id AS campaign_id, c.status AS campaign_status
        FROM reg_workers w JOIN reg_campaigns c ON c.id = w.campaign_id
       WHERE w.token = ? LIMIT 1`,
@@ -51,7 +52,7 @@ async function resolveCampaignWorker(campaignId, mobile) {
   const key = phoneKey(mobile);
   if (!key || key.length !== 10) return null;
   const [w] = await query(
-    `SELECT w.id AS worker_id, w.name AS worker_name, w.mobile AS worker_mobile, w.worker_code
+    `SELECT w.id AS worker_id, w.name AS worker_name, w.mobile AS worker_mobile, w.worker_code, w.contact_id AS contact_id
        FROM reg_workers w
       WHERE w.campaign_id = ? AND w.status = 'active' AND ${last10Sql("w.mobile")} = ? LIMIT 1`,
     [campaignId, key]
@@ -64,7 +65,7 @@ async function resolveCampaignWorker(campaignId, mobile) {
 export async function resolveCampaignWorkerById(campaignId, workerId) {
   if (!campaignId || !workerId) return null;
   const [w] = await query(
-    `SELECT w.id AS worker_id, w.name AS worker_name, w.mobile AS worker_mobile, w.worker_code
+    `SELECT w.id AS worker_id, w.name AS worker_name, w.mobile AS worker_mobile, w.worker_code, w.contact_id AS contact_id
        FROM reg_workers w JOIN reg_campaigns c ON c.id = w.campaign_id
       WHERE w.id = ? AND w.campaign_id = ? AND w.status = 'active' AND c.status = 'active' LIMIT 1`,
     [workerId, campaignId]
@@ -202,7 +203,7 @@ export async function handleRegOtpVerify(token, body) {
         return json({ message: "This registration link does not have a registered mobile number on file yet." }, 409);
       }
       verifyMobile = owner;
-      worker = { worker_id: entry.worker_id, worker_name: entry.worker_name, worker_code: entry.worker_code };
+      worker = { worker_id: entry.worker_id, worker_name: entry.worker_name, worker_code: entry.worker_code, contact_id: entry.contact_id };
     } else {
       const entered = phoneKey(body?.mobile);
       const w = entered ? await resolveCampaignWorker(entry.campaign_id, entered) : null;
@@ -221,8 +222,9 @@ export async function handleRegOtpVerify(token, body) {
 
     // The session is bound to the karyakarta + campaign. A worker link also pins
     // its token; a drive/join session carries no token and is validated by cid.
+    const photo = await resolveWorkerPhoto({ contactId: worker.contact_id, mobile: verifyMobile });
     const payload = { kind: "reg_link", rwid: worker.worker_id, cid: entry.campaign_id, token: token ? String(token) : null, mobile: verifyMobile, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS };
-    const out = json({ ok: true, handler: { name: worker.worker_name, mobile: verifyMobile, worker_code: worker.worker_code } });
+    const out = json({ ok: true, handler: { name: worker.worker_name, mobile: verifyMobile, worker_code: worker.worker_code, photo_url: toPublicRegistrationPhoto(photo?.photo_url) } });
     out.cookies.set(regSessionCookie(signPayload(payload)));
     console.log(`${tag} otp verify OK → handler session issued (rwid=${worker.worker_id})`);
     return out;
@@ -268,13 +270,16 @@ export async function handleRegUserPhoto(username) {
     const uname = String(username || "").replace(/\s+/g, " ").trim();
     if (!uname) return json({}, 200);
     const [w] = await query(
-      `SELECT name, mobile FROM reg_workers
+      `SELECT name, mobile, contact_id FROM reg_workers
         WHERE campaign_id = ? AND username = ? AND status = 'active' LIMIT 1`,
       [entry.campaign_id, uname]
     );
     if (!w) return json({}, 200);
-    const hit = await photoByMobile(w.mobile);
-    return json({ name: w.name || null, photo_url: hit?.photo_url || null }, 200);
+    // contact_id first (the reliable link), mobile only as a fallback — so the
+    // login screen shows the user's real Contact photo even when their reg_worker
+    // mobile does not exactly match the Contact's stored number.
+    const hit = await resolveWorkerPhoto({ contactId: w.contact_id, mobile: w.mobile });
+    return json({ name: w.name || null, photo_url: toPublicRegistrationPhoto(hit?.photo_url) }, 200);
   } catch (err) {
     console.error(`[reg-user-photo] ${err?.message || err}`);
     return json({}, 200);
@@ -304,7 +309,7 @@ export async function handleRegWorkerPhoto(req, mobile) {
     // so the header can never silently attach one worker's photo to another.
     return json({
       name: hit?.name || null,
-      photo_url: hit?.photo_url || null,
+      photo_url: toPublicRegistrationPhoto(hit?.photo_url),
       contact_id: hit?.contact_id ?? null,
       worker_code: hit?.worker_code || null,
     }, 200);
@@ -323,7 +328,7 @@ export async function handleRegLogin(body) {
     if (!username || !password) return json({ message: "Enter your username and password." }, 400);
 
     const [w] = await query(
-      `SELECT id AS worker_id, name AS worker_name, worker_code, mobile, password_hash, status, password_set_at, created_at
+      `SELECT id AS worker_id, name AS worker_name, worker_code, mobile, contact_id, password_hash, status, password_set_at, created_at
          FROM reg_workers WHERE campaign_id = ? AND username = ? LIMIT 1`,
       [entry.campaign_id, username]
     );
@@ -340,9 +345,9 @@ export async function handleRegLogin(body) {
     // photo, by their registered mobile) — shown beside their name in the form's
     // top bar. null → the client shows its placeholder avatar. Never the photo of
     // a worker being added through the form.
-    const photo = await photoByMobile(w.mobile);
+    const photo = await resolveWorkerPhoto({ contactId: w.contact_id, mobile: w.mobile });
     const payload = { kind: "reg_link", rwid: w.worker_id, cid: entry.campaign_id, token: null, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS };
-    const out = json({ ok: true, handler: { name: w.worker_name, worker_code: w.worker_code, mobile: maskPhone(phoneKey(w.mobile)), photo_url: photo?.photo_url || null } });
+    const out = json({ ok: true, handler: { name: w.worker_name, worker_code: w.worker_code, mobile: maskPhone(phoneKey(w.mobile)), photo_url: toPublicRegistrationPhoto(photo?.photo_url) } });
     out.cookies.set(regSessionCookie(signPayload(payload)));
     return out;
   } catch (err) {
@@ -362,8 +367,8 @@ export async function handleRegSession(req, token) {
   if (entry.mode === "worker") {
     const s = readRegSession(req, token);
     if (s && String(s.rwid) === String(entry.worker_id)) {
-      const photo = await photoByMobile(entry.worker_mobile);
-      return json({ required: true, authenticated: true, handler: { name: entry.worker_name, mobile: maskPhone(phoneKey(entry.worker_mobile)), worker_code: entry.worker_code, photo_url: photo?.photo_url || null } });
+      const photo = await resolveWorkerPhoto({ contactId: entry.contact_id, mobile: entry.worker_mobile });
+      return json({ required: true, authenticated: true, handler: { name: entry.worker_name, mobile: maskPhone(phoneKey(entry.worker_mobile)), worker_code: entry.worker_code, photo_url: toPublicRegistrationPhoto(photo?.photo_url) } });
     }
     return json({ required: true, authenticated: false });
   }
@@ -375,8 +380,8 @@ export async function handleRegSession(req, token) {
   if (s && s.rwid && String(s.cid) === String(entry.campaign_id)) {
     const w = await resolveCampaignWorkerById(entry.campaign_id, s.rwid);
     if (w) {
-      const photo = await photoByMobile(w.worker_mobile);
-      return json({ required: true, authenticated: true, handler: { name: w.worker_name, mobile: maskPhone(phoneKey(w.worker_mobile)), worker_code: w.worker_code, photo_url: photo?.photo_url || null } });
+      const photo = await resolveWorkerPhoto({ contactId: w.contact_id, mobile: w.worker_mobile });
+      return json({ required: true, authenticated: true, handler: { name: w.worker_name, mobile: maskPhone(phoneKey(w.worker_mobile)), worker_code: w.worker_code, photo_url: toPublicRegistrationPhoto(photo?.photo_url) } });
     }
   }
   return json({ required: true, authenticated: false });
