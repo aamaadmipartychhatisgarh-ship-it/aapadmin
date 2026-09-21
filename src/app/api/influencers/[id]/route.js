@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isSuperAdmin } from "@/lib/permissions";
+import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureInfluencerSchema } from "@/lib/influencerSchema";
 import { validate, coerce, shape } from "../route";
 
-// Every handler here is Super-Admin ONLY, verified server-side (403 otherwise),
-// so influencer detail/update/delete is never reachable by any other role even
-// if the client guard is bypassed.
+// Every handler here is gated by the "influencers" page key (Super Admin +
+// Supervisor by baseline, plus Page-Access grants), verified server-side (403
+// otherwise), so influencer detail/update/delete is never reachable by an
+// unauthorized role even if the client guard is bypassed.
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
@@ -17,7 +18,7 @@ const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-ag
 async function guard() {
   const session = await getServerSession(authOptions);
   if (!session) return { error: NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE }) };
-  if (!isSuperAdmin(session)) return { error: NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE }) };
+  if (!(await userCanAccessPageKey(session, "influencers"))) return { error: NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE }) };
   return { session };
 }
 

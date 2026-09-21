@@ -56,6 +56,9 @@ const SUPERVISOR_NAV = [
   },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
   { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
+  // Influencers is available to Supervisors (baseline in the page-access registry;
+  // the /api/influencers routes re-check the same "influencers" page key).
+  { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
   { name: "Media", href: "/dashboard/media", icon: Newspaper },
   // Reports is a collapsible parent — Area Reports is nested beneath it as a
   // child page (supervisor dashboard only). Analytics is intentionally NOT

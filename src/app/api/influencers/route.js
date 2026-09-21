@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isSuperAdmin } from "@/lib/permissions";
+import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import {
   ensureInfluencerSchema, normalizeStatus, normalizeRating, resolveAssemblyHierarchy,
   POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES,
 } from "@/lib/influencerSchema";
 
-// The Influencer module is Super-Admin ONLY. Every handler re-verifies the role
-// server-side (never trusts the hidden nav / client guard) and returns 403 for
-// anyone else, so no influencer data ever leaves the server for a non-super user.
+// Access to the Influencer module is governed by the "influencers" page key
+// (Super Admin + Supervisor by baseline, plus anyone granted it in Page Access).
+// Every handler re-verifies it server-side via userCanAccessPageKey (never trusts
+// the nav / client guard) and returns 403 for anyone without it, so no influencer
+// data ever leaves the server for an unauthorized user.
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
@@ -50,7 +52,7 @@ export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
-    if (!isSuperAdmin(session)) return NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE });
+    if (!(await userCanAccessPageKey(session, "influencers"))) return NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE });
     await ensureInfluencerSchema();
 
     const { searchParams } = new URL(req.url);
@@ -113,7 +115,7 @@ export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
-    if (!isSuperAdmin(session)) return NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE });
+    if (!(await userCanAccessPageKey(session, "influencers"))) return NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE });
     await ensureInfluencerSchema();
 
     const d = await req.json().catch(() => null);

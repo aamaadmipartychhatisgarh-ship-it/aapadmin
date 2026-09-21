@@ -144,12 +144,12 @@ export const PAGES = [
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.SUPERVISOR] },
   { key: "training", label: "Training", href: "/dashboard/training", prefixes: ["/dashboard/training"], icon: "GraduationCap",
     roles: [...OVERSIGHT, ROLES.CALLER] },
-  // Influencer module — SUPER ADMIN ONLY. No other role holds it by baseline, and
-  // it is deliberately NOT grantable to any other role: the API re-checks
-  // isSuperAdmin on every call. It appears in no non-super nav, dropdown, or
-  // page-access list because super_admin is the sole role in `roles`.
+  // Influencer module — Super Admin and Supervisor by baseline; also grantable to
+  // any other role through Page Access. Every /api/influencers route re-checks this
+  // page key server-side (userCanAccessPageKey), so access is governed entirely by
+  // the page-access system — never by a hidden nav or client guard alone.
   { key: "influencers", label: "Influencers", href: "/dashboard/admin/influencers", prefixes: ["/dashboard/admin/influencers"], icon: "Star",
-    roles: [ROLES.SUPER_ADMIN] },
+    roles: [ROLES.SUPER_ADMIN, ROLES.SUPERVISOR] },
   // Voter & Worker Registration — the public link drive. State-level by baseline
   // (the drive is run centrally), and grantable to anyone else through Page
   // Access; every /api/registration route re-checks this key server-side. The

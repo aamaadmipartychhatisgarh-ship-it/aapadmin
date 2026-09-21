@@ -8,6 +8,7 @@ import {
   Loader2, Shield, Phone, MapPin, Save, ArrowLeft, Users, CheckCircle2, Camera, ImagePlus,
 } from "lucide-react";
 import { normalizeRole, ROLES } from "@/lib/permissions";
+import { usePageAccess } from "@/components/usePageAccess";
 
 // Colour used across the dashboard.
 const BRAND = "#164FA3";
@@ -41,6 +42,11 @@ export default function InfluencersPage() {
   const { data: session, status: authStatus } = useSession();
   const router = useRouter();
   const isSuper = normalizeRole(session?.user?.role) === ROLES.SUPER_ADMIN;
+  // Access mirrors the backend gate exactly: the effective "influencers" page key
+  // (Super Admin + Supervisor by baseline, plus anyone granted it in Page Access).
+  // Super Admin is a synchronous fast-path so their view never waits on /my-pages.
+  const { has, loading: pagesLoading } = usePageAccess();
+  const canAccess = isSuper || has("influencers");
 
   const [meta, setMeta] = useState(null);
   const [assemblies, setAssemblies] = useState([]);
@@ -72,17 +78,17 @@ export default function InfluencersPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Load option sets + assemblies once (super only).
+  // Load option sets + assemblies once (only for a user who can access the module).
   useEffect(() => {
-    if (!isSuper) return;
+    if (!canAccess) return;
     fetch("/api/influencers?meta=1", { cache: "no-store" })
       .then((r) => r.json()).then((d) => setMeta(d.meta || null)).catch(() => {});
     fetch("/api/locations?type=assembly", { cache: "no-store" })
       .then((r) => r.json()).then((d) => setAssemblies(d.locations || [])).catch(() => {});
-  }, [isSuper]);
+  }, [canAccess]);
 
   const loadList = useCallback(async () => {
-    if (!isSuper) return;
+    if (!canAccess) return;
     setLoading(true); setErr("");
     try {
       const p = new URLSearchParams();
@@ -106,7 +112,7 @@ export default function InfluencersPage() {
     } finally {
       setLoading(false);
     }
-  }, [isSuper, page, pageSize, debounced, fStatus, fAssembly, fRating, fAction]);
+  }, [canAccess, page, pageSize, debounced, fStatus, fAssembly, fRating, fAction]);
 
   useEffect(() => { if (mode === "list") loadList(); }, [mode, loadList]);
 
@@ -138,17 +144,19 @@ export default function InfluencersPage() {
     }
   }
 
-  // --- access gate (super admin only) --------------------------------------
-  if (authStatus === "loading") {
+  // --- access gate (governed by the "influencers" page key) -----------------
+  // Wait while the session or (for a non-super user) the effective page keys are
+  // still loading, so an authorized Supervisor never sees a flash of Access Denied.
+  if (authStatus === "loading" || (!isSuper && pagesLoading)) {
     return <div className="flex items-center justify-center py-24"><Loader2 className="animate-spin" style={{ color: BRAND }} size={28} /></div>;
   }
-  if (!isSuper) {
+  if (!canAccess) {
     return (
       <div className="flex h-full min-h-[60vh] items-center justify-center">
         <div className="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow-sm p-8 text-center">
           <div className="w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto mb-4"><Shield size={26} /></div>
           <h2 className="text-lg font-bold text-gray-900">Access Denied</h2>
-          <p className="text-sm text-gray-500 mt-2">The Influencer module is restricted to the Super Admin.</p>
+          <p className="text-sm text-gray-500 mt-2">You do not have access to the Influencer module.</p>
           <button onClick={() => router.push("/dashboard")} className="mt-6 h-10 px-5 rounded-lg text-white text-sm font-semibold" style={{ background: BRAND }}>Back to Dashboard</button>
         </div>
       </div>
