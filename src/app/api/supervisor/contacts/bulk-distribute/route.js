@@ -7,6 +7,7 @@ import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignment
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { repeatOffExclusion } from "@/lib/repeatOff";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
@@ -92,6 +93,7 @@ export async function POST(req) {
     }
     where += await notWrongNumberClause("c");
     where += await notNotInterestedClause("c");
+    where += await repeatOffExclusion("c");
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
     // Strict territory scope — the contact set this supervisor may ever touch.
     // Always applied, explicit selection or not.

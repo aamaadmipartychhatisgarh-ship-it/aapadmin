@@ -5,6 +5,7 @@ import { getPool } from "@/lib/db";
 import { resolveActingUserId } from "@/lib/actAs";
 import { buildRuleMatch, zoneMatch } from "@/lib/assignmentRules";
 import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { repeatOffExclusion } from "@/lib/repeatOff";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // On-demand daily top-up for the signed-in caller. For each active rule, fill
@@ -42,6 +43,7 @@ export async function POST() {
       // neither from the pool nor pulled from another caller.
       const notWrong = await notWrongNumberClause("c");
       const notInterested = await notNotInterestedClause("c");
+      const repeatOff = await repeatOffExclusion("c");
 
       let assignedTotal = 0;
       let takenTotal = 0;
@@ -58,7 +60,7 @@ export async function POST() {
             `SELECT COUNT(*) AS n FROM contacts c
               WHERE c.assigned_to_user_id = ? AND c.is_completed = 0
                 AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
-                ${notWrong}${notInterested} ${m.where}`,
+                ${notWrong}${notInterested}${repeatOff} ${m.where}`,
             [userId, ...m.params]
           );
           let need = Math.max(0, (Number(rule.daily_quota) || 0) - Number(held.n || 0));
@@ -71,7 +73,7 @@ export async function POST() {
                   AND c.assigned_to_user_id IS NULL
                   AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
                   AND (c.locked_by_user_id IS NULL OR c.locked_at < NOW() - INTERVAL 10 MINUTE)
-                  ${notWrong}${notInterested} ${m.where}
+                  ${notWrong}${notInterested}${repeatOff} ${m.where}
                 ORDER BY c.is_vip DESC, c.id ASC
                 LIMIT ${need} FOR UPDATE`,
               m.params
@@ -101,7 +103,7 @@ export async function POST() {
                   AND c.assigned_to_user_id <> ?
                   AND (c.follow_up_date IS NULL OR c.follow_up_date <= CURDATE())
                   AND (c.assigned_at IS NULL OR c.assigned_at < NOW() - INTERVAL ${staleDays} DAY)
-                  ${notWrong}${notInterested} ${m.where}
+                  ${notWrong}${notInterested}${repeatOff} ${m.where}
                 ORDER BY c.assigned_at ASC, c.id ASC
                 LIMIT ${need} FOR UPDATE`,
               [userId, ...m.params]

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Search, Loader2, RefreshCcw, Phone, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Loader2, RefreshCcw, Phone, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import Avatar from "@/components/Avatar";
 
 // Reusable "10+ Times Off" list — the ONE place the repeat-off search + table +
@@ -20,6 +20,7 @@ export default function RepeatOffPanel({ type }) {
   const [totalPages, setTotalPages] = useState(1);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [restoringId, setRestoringId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -35,6 +36,26 @@ export default function RepeatOffPanel({ type }) {
       }
     } finally { setLoading(false); }
   }, [type, page, search]);
+
+  // Explicitly restore a contact to Main Contacts (per this list's type). Confirms
+  // first; the backend stamps the restore time (history preserved) and the contact
+  // leaves this list and becomes active/assignable again.
+  const restore = useCallback(async (c) => {
+    if (!window.confirm(`Restore ${c.person_name || "this contact"} to Main Contacts? Its call history stays intact and it becomes assignable again.`)) return;
+    setRestoringId(c.id);
+    try {
+      const r = await fetch(`/api/contacts/repeat-off/${c.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type }),
+      });
+      if (r.ok) load();
+      else {
+        const d = await r.json().catch(() => ({}));
+        alert(d.message || "Could not restore this contact.");
+      }
+    } finally { setRestoringId(null); }
+  }, [type, load]);
 
   // Reset to page 1 whenever the type (tab) or search changes, so switching tabs
   // never lands on an out-of-range page from the previous list.
@@ -66,13 +87,14 @@ export default function RepeatOffPanel({ type }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">Location</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Caller</th>
                 <th className="px-4 py-3 font-semibold text-gray-600 text-right">{type === "incoming" ? "Incoming Off" : "Switched Off"} count</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" className="py-12 text-center text-gray-400"><Loader2 className="inline animate-spin text-[#164FA3]" /></td></tr>
+                <tr><td colSpan="7" className="py-12 text-center text-gray-400"><Loader2 className="inline animate-spin text-[#164FA3]" /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan="6" className="py-12 text-center text-gray-400">No contacts have crossed the 10+ threshold for this status.</td></tr>
+                <tr><td colSpan="7" className="py-12 text-center text-gray-400">No contacts have crossed the 10+ threshold for this status.</td></tr>
               ) : rows.map((c) => (
                 <tr key={c.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-4 py-3">
@@ -86,6 +108,12 @@ export default function RepeatOffPanel({ type }) {
                   <td className="px-4 py-3 text-gray-500 text-xs">{[c.district_name, c.assembly_name].filter(Boolean).join(" / ") || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.assigned_to_username || "—"}</td>
                   <td className="px-4 py-3 text-right"><span className="inline-flex items-center px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 font-bold">{c.off_count}</span></td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => restore(c)} disabled={restoringId === c.id} title="Restore to Main Contacts"
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#164FA3] hover:bg-blue-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50">
+                      {restoringId === c.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Restore
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

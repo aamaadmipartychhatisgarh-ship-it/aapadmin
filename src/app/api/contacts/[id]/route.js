@@ -9,6 +9,7 @@ import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { isContactNotInterested } from "@/lib/contactExtras";
+import { isContactRepeatOff } from "@/lib/repeatOff";
 import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
 
@@ -106,6 +107,13 @@ export async function PUT(req, { params }) {
     if ("assigned_to_user_id" in data && data.assigned_to_user_id && await isContactNotInterested(id)) {
       return NextResponse.json(
         { message: "This contact is in Not Interested and cannot be assigned. Restore it first." },
+        { status: 409 }
+      );
+    }
+    // Same backend restriction for a contact in a 10+ Switch Off / Incoming Off list.
+    if ("assigned_to_user_id" in data && data.assigned_to_user_id && await isContactRepeatOff(id)) {
+      return NextResponse.json(
+        { message: "This contact is in a 10+ Times Switch Off / Incoming Off list and cannot be assigned. Restore it first." },
         { status: 409 }
       );
     }

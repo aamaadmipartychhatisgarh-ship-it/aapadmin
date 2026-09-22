@@ -6,6 +6,7 @@ import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { repeatOffExclusion } from "@/lib/repeatOff";
 import { supervisorScopeFilter } from "@/lib/supervisorScope";
 
 // Supervisor-scoped mirror of GET /api/contacts/ids — every contact id
@@ -41,6 +42,7 @@ export async function GET(req) {
     if (statusCond) where += ` AND ${statusCond}`;
     if (wrong !== "1") where += await notWrongNumberClause("c");
     if (wrong !== "1") where += await notNotInterestedClause("c");
+    if (wrong !== "1") where += await repeatOffExclusion("c");
     const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });
     where += person.where;
     params.push(...person.params);

@@ -5,6 +5,7 @@ import { scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { repeatOffExclusion } from "@/lib/repeatOff";
 import { normalizeActiveStatus } from "@/lib/activeStatus";
 
 // The Active Status lives on users.active_status (the ONE authoritative value,
@@ -53,6 +54,7 @@ export async function GET(req) {
     // "Active" excludes wrong-number contacts — identical rule to the list.
     where += await notWrongNumberClause("c");
     where += await notNotInterestedClause("c");
+    where += await repeatOffExclusion("c");
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
     if (assembly_id) { where += " AND c.assembly_id = ?"; params.push(assembly_id); }
     if (search) { where += " AND u.username LIKE ?"; params.push(`%${search}%`); }
