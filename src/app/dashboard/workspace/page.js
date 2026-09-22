@@ -1188,6 +1188,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                             <option value="negative">Negative</option>
                             <option value="opponent">Opponent</option>
                             <option value="not_supporter">Not a Supporter</option>
+                            <option value="wrong_number">Wrong Number</option>
                           </select>
                         </Field>
                       )}

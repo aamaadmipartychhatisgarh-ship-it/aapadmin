@@ -21,7 +21,7 @@ const STATUS_PILL = {
 };
 const SENTIMENT_LABEL = {
   positive: "Positive", supporter: "Supporter", neutral: "Neutral",
-  negative: "Negative", opponent: "Opponent", not_supporter: "Not a Supporter",
+  negative: "Negative", opponent: "Opponent", not_supporter: "Not a Supporter", wrong_number: "Wrong Number",
 };
 
 
@@ -297,6 +297,7 @@ function CallDetailModal({ call, statuses, onClose, onSaved }) {
               <option value="negative">Negative</option>
               <option value="opponent">Opponent</option>
               {(statusName === "Phone Picked" || form.sentiment === "not_supporter") && <option value="not_supporter">Not a Supporter</option>}
+              <option value="wrong_number">Wrong Number</option>
             </select>
             <textarea className={inp} rows={3} placeholder="Remarks" value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
           </div>

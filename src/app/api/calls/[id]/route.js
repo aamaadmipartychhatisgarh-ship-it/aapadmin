@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { hasWrongNumberColumn } from "@/lib/contactExtras";
 
 export async function DELETE(req, { params }) {
   try {
@@ -51,9 +52,12 @@ export async function PUT(req, { params }) {
     );
 
     // Sentiment only applies to a connected ("Phone Picked") call — store NULL
-    // for any other status so a correction never leaves a stale sentiment.
+    // for any other status so a correction never leaves a stale sentiment. The new
+    // "Wrong Number" sentiment is the one exception: it is a disposition, kept
+    // regardless of status, so editing a call to it moves the contact.
+    const isWrongSentiment = String(sentiment || "").toLowerCase() === "wrong_number";
     const [statusRow] = await query("SELECT name FROM call_statuses WHERE id = ?", [status_id]);
-    const finalSentiment = statusRow?.name === "Phone Picked" ? (sentiment || null) : null;
+    const finalSentiment = isWrongSentiment ? "wrong_number" : (statusRow?.name === "Phone Picked" ? (sentiment || null) : null);
 
     await query(
       `UPDATE calls
@@ -82,6 +86,12 @@ export async function PUT(req, { params }) {
       if (sets.length) {
         vals.push(oldCall.contact_id);
         await query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
+      }
+      // Editing a call's sentiment to "Wrong Number" moves the contact to the Wrong
+      // Number list right away (same persistent flag the log flow sets). Set-only —
+      // editing away from it does not auto-restore (restore is explicit).
+      if (isWrongSentiment && (await hasWrongNumberColumn())) {
+        await query(`UPDATE contacts SET is_wrong_number = 1 WHERE id = ?`, [oldCall.contact_id]);
       }
     }
 

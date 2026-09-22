@@ -235,6 +235,7 @@ export default function LogCall() {
                 {(statuses.find((s) => String(s.id) === String(formData.status_id))?.name === "Phone Picked" || formData.sentiment === "not_supporter") && (
                   <option value="not_supporter">Not a Supporter</option>
                 )}
+                <option value="wrong_number">Wrong Number</option>
               </select>
             </div>
             <div>

@@ -44,6 +44,7 @@ const SENTIMENT_PILL = {
   negative:  { bg: "bg-orange-100 text-orange-700", label: "Negative" },
   not_supporter: { bg: "bg-red-100 text-red-700", label: "Not a Supporter" },
   opponent:  { bg: "bg-red-200 text-red-800", label: "Opponent" },
+  wrong_number: { bg: "bg-gray-100 text-gray-600", label: "Wrong Number" },
 };
 // Fixed display order for the Sentiment Summary (each shown even at 0), plus a
 // "Not Set" bucket for calls with no sentiment recorded.
@@ -353,6 +354,7 @@ export default function AdminCallRecords() {
               <option value="negative">Negative</option>
               <option value="not_supporter">Not a Supporter</option>
               <option value="opponent">Opponent</option>
+              <option value="wrong_number">Wrong Number</option>
             </select>
           </div>
           <div className="lg:col-span-2 flex items-end gap-2">

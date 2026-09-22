@@ -328,7 +328,9 @@ export async function POST(req) {
     if (contact_id) {
       const finalStatuses = ["Phone Picked", "Wrong Number", "Rudely Behaved"];
       const isFinal = !!statusName && finalStatuses.includes(statusName);
-      isWrongNumber = statusName === "Wrong Number";
+      // Wrong Number is triggered by the call STATUS "Wrong Number" OR the new
+      // "Wrong Number" SENTIMENT — both move the contact to the Wrong Number list.
+      isWrongNumber = statusName === "Wrong Number" || String(sentiment || "").toLowerCase() === "wrong_number";
       // If a follow-up was scheduled, keep the contact open and pin it to this caller.
       const wantsFollowUp = !!is_follow_up_required;
       // Re-logging a call always consumes the previous reminder: set the new
