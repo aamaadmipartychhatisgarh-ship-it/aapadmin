@@ -1266,6 +1266,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         <ComplaintModal
           contact={active}
           districts={districts}
+          designations={designations}
           onClose={() => setShowComplaint(false)}
           onSaved={() => { setShowComplaint(false); setMessage("Complaint logged."); }}
         />
@@ -1566,11 +1567,12 @@ function ProgressPanel({ refreshKey = 0 }) {
 // Quick complaint capture — prefilled from the contact the caller is talking to.
 const COMPLAINT_TYPES = { water: "Water", roads: "Roads", electricity: "Electricity", ration: "Ration", other: "Other" };
 
-function ComplaintModal({ contact, districts, onClose, onSaved }) {
+function ComplaintModal({ contact, districts, designations = [], onClose, onSaved }) {
   const [form, setForm] = useState({
     citizen_name: contact?.person_name || "",
     citizen_phone: contact?.phone_number || "",
     type: "water",
+    designation_id: contact?.designation_id ? String(contact.designation_id) : "",
     description: "",
     district_id: contact?.district_id || "",
   });
@@ -1601,6 +1603,12 @@ function ComplaintModal({ contact, districts, onClose, onSaved }) {
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className={inp} placeholder="Citizen name *" value={form.citizen_name} onChange={(e) => setForm({ ...form, citizen_name: e.target.value })} />
         <input className={inp} placeholder="Phone" value={form.citizen_phone} onChange={(e) => setForm({ ...form, citizen_phone: e.target.value })} />
+        {/* Designation — a separate field (existing designations master), stored
+            independently from the name. */}
+        <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
+          <option value="">Designation (optional)</option>
+          {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
+        </select>
         <select className={inp} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
           {Object.entries(COMPLAINT_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
@@ -1608,7 +1616,7 @@ function ComplaintModal({ contact, districts, onClose, onSaved }) {
           <option value="">District</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <textarea className={inp} rows={3} placeholder="What is the complaint about?" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <textarea className={inp} rows={3} placeholder="Description — enter complaint details…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
           <button onClick={save} disabled={saving || !form.citizen_name} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Log Complaint"}</button>

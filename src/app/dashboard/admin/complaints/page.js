@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
-import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search } from "lucide-react";
+import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search, Trash2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import CommonPrintButton from "@/components/common/CommonPrintButton";
@@ -73,6 +73,17 @@ function Body() {
     await fetch(`/api/complaints/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: s }) });
     load();
   }
+  // Delete one complaint after an explicit confirmation. The server deletes by the
+  // exact id, so the row's list position can never cause the wrong record to go.
+  async function removeComplaint(cm) {
+    if (!window.confirm("Are you sure you want to delete this complaint?")) return;
+    const r = await fetch(`/api/complaints/${cm.id}`, { method: "DELETE" });
+    if (r.ok) load();
+    else {
+      const d = await r.json().catch(() => ({}));
+      alert(d.message || "Could not delete this complaint.");
+    }
+  }
   const c = data.counts || {};
 
   return (
@@ -96,7 +107,7 @@ function Body() {
                     { header: "#", flex: 0.6 },
                     { header: "Citizen", flex: 1.6 },
                     { header: "Phone", flex: 1.2 },
-                    { header: "Type", flex: 1 },
+                    { header: "Designation", flex: 1.3 },
                     { header: "District", flex: 1.3 },
                     { header: "Description", flex: 3 },
                     { header: "Status", flex: 1 },
@@ -105,7 +116,7 @@ function Body() {
                     cm.id,
                     cm.citizen_name || "—",
                     cm.citizen_phone || "—",
-                    (TYPE_META[cm.type] || TYPE_META.other).label,
+                    cm.designation_name || "—",
                     cm.district_name || "—",
                     cm.description || "—",
                     (cm.status || "").replace(/_/g, " "),
@@ -157,26 +168,25 @@ function Body() {
               <tr>
                 <th className="px-4 py-3 font-semibold text-gray-600">#</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Citizen</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Description</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Update</th>
               </tr>
             </thead>
             <tbody>
-              {data.complaints.map((cm) => {
-                const tm = TYPE_META[cm.type] || TYPE_META.other;
-                const Icon = tm.icon;
-                return (
-                  <tr key={cm.id} className="border-t border-gray-100 hover:bg-gray-50">
+              {data.complaints.map((cm) => (
+                  <tr key={cm.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
                     <td className="px-4 py-3 text-gray-400 font-mono text-xs">#{cm.id}</td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900">{cm.citizen_name}</div>
                       <div className="text-xs text-gray-400">{cm.citizen_phone || ""}</div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full ${tm.color}`}><Icon size={12} /> {tm.label}</span>
-                    </td>
+                    <td className="px-4 py-3 text-gray-600">{cm.designation_name || <span className="text-gray-300">—</span>}</td>
+                    {/* Full description is available in the edit modal; the cell clamps
+                        long text so the row layout never breaks. */}
+                    <td className="px-4 py-3 text-gray-600 max-w-xs"><div className="line-clamp-2 whitespace-pre-wrap">{cm.description || <span className="text-gray-300">—</span>}</div></td>
                     <td className="px-4 py-3 text-gray-600">{cm.district_name || "—"}</td>
                     <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span></td>
                     <td className="px-4 py-3">
@@ -185,11 +195,11 @@ function Body() {
                           {STATUS_OPTS.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
                         </select>
                         <button onClick={() => setEditing(cm)} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={13} /></button>
+                        <button onClick={() => removeComplaint(cm)} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>
-                );
-              })}
+              ))}
             </tbody>
           </table>
           </div>
@@ -215,13 +225,16 @@ function AddModal({ onClose, onSaved, editing }) {
     citizen_name: editing.citizen_name || "",
     citizen_phone: editing.citizen_phone || "",
     type: editing.type || "water",
+    designation_id: editing.designation_id ? String(editing.designation_id) : "",
     description: editing.description || "",
     district_id: editing.district_id || "",
     resolution_notes: editing.resolution_notes || "",
-  } : { citizen_name: "", citizen_phone: "", type: "water", description: "", district_id: "", resolution_notes: "" });
+  } : { citizen_name: "", citizen_phone: "", type: "water", designation_id: "", description: "", district_id: "", resolution_notes: "" });
   const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   useEffect(() => { fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || [])); }, []);
+  useEffect(() => { fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || [])).catch(() => {}); }, []);
   async function save() {
     setSaving(true);
     const url = editing ? `/api/complaints/${editing.id}` : "/api/complaints";
@@ -236,6 +249,12 @@ function AddModal({ onClose, onSaved, editing }) {
         <div className="flex items-center justify-between"><h2 className="text-xl font-bold text-gray-900">{editing ? "Edit Complaint" : "Log Complaint"}</h2><button onClick={onClose} className="text-gray-400"><X size={20} /></button></div>
         <input className={inp} placeholder="Citizen name *" value={form.citizen_name} onChange={(e) => setForm({ ...form, citizen_name: e.target.value })} />
         <input className={inp} placeholder="Phone" value={form.citizen_phone} onChange={(e) => setForm({ ...form, citizen_phone: e.target.value })} />
+        {/* Designation — stored independently from the name (references the existing
+            designations master). */}
+        <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
+          <option value="">Designation (optional)</option>
+          {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
+        </select>
         <select className={inp} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
           {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
@@ -243,7 +262,7 @@ function AddModal({ onClose, onSaved, editing }) {
           <option value="">District</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <textarea className={inp} rows={2} placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <textarea className={inp} rows={3} placeholder="Description — enter complaint details…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         {editing && (
           <textarea className={inp} rows={2} placeholder="Resolution notes" value={form.resolution_notes} onChange={(e) => setForm({ ...form, resolution_notes: e.target.value })} />
         )}

@@ -100,7 +100,7 @@ function Body({ previewingCaller, viewAsCaller }) {
                   { header: "#", flex: 0.6 },
                   { header: "Citizen", flex: 1.6 },
                   { header: "Phone", flex: 1.2 },
-                  { header: "Type", flex: 1 },
+                  { header: "Designation", flex: 1.3 },
                   { header: "District", flex: 1.3 },
                   { header: "Description", flex: 3 },
                   { header: "Status", flex: 1 },
@@ -109,7 +109,7 @@ function Body({ previewingCaller, viewAsCaller }) {
                   cm.id,
                   cm.citizen_name || "—",
                   cm.citizen_phone || "—",
-                  (TYPE_META[cm.type] || TYPE_META.other).label,
+                  cm.designation_name || "—",
                   cm.district_name || "—",
                   cm.description || "—",
                   (cm.status || "").replace(/_/g, " "),
@@ -163,32 +163,26 @@ function Body({ previewingCaller, viewAsCaller }) {
                 <tr>
                   <th className="px-4 py-3 font-semibold text-gray-600">#</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Citizen</th>
-                  <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
+                  <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Description</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {data.complaints.map((cm) => {
-                  const tm = TYPE_META[cm.type] || TYPE_META.other;
-                  const Icon = tm.icon;
-                  return (
+                {data.complaints.map((cm) => (
                     <tr key={cm.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
                       <td className="px-4 py-3 text-gray-400 font-mono text-xs">#{cm.id}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">{cm.citizen_name}</div>
                         <div className="text-xs text-gray-400">{cm.citizen_phone || ""}</div>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full ${tm.color}`}><Icon size={12} /> {tm.label}</span>
-                      </td>
+                      <td className="px-4 py-3 text-gray-600">{cm.designation_name || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600">{cm.district_name || "—"}</td>
-                      <td className="px-4 py-3 text-gray-600 max-w-xs"><div className="line-clamp-2">{cm.description || <span className="text-gray-300">—</span>}</div></td>
+                      <td className="px-4 py-3 text-gray-600 max-w-xs"><div className="line-clamp-2 whitespace-pre-wrap">{cm.description || <span className="text-gray-300">—</span>}</div></td>
                       <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span></td>
                     </tr>
-                  );
-                })}
+                ))}
               </tbody>
             </table>
           </div>
@@ -210,11 +204,13 @@ function SumCard({ label, value, accent, danger }) {
 }
 
 function AddModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ citizen_name: "", citizen_phone: "", type: "water", description: "", district_id: "" });
+  const [form, setForm] = useState({ citizen_name: "", citizen_phone: "", type: "water", designation_id: "", description: "", district_id: "" });
   const [districts, setDistricts] = useState([]);
+  const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => { fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || [])); }, []);
+  useEffect(() => { fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || [])).catch(() => {}); }, []);
   async function save() {
     setSaving(true); setError("");
     const r = await fetch("/api/complaints", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
@@ -233,6 +229,12 @@ function AddModal({ onClose, onSaved }) {
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className={inp} placeholder="Citizen name *" value={form.citizen_name} onChange={(e) => setForm({ ...form, citizen_name: e.target.value })} />
         <input className={inp} placeholder="Phone" value={form.citizen_phone} onChange={(e) => setForm({ ...form, citizen_phone: e.target.value })} />
+        {/* Designation — a separate field, stored independently from the name
+            (references the existing designations master). */}
+        <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
+          <option value="">Designation (optional)</option>
+          {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
+        </select>
         <select className={inp} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
           {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
@@ -240,7 +242,7 @@ function AddModal({ onClose, onSaved }) {
           <option value="">District</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
-        <textarea className={inp} rows={2} placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <textarea className={inp} rows={3} placeholder="Description — enter complaint details…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
           <button onClick={save} disabled={saving || !form.citizen_name} className="px-4 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">{saving ? "Saving…" : "Log"}</button>
