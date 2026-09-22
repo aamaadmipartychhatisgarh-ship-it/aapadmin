@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -222,9 +222,24 @@ export default function DashboardLayout({ children }) {
       { name: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", icon: Vote },
       { name: "Events", href: "/dashboard/admin/events", icon: CalendarClock },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
+      // Reports Audit Phase 0: these three were present for state_admin down
+      // through district_admin but missing here, so the top role — the one
+      // whose own comment above says "higher tiers include more" — was the
+      // only admin tier that could not reach them from its own nav.
+      { name: "Strength", href: "/dashboard/strength", icon: Gauge },
+      { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
+      // Reports Audit Phase 0: this page was unreachable from every role's
+      // nav (grant-only) despite its own access check (isAdmin) being wider
+      // than the Reports Engine's audit module (super_admin/state_admin
+      // only) — added here rather than deleted, since deleting live,
+      // working code on the strength of "nobody could click to it" is not a
+      // zero-risk move, and this page serves admin tiers the Engine module
+      // excludes outright.
+      { name: "Audit", href: "/dashboard/admin/audit", icon: ScrollText },
+      { name: "Master Data", href: "/dashboard/admin/settings", icon: Settings },
     ],
     [ROLES.STATE_ADMIN]: [
       // Same as super_admin except no Users management
@@ -249,6 +264,7 @@ export default function DashboardLayout({ children }) {
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
+      { name: "Audit", href: "/dashboard/admin/audit", icon: ScrollText },
       { name: "Master Data", href: "/dashboard/admin/settings", icon: Settings },
     ],
     [ROLES.ZONE_ADMIN]: [
@@ -271,6 +287,7 @@ export default function DashboardLayout({ children }) {
       { name: "Strength", href: "/dashboard/strength", icon: Gauge },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
+      { name: "Audit", href: "/dashboard/admin/audit", icon: ScrollText },
     ],
     [ROLES.DISTRICT_ADMIN]: [
       // District admin: focused on field ops within one district
@@ -291,6 +308,7 @@ export default function DashboardLayout({ children }) {
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
       { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
+      { name: "Audit", href: "/dashboard/admin/audit", icon: ScrollText },
     ],
     [ROLES.ASSEMBLY_ADMIN]: [
       // Assembly admin: very narrow — booth & ward management

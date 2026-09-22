@@ -5,6 +5,54 @@ import { query } from "@/lib/db";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
 import { PdfHeader, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
+import { scopeFilterSync, loadUserScope, normalizeRole, ROLES } from "@/lib/permissions";
+
+// Reports Audit Phase 1 (security fix): every builder below queried ALL
+// users / ALL districts / the WHOLE day's calls with no territory
+// restriction at all — only `isSupervisor(session)` gated the route, and
+// that check passes for every oversight role down to assembly_admin. A
+// scoped admin who cannot see another district anywhere else in the app
+// could still pull a statewide PDF through this one endpoint. Every builder
+// now takes the caller's own `user` (post-loadUserScope) and narrows to
+// their territory, exactly like every Reports Engine module already does
+// via scopeFilterSync — unrestricted roles (super_admin/state_admin/
+// supervisor) are unaffected, matching scopeFilterSync's own definition of
+// "sees everything by default".
+
+/**
+ * districtScopeWhere — the district-list report's rows ARE districts
+ * (`locations l`), not rows that HAVE a district_id column, so
+ * scopeFilterSync's generic `{alias}.{col} = ?` shape doesn't apply
+ * directly. Same role branches, same subqueries scopeFilterSync uses
+ * internally for zone_id/assembly_id -> district_id, just re-targeted at
+ * the district row's own `id`.
+ */
+function districtScopeWhere(user) {
+  const role = normalizeRole(user?.role);
+  if (role === ROLES.SUPER_ADMIN || role === ROLES.STATE_ADMIN || role === ROLES.SUPERVISOR) {
+    return { where: "", params: [] };
+  }
+  if (role === ROLES.ZONE_ADMIN) {
+    if (!user.scope_zone_id) return { where: "AND 1 = 0", params: [] };
+    return {
+      where: `AND l.id IN (
+        SELECT d.id FROM locations d
+        JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+        WHERE ls.parent_id = ?
+      )`,
+      params: [user.scope_zone_id],
+    };
+  }
+  if (role === ROLES.DISTRICT_ADMIN || role === ROLES.CALLER || role === ROLES.WORKER) {
+    if (!user.home_district_id) return { where: "AND 1 = 0", params: [] };
+    return { where: "AND l.id = ?", params: [user.home_district_id] };
+  }
+  if (role === ROLES.ASSEMBLY_ADMIN) {
+    if (!user.scope_assembly_id) return { where: "AND 1 = 0", params: [] };
+    return { where: "AND l.id = (SELECT parent_id FROM locations WHERE id = ?)", params: [user.scope_assembly_id] };
+  }
+  return { where: "AND 1 = 0", params: [] };
+}
 
 const styles = StyleSheet.create({
   page: { paddingTop: PDF_HEADER_HEIGHT + 12, paddingBottom: 32, paddingHorizontal: 32, fontSize: 10, fontFamily: "Helvetica" },
@@ -55,12 +103,18 @@ function ReportDocument({ title, subtitle, columns, rows }) {
   );
 }
 
-async function buildCallersReport({ date_from, date_to } = {}) {
+async function buildCallersReport({ date_from, date_to, user } = {}) {
   // Date filter goes on the LEFT JOIN's ON clause so zero-call users still show.
+  // Geo scope goes the same place, for the same reason: a WHERE-clause scope
+  // would evaluate against a NULL district_id for a zero-call user (unmatched
+  // LEFT JOIN) and incorrectly drop them from the report entirely.
   const params = [];
   let joinExtra = "";
   if (date_from) { joinExtra += " AND DATE(c.called_at) >= ?"; params.push(date_from); }
   if (date_to)   { joinExtra += " AND DATE(c.called_at) <= ?"; params.push(date_to); }
+  const scope = scopeFilterSync(user, "c", { cols: ["zone_id", "district_id", "assembly_id"] });
+  joinExtra += " " + scope.where;
+  params.push(...scope.params);
   const rows = await query(
     `SELECT u.username AS name,
             COUNT(c.id) AS total_calls,
@@ -90,7 +144,8 @@ async function buildCallersReport({ date_from, date_to } = {}) {
   };
 }
 
-async function buildAreasReport() {
+async function buildAreasReport({ user } = {}) {
+  const scope = districtScopeWhere(user);
   const rows = await query(
     `SELECT l.name AS area_name,
             COUNT(c.id) AS total_calls,
@@ -100,9 +155,10 @@ async function buildAreasReport() {
        FROM locations l
        LEFT JOIN calls c ON c.district_id = l.id
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
-      WHERE l.type = 'district'
+      WHERE l.type = 'district' ${scope.where}
       GROUP BY l.id, l.name
-      ORDER BY total_calls DESC`
+      ORDER BY total_calls DESC`,
+    scope.params
   );
   return {
     title: "District-Wise Calling Report",
@@ -118,14 +174,21 @@ async function buildAreasReport() {
   };
 }
 
-async function buildSummaryReport() {
-  const [{ total }] = await query(`SELECT COUNT(*) AS total FROM calls WHERE DATE(called_at) = CURDATE()`);
+async function buildSummaryReport({ user } = {}) {
+  const scope = scopeFilterSync(user, "c", { cols: ["zone_id", "district_id", "assembly_id"] });
+  // buildCallersReport/buildAreasReport alias calls as `c` too; this query has
+  // no join to rename, so it aliases `calls` itself as `c` to match scope.where.
+  const [{ total }] = await query(
+    `SELECT COUNT(*) AS total FROM calls c WHERE DATE(c.called_at) = CURDATE() ${scope.where}`,
+    scope.params
+  );
   const buckets = await query(
     `SELECT cs.name AS status_name, COUNT(c.id) AS count
        FROM calls c
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
-      WHERE DATE(c.called_at) = CURDATE()
-      GROUP BY cs.name`
+      WHERE DATE(c.called_at) = CURDATE() ${scope.where}
+      GROUP BY cs.name`,
+    scope.params
   );
   return {
     title: "Daily Calling Summary",
@@ -155,10 +218,17 @@ export async function GET(req, { params }) {
     if (!builder) {
       return NextResponse.json({ message: "Unknown report" }, { status: 404 });
     }
+    // Load the scope columns (home_district_id/scope_zone_id/scope_assembly_id)
+    // onto session.user before any builder runs — same call the Reports
+    // Engine's own guard makes; scopeFilterSync/districtScopeWhere are no-ops
+    // without it and every scoped role would silently fall through to
+    // "AND 1 = 0" (an empty report) rather than their real territory.
+    await loadUserScope(session, query);
     const { searchParams } = new URL(req.url);
     const payload = await builder({
       date_from: searchParams.get("date_from"),
       date_to: searchParams.get("date_to"),
+      user: session.user,
     });
     const buffer = await renderToBuffer(React.createElement(ReportDocument, payload));
     return new Response(buffer, {

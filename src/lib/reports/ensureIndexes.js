@@ -7,6 +7,25 @@ import { getPool } from "@/lib/db";
 const WANT = [
   { table: "calls", name: "idx_calls_called_at", cols: "called_at" },
   { table: "contacts", name: "idx_contacts_created_at", cols: "created_at" },
+  // Reports Audit Phase 3: this list covered 2 of the registry's 14 modules'
+  // time-filter columns (the ones every module's Table/Summary view range-
+  // filters and sorts on — see registry.js's dateField/timeField). The other
+  // 12 had no guaranteed index here, risking the exact scan this file exists
+  // to prevent. wrong_numbers is the one module with no entry: its dateField
+  // is a correlated MAX(calls.called_at) subquery, not a plain column, so
+  // there is no single column to index for it here (calls.called_at above
+  // already covers the subquery's own scan).
+  { table: "workers", name: "idx_workers_created_at", cols: "created_at" },
+  { table: "tasks", name: "idx_tasks_created_at", cols: "created_at" },
+  { table: "complaints", name: "idx_complaints_created_at", cols: "created_at" },
+  { table: "attendance_log", name: "idx_attendance_log_login_at", cols: "login_at" },
+  { table: "users", name: "idx_users_created_at", cols: "created_at" },
+  { table: "teams", name: "idx_teams_created_at", cols: "created_at" },
+  { table: "notifications", name: "idx_notifications_created_at", cols: "created_at" },
+  { table: "audit_logs", name: "idx_audit_logs_created_at", cols: "created_at" },
+  { table: "press_notes", name: "idx_press_notes_created_at", cols: "created_at" },
+  { table: "debates", name: "idx_debates_created_at", cols: "created_at" },
+  { table: "press_conferences", name: "idx_press_conferences_created_at", cols: "created_at" },
 ];
 
 let started = false;

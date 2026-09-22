@@ -53,6 +53,15 @@ const INDEXES = [
   ["notifications", "idx_notifications_created", "created_at"],
   ["notifications", "idx_notifications_user", "user_id"],
   ["audit_logs", "idx_audit_created", "created_at"],
+  // Reports Audit Phase 3: the Reports Engine registry (src/lib/reports/registry.js)
+  // grew to 14 modules — these 5 tables' time-range columns were never added here,
+  // so their reports still risk the same full-table-scan/504 timeout this script
+  // exists to prevent for the other 9.
+  ["users", "idx_users_created", "created_at"],
+  ["teams", "idx_teams_created", "created_at"],
+  ["press_notes", "idx_press_notes_created", "created_at"],
+  ["debates", "idx_debates_created", "created_at"],
+  ["press_conferences", "idx_press_conferences_created", "created_at"],
 ];
 
 async function indexExists(table, name) {

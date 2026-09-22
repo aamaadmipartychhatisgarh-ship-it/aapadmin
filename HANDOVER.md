@@ -15,7 +15,7 @@ See `SETUP.md` for how to run it.
 - **Workers / Teams** — CRUD, CSV upload, team membership
 - **Media center** — newspapers, channels, debates, press conferences, spokespersons, journalists (manual CRUD)
 - **Social management** — manual post/page logging (no live platform APIs — see below)
-- **Rankings, Strength meter, Map, Analytics (9 chart types), Reports (Excel export)**
+- **Rankings, Strength meter, Map, Analytics (7 chart/visual panels: calls-over-time line, status pie, top-agents bar, cumulative-connected area, district×status stacked bar, date×hour heatmap, workers-by-assembly bar), Reports (CSV/XLSX/PDF export)**
 - **Supervisor dashboard** — live status, caller performance, attendance, sentiment, alerts, areas
 - **Admin settings** — statuses, designations, locations
 - **Responsive** — mobile drawer sidebar, works on phone + desktop

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { isAdmin, scopeFilterSync, loadUserScope } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 
@@ -33,6 +33,12 @@ export async function GET(req) {
     if (!(await pageAllowed(session, "caller_report", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
+    // Reports Audit Phase 1/2 (security fix): this endpoint had NO territory
+    // restriction at all — every caller nationwide, regardless of the
+    // viewer's own scope, same class of gap as supervisor/export/[report].
+    // It is the one every admin tier's nav actually points to (Phase 0), so
+    // this is the highest-traffic instance of the gap, not a minor one.
+    await loadUserScope(session, query);
 
     const { searchParams } = new URL(req.url);
     const dateFrom = searchParams.get("date_from");
@@ -61,6 +67,9 @@ export async function GET(req) {
     let joinExtra = "";
     if (dateFrom) { joinExtra += " AND DATE(c.called_at) >= ?"; params.push(dateFrom); }
     if (dateTo) { joinExtra += " AND DATE(c.called_at) <= ?"; params.push(dateTo); }
+    const scope = scopeFilterSync(session.user, "c", { cols: ["zone_id", "district_id", "assembly_id"] });
+    joinExtra += " " + scope.where;
+    params.push(...scope.params);
 
     const rows = await query(
       `SELECT
@@ -138,6 +147,8 @@ export async function GET(req) {
     let dayWhere = "WHERE 1=1";
     if (dateFrom) { dayWhere += " AND DATE(c.called_at) >= ?"; dayParams.push(dateFrom); }
     if (dateTo) { dayWhere += " AND DATE(c.called_at) <= ?"; dayParams.push(dateTo); }
+    dayWhere += " " + scope.where;
+    dayParams.push(...scope.params);
     const istCalled = "CONVERT_TZ(c.called_at,'+00:00','+05:30')";
     const bucketExpr = granularity === "month" ? `DATE_FORMAT(${istCalled},'%Y-%m-01')`
       : granularity === "week" ? `DATE_SUB(DATE(${istCalled}), INTERVAL WEEKDAY(${istCalled}) DAY)`
