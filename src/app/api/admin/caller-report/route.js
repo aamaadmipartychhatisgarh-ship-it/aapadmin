@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin, scopeFilterSync, loadUserScope } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
+import { connectRate } from "@/lib/callerMetrics";
 
 // Per-caller performance report for the admin dashboard: call volume, outcome
 // (review status) breakdown, connect rate, sentiment, follow-ups and a ranking.
@@ -110,7 +111,7 @@ export async function GET(req) {
           last_call_at: r.last_call_at,
           total_calls: total,
           connected,
-          connect_rate: total ? Math.round((connected / total) * 100) : 0,
+          connect_rate: connectRate(total, connected),
           not_picked: Number(r.not_picked) || 0,
           wrong_number: Number(r.wrong_number) || 0,
           rude: Number(r.rude) || 0,
@@ -138,7 +139,7 @@ export async function GET(req) {
       },
       { callers: 0, total_calls: 0, connected: 0, follow_ups: 0, interested: 0 }
     );
-    totals.connect_rate = totals.total_calls ? Math.round((totals.connected / totals.total_calls) * 100) : 0;
+    totals.connect_rate = connectRate(totals.total_calls, totals.connected);
 
     // Combined calls per day/week/month across ALL callers, for the same
     // window. Grouping is done on the IST calendar day (calls timestamp is
