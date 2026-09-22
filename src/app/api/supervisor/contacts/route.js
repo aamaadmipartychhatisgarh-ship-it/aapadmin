@@ -6,7 +6,7 @@ import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
@@ -60,6 +60,7 @@ export async function GET(req) {
     if (statusCond) where += ` AND ${statusCond}`;
     if (wrong !== "1") {
       where += await notWrongNumberClause("c");
+    where += await notNotInterestedClause("c");
       where += await repeatOffExclusion("c");
     }
     const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });

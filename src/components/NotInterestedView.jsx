@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, Loader2, HeartCrack } from "lucide-react";
+import { Search, Loader2, HeartCrack, RotateCcw } from "lucide-react";
 import Avatar from "@/components/Avatar";
 import CollapsibleSection from "@/components/CollapsibleSection";
-import { isCaller } from "@/lib/permissions";
+import { isCaller, isOversight } from "@/lib/permissions";
 
 const PAGE_SIZE = 50;
 const fmt = (d) => (d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
@@ -40,6 +40,9 @@ function statusLabel(c) {
 // the data). `onCount` bubbles the total up so the tab header can show it.
 export default function NotInterestedView({ session, onCount }) {
   const canSeeCallers = !isCaller(session);
+  // Restore is an authorized action (oversight roles) — matches the backend gate.
+  const canRestore = isOversight(session);
+  const [restoringId, setRestoringId] = useState(null);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -104,6 +107,28 @@ export default function NotInterestedView({ session, onCount }) {
     setLoading(false);
   }
 
+  // Explicitly restore a contact to Main Contacts. Confirms first, then clears the
+  // persistent Not-Interested state server-side; on success the row leaves this list
+  // (and returns to the active/assignable contacts).
+  async function restore(c) {
+    if (!window.confirm(`Restore ${c.person_name || "this contact"} to Main Contacts? They will become active and assignable again.`)) return;
+    setRestoringId(c.id);
+    try {
+      const r = await fetch(`/api/not-interested/${c.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restore" }),
+      });
+      if (r.ok) load(page);
+      else {
+        const d = await r.json().catch(() => ({}));
+        alert(d.message || "Could not restore this contact.");
+      }
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
   // Reload when filters change (debounced for typing); reset to page 1.
   useEffect(() => {
     const t = setTimeout(() => { setPage(1); load(1); }, search ? 300 : 0);
@@ -114,7 +139,7 @@ export default function NotInterestedView({ session, onCount }) {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const sel = "h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white";
-  const HEADERS = ["Name", "Phone", "Designation", "Zone", "Lok Sabha", "Assembly", "District", "Address", "Status", "Assigned Caller", "Last Call Date", "Total Calls", "Reason"];
+  const HEADERS = ["Name", "Phone", "Designation", "Zone", "Lok Sabha", "Assembly", "District", "Address", "Status", "Assigned Caller", "Last Call Date", "Total Calls", "Reason", ...(canRestore ? ["Actions"] : [])];
 
   return (
     <div className="space-y-4">
@@ -174,6 +199,18 @@ export default function NotInterestedView({ session, onCount }) {
                     <td className="px-3 py-3 text-xs">
                       <span className="inline-block text-[11px] font-semibold px-2 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-100">{reasonText(c)}</span>
                     </td>
+                    {canRestore && (
+                      <td className="px-3 py-3">
+                        <button
+                          onClick={() => restore(c)}
+                          disabled={restoringId === c.id}
+                          title="Restore to Main Contacts"
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#164FA3] hover:bg-blue-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+                        >
+                          {restoringId === c.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Restore
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

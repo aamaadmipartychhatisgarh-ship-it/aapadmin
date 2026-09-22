@@ -6,7 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
 
 // GET /api/contacts/ids?<same filters as GET /api/contacts> — every matching
 // contact id, uncapped (no pagination limit). Powers the Contacts page's
@@ -46,6 +46,7 @@ export async function GET(req) {
     const statusCond = statusWhere(status);
     if (statusCond) where += ` AND ${statusCond}`;
     if (wrong !== "1") where += await notWrongNumberClause("c");
+    if (wrong !== "1") where += await notNotInterestedClause("c");
     const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });
     where += person.where;
     params.push(...person.params);

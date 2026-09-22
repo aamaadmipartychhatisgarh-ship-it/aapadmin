@@ -6,7 +6,7 @@ import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { buildRulesOrMatch, zoneMatch, contactsHaveAssignedBy } from "@/lib/assignmentRules";
-import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasFollowUpTimeColumn, ensureNotInterestedColumns } from "@/lib/contactExtras";
 import { dueClause, laterClause } from "@/lib/followup";
 import { buildAssignedFilters } from "@/lib/workspaceFilters";
 
@@ -71,6 +71,10 @@ export async function GET(req) {
     // isn't marked completed still can't surface here. Feature-detected.
     const hasWrong = await hasWrongNumberColumn();
     const notWrong = hasWrong ? " AND (c.is_wrong_number = 0 OR c.is_wrong_number IS NULL)" : "";
+    // Not-Interested contacts are never in the caller's queue or assignable pool.
+    const hasNI = await ensureNotInterestedColumns();
+    const notInterested = hasNI ? " AND (c.is_not_interested = 0 OR c.is_not_interested IS NULL)" : "";
+    const notInterestedNoAlias = hasNI ? " AND (is_not_interested = 0 OR is_not_interested IS NULL)" : "";
     // Reminders become due at their date + optional time (feature-detected).
     const hasFupTime = await hasFollowUpTimeColumn();
     const dueSql = dueClause("c", hasFupTime);
@@ -85,7 +89,7 @@ export async function GET(req) {
          FROM contacts c
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND ${dueSql}${notWrong}${filterSql}`,
+          AND ${dueSql}${notWrong}${notInterested}${filterSql}`,
       [userId, ...qParams]
     );
 
@@ -134,7 +138,7 @@ export async function GET(req) {
          ${assignedByJoin}
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND ${dueSql}${notWrong}${filterSql}
+          AND ${dueSql}${notWrong}${notInterested}${filterSql}
         -- Two ordered sections in ONE query (grouped client-side for headers):
         --   FRESH (is_worked = 0): no saved sentiment and no saved call status —
         --     a brand-new assignment. These lead, newest assigned_at first (legacy
@@ -166,7 +170,7 @@ export async function GET(req) {
          LEFT JOIN locations ld ON ld.id = c.district_id
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
-          AND ${laterSql}${notWrong}
+          AND ${laterSql}${notWrong}${notInterested}
         -- Kept in sync with the Schedule module: latest schedule_date first,
         -- then newest assignment first among the same date.
         ORDER BY c.follow_up_date DESC${hasFupTime ? ", c.follow_up_time DESC" : ""},
@@ -200,7 +204,7 @@ export async function GET(req) {
     if (terr) {
       const [{ n }] = await query(
         `SELECT COUNT(*) AS n FROM contacts
-          WHERE is_completed = 0${hasWrong ? " AND (is_wrong_number = 0 OR is_wrong_number IS NULL)" : ""}
+          WHERE is_completed = 0${hasWrong ? " AND (is_wrong_number = 0 OR is_wrong_number IS NULL)" : ""}${notInterestedNoAlias}
             AND assigned_to_user_id IS NULL
             AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
             ${terr.where}`,

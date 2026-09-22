@@ -5,6 +5,7 @@ import { isAdmin, isSupervisorRole, isCaller, scopeFilterSync, normalizeRole, RO
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { supervisorScopeFilter } from "@/lib/supervisorScope";
+import { ensureNotInterestedColumns } from "@/lib/contactExtras";
 
 // GET /api/not-interested — contacts that match ANY "Not Interested" rule:
 //   1. Switched Off more than 5 times          (feature-detected columns)
@@ -62,6 +63,13 @@ export async function GET(req) {
     const switchedExpr = (cols.has("wrong_number_reason") && cols.has("wrong_attempts"))
       ? "CASE WHEN c.wrong_number_reason = 'switched_off' THEN COALESCE(c.wrong_attempts, 0) ELSE 0 END"
       : "0";
+    // The persistent Not-Interested flag drives the sentiment reasons: a contact
+    // enters via a Negative/Opponent/Not-a-Supporter call and LEAVES this page the
+    // moment it is restored (flag cleared) — so restore is consistent with the Main
+    // list. Switched-off / rude stay purely derived. If the column can't be created
+    // on this deployment, fall back to the original sentiment-derived matching.
+    const niReady = await ensureNotInterestedColumns();
+    const niSel = niReady ? "c.is_not_interested AS is_not_interested" : "0 AS is_not_interested";
 
     // ---- Filters (identical semantics to the Contacts dashboard) ----
     let where = " WHERE 1=1";
@@ -112,24 +120,28 @@ export async function GET(req) {
     // reads off the computed switched_off_count alias and the aggregate flags.
     // Filtering happens here (server-side), so it composes with every other
     // filter, the role scope, pagination and the count.
+    // Sentiment inclusion is gated by the persistent flag when available.
+    const niGate = niReady ? " AND COALESCE(is_not_interested,0) = 1" : "";
+    const sentimentDefault = niReady
+      ? "COALESCE(is_not_interested,0) = 1"
+      : `(COALESCE(has_negative,0) = 1 OR COALESCE(has_opponent,0) = 1 OR COALESCE(has_not_supporter,0) = 1)`;
     const REASON_HAVING = {
       switched_off: "switched_off_count > 5",
-      negative: "COALESCE(has_negative,0) = 1",
-      opponent: "COALESCE(has_opponent,0) = 1",
-      not_supporter: "COALESCE(has_not_supporter,0) = 1",
+      negative: `COALESCE(has_negative,0) = 1${niGate}`,
+      opponent: `COALESCE(has_opponent,0) = 1${niGate}`,
+      not_supporter: `COALESCE(has_not_supporter,0) = 1${niGate}`,
       rude: "COALESCE(has_rude,0) = 1",
     };
     const HAVING = `HAVING ${REASON_HAVING[reason] || `switched_off_count > 5
-                       OR COALESCE(has_negative,0) = 1
-                       OR COALESCE(has_opponent,0) = 1
-                       OR COALESCE(has_not_supporter,0) = 1
+                       OR ${sentimentDefault}
                        OR COALESCE(has_rude,0) = 1`}`;
 
     // Total (one row per contact) matching filters + rules.
     const countRows = await query(
       `SELECT COUNT(*) AS total FROM (
          SELECT c.id, ${switchedExpr} AS switched_off_count,
-                agg.has_negative, agg.has_opponent, agg.has_not_supporter, agg.has_rude
+                agg.has_negative, agg.has_opponent, agg.has_not_supporter, agg.has_rude,
+                ${niSel}
          ${FROM}
          ${HAVING}
        ) t`,
@@ -152,7 +164,8 @@ export async function GET(req) {
               COALESCE(agg.has_negative, 0) AS has_negative,
               COALESCE(agg.has_opponent, 0) AS has_opponent,
               COALESCE(agg.has_not_supporter, 0) AS has_not_supporter,
-              COALESCE(agg.has_rude, 0) AS has_rude
+              COALESCE(agg.has_rude, 0) AS has_rude,
+              ${niSel}
          FROM contacts c
          LEFT JOIN workers w ON w.id = c.worker_id
          LEFT JOIN users u ON u.id = c.assigned_to_user_id

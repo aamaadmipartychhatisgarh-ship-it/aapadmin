@@ -8,6 +8,7 @@ import { query, getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
+import { isContactNotInterested } from "@/lib/contactExtras";
 import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
 
@@ -97,6 +98,17 @@ export async function PUT(req, { params }) {
       }
     }
     const data = await req.json();
+
+    // A Not-Interested contact cannot be (re)assigned to a User/Worker — the
+    // restriction is enforced here, server-side, not just by hiding it in lists.
+    // Assigning is only blocked when a new owner is being set; clearing the
+    // assignment (or any non-assignment edit) is still allowed.
+    if ("assigned_to_user_id" in data && data.assigned_to_user_id && await isContactNotInterested(id)) {
+      return NextResponse.json(
+        { message: "This contact is in Not Interested and cannot be assigned. Restore it first." },
+        { status: 409 }
+      );
+    }
 
     // Multi-designation (PROMPT 5): when designation_ids[] is present, the join
     // table is fully synced below and the legacy primary column is kept aligned

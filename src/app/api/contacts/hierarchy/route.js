@@ -4,7 +4,7 @@ import { authOptions, isSupervisor } from "@/lib/auth";
 import { scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
 import { ensureContactDesignationsSchema, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 
@@ -60,7 +60,7 @@ export async function GET(req) {
     // designation with nobody assigned still appears, with a blank person area.
     if (level === "state") {
       const scope = scopeFilterSync(session.user, "c");
-      const notWrong = await notWrongNumberClause("c");
+      const notWrong = (await notWrongNumberClause("c")) + (await notNotInterestedClause("c"));
       // Only State-level designations (PROMPT 14). Legacy rows with no level yet
       // (level IS NULL) still show so nothing disappears before migration.
       const desConds = ["(d.level = 'state' OR d.level IS NULL)"];
@@ -97,7 +97,7 @@ export async function GET(req) {
     // level, and under each show every designation with the people (Name +
     // Photo ONLY) who hold it in that location — blank when unfilled.
     const scope = scopeFilterSync(session.user, "c");
-    const notWrong = await notWrongNumberClause("c");
+    const notWrong = (await notWrongNumberClause("c")) + (await notNotInterestedClause("c"));
     const levelIdExpr = LEVEL_ID_EXPR[level];
 
     // 1) Designation master for THIS level only (PROMPT 14) — a designation is

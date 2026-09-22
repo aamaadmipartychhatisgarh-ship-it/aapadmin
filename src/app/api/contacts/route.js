@@ -6,7 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
@@ -82,6 +82,9 @@ export async function GET(req) {
     // itself queries), so skip the exclusion there.
     if (wrong !== "1") {
       where += await notWrongNumberClause("c");
+      // Not-Interested contacts (Negative / Opponent / Not-a-Supporter sentiment)
+      // live only on the Not Interested page — excluded from the main list.
+      where += await notNotInterestedClause("c");
       // Contacts dispositioned Switched Off / Incoming Off more than 10 times drop
       // out of the main list (they live on the dedicated "10+ Times …" pages).
       where += await repeatOffExclusion("c");

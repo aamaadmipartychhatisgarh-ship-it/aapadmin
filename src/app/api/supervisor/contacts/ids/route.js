@@ -5,7 +5,7 @@ import { isSupervisorRole } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter } from "@/lib/supervisorScope";
 
 // Supervisor-scoped mirror of GET /api/contacts/ids — every contact id
@@ -40,6 +40,7 @@ export async function GET(req) {
     const statusCond = statusWhere(status);
     if (statusCond) where += ` AND ${statusCond}`;
     if (wrong !== "1") where += await notWrongNumberClause("c");
+    if (wrong !== "1") where += await notNotInterestedClause("c");
     const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });
     where += person.where;
     params.push(...person.params);

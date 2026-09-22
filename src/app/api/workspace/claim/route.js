@@ -6,7 +6,7 @@ import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { getPool } from "@/lib/db";
 import { zoneMatch } from "@/lib/assignmentRules";
-import { hasWrongNumberColumn, hasFollowUpTimeColumn } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasFollowUpTimeColumn, ensureNotInterestedColumns } from "@/lib/contactExtras";
 import { dueClause } from "@/lib/followup";
 import { buildAssignedFilters } from "@/lib/workspaceFilters";
 
@@ -39,6 +39,9 @@ export async function POST(req) {
     // their own list until restored. Feature-detected so it's a no-op pre-migration.
     const notWrong = (await hasWrongNumberColumn())
       ? " AND (is_wrong_number = 0 OR is_wrong_number IS NULL)" : "";
+    // Not-Interested contacts are never claimable from the pool (restore is explicit).
+    const notInterested = (await ensureNotInterestedColumns())
+      ? " AND (is_not_interested = 0 OR is_not_interested IS NULL)" : "";
     // A reminder is due at its date + optional time (feature-detected).
     const dueSql = dueClause("", await hasFollowUpTimeColumn());
 
@@ -61,7 +64,7 @@ export async function POST(req) {
         // works). Pool contacts still respect the due-date and lock rules.
         const [rows] = await conn.execute(
           `SELECT * FROM contacts WHERE id = ?
-             AND is_completed = 0${notWrong}
+             AND is_completed = 0${notWrong}${notInterested}
              AND (locked_by_user_id IS NULL OR locked_by_user_id = ? OR locked_at < NOW() - INTERVAL 10 MINUTE)
              AND (assigned_to_user_id = ?
                   OR (assigned_to_user_id IS NULL
@@ -108,7 +111,7 @@ export async function POST(req) {
         const freshOnly = "AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = contacts.id AND (cx.status_id IS NOT NULL OR cx.sentiment IS NOT NULL))";
         const [freshRows] = await conn.execute(
           `SELECT * FROM contacts
-            WHERE is_completed = 0${notWrong}
+            WHERE is_completed = 0${notWrong}${notInterested}
               AND assigned_to_user_id = ?
               AND ${dueSql}
               ${freshOnly}
@@ -125,7 +128,7 @@ export async function POST(req) {
           // ordered to match the My Workspace follow-up section (nearest first).
           const [assignedRows] = await conn.execute(
             `SELECT * FROM contacts
-              WHERE is_completed = 0${notWrong}
+              WHERE is_completed = 0${notWrong}${notInterested}
                 AND assigned_to_user_id = ?
                 AND ${dueSql}
                 AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
@@ -142,7 +145,7 @@ export async function POST(req) {
             // caller's filtered "Assigned to You" dataset (no random/pool pick).
             const [poolRows] = await conn.execute(
               `SELECT * FROM contacts
-                WHERE is_completed = 0${notWrong}
+                WHERE is_completed = 0${notWrong}${notInterested}
                   AND assigned_to_user_id IS NULL
                   AND ${dueSql}
                   AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)

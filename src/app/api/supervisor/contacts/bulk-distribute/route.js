@@ -6,7 +6,7 @@ import { query, getPool } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
@@ -91,6 +91,7 @@ export async function POST(req) {
       workerJoin = "LEFT JOIN workers w ON w.id = c.worker_id";
     }
     where += await notWrongNumberClause("c");
+    where += await notNotInterestedClause("c");
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
     // Strict territory scope — the contact set this supervisor may ever touch.
     // Always applied, explicit selection or not.

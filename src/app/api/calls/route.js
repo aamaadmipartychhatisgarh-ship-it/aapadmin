@@ -5,7 +5,7 @@ import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
-import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn, ensureNotInterestedColumns } from "@/lib/contactExtras";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { normalizeDurationSeconds } from "@/lib/callDuration";
 
@@ -382,6 +382,19 @@ export async function POST(req) {
             [data.wrong_number_reason || null, remarks || null, session.user.id, res.insertId, contact_id]
           );
         }
+      }
+    }
+
+    // Not Interested: a Negative / Opponent / Not-a-Supporter sentiment moves the
+    // contact into the persistent Not Interested state — excluded from every active/
+    // Main contacts list and from assignment until an authorized user EXPLICITLY
+    // restores it. Set-only: a later non-negative call must never auto-restore it.
+    if (contact_id && ["negative", "opponent", "not_supporter"].includes(String(sentiment || "").toLowerCase())) {
+      if (await ensureNotInterestedColumns()) {
+        await query(
+          `UPDATE contacts SET is_not_interested = 1, not_interested_reason = ?, not_interested_at = NOW() WHERE id = ?`,
+          [String(sentiment).toLowerCase(), contact_id]
+        );
       }
     }
 

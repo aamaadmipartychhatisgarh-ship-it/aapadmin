@@ -7,7 +7,7 @@ import { query, getPool } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
@@ -124,6 +124,7 @@ export async function POST(req) {
     // NEVER assign a Wrong Number contact, `reassign=false` must never pull
     // from another caller's queue, and geographic scope is never bypassable.
     where += await notWrongNumberClause("c");
+    where += await notNotInterestedClause("c");
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";
     const scope = scopeFilterSync(session.user, "c");
     where += " " + scope.where;
