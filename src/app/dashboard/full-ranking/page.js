@@ -6,24 +6,25 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import StrengthView from "@/components/StrengthView";
 import RankingsView from "@/components/RankingsView";
 import AssemblyRankingView from "@/components/AssemblyRankingView";
-import { Gauge, Trophy, ArrowLeft, LayoutDashboard } from "lucide-react";
+import { Gauge, Trophy, ArrowLeft, MapPin } from "lucide-react";
 
 // Combined Strength & Ranking view — opened from the Dashboard Overview's "Full
-// ranking" button. Three tabs (State Overview / Strength / Ranking) that reuse the
-// existing content components (same data/APIs, no duplication). State Overview
-// carries the Assembly-wise Ranking (§1).
+// ranking" button. Three tabs (Area Ranking / Strength / Ranking) that reuse the
+// existing content components (same data/APIs, no duplication). The former "State
+// Overview" tab has been removed; its Assembly-wise ranking now lives under
+// "Area Ranking" (all assemblies + each assembly's current member).
 export default function Page() {
   return <SupervisorGuard><Body /></SupervisorGuard>;
 }
 
 const TABS = [
-  { key: "overview", label: "State Overview", icon: LayoutDashboard },
+  { key: "area", label: "Area Ranking", icon: MapPin },
   { key: "strength", label: "Strength", icon: Gauge },
   { key: "rankings", label: "Ranking", icon: Trophy },
 ];
 
 function Body() {
-  const [tab, setTab] = useState("overview"); // default: State Overview
+  const [tab, setTab] = useState("area"); // default: Area Ranking
   const router = useRouter();
 
   return (
@@ -38,7 +39,7 @@ function Body() {
       </button>
       <div>
         <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Strength &amp; Ranking</h1>
-        <p className="text-gray-500 mt-2 font-medium">State overview, organization strength and performance rankings.</p>
+        <p className="text-gray-500 mt-2 font-medium">Area ranking, organization strength and performance rankings.</p>
       </div>
 
       {/* Native-style tab switcher (matches the dashboard's Overview/Analytics tabs). */}
@@ -59,13 +60,14 @@ function Body() {
         })}
       </div>
 
-      {/* State Overview carries the Assembly-wise Ranking (§1); Strength and Ranking
-          reuse the existing content components unchanged. */}
-      {tab === "overview" ? (
+      {/* Area Ranking carries the Assembly-wise ranking (all assemblies, each with
+          its current member); Strength and Ranking reuse the existing content
+          components unchanged. */}
+      {tab === "area" ? (
         <div className="space-y-4">
           <div>
-            <h2 className="text-lg font-bold text-gray-900">State Overview</h2>
-            <p className="text-sm text-gray-500">State-level strength at a glance, with every assembly ranked by its worker count.</p>
+            <h2 className="text-lg font-bold text-gray-900">Area Ranking</h2>
+            <p className="text-sm text-gray-500">Every assembly ranked by its worker count, with its current member.</p>
           </div>
           <AssemblyRankingView />
         </div>

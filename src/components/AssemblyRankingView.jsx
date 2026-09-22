@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, MapPin, Trophy, Building2, Users } from "lucide-react";
+import Avatar from "@/components/Avatar";
 
-// Assembly-wise Ranking for the State Overview (§1): all assemblies ranked by
+// Assembly-wise "Area Ranking": ALL assemblies (from the locations master) ranked by
 // their live worker/contact count, from /api/rankings/assemblies. Assemblies with
-// zero workers still appear. Responsive — the table scrolls horizontally on small
-// screens so nothing is cut off.
+// zero workers still appear. Each row also shows the assembly's CURRENT MEMBER (MLA)
+// — name + existing photo — resolved server-side from the Leader Assessment
+// relationship by id; assemblies without one show "Not Assigned" and stay visible.
+// Responsive — the table scrolls horizontally on small screens so nothing is cut off.
 export default function AssemblyRankingView() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -44,24 +47,35 @@ export default function AssemblyRankingView() {
           <span className="ml-auto text-xs text-gray-400">Ranked by workers · state-wide</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[520px]">
+          <table className="w-full text-sm min-w-[640px]">
             <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-400">
               <tr>
                 <th className="px-4 py-2.5 w-16">Rank</th>
                 <th className="px-4 py-2.5">Assembly</th>
+                <th className="px-4 py-2.5">Current Member</th>
                 <th className="px-4 py-2.5">District</th>
                 <th className="px-4 py-2.5 text-right">Workers</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {rows.length === 0 ? (
-                <tr><td colSpan={4} className="px-4 py-10 text-center text-gray-400">No assemblies found.</td></tr>
+                <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-400">No assemblies found.</td></tr>
               ) : rows.map((a) => (
                 <tr key={a.id} className="hover:bg-gray-50/60">
                   <td className="px-4 py-2.5">
                     <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${a.rank <= 3 && a.workers > 0 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"}`}>{a.rank}</span>
                   </td>
                   <td className="px-4 py-2.5 font-semibold text-gray-900">{a.assembly_name || "—"}</td>
+                  <td className="px-4 py-2.5">
+                    {a.current_member_name ? (
+                      <span className="flex items-center gap-2 min-w-0">
+                        <Avatar name={a.current_member_name} src={a.current_member_photo} size={28} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
+                        <span className="font-medium text-gray-800 truncate">{a.current_member_name}</span>
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 italic">Not Assigned</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5 text-gray-600">{a.district_name || "—"}</td>
                   <td className="px-4 py-2.5 text-right font-bold text-gray-900">{Number(a.workers).toLocaleString("en-IN")}</td>
                 </tr>
