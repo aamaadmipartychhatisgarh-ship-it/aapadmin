@@ -584,7 +584,9 @@ export default function PublicRegistrationForm({ token }) {
           // Manual capture/upload wins; otherwise the photo already stored against
           // this person's Contact (same URL, not a re-upload/duplicate) so the saved
           // record is never left photo-less when Contacts already has one.
-          photo_url: photoUrl || workerPhoto?.photo_url || "",
+          // Photo belongs to the Karykarta/Worker section only — a Voter never
+          // carries one, even if some photo state lingers from a prior worker entry.
+          photo_url: isWorker ? (photoUrl || workerPhoto?.photo_url || "") : "",
           website: honeypot.current?.value || "",
         }),
       });
@@ -768,7 +770,7 @@ export default function PublicRegistrationForm({ token }) {
                 header (§2). Shown only once a Contact is matched, and it is the worker,
                 not the collector (§11). The language toggle stays alongside it. */}
             <div className="flex items-center gap-2 shrink-0">
-              {workerPhoto ? <HeaderWorkerChip photo={workerPhoto.photo_url} name={workerPhoto.name || name} /> : null}
+              {personType === "worker" && workerPhoto ? <HeaderWorkerChip photo={workerPhoto.photo_url} name={workerPhoto.name || name} /> : null}
               {LangButton}
             </div>
           </div>
@@ -816,7 +818,7 @@ export default function PublicRegistrationForm({ token }) {
               name, Worker/Contact ID and mobile (§1). Appears the moment the entered
               mobile matches a Contact that has a photo, so the worker's existing photo
               is prominent and never blank when one exists. */}
-          {workerPhoto ? (
+          {personType === "worker" && workerPhoto ? (
             <WorkerIdentityCard photo={workerPhoto.photo_url} name={workerPhoto.name || name}
               workerCode={workerPhoto.worker_code} contactId={workerPhoto.contact_id} mobile={mobile} t={t} />
           ) : null}
@@ -915,9 +917,11 @@ export default function PublicRegistrationForm({ token }) {
             </Field>
           )}
 
-          {/* Photo — for BOTH voter and worker (§16). Capture opens the device
-              camera where allowed; Choose picks an existing image. Both go through
-              the same upload/store path. */}
+          {/* Photo — Karykarta / Worker section ONLY. The Voter section has no photo
+              field, upload button, camera button or capture option at all. Gating on
+              personType (not just hiding buttons) also stops any cached/reused photo
+              state from surfacing in the Voter flow. */}
+          {personType === "worker" && (
           <div>
             <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo}</span>
             <div className="flex items-center gap-3">
@@ -962,6 +966,7 @@ export default function PublicRegistrationForm({ token }) {
             </div>
             {photoErr ? <p className="text-[12px] text-red-700 mt-1.5">{photoErr}</p> : null}
           </div>
+          )}
 
           {/* Karyakarta Rating (1–10) — worker branch only. Green scale, darker as
               the rating rises; the selected value is highlighted in its shade. */}
