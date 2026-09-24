@@ -4,6 +4,29 @@ import { useState, useEffect, useMemo } from "react";
 import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X, Search } from "lucide-react";
 import { DESIGNATION_LEVELS, designationLevelLabel } from "@/lib/designationLevels";
 
+// The Designation Chain levels (State → Lok Sabha → District → Assembly → Block).
+const DESIG_LEVELS = DESIGNATION_LEVELS.filter((l) => l.key !== "zone");
+// Wings — label shown to the admin, value is the stored wing name in `designations.wing`.
+const DESIG_WINGS = [
+  { label: "Main", value: "Main Organisation" },
+  { label: "SC", value: "SC Wing" },
+  { label: "ST", value: "ST Wing" },
+  { label: "Youth", value: "Youth Wing" },
+  { label: "Mahila", value: "Mahila Wing" },
+  { label: "RTI", value: "RTI Wing" },
+  { label: "Legal", value: "Legal Wing" },
+  { label: "Transport", value: "Transport Wing" },
+  { label: "RWA", value: "RWA Wing" },
+  { label: "OBC", value: "OBC Wing" },
+  { label: "Social Media", value: "Social Media Wing" },
+  { label: "Ex-Employee", value: "Ex-Employee Wing" },
+  { label: "ASAP", value: "ASAP Wing" },
+  { label: "Minority", value: "Minority Wing" },
+  { label: "Labour", value: "Labour Wing" },
+  { label: "Trade", value: "Trade Wing" },
+];
+const DESIG_WING_LABEL = (v) => DESIG_WINGS.find((w) => w.value === v)?.label || v;
+
 // `embedded` hides the standalone page header so this same component can render
 // as the "Master Data" tab inside Administration (native tab look) while the
 // direct /dashboard/admin/settings route keeps its own header.
@@ -13,10 +36,6 @@ export default function MasterDataSettings({ embedded = false }) {
   const [statusLoading, setStatusLoading] = useState(false);
 
   const [designations, setDesignations] = useState([]);
-  const [newDesignation, setNewDesignation] = useState("");
-  const [newDesigLevel, setNewDesigLevel] = useState(""); // PROMPT 13 — mandatory level
-  const [desigLoading, setDesigLoading] = useState(false);
-  const [desigError, setDesigError] = useState("");
 
   useEffect(() => {
     fetchStatuses();
@@ -44,24 +63,6 @@ export default function MasterDataSettings({ embedded = false }) {
       });
       if (res.ok) { setNewStatus(""); fetchStatuses(); }
     } finally { setStatusLoading(false); }
-  };
-
-  const handleAddDesignation = async (e) => {
-    e.preventDefault();
-    setDesigError("");
-    if (!newDesigLevel) { setDesigError("Please select a Level."); return; }
-    if (!newDesignation.trim()) { setDesigError("Please enter a Designation name."); return; }
-    setDesigLoading(true);
-    try {
-      const res = await fetch("/api/designations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newDesignation.trim(), level: newDesigLevel }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (res.ok) { setNewDesignation(""); setNewDesigLevel(""); fetchDesignations(); }
-      else setDesigError(d.message || "Failed to add designation");
-    } finally { setDesigLoading(false); }
   };
 
   return (
@@ -93,23 +94,10 @@ export default function MasterDataSettings({ embedded = false }) {
           onChanged={fetchStatuses}
         />
 
-        {/* Designations — PROMPT 13: each carries a mandatory hierarchy Level. */}
-        <ListCard
-          icon={Users}
-          title="Designations"
-          items={designations}
-          onSubmit={handleAddDesignation}
-          value={newDesignation}
-          setValue={setNewDesignation}
-          loading={desigLoading}
-          placeholder="Designation name…"
-          apiBase="/api/designations"
-          onChanged={fetchDesignations}
-          levelOptions={DESIGNATION_LEVELS}
-          level={newDesigLevel}
-          setLevel={setNewDesigLevel}
-          addError={desigError}
-        />
+        {/* Designations — multi-select Level + Wing. Each selected Level × Wing
+            combination is created in the Master, and the configured order is stored
+            in sort_order (followed everywhere the app lists designations). */}
+        <DesignationsCard designations={designations} onChanged={fetchDesignations} />
       </div>
 
       {/* Merge duplicate / synonymous designations — full width */}
@@ -430,6 +418,137 @@ function MergeDesignations({ onChanged }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// Designations master — multi-select Level + Wing. The admin picks one or more
+// Levels and one or more Wings, types a designation name, and one designation is
+// created per Level × Wing combination (unique names, no duplicates), appended to
+// that group's configured order (sort_order). Edit can change name / level / wing.
+function DesignationsCard({ designations, onChanged }) {
+  const [name, setName] = useState("");
+  const [levels, setLevels] = useState(() => new Set());
+  const [wings, setWings] = useState(() => new Set());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editLevel, setEditLevel] = useState("");
+  const [editWing, setEditWing] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const toggle = (setFn, val) => setFn((prev) => { const n = new Set(prev); if (n.has(val)) n.delete(val); else n.add(val); return n; });
+
+  async function add(e) {
+    e.preventDefault();
+    setError("");
+    if (!name.trim()) { setError("Please enter a Designation name."); return; }
+    if (levels.size === 0) { setError("Please select at least one Level."); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/designations", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), levels: [...levels], wings: [...wings] }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.message || "Failed to add designation."); return; }
+      setName(""); setLevels(new Set()); setWings(new Set()); onChanged();
+    } finally { setLoading(false); }
+  }
+
+  async function saveEdit(id) {
+    if (!editName.trim()) return;
+    setBusy(true); setError("");
+    const r = await fetch(`/api/designations/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName.trim(), level: editLevel, wing: editWing }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { setEditingId(null); onChanged(); } else setError(d.message || "Update failed");
+    setBusy(false);
+  }
+
+  async function remove(item) {
+    if (!confirm(`Delete "${item.name}"? Records using it keep their data but show no designation.`)) return;
+    setBusy(true); setError("");
+    const r = await fetch(`/api/designations/${item.id}`, { method: "DELETE" });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) onChanged(); else setError(d.message || "Delete failed");
+    setBusy(false);
+  }
+
+  const pill = (active) => `text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${active ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-[500px]">
+      <div className="p-6 border-b border-gray-100 flex items-center gap-2 text-[#164FA3]">
+        <Users size={18} />
+        <h2 className="font-bold text-lg">Designations</h2>
+      </div>
+      <div className="p-5 border-b border-gray-100 bg-gray-50">
+        <form onSubmit={add} className="space-y-3">
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Level <span className="text-red-500">*</span> <span className="text-gray-400 normal-case font-normal">(select one or more)</span></label>
+            <div className="flex flex-wrap gap-1.5">
+              {DESIG_LEVELS.map((l) => (
+                <button type="button" key={l.key} onClick={() => toggle(setLevels, l.key)} className={pill(levels.has(l.key))}>{l.label}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Wing <span className="text-gray-400 normal-case font-normal">(optional — one or more)</span></label>
+            <div className="flex flex-wrap gap-1.5">
+              {DESIG_WINGS.map((w) => (
+                <button type="button" key={w.value} onClick={() => toggle(setWings, w.value)} className={pill(wings.has(w.value))}>{w.label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Designation name…"
+              className="flex-1 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-4 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
+            <button type="submit" disabled={loading} className="bg-[#FCB712] text-[#164FA3] px-4 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2 disabled:opacity-50">
+              <Plus size={16} /> Add
+            </button>
+          </div>
+        </form>
+        {error && <div className="mt-3 bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-xs">{error}</div>}
+      </div>
+      <div className="flex-1 overflow-auto p-2">
+        <ul className="divide-y divide-gray-100">
+          {designations.map((s) => (
+            <li key={s.id} className="p-3.5 hover:bg-gray-50 flex items-center justify-between gap-2 rounded-lg">
+              {editingId === s.id ? (
+                <>
+                  <input value={editName} onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveEdit(s.id); if (e.key === "Escape") setEditingId(null); }} autoFocus
+                    className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+                  <select value={editLevel} onChange={(e) => setEditLevel(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white outline-none">
+                    <option value="">— level —</option>
+                    {DESIG_LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+                  </select>
+                  <select value={editWing} onChange={(e) => setEditWing(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white outline-none">
+                    <option value="">— wing —</option>
+                    {DESIG_WINGS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                  </select>
+                  <button onClick={() => saveEdit(s.id)} disabled={busy} title="Save" className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={16} /></button>
+                  <button onClick={() => setEditingId(null)} title="Cancel" className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
+                </>
+              ) : (
+                <>
+                  <span className="font-medium text-gray-700 flex-1 min-w-0 truncate">{s.name}</span>
+                  {s.level
+                    ? <span className="text-[10px] uppercase font-bold tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-1 rounded-full whitespace-nowrap">{designationLevelLabel(s.level) || s.level}</span>
+                    : <span className="text-[10px] uppercase font-bold tracking-wide text-amber-700 bg-amber-100 px-2 py-1 rounded-full">No level</span>}
+                  {s.wing && <span className="text-[10px] uppercase font-bold tracking-wide text-purple-700 bg-purple-100 px-2 py-1 rounded-full whitespace-nowrap">{DESIG_WING_LABEL(s.wing)}</span>}
+                  <button onClick={() => { setEditingId(s.id); setEditName(s.name); setEditLevel(s.level || ""); setEditWing(s.wing || ""); setError(""); }} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
+                  <button onClick={() => remove(s)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={14} /></button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
