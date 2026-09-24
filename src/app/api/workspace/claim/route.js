@@ -179,13 +179,12 @@ export async function POST(req) {
         `UPDATE contacts SET locked_by_user_id = ?, locked_at = NOW() WHERE id = ?`,
         [userId, row.id]
       );
-      // Resolve district + block/ward names and the linked worker's photo so the
-      // active call card and edit form can show them.
+      // Resolve district + block/ward names so the active call card and edit form
+      // can show them.
       const [nameRows] = await conn.execute(
         `SELECT (SELECT name FROM locations WHERE id = ?) AS ward_name,
-                (SELECT name FROM locations WHERE id = ?) AS district_name,
-                (SELECT photo_url FROM workers WHERE id = ?) AS photo_url`,
-        [row.ward_id ?? null, row.district_id ?? null, row.worker_id ?? null]
+                (SELECT name FROM locations WHERE id = ?) AS district_name`,
+        [row.ward_id ?? null, row.district_id ?? null]
       );
       await conn.commit();
       return NextResponse.json({
@@ -193,10 +192,12 @@ export async function POST(req) {
           ...row,
           ward_name: nameRows[0]?.ward_name ?? null,
           district_name: nameRows[0]?.district_name ?? null,
-          // Canonical source of truth: the contact's OWN photo first, the linked
-          // worker's photo only as a fallback (same resolution the Contacts list
-          // uses), so every caller sees the identical photo for a given contact.
-          photo_url: row.photo_url ?? nameRows[0]?.photo_url ?? null,
+          // The photo is the contact's OWN saved photo (contacts.photo_url) — the
+          // single field the workspace upload/remove writes — so what's displayed
+          // always matches the saved state (a Remove actually clears the image and
+          // stays cleared across refresh, instead of a legacy linked-worker photo
+          // reappearing).
+          photo_url: row.photo_url ?? null,
           locked_by_user_id: userId,
         },
       });
