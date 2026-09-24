@@ -180,9 +180,19 @@ export async function buildVacancyDataset(session, filters = {}) {
   const TYPE_TO_KEY = { lok_sabha: "lok_sabha", district: "district", assembly: "assembly", ward: "block" };
   for (const loc of index.values()) {
     const key = TYPE_TO_KEY[loc.type];
-    if (key) locByType[key].push({ id: loc.id, name: loc.name, parent_id: loc.parent_id });
+    if (key) locByType[key].push({ id: loc.id, name: loc.name, parent_id: loc.parent_id, sort_order: loc.sort_order });
   }
-  for (const k of Object.keys(locByType)) locByType[k].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  // Lok Sabha follows its Master SEQUENCE (stored sort_order); the other types
+  // keep alphabetical (their sort_order is always NULL, so name is the tiebreak).
+  for (const k of Object.keys(locByType)) {
+    locByType[k].sort((a, b) => {
+      const ao = a.sort_order, bo = b.sort_order;
+      if (ao != null && bo != null && ao !== bo) return ao - bo;
+      if (ao != null && bo == null) return -1;
+      if (ao == null && bo != null) return 1;
+      return String(a.name).localeCompare(String(b.name));
+    });
+  }
 
   return {
     counts: {

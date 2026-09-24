@@ -132,7 +132,15 @@ async function fetchLocations(type, parentIds) {
     );
     const merged = new Map();
     for (const list of lists) for (const loc of list) if (loc.type === type) merged.set(loc.id, loc);
-    return [...merged.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    // Lok Sabha follows its stored master sequence; other types (no sort_order)
+    // stay alphabetical via the name fallback.
+    return [...merged.values()].sort((a, b) => {
+      const ao = a.sort_order, bo = b.sort_order;
+      if (ao != null && bo != null && ao !== bo) return ao - bo;
+      if (ao != null && bo == null) return -1;
+      if (ao == null && bo != null) return 1;
+      return String(a.name).localeCompare(String(b.name));
+    });
   } catch { return []; }
 }
 

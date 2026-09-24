@@ -60,7 +60,15 @@ async function fetchLocations(type, parentIds) {
   );
   const merged = new Map();
   for (const list of lists) for (const loc of list) if (loc.type === type) merged.set(loc.id, loc);
-  return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+  // Honor the stored master sequence (Lok Sabha); other types have no sort_order
+  // and fall back to name — so this keeps their alphabetical order unchanged.
+  return [...merged.values()].sort((a, b) => {
+    const ao = a.sort_order, bo = b.sort_order;
+    if (ao != null && bo != null && ao !== bo) return ao - bo;
+    if (ao != null && bo == null) return -1;
+    if (ao == null && bo != null) return 1;
+    return String(a.name).localeCompare(String(b.name));
+  });
 }
 
 function ReportsCenter() {

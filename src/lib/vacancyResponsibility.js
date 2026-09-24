@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
+import { ensureLocationSortOrder } from "@/lib/locationOrder";
 
 // VACANCY RESPONSIBILITY — who must fill a vacant organizational designation.
 //
@@ -54,9 +55,10 @@ const RESP_LOC_EXPR = {
 
 // Load the full location index once: id → { id, name, type, parent_id }.
 export async function loadLocationIndex() {
-  const rows = await query("SELECT id, name, type, parent_id FROM locations");
+  await ensureLocationSortOrder();
+  const rows = await query("SELECT id, name, type, parent_id, sort_order FROM locations");
   const map = new Map();
-  for (const r of rows) map.set(r.id, { id: r.id, name: r.name, type: r.type, parent_id: r.parent_id });
+  for (const r of rows) map.set(r.id, { id: r.id, name: r.name, type: r.type, parent_id: r.parent_id, sort_order: r.sort_order });
   return map;
 }
 

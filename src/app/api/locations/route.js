@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
+import { ensureLocationSortOrder, locationOrderSql, nextLokSabhaSortOrder } from "@/lib/locationOrder";
 
 export async function GET(req) {
   try {
@@ -11,6 +12,8 @@ export async function GET(req) {
     if (!session) {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
+    // Lok Sabha must display in its Master SEQUENCE (never alphabetically).
+    await ensureLocationSortOrder();
 
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type");
@@ -30,7 +33,7 @@ export async function GET(req) {
       return Response.json({ locations: rows }, { status: 200 });
     }
 
-    let sql = "SELECT id, type, name, parent_id FROM locations WHERE 1=1";
+    let sql = "SELECT id, type, name, parent_id, sort_order FROM locations WHERE 1=1";
     const params = [];
 
     if (type) {
@@ -50,7 +53,9 @@ export async function GET(req) {
       sql += " AND parent_id IS NULL";
     }
 
-    sql += " ORDER BY name ASC";
+    // Sequence-first ordering: Lok Sabha rows follow their stored master order;
+    // every other type has NULL sort_order and so still orders by name.
+    sql += ` ORDER BY ${locationOrderSql()}`;
 
     const locations = await query(sql, params);
     return Response.json({ locations }, { status: 200 });
@@ -73,9 +78,13 @@ export async function POST(req) {
       return Response.json({ message: "Type and name are required" }, { status: 400 });
     }
 
+    await ensureLocationSortOrder();
+    // A new Lok Sabha joins the END of the master sequence (never re-sorted
+    // alphabetically). Other types leave sort_order NULL and keep name ordering.
+    const sortOrder = type === "lok_sabha" ? await nextLokSabhaSortOrder() : null;
     const res = await query(
-      "INSERT INTO locations (type, name, parent_id) VALUES (?, ?, ?)",
-      [type, name, parent_id || null]
+      "INSERT INTO locations (type, name, parent_id, sort_order) VALUES (?, ?, ?, ?)",
+      [type, name, parent_id || null, sortOrder]
     );
 
     return Response.json({ message: "Location added successfully", id: res.insertId }, { status: 201 });
