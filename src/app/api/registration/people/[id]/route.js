@@ -35,7 +35,13 @@ export async function PATCH(req, { params }) {
     if (d.person_type !== undefined && PERSON_TYPES.includes(d.person_type)) {
       sets.push("person_type = ?, wants_worker = ?"); vals.push(d.person_type, d.person_type === "worker" ? 1 : 0);
     }
-    if (d.worker_role !== undefined) { sets.push("worker_role = ?"); vals.push(clip(d.worker_role, 160)); }
+    if (d.worker_rating !== undefined) {
+      // Karyakarta Rating: an integer 1–10, or NULL to clear. Anything else is rejected.
+      const rn = parseInt(d.worker_rating, 10);
+      if (d.worker_rating === null || d.worker_rating === "") { sets.push("worker_rating = ?"); vals.push(null); }
+      else if (Number.isInteger(rn) && rn >= 1 && rn <= 10) { sets.push("worker_rating = ?"); vals.push(rn); }
+      else return NextResponse.json({ message: "Karyakarta Rating must be a whole number from 1 to 10." }, { status: 400, headers: NO_STORE });
+    }
     if (d.address !== undefined) { sets.push("address = ?"); vals.push(String(d.address || "").trim().slice(0, 2000) || null); }
     if (d.ward_number !== undefined) { sets.push("ward_number = ?"); vals.push(clip(d.ward_number, 60)); }
     if (d.area_booth !== undefined) { sets.push("area_booth = ?"); vals.push(clip(d.area_booth, 160)); }

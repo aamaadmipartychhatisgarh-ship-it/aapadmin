@@ -11,6 +11,7 @@ import {
 import { isTopAdmin } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 import Avatar from "@/components/Avatar";
+import { RatingBadge } from "@/components/KaryakartaRating";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 
 // Voter & Worker Registration — the admin side of the public link drive.
@@ -963,7 +964,7 @@ function PeopleTab({ filterQs, onError }) {
                       p.person_type === "worker" ? "bg-green-50 text-green-700 border-green-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}>
                       {p.person_type === "worker" ? "New worker" : "Voter"}
                     </span>
-                    {p.worker_role ? <span className="block text-[11px] text-gray-500 mt-1">{p.worker_role}</span> : null}
+                    {p.worker_rating != null && p.worker_rating !== "" ? <span className="block mt-1"><RatingBadge value={p.worker_rating} /></span> : null}
                   </td>
                   <td className="px-3 py-2.5 font-semibold text-gray-900">{p.name}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap">{p.mobile || "—"}</td>

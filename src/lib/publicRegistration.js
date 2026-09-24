@@ -313,7 +313,10 @@ export async function submitPublicRegistration(req, token) {
     // "Wants to become a worker" is the person type itself; the explicit Yes/No
     // and the role are only meaningful on that branch.
     const wantsWorker = personType === "worker" ? 1 : 0;
-    const workerRole = wantsWorker ? (String(d.worker_role || "").trim().slice(0, 160) || null) : null;
+    // Karyakarta Rating (1–10) — worker branch only. Anything outside 1–10 (or a
+    // voter) stores NULL so a bad/absent value never becomes a fake rating.
+    const ratingNum = parseInt(d.worker_rating, 10);
+    const workerRating = wantsWorker && Number.isInteger(ratingNum) && ratingNum >= 1 && ratingNum <= 10 ? ratingNum : null;
 
     const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
     const ward = normalizeWard(d.ward_number) || normalizeWard(link.worker_ward || link.campaign_ward);
@@ -413,11 +416,11 @@ export async function submitPublicRegistration(req, token) {
     await query(
       `INSERT INTO reg_people
          (campaign_id, worker_id, person_type, name, mobile, address, assembly_id, assembly_name,
-          ward_number, ward_name, block_id, area_booth, wants_worker, worker_role, photo_url,
+          ward_number, ward_name, block_id, area_booth, wants_worker, worker_rating, photo_url,
           mobile_verified, status, source_ip, registered_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
       [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
-       assemblyId, assemblyName, ward, wardName, blockId, areaBooth, wantsWorker, workerRole, photoUrl,
+       assemblyId, assemblyName, ward, wardName, blockId, areaBooth, wantsWorker, workerRating, photoUrl,
        verificationId ? 1 : 0, ip, regNow()]
     );
     // Spend the proof so one verification cannot be replayed to push a second

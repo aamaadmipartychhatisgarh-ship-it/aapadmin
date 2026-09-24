@@ -150,6 +150,12 @@ export async function ensureRegistrationSchema() {
          KEY idx_reg_people_mobile (mobile)
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
+    // Karyakarta Rating (1–10). Replaces the old free-text "Karyakarta Bhumika"
+    // (worker_role) as the worker's rating on the common form. Added lazily so
+    // existing installs gain it without a manual migration; worker_role is RETAINED
+    // in the schema so any historical values are preserved, though the form and UI
+    // no longer read or write it.
+    await ensureColumn("reg_people", "worker_rating", "INT NULL");
     // --- Mobile OTP verification -------------------------------------------
     // One row per OTP request. The CODE IS NEVER STORED: 2Factor generates and
     // checks it, and we keep only their opaque session id, so a dump of this

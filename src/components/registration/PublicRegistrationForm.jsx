@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft } from "lucide-react";
+import { RatingScale } from "@/components/KaryakartaRating";
 
 // The registration form. It is OTP-gated at EVERY entry — there is no anonymous
 // access — and who ends up credited is the signed-in karyakarta, derived from the
@@ -77,7 +78,7 @@ const STRINGS = {
     name: "नाम", namePh: "पूरा नाम",
     mobile: "मोबाइल नंबर", mobilePh: "10 अंकों का नंबर",
     address: "पूरा पता", addressPh: "मकान नं., मोहल्ला, शहर",
-    workerRole: "कार्यकर्ता भूमिका", workerRolePh: "जैसे बूथ अध्यक्ष, वार्ड प्रभारी",
+    workerRating: "कार्यकर्ता रेटिंग", workerRatingHint: "1 से 10 तक रेटिंग चुनें",
     autoTime: "पंजीयन दिनांक व समय स्वतः दर्ज होगा",
     submit: "सबमिट करें", saving: "सहेजा जा रहा है…",
     footer: "आम आदमी पार्टी छत्तीसगढ़",
@@ -147,7 +148,7 @@ const STRINGS = {
     name: "Name", namePh: "Full name",
     mobile: "Mobile Number", mobilePh: "10-digit number",
     address: "Full Address", addressPh: "House no., locality, city",
-    workerRole: "Worker Role", workerRolePh: "e.g. Booth President, Ward In-charge",
+    workerRating: "Karyakarta Rating", workerRatingHint: "Select a rating from 1 to 10",
     autoTime: "Registration date & time are recorded automatically",
     submit: "Submit", saving: "Saving…",
     footer: "Aam Aadmi Party Chhattisgarh",
@@ -246,7 +247,7 @@ export default function PublicRegistrationForm({ token }) {
   // refresh mid-session cannot silently flip Worker↔Voter (§7); browser
   // back/forward never touch it because it is pure client state, not the URL (§8).
   const [regType, setRegType] = useState(null); // null | "worker" | "voter"
-  const [workerRole, setWorkerRole] = useState("");
+  const [workerRating, setWorkerRating] = useState("");
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   // Mobile verification. `otpFor` records WHICH number was proven, so editing
@@ -409,7 +410,7 @@ export default function PublicRegistrationForm({ token }) {
   function resetPerson() {
     // Block selection is cleared for the next person; the Block LIST is kept because
     // the constituency is retained (below), so the same assembly's blocks stay ready.
-    setPersonType("voter"); setWorkerRole(""); setBlockId("");
+    setPersonType("voter"); setWorkerRating(""); setBlockId("");
     setName(""); setMobile(""); setAddress("");
     setPhotoUrl(""); setPhotoPreview(""); setPhotoErr(""); setContactPhoto(null);
     setOtpStage("idle"); setOtpCode(""); setOtpFor(""); setOtpNote("");
@@ -579,7 +580,7 @@ export default function PublicRegistrationForm({ token }) {
           // Block (Assembly-dependent). The id is validated server-side against the
           // selected assembly; the backend resolves and stores the Block's name.
           block_id: isWorker ? blockId : "",
-          worker_role: isWorker ? workerRole.trim() : "",
+          worker_rating: isWorker && workerRating ? Number(workerRating) : null,
           // Manual capture/upload wins; otherwise the photo already stored against
           // this person's Contact (same URL, not a re-upload/duplicate) so the saved
           // record is never left photo-less when Contacts already has one.
@@ -962,11 +963,12 @@ export default function PublicRegistrationForm({ token }) {
             {photoErr ? <p className="text-[12px] text-red-700 mt-1.5">{photoErr}</p> : null}
           </div>
 
-          {/* Worker role — worker branch only (हाँ). */}
+          {/* Karyakarta Rating (1–10) — worker branch only. Green scale, darker as
+              the rating rises; the selected value is highlighted in its shade. */}
           {personType === "worker" && (
-            <Field label={t.workerRole}>
-              <input className={inputCls} value={workerRole} onChange={(e) => setWorkerRole(e.target.value)}
-                     placeholder={t.workerRolePh} />
+            <Field label={t.workerRating}>
+              <RatingScale value={workerRating} onChange={setWorkerRating} />
+              <p className="text-[11px] text-gray-500 mt-1.5">{t.workerRatingHint}</p>
             </Field>
           )}
 

@@ -72,12 +72,12 @@ export async function GET(req) {
       }
       csv = toCsv(
         ["Registration Date & Time", "Type", "Name", "Mobile", "Address", "Constituency", "Ward", "Area/Booth",
-         "Wants to be Worker", "Worker Role", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"],
+         "Wants to be Worker", "Karyakarta Rating", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"],
         all.map((p) => [
           fmtDateTime(p.registered_at),
           p.person_type === "worker" ? "Wants to be Worker" : "Voter",
           p.name, p.mobile, p.address, p.assembly_name, p.effective_ward || p.ward_number, p.area_booth,
-          p.wants_worker ? "Yes" : "No", p.worker_role,
+          p.wants_worker ? "Yes" : "No", p.worker_rating != null ? String(p.worker_rating) : "",
           // No karyakarta = arrived through the general /join link.
           p.worker_name || "Direct (/join)", p.worker_mobile, p.worker_code, p.status,
         ])
