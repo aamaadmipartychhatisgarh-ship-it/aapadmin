@@ -433,8 +433,13 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
 
   useEffect(() => {
     if (record) {
+      // Coalesce every known field so a NULL from the database (e.g. an influencer
+      // with no phone / address / caste) becomes the blank-form default instead of
+      // null — otherwise `f.phone.trim()` etc. throw and the Save never fires.
+      const norm = {};
+      for (const k of Object.keys(BLANK)) norm[k] = record[k] ?? BLANK[k];
       setF({
-        ...BLANK, ...record,
+        ...norm,
         assembly_id: record.assembly_id != null ? String(record.assembly_id) : "",
         age: record.age != null ? String(record.age) : "",
         joined_by_phone: record.joined_by_phone || "",
@@ -496,9 +501,12 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
   async function submit(e) {
     e.preventDefault();
     setError("");
-    if (!f.name.trim()) { setError("Name is required."); return; }
-    if (f.phone.trim()) {
-      const digits = f.phone.replace(/[^0-9]/g, "");
+    // Guard against null values defensively — a field can be null if it was ever
+    // set outside the normalized form load.
+    if (!String(f.name || "").trim()) { setError("Name is required."); return; }
+    const phone = String(f.phone || "").trim();
+    if (phone) {
+      const digits = phone.replace(/[^0-9]/g, "");
       if (digits.length < 7 || digits.length > 15) { setError("Enter a valid phone number."); return; }
     }
     // Cancelled requires a reason/remark before saving (§12) — the backend enforces
