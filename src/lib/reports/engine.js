@@ -45,7 +45,8 @@ export async function moduleMeta(module) {
       const rows = await query("SELECT id, name FROM call_statuses ORDER BY id");
       out.options = rows.map((r) => ({ value: String(r.id), label: r.name }));
     } else if (f.optionsFrom === "designations") {
-      const rows = await query("SELECT id, name FROM designations ORDER BY name");
+      // Designation filter follows the Designation Master order (sort_order), not name.
+      const rows = await query("SELECT id, name FROM designations ORDER BY (sort_order IS NULL), sort_order ASC, name ASC");
       out.options = rows.map((r) => ({ value: String(r.id), label: r.name }));
     } else if (f.optionsFrom === "teams") {
       const rows = await query("SELECT id, name FROM teams ORDER BY name");

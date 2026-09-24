@@ -68,7 +68,10 @@ export async function syncContactDesignations(contactId, ids) {
 //   • DESIGNATION_NAMES_SQL → comma-joined designation names (for display)
 export const DESIGNATION_IDS_SQL =
   `(SELECT GROUP_CONCAT(cd.designation_id ORDER BY cd.id) FROM contact_designations cd WHERE cd.contact_id = c.id)`;
+// A person's multiple designations are concatenated in the Designation Master
+// order (sort_order, un-ordered last), NOT alphabetically — so the displayed role
+// list reads in the configured sequence everywhere it appears.
 export const DESIGNATION_NAMES_SQL =
-  `(SELECT GROUP_CONCAT(dd.name ORDER BY dd.name SEPARATOR ', ')
+  `(SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
       FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
      WHERE cd.contact_id = c.id)`;

@@ -208,7 +208,10 @@ export async function buildVacancyDataset(session, filters = {}) {
     capped,
     hierarchy,
     filters: {
-      designations: designationOptions.sort((a, b) => a.level_label.localeCompare(b.level_label) || a.name.localeCompare(b.name)),
+      // Keep the Designation Master order: options are already appended per level
+      // (in level order) with designations in sort_order from incompleteDesignation
+      // — re-sorting by name/level here would discard that authoritative order.
+      designations: designationOptions,
       responsibles: [...respMap.values()].sort((a, b) => String(a.name).localeCompare(String(b.name))),
       locations: locByType,
       levels: TEAM_LEVELS.map((l) => ({ key: l, label: LEVEL_LABEL[l] })),

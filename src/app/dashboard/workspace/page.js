@@ -178,7 +178,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     fetch("/api/locations?type=lok_sabha").then((r) => r.json()).then((d) => setLokSabhas(d.locations || []));
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
     fetch("/api/locations?type=assembly").then((r) => r.json()).then((d) => setAssemblies(d.locations || []));
-    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(sortDesignations(d.designations || [])));
+    // /api/designations already returns rows in the Designation Master order
+    // (sort_order); use it as-is — never re-sort by name/keyword on the client.
+    fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
   }, []);
 
   // When a call is opened (Log Outcome becomes visible for a contact), pull the
@@ -1625,26 +1627,6 @@ function ComplaintModal({ contact, districts, designations = [], onClose, onSave
       </div>
     </div>
   );
-}
-
-// Order designations by organizational level (State → Lok Sabha → District →
-// Vidhan Sabha → Block → Ward → Booth → Member → Volunteer → others). Stable, so
-// the party sub-order within a level (as returned by the API) is preserved.
-function designationRank(name) {
-  const n = (name || "").toLowerCase();
-  if (/\bstate\b|rajya|pradesh/.test(n)) return 0;
-  if (/loksabha|lok\s*sabha/.test(n)) return 1;
-  if (/district|zila|jila/.test(n)) return 2;
-  if (/vidhan\s*sabha|vidhansabha|vidhansbha/.test(n)) return 3;
-  if (/block/.test(n)) return 4;
-  if (/ward/.test(n)) return 5;
-  if (/booth/.test(n)) return 6;
-  if (/member/.test(n)) return 7;
-  if (/volunteer|karyakarta/.test(n)) return 8;
-  return 9;
-}
-function sortDesignations(list) {
-  return [...list].sort((a, b) => designationRank(a.name) - designationRank(b.name));
 }
 
 function initialForm() {

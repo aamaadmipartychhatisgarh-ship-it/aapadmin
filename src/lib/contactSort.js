@@ -1,5 +1,3 @@
-import { DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
-
 // Server-side sorting for the Contacts list + exports. The whitelist maps a small
 // set of client sort keys to safe SQL ORDER expressions — so the sort is applied
 // in the database over the COMPLETE filtered dataset (never a client-side sort of
@@ -13,7 +11,16 @@ import { DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 const SORT_COLUMNS = {
   name: "c.person_name",
   phone: "c.phone_number",
-  designation: `COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name)`,
+  // Sorting by "Designation" follows the Designation Master order (the numeric
+  // sort_order), NEVER the designation name — a contact's best (lowest) mastered
+  // sort_order, else its legacy designation's, else a sentinel so un-ordered
+  // designations sort last. (§4/§5: Master order, never alphabetical.)
+  designation: `COALESCE(
+    (SELECT MIN(dd.sort_order)
+       FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
+      WHERE cd.contact_id = c.id AND dd.sort_order IS NOT NULL),
+    (SELECT dgl.sort_order FROM designations dgl WHERE dgl.id = c.designation_id),
+    1000000)`,
   zone: "COALESCE(cz.name, lz.name)",
   lok_sabha: "COALESCE(cls.name, lls.name)",
   district: "ld.name",
@@ -69,11 +76,21 @@ function levelCase(col) {
     ELSE 7 END`;
 }
 
-// The contact's designation priority: the BEST (lowest) level among its MANY
-// designations (indexed subquery on contact_designations.contact_id — no N+1);
-// else the linked worker's position text; else the legacy single designation;
-// else 7. An unknown/odd value never hides a contact or breaks the sort — it just
-// sorts last within its photo group (§13).
+// The contact's DESIGNATION MASTER order: the BEST (lowest) sort_order among its
+// MANY designations (indexed subquery on contact_designations.contact_id — no
+// N+1); else its legacy single designation's sort_order; else a sentinel so a
+// contact with no mastered/ordered designation sorts last. This is the authoritative
+// Master sequence (§4/§5), never a name or keyword.
+export const CONTACT_MASTER_ORDER_SQL = `COALESCE(
+  (SELECT MIN(dd.sort_order)
+     FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
+    WHERE cd.contact_id = c.id AND dd.sort_order IS NOT NULL),
+  (SELECT dgl.sort_order FROM designations dgl WHERE dgl.id = c.designation_id),
+  1000000)`;
+
+// A keyword→level fallback (State→…→Member) used ONLY as a secondary tiebreak so
+// contacts whose designations have no configured sort_order still group sensibly
+// by level instead of collapsing to id order. It never overrides a real sort_order.
 export const CONTACT_DESIGNATION_PRIORITY_SQL = `COALESCE(
   (SELECT MIN(${levelCase("dd.name")})
      FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
@@ -82,7 +99,8 @@ export const CONTACT_DESIGNATION_PRIORITY_SQL = `COALESCE(
   NULLIF(${levelCase("dsg.name")}, 7),
   7)`;
 
-// The full default ORDER BY expression (used by the list AND the exports when no
-// explicit column sort is chosen, so they always agree).
+// The full default ORDER BY (used by the list AND the exports when no explicit
+// column sort is chosen, so they always agree): photo first, then the Designation
+// Master sort_order, then the level fallback, then a stable tiebreak.
 export const CONTACT_DEFAULT_ORDER_BY =
-  `${CONTACT_PHOTO_AVAILABLE_SQL} DESC, ${CONTACT_DESIGNATION_PRIORITY_SQL} ASC, c.is_completed ASC, c.id DESC`;
+  `${CONTACT_PHOTO_AVAILABLE_SQL} DESC, ${CONTACT_MASTER_ORDER_SQL} ASC, ${CONTACT_DESIGNATION_PRIORITY_SQL} ASC, c.is_completed ASC, c.id DESC`;

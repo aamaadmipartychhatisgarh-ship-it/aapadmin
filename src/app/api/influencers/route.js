@@ -178,7 +178,7 @@ export async function GET(req) {
                 COALESCE(jc.photo_url, jcw.photo_url) AS joined_by_photo,
                 ${mobileExpr} AS joined_by_mobile,
                 COALESCE(
-                  (SELECT GROUP_CONCAT(dd.name ORDER BY dd.name SEPARATOR ', ')
+                  (SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
                      FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
                     WHERE cd.contact_id = jc.id),
                   NULLIF(TRIM(jcw.position), ''),
