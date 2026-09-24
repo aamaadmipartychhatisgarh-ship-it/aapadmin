@@ -52,11 +52,20 @@ export async function GET(req) {
     // Cancelled, computed from the actual records. Every master assembly is listed
     // (LEFT JOIN), including those with zero influencers (§2, §12, §16, §17, §25).
     if (searchParams.get("stats") === "1") {
+      // Party buckets for the dashboard cards — BJP / INC / Others, classified from
+      // the influencer's saved Party (current_party). NULL/blank/any-other party
+      // falls into Others (the CASE ELSE), so every influencer is counted exactly
+      // once and Total = BJP + INC + Others.
+      const BJP = "(LOWER(current_party) = 'bjp' OR LOWER(current_party) LIKE '%bharatiya janata%')";
+      const INC = "(LOWER(current_party) IN ('inc','congress','indian national congress') OR LOWER(current_party) LIKE '%congress%')";
       const [totals] = await query(
         `SELECT COUNT(*) AS total,
                 COALESCE(SUM(status = 'Joined'), 0) AS joined,
                 COALESCE(SUM(status = 'Pending'), 0) AS pending,
-                COALESCE(SUM(status = 'Cancelled'), 0) AS cancelled
+                COALESCE(SUM(status = 'Cancelled'), 0) AS cancelled,
+                COALESCE(SUM(CASE WHEN ${BJP} THEN 1 ELSE 0 END), 0) AS bjp,
+                COALESCE(SUM(CASE WHEN ${INC} THEN 1 ELSE 0 END), 0) AS inc,
+                COALESCE(SUM(CASE WHEN ${BJP} THEN 0 WHEN ${INC} THEN 0 ELSE 1 END), 0) AS others
            FROM influencers`
       );
       const assemblies = await query(
@@ -71,7 +80,7 @@ export async function GET(req) {
           GROUP BY a.id, a.name
           ORDER BY a.name ASC`
       );
-      const num = (r) => ({ ...r, total: Number(r.total) || 0, joined: Number(r.joined) || 0, pending: Number(r.pending) || 0, cancelled: Number(r.cancelled) || 0 });
+      const num = (r) => ({ ...r, total: Number(r.total) || 0, joined: Number(r.joined) || 0, pending: Number(r.pending) || 0, cancelled: Number(r.cancelled) || 0, bjp: Number(r.bjp) || 0, inc: Number(r.inc) || 0, others: Number(r.others) || 0 });
       return NextResponse.json(
         { totals: num(totals || {}), assemblies: assemblies.map(num) },
         { headers: NO_STORE }

@@ -254,9 +254,9 @@ export default function InfluencersPage() {
       {/* Live summary cards — Total = Joined + Pending + Cancelled */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <StatCard label="Total Influencers" value={stats?.totals?.total} tone="brand" />
-        <StatCard label="Joined" value={stats?.totals?.joined} tone="green" />
-        <StatCard label="Pending" value={stats?.totals?.pending} tone="amber" />
-        <StatCard label="Cancelled" value={stats?.totals?.cancelled} tone="red" />
+        <StatCard label="BJP" value={stats?.totals?.bjp} tone="amber" />
+        <StatCard label="INC" value={stats?.totals?.inc} tone="green" />
+        <StatCard label="Others" value={stats?.totals?.others} tone="default" />
       </div>
 
       {/* Assembly-wise Influencer Count — every master assembly, live counts */}
