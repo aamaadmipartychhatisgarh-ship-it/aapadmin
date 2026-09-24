@@ -54,11 +54,11 @@ const SUPERVISOR_NAV = [
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
     ],
   },
+  // Influencers — a STANDALONE page directly below Contacts (its own route and
+  // "influencers" page-access key, baseline for Supervisors), NOT a Contacts child.
+  { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
   { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
-  // Influencers is available to Supervisors (baseline in the page-access registry;
-  // the /api/influencers routes re-check the same "influencers" page key).
-  { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
   { name: "Media", href: "/dashboard/media", icon: Newspaper },
   // Reports is a collapsible parent — Area Reports is nested beneath it as a
   // child page (supervisor dashboard only). Analytics is intentionally NOT
@@ -204,16 +204,16 @@ export default function DashboardLayout({ children }) {
     [ROLES.SUPER_ADMIN]: [
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      // Contacts is a collapsible parent — Active Workers and Influencers are
-      // nested beneath it as child pages. Wrong Number is NOT a side-panel item:
-      // it opens as a tab on the Contacts page itself (with its Not Interested /
-      // 10+ Switched-Off / 10+ Incoming-Off sub-tabs). Routes/pages/permissions
-      // are unchanged. Influencers stays super_admin-only (its own page-access
-      // key), so it is a child here alone and appears in no other role's menu.
+      // Contacts is a collapsible parent — Active Workers is nested beneath it.
+      // Wrong Number is NOT a side-panel item: it opens as a tab on the Contacts
+      // page itself (with its Not Interested / 10+ Switched-Off / 10+ Incoming-Off
+      // sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
-        { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
       ] },
+      // Influencers — a STANDALONE page directly below Contacts (its own route and
+      // "influencers" page-access key), NOT a Contacts child/tab.
+      { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Designation Vacancies", href: "/dashboard/admin/vacancies", icon: UserCog },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
