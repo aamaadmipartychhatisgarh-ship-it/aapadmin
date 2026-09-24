@@ -59,6 +59,35 @@ export async function GET(req) {
     if (searchParams.get("meta") === "1") {
       return NextResponse.json({ meta: META }, { headers: NO_STORE });
     }
+    // Live dashboard: overall status totals + per-assembly Total/Joined/Pending/
+    // Cancelled, computed from the actual records. Every master assembly is listed
+    // (LEFT JOIN), including those with zero influencers (§2, §12, §16, §17, §25).
+    if (searchParams.get("stats") === "1") {
+      const [totals] = await query(
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(status = 'Joined'), 0) AS joined,
+                COALESCE(SUM(status = 'Pending'), 0) AS pending,
+                COALESCE(SUM(status = 'Cancelled'), 0) AS cancelled
+           FROM influencers`
+      );
+      const assemblies = await query(
+        `SELECT a.id AS assembly_id, a.name AS assembly_name,
+                COUNT(i.id) AS total,
+                COALESCE(SUM(i.status = 'Joined'), 0) AS joined,
+                COALESCE(SUM(i.status = 'Pending'), 0) AS pending,
+                COALESCE(SUM(i.status = 'Cancelled'), 0) AS cancelled
+           FROM locations a
+           LEFT JOIN influencers i ON i.assembly_id = a.id
+          WHERE a.type = 'assembly'
+          GROUP BY a.id, a.name
+          ORDER BY a.name ASC`
+      );
+      const num = (r) => ({ ...r, total: Number(r.total) || 0, joined: Number(r.joined) || 0, pending: Number(r.pending) || 0, cancelled: Number(r.cancelled) || 0 });
+      return NextResponse.json(
+        { totals: num(totals || {}), assemblies: assemblies.map(num) },
+        { headers: NO_STORE }
+      );
+    }
     // Live location resolver for the form: given an assembly, return the mapped
     // District / Lok Sabha / Zone from master data (DB-driven, never hardcoded).
     const locOf = searchParams.get("location_of");
@@ -95,7 +124,9 @@ export async function GET(req) {
     // pageSize/offset are validated integers (parseInt + clamp above), so they
     // are inlined — mysql2's prepared execute() rejects LIMIT/OFFSET placeholders.
     const rows = await query(
-      `SELECT * FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
+      `SELECT influencers.*,
+              (SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name
+         FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
     const influencers = rows.map(shape);
@@ -133,8 +164,8 @@ export async function POST(req) {
          election_constituency, election_party, election_result, election_votes,
          election_details, org_social_activity, economic_status, economic_profile, potential_rating,
          potential_areas, expected_contribution, potential_remarks, status, next_action, action_remarks,
-         follow_up_date, responsible_person, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         follow_up_date, responsible_person, join_date, cancelled_date, cancellation_remark, created_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         v.name, v.phone, v.photo_url, v.address, v.assembly_id, v.assembly_name,
         v.district_id, v.district_name, v.lok_sabha_id, v.lok_sabha_name, v.zone_id, v.zone_name, v.influence_position,
@@ -142,7 +173,7 @@ export async function POST(req) {
         v.election_constituency, v.election_party, v.election_result, v.election_votes,
         v.election_details, v.org_social_activity, v.economic_status, v.economic_profile, v.potential_rating,
         v.potential_areas, v.expected_contribution, v.potential_remarks, v.status, v.next_action, v.action_remarks,
-        v.follow_up_date, v.responsible_person, session.user.id || null,
+        v.follow_up_date, v.responsible_person, v.join_date, v.cancelled_date, v.cancellation_remark, session.user.id || null,
       ]
     );
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [res.insertId]);
@@ -169,10 +200,33 @@ export async function validate(d) {
     const rows = await query("SELECT id, name FROM locations WHERE id = ? AND type = 'assembly'", [d.assembly_id]);
     if (!rows.length) return "Select a valid assembly.";
   }
+  // Cancelled requires a reason/remark (§12, §15, §21) — enforced server-side.
+  if (normalizeStatus(d.status) === "Cancelled" && !String(d.cancellation_remark ?? "").trim()) {
+    return "A cancellation reason/remark is required when the status is Cancelled.";
+  }
   return null;
 }
 
-export async function coerce(d) {
+// Participation bookkeeping derived from the chosen status (§9–§13, §15). Pending
+// clears the dates; Joined stamps a join date (kept if already set, else today);
+// Cancelled stamps a cancel date + keeps the remark, and preserves a legitimate
+// prior join date (a contact that joined and was later cancelled). `prior` is the
+// existing DB row on edit (null on create).
+function participationFields(status, d, prior) {
+  const today = new Date().toISOString().slice(0, 10);
+  const clip = (x) => { const v = String(x ?? "").trim(); return v || null; };
+  const priorJoin = prior?.join_date ? String(prior.join_date).slice(0, 10) : null;
+  if (status === "Joined") {
+    return { join_date: clip(d.join_date) || priorJoin || today, cancelled_date: null, cancellation_remark: null };
+  }
+  if (status === "Cancelled") {
+    const priorCancel = prior?.cancelled_date ? String(prior.cancelled_date).slice(0, 10) : null;
+    return { join_date: priorJoin, cancelled_date: clip(d.cancelled_date) || priorCancel || today, cancellation_remark: clip(d.cancellation_remark) };
+  }
+  return { join_date: null, cancelled_date: null, cancellation_remark: null };
+}
+
+export async function coerce(d, prior = null) {
   // Assembly → District / Lok Sabha / Zone resolved authoritatively from master
   // data (never trusts client-supplied location names). Nulls where unmapped.
   const h = await resolveAssemblyHierarchy(d.assembly_id);
@@ -217,6 +271,7 @@ export async function coerce(d) {
     action_remarks: s(d.action_remarks),
     follow_up_date: follow,
     responsible_person: s(d.responsible_person, 160),
+    ...participationFields(normalizeStatus(d.status), d, prior),
   };
 }
 

@@ -22,20 +22,46 @@ const BLANK = {
   election_party: "", election_result: "", election_votes: "", election_details: "",
   org_social_activity: "", economic_status: "", economic_profile: "",
   potential_rating: "", potential_areas: "", expected_contribution: "", potential_remarks: "",
-  status: "New", next_action: "", action_remarks: "", follow_up_date: "", responsible_person: "",
+  status: "Pending", next_action: "", action_remarks: "", follow_up_date: "", responsible_person: "",
+  join_date: "", cancelled_date: "", cancellation_remark: "",
 };
 
-// Status → chip colour.
+// The three canonical participation statuses → chip colour.
 function statusChip(status) {
   const s = String(status || "").toLowerCase();
-  if (["joined", "interested"].some((x) => s.includes(x))) return "bg-green-50 text-green-700 border-green-200";
-  if (["rejected", "not interested", "closed"].some((x) => s.includes(x))) return "bg-red-50 text-red-700 border-red-200";
-  if (["contacted", "meeting", "discussion", "shortlisted"].some((x) => s.includes(x))) return "bg-blue-50 text-blue-700 border-blue-200";
-  if (["hold", "assessment", "contact required"].some((x) => s.includes(x))) return "bg-amber-50 text-amber-700 border-amber-200";
-  return "bg-gray-100 text-gray-600 border-gray-200";
+  if (s === "joined") return "bg-green-50 text-green-700 border-green-200";
+  if (s === "cancelled") return "bg-red-50 text-red-700 border-red-200";
+  return "bg-amber-50 text-amber-700 border-amber-200"; // Pending
+}
+// "24 Sep 2026" from a DATE (YYYY-MM-DD string or Date) without a timezone shift.
+function fmtJoinDate(v) {
+  if (!v) return "—";
+  const ymd = String(v).slice(0, 10);
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return "—";
+  const dt = new Date(y, m - 1, d);
+  return isNaN(dt.getTime()) ? "—" : new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(dt);
 }
 function ratingLabel(meta, value) {
   return meta?.potentialRatings?.find((r) => r.value === value)?.label || "—";
+}
+
+// A live dashboard summary card. `value` undefined → a subtle loading dash.
+function StatCard({ label, value, tone }) {
+  const toneCls = {
+    brand: "bg-[#164FA3] text-white",
+    green: "bg-white border border-green-200",
+    amber: "bg-white border border-amber-200",
+    red: "bg-white border border-red-200",
+  }[tone] || "bg-white border border-gray-200";
+  const valCls = tone === "brand" ? "text-white" : tone === "green" ? "text-green-700" : tone === "amber" ? "text-amber-700" : tone === "red" ? "text-red-700" : "text-gray-900";
+  const labelCls = tone === "brand" ? "text-blue-100" : "text-gray-500";
+  return (
+    <div className={`${toneCls} rounded-xl p-4 shadow-sm`}>
+      <div className={`text-3xl font-bold ${valCls}`}>{value == null ? "—" : Number(value).toLocaleString("en-IN")}</div>
+      <div className={`text-xs font-medium mt-1 ${labelCls}`}>{label}</div>
+    </div>
+  );
 }
 
 export default function InfluencersPage() {
@@ -71,6 +97,7 @@ export default function InfluencersPage() {
   const [editId, setEditId] = useState(null);
   const [viewRow, setViewRow] = useState(null);
   const [deleteRow, setDeleteRow] = useState(null);
+  const [stats, setStats] = useState(null); // { totals, assemblies } — live dashboard
 
   // Debounce the search box.
   useEffect(() => {
@@ -114,7 +141,16 @@ export default function InfluencersPage() {
     }
   }, [canAccess, page, pageSize, debounced, fStatus, fAssembly, fRating, fAction]);
 
-  useEffect(() => { if (mode === "list") loadList(); }, [mode, loadList]);
+  // Live dashboard counts (overall + per-assembly), recomputed from the DB.
+  const loadStats = useCallback(async () => {
+    if (!canAccess) return;
+    try {
+      const r = await fetch("/api/influencers?stats=1", { cache: "no-store" });
+      if (r.ok) setStats(await r.json());
+    } catch { /* keep last stats */ }
+  }, [canAccess]);
+
+  useEffect(() => { if (mode === "list") { loadList(); loadStats(); } }, [mode, loadList, loadStats]);
 
   async function openEdit(id) {
     setErr("");
@@ -138,6 +174,7 @@ export default function InfluencersPage() {
       if (!r.ok) throw new Error();
       setDeleteRow(null);
       loadList();
+      loadStats();
     } catch {
       setErr("Could not delete this influencer.");
       setDeleteRow(null);
@@ -182,8 +219,8 @@ export default function InfluencersPage() {
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white" style={{ background: BRAND }}><Star size={22} /></div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Influencers</h1>
-            <p className="text-sm text-gray-500">{total} record{total === 1 ? "" : "s"} · Super Admin only</p>
+            <h1 className="text-xl font-bold text-gray-900">Influencer Dashboard</h1>
+            <p className="text-sm text-gray-500">Live participation — Total, Joined, Pending, Cancelled</p>
           </div>
         </div>
         <button
@@ -193,6 +230,55 @@ export default function InfluencersPage() {
         >
           <Plus size={17} /> Add Influencer
         </button>
+      </div>
+
+      {/* Live summary cards — Total = Joined + Pending + Cancelled */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <StatCard label="Total Influencers" value={stats?.totals?.total} tone="brand" />
+        <StatCard label="Joined" value={stats?.totals?.joined} tone="green" />
+        <StatCard label="Pending" value={stats?.totals?.pending} tone="amber" />
+        <StatCard label="Cancelled" value={stats?.totals?.cancelled} tone="red" />
+      </div>
+
+      {/* Assembly-wise Influencer Count — every master assembly, live counts */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-4">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+          <MapPin size={16} style={{ color: BRAND }} />
+          <h2 className="text-sm font-bold text-gray-900">Assembly-wise Influencer Count</h2>
+          <span className="ml-auto text-xs text-gray-400">Click an assembly to filter the list</span>
+        </div>
+        <div className="overflow-x-auto max-h-72 overflow-y-auto">
+          <table className="w-full text-sm min-w-[520px]">
+            <thead className="bg-gray-50 text-left text-gray-500 text-[11px] uppercase tracking-wide sticky top-0">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold">Assembly</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Total</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Joined</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Pending</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Cancelled</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {!stats ? (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
+              ) : stats.assemblies.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No assemblies found.</td></tr>
+              ) : stats.assemblies.map((a) => (
+                <tr key={a.assembly_id} className={`hover:bg-gray-50 ${String(fAssembly) === String(a.assembly_id) ? "bg-blue-50/60" : ""}`}>
+                  <td className="px-4 py-2.5">
+                    <button onClick={() => { setFAssembly(String(a.assembly_id)); setPage(1); }} className="font-medium text-[#164FA3] hover:underline text-left">
+                      {a.assembly_name || "—"}
+                    </button>
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{a.total}</td>
+                  <td className="px-4 py-2.5 text-right text-green-700">{a.joined}</td>
+                  <td className="px-4 py-2.5 text-right text-amber-700">{a.pending}</td>
+                  <td className="px-4 py-2.5 text-right text-red-700">{a.cancelled}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Filters */}
@@ -243,38 +329,34 @@ export default function InfluencersPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
-                <th className="px-4 py-3 font-semibold">Name</th>
-                <th className="px-4 py-3 font-semibold">Phone</th>
                 <th className="px-4 py-3 font-semibold">Assembly</th>
-                <th className="px-4 py-3 font-semibold">District</th>
-                <th className="px-4 py-3 font-semibold">Potential</th>
+                <th className="px-4 py-3 font-semibold">Influencer Name</th>
+                <th className="px-4 py-3 font-semibold">Added By</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold">Next Action</th>
+                <th className="px-4 py-3 font-semibold">Join Date</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-16 text-center text-gray-400">
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400">
                   <Users size={30} className="mx-auto mb-2 opacity-40" />
                   No influencers found.
                 </td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-gray-600">{r.assembly_name || "—"}</td>
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Thumb src={r.photo_url} name={r.name} />
                       <span>{r.name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{r.phone || "—"}</td>
-                  <td className="px-4 py-3 text-gray-600">{r.assembly_name || "—"}</td>
-                  <td className="px-4 py-3 text-gray-600">{r.district_name || "—"}</td>
-                  <td className="px-4 py-3 text-gray-600">{ratingLabel(meta, r.potential_rating)}</td>
+                  <td className="px-4 py-3 text-gray-600">{r.created_by_name || "—"}</td>
                   <td className="px-4 py-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${statusChip(r.status)}`}>{r.status || "—"}</span></td>
-                  <td className="px-4 py-3 text-gray-600 max-w-[150px] truncate">{r.next_action || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{r.status === "Joined" ? fmtJoinDate(r.join_date) : "—"}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => setViewRow(r)} title="View" className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><Eye size={16} /></button>
@@ -374,6 +456,11 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
     if (f.phone.trim()) {
       const digits = f.phone.replace(/[^0-9]/g, "");
       if (digits.length < 7 || digits.length > 15) { setError("Enter a valid phone number."); return; }
+    }
+    // Cancelled requires a reason/remark before saving (§12) — the backend enforces
+    // this too, so a client bypass is still rejected.
+    if (f.status === "Cancelled" && !String(f.cancellation_remark || "").trim()) {
+      setError("Please enter a cancellation reason/remark before saving."); return;
     }
     setSaving(true);
     try {
@@ -520,9 +607,22 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
           <Grid>
             <Field label="Current Status">
               <select value={f.status} onChange={(e) => set("status", e.target.value)} className={inputCls}>
-                {(meta?.statuses || ["New"]).map((s) => <option key={s} value={s}>{s}</option>)}
+                {(meta?.statuses || ["Pending", "Joined", "Cancelled"]).map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </Field>
+            {/* Joined → record the join date (auto-stamped on save if left blank). */}
+            {f.status === "Joined" && (
+              <Field label="Join Date">
+                <input type="date" value={(f.join_date || "").slice(0, 10)} onChange={(e) => set("join_date", e.target.value)} className={inputCls} />
+                <p className="text-[11px] text-gray-400 mt-1">Set automatically to today if left blank.</p>
+              </Field>
+            )}
+            {/* Cancelled → a reason/remark is required before it can be saved (§12). */}
+            {f.status === "Cancelled" && (
+              <Field label="Cancellation Reason / Remark" required full>
+                <textarea value={f.cancellation_remark || ""} onChange={(e) => set("cancellation_remark", e.target.value)} className={areaCls} rows={2} placeholder="Why was this cancelled? (required)" />
+              </Field>
+            )}
             <Field label="Next Action">
               <select value={f.next_action} onChange={(e) => set("next_action", e.target.value)} className={inputCls}>
                 <option value="">Select action</option>
@@ -576,6 +676,14 @@ function ViewModal({ row, meta, onClose, onEdit }) {
             {row.potential_rating && <span className="px-2 py-0.5 rounded-full text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">Potential: {ratingLabel(meta, row.potential_rating)}</span>}
             {row.next_action && <span className="px-2 py-0.5 rounded-full text-xs font-medium border bg-gray-100 text-gray-600 border-gray-200">Next: {row.next_action}</span>}
           </div>
+
+          {/* Participation — Added By, Join / Cancellation info */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <ViewInline label="Added By" value={row.created_by_name} />
+            {row.status === "Joined" && <ViewInline label="Join Date" value={fmtJoinDate(row.join_date)} />}
+            {row.status === "Cancelled" && <ViewInline label="Cancelled Date" value={fmtJoinDate(row.cancelled_date)} />}
+          </div>
+          {row.status === "Cancelled" && <ViewBlock label="Cancellation Reason" value={row.cancellation_remark} />}
 
           {/* Location (auto-resolved from Assembly) */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">

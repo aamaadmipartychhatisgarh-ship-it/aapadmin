@@ -66,6 +66,29 @@ export async function ensureInfluencerSchema() {
     await ensureColumn("lok_sabha_name", "VARCHAR(160) NULL");
     await ensureColumn("zone_id", "INT NULL");
     await ensureColumn("zone_name", "VARCHAR(160) NULL");
+    // Participation workflow (Pending → Joined / Cancelled). join_date is stamped
+    // when a contact turns Joined; cancelled_date + cancellation_remark when it turns
+    // Cancelled. Added lazily; the first creation of join_date also normalises any
+    // legacy status into the three canonical buckets so the dashboard reconciles
+    // (Total = Joined + Pending + Cancelled) without losing any record.
+    const hadJoinDate = (await query("SHOW COLUMNS FROM influencers LIKE 'join_date'")).length > 0;
+    await ensureColumn("join_date", "DATE NULL");
+    await ensureColumn("cancelled_date", "DATE NULL");
+    await ensureColumn("cancellation_remark", "TEXT NULL");
+    if (!hadJoinDate) {
+      // One-time migration of pre-existing statuses into Pending / Joined / Cancelled.
+      // Names, assemblies, Added By and every other detail are untouched.
+      await query(
+        `UPDATE influencers
+            SET status = CASE
+              WHEN status = 'Joined' THEN 'Joined'
+              WHEN status IN ('Rejected','Closed','Not Interested','Cancelled') THEN 'Cancelled'
+              ELSE 'Pending' END
+          WHERE status NOT IN ('Pending','Joined','Cancelled') OR status IS NULL`
+      ).catch((e) => console.error("[influencer] status migration:", e?.message || e));
+      // Give migrated Joined records a best-effort join date so the list isn't blank.
+      await query(`UPDATE influencers SET join_date = DATE(updated_at) WHERE status = 'Joined' AND join_date IS NULL`).catch(() => {});
+    }
     ensured = true;
   } catch (e) {
     console.error("[influencer] ensure schema:", e?.message || e);
@@ -126,11 +149,9 @@ export const POTENTIAL_RATINGS = [
   { value: "low", label: "Low" },
   { value: "very_low", label: "Very Low" },
 ];
-export const STATUSES = [
-  "New", "Under Assessment", "Shortlisted", "Contact Required", "Contacted",
-  "Meeting Required", "Meeting Scheduled", "In Discussion", "Interested",
-  "Not Interested", "Joined", "On Hold", "Rejected", "Closed",
-];
+// Exactly three participation statuses (§7). "Pending" is the default for a new
+// Influencer (§8); "Joined" records a join date; "Cancelled" requires a remark.
+export const STATUSES = ["Pending", "Joined", "Cancelled"];
 export const NEXT_ACTIONS = [
   "Call Influencer", "Arrange Meeting", "Contact Through Reference", "Conduct Background Assessment",
   "Follow Up", "Arrange Senior Leadership Meeting", "Discuss Party Joining", "Hold for Future",
@@ -142,7 +163,7 @@ export const ECONOMIC_STATUSES = ["High", "Upper Middle", "Middle", "Lower Middl
 // (free-ish but validated against the list); rating is stored as its enum value.
 export function normalizeStatus(s) {
   const v = String(s || "").trim();
-  return STATUSES.includes(v) ? v : "New";
+  return STATUSES.includes(v) ? v : "Pending";
 }
 export function normalizeRating(r) {
   const v = String(r || "").trim();

@@ -50,7 +50,7 @@ export async function PUT(req, { params }) {
     const { id } = await params;
     const iid = Number(id);
     if (!Number.isInteger(iid) || iid <= 0) return NextResponse.json({ message: "Invalid id." }, { status: 400, headers: NO_STORE });
-    const [existing] = await query("SELECT id FROM influencers WHERE id = ?", [iid]);
+    const [existing] = await query("SELECT * FROM influencers WHERE id = ?", [iid]);
     if (!existing) return NextResponse.json({ message: "Influencer not found." }, { status: 404, headers: NO_STORE });
 
     const d = await req.json().catch(() => null);
@@ -58,7 +58,9 @@ export async function PUT(req, { params }) {
     const verr = await validate(d);
     if (verr) return NextResponse.json({ message: verr }, { status: 400, headers: NO_STORE });
 
-    const v = await coerce(d);
+    // Pass the existing row so join/cancel dates are preserved correctly across a
+    // status change (e.g. Joined → Cancelled keeps the original join date).
+    const v = await coerce(d, existing);
     // Influence Type and Election "Position and Post" are intentionally NOT in
     // this SET — the columns are retained (historical data preserved) but the
     // module no longer writes them.
@@ -70,7 +72,7 @@ export async function PUT(req, { params }) {
          election_constituency=?, election_party=?, election_result=?, election_votes=?,
          election_details=?, org_social_activity=?, economic_status=?, economic_profile=?, potential_rating=?,
          potential_areas=?, expected_contribution=?, potential_remarks=?, status=?, next_action=?, action_remarks=?,
-         follow_up_date=?, responsible_person=?
+         follow_up_date=?, responsible_person=?, join_date=?, cancelled_date=?, cancellation_remark=?
        WHERE id=?`,
       [
         v.name, v.phone, v.photo_url, v.address, v.assembly_id, v.assembly_name,
@@ -79,7 +81,7 @@ export async function PUT(req, { params }) {
         v.election_constituency, v.election_party, v.election_result, v.election_votes,
         v.election_details, v.org_social_activity, v.economic_status, v.economic_profile, v.potential_rating,
         v.potential_areas, v.expected_contribution, v.potential_remarks, v.status, v.next_action, v.action_remarks,
-        v.follow_up_date, v.responsible_person, iid,
+        v.follow_up_date, v.responsible_person, v.join_date, v.cancelled_date, v.cancellation_remark, iid,
       ]
     );
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [iid]);
