@@ -66,7 +66,9 @@ export default function Page() {
         <Link href="/dashboard/admin/active-workers" className={tabCls(false)}><UsersIcon size={15} /> Active Workers</Link>
         {isSuper && <Link href="/dashboard/admin/influencers" className={tabCls(false)}><Star size={15} /> Influencers</Link>}
         <button className={tabCls(tab === "wrong")} onClick={() => setTab("wrong")}><AlertCircle size={15} /> Wrong Number</button>
-        <Link href="/dashboard/admin/contacts-incomplete" className={tabCls(false)}><AlertCircle size={15} /> Incomplete Designation</Link>
+        {/* Incomplete Designation is reached from the page's top navigation group
+            (and the sidebar); it was removed from this tab bar to avoid showing the
+            same entry twice on the Contacts page. */}
         {(isSuper || has("vacancies")) && (
           <Link href="/dashboard/admin/vacancies" className={tabCls(false)}><UserCog size={15} /> Designation Vacancies</Link>
         )}
