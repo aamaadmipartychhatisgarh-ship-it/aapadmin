@@ -16,21 +16,26 @@ import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 //   wing_designations  — each wing's ordered base roles (admin-configurable)
 //   designations       — gains `wing`, `wing_base_id`, `enabled` (generated rows)
 
-// The four organizational levels designations generate across, in order.
+// The organizational levels designations generate across, in order:
+// State → Lok Sabha → District → Assembly → Block (block = the `ward` location type).
 export const WING_LEVELS = [
   { key: "state", label: "State" },
   { key: "lok_sabha", label: "Lok Sabha" },
   { key: "district", label: "District" },
   { key: "assembly", label: "Assembly" },
+  { key: "block", label: "Block" },
 ];
 const LEVEL_LABEL = Object.fromEntries(WING_LEVELS.map((l) => [l.key, l.label]));
 
 // The seeded wings. Main Organisation is special (fixed State designations, no
-// level generation); the 10 wings are level-generated from their own base roles.
+// level generation); the rest are level-generated from their own base roles.
+// Seeding is additive (INSERT IGNORE) — existing wings on a live install are never
+// removed or renamed, so no configured order or assignment is lost.
 export const MAIN_WING = "Main Organisation";
 const SEED_WINGS = [
-  "SC Wing", "Social Media Wing", "Youth Wing", "Legal Wing", "OBC Wing",
-  "Women Wing", "Transport Wing", "RTI Wing", "Ex-Employee Wing", "Karmchari Wing",
+  "SC Wing", "ST Wing", "Youth Wing", "Mahila Wing", "RTI Wing", "Legal Wing",
+  "Transport Wing", "RWA Wing", "OBC Wing", "Social Media Wing", "Ex-Employee Wing",
+  "ASAP Wing", "Minority Wing", "Labour Wing", "Trade Wing",
 ];
 // The Main State Administration designations, in EXACTLY this sequence (§1).
 const MAIN_STATE_DESIGNATIONS = [
@@ -94,8 +99,31 @@ export async function ensureWingSchema() {
     await seedWings();
     await seedMainStateDesignations();
     ensured = true;
+    // ensured is set BEFORE this so the syncWing calls below (which call
+    // ensureWingSchema) short-circuit instead of recursing.
+    await backfillBlockLevel();
   } catch (e) {
     console.error("[wing] ensure schema:", e?.message || e);
+  }
+}
+
+// One-time: regenerate every wing so the newly-added Block level materialises for
+// wings that were configured before Block existed. syncWing upserts by
+// (wing_base_id, level), so this only ADDS the missing Block rows — it never
+// duplicates existing generated designations or touches assignments. Guarded by a
+// migration flag so it runs at most once per deployment.
+async function backfillBlockLevel() {
+  try {
+    const done = await query(`SELECT 1 FROM app_migrations WHERE name = ? LIMIT 1`, ["wing_block_level_v1"]).catch(() => []);
+    if (done.length) return;
+    const wings = await query(`SELECT id FROM wings WHERE is_main = 0`);
+    for (const w of wings) {
+      // eslint-disable-next-line no-await-in-loop
+      await syncWing(w.id);
+    }
+    await query(`INSERT IGNORE INTO app_migrations (name) VALUES (?)`, ["wing_block_level_v1"]).catch(() => {});
+  } catch (e) {
+    console.error("[wing] backfillBlockLevel:", e?.message || e);
   }
 }
 
