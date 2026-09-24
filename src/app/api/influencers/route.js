@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import {
-  ensureInfluencerSchema, normalizeStatus, normalizeRating, resolveAssemblyHierarchy,
+  ensureInfluencerSchema, getInfluencerColumns, normalizeStatus, normalizeRating, resolveAssemblyHierarchy,
   POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES,
 } from "@/lib/influencerSchema";
 
@@ -156,31 +156,30 @@ export async function POST(req) {
     if (err) return NextResponse.json({ message: err }, { status: 400, headers: NO_STORE });
 
     const v = await coerce(d);
+    // Added By / Created By is ALWAYS the authenticated user — never client-supplied.
+    const record = { ...v, created_by: session.user.id || null };
+    // Build the column list from the columns that actually exist on the table, so a
+    // deployment where a newer column (e.g. join_date) was never migrated still saves
+    // the core record instead of failing with an "Unknown column" 500. `created_by`
+    // and the core fields have existed since the table was created, so the essential
+    // save always succeeds.
+    const cols = await getInfluencerColumns();
+    const names = Object.keys(record).filter((k) => cols.has(k));
+    if (!names.includes("name")) {
+      // Table isn't reachable / has no expected columns — surface, don't fake success.
+      throw new Error("influencers table is missing expected columns");
+    }
     const res = await query(
-      `INSERT INTO influencers
-        (name, phone, photo_url, address, assembly_id, assembly_name,
-         district_id, district_name, lok_sabha_id, lok_sabha_name, zone_id, zone_name, influence_position,
-         key_activities, political_journey, contested_election, election_type, election_year,
-         election_constituency, election_party, election_result, election_votes,
-         election_details, org_social_activity, economic_status, economic_profile, potential_rating,
-         potential_areas, expected_contribution, potential_remarks, status, next_action, action_remarks,
-         follow_up_date, responsible_person, join_date, cancelled_date, cancellation_remark, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        v.name, v.phone, v.photo_url, v.address, v.assembly_id, v.assembly_name,
-        v.district_id, v.district_name, v.lok_sabha_id, v.lok_sabha_name, v.zone_id, v.zone_name, v.influence_position,
-        v.key_activities, v.political_journey, v.contested_election, v.election_type, v.election_year,
-        v.election_constituency, v.election_party, v.election_result, v.election_votes,
-        v.election_details, v.org_social_activity, v.economic_status, v.economic_profile, v.potential_rating,
-        v.potential_areas, v.expected_contribution, v.potential_remarks, v.status, v.next_action, v.action_remarks,
-        v.follow_up_date, v.responsible_person, v.join_date, v.cancelled_date, v.cancellation_remark, session.user.id || null,
-      ]
+      `INSERT INTO influencers (${names.map((n) => `\`${n}\``).join(", ")}) VALUES (${names.map(() => "?").join(",")})`,
+      names.map((n) => record[n])
     );
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [res.insertId]);
     return NextResponse.json({ influencer: shape(row) }, { status: 201, headers: NO_STORE });
   } catch (err) {
-    console.error("[influencer] POST error:", err);
-    return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });
+    // Log the ACTUAL cause (SQL error code + driver message) so a genuine failure
+    // is diagnosable server-side; never leak it to the client (§14, §15).
+    console.error("[influencer] POST error:", err?.code || "", err?.sqlMessage || err?.message || err);
+    return NextResponse.json({ message: "Could not save the influencer. Please try again." }, { status: 500, headers: NO_STORE });
   }
 }
 

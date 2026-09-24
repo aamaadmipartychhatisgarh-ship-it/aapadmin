@@ -5,6 +5,12 @@ import { query } from "@/lib/db";
 // string in a TEXT column. ensureInfluencerSchema() is idempotent (CREATE TABLE
 // IF NOT EXISTS) and cached per process, so the create/read paths run no DDL.
 let ensured = false;
+// Cached snapshot of the columns that actually exist on the `influencers` table.
+// The create/update paths build their column list from this so a deployment whose
+// DB user could not run the guarded ALTERs (no ALTER privilege) still saves into
+// whatever columns DO exist, instead of hard-failing with "Unknown column" on a
+// column the migration never added. Invalidated whenever ensureColumn adds one.
+let columnCache = null;
 export async function ensureInfluencerSchema() {
   if (ensured) return;
   try {
@@ -89,20 +95,46 @@ export async function ensureInfluencerSchema() {
       // Give migrated Joined records a best-effort join date so the list isn't blank.
       await query(`UPDATE influencers SET join_date = DATE(updated_at) WHERE status = 'Joined' AND join_date IS NULL`).catch(() => {});
     }
+    // Snapshot the columns that ended up on the table, so the INSERT/UPDATE paths
+    // only ever reference real columns (see columnCache above).
+    await refreshColumnCache();
     ensured = true;
   } catch (e) {
     console.error("[influencer] ensure schema:", e?.message || e);
   }
 }
 
-// Add a column to `influencers` only if it doesn't already exist.
+// Add a column to `influencers` only if it doesn't already exist. A successful
+// add invalidates the cached column snapshot so the write paths pick it up.
 async function ensureColumn(column, definition) {
   try {
     const rows = await query("SHOW COLUMNS FROM influencers LIKE ?", [column]);
-    if (!rows.length) await query(`ALTER TABLE influencers ADD COLUMN \`${column}\` ${definition}`);
+    if (!rows.length) {
+      await query(`ALTER TABLE influencers ADD COLUMN \`${column}\` ${definition}`);
+      columnCache = null;
+    }
   } catch (e) {
     console.error(`[influencer] ensureColumn ${column}:`, e?.message || e);
   }
+}
+
+// Re-read the live set of column names from the table.
+async function refreshColumnCache() {
+  try {
+    const rows = await query("SHOW COLUMNS FROM influencers");
+    columnCache = new Set(rows.map((r) => r.Field));
+  } catch (e) {
+    console.error("[influencer] refreshColumnCache:", e?.message || e);
+  }
+}
+
+// The set of columns that actually exist on `influencers` right now. Used by the
+// create/update routes to filter their column list, so a missing (never-migrated)
+// column is skipped rather than causing an "Unknown column" 500. Falls back to
+// reading the table on demand if the cache hasn't been populated yet.
+export async function getInfluencerColumns() {
+  if (!columnCache) await refreshColumnCache();
+  return columnCache || new Set();
 }
 
 // Resolve an assembly's full location chain from master data (DB-driven):
