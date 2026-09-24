@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import {
-  ensureInfluencerSchema, getInfluencerColumns, normalizeStatus, normalizeRating, resolveAssemblyHierarchy,
+  ensureInfluencerSchema, getInfluencerColumns, normalizeStatus, resolveAssemblyHierarchy,
   POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES,
 } from "@/lib/influencerSchema";
 
@@ -195,6 +195,11 @@ export async function validate(d) {
     const n = Number(d.age);
     if (!Number.isInteger(n) || n < 1 || n > 120) return "Enter a valid age (1–120).";
   }
+  // Influencer Rating, when provided, must be 1–10.
+  if (d.influencer_rating != null && String(d.influencer_rating).trim() !== "") {
+    const ir = Number(d.influencer_rating);
+    if (!Number.isInteger(ir) || ir < 1 || ir > 10) return "Influencer Rating must be a whole number from 1 to 10.";
+  }
   // Assembly, when provided, must be a real assembly in the master data.
   if (d.assembly_id != null && String(d.assembly_id).trim() !== "") {
     const rows = await query("SELECT id, name FROM locations WHERE id = ? AND type = 'assembly'", [d.assembly_id]);
@@ -273,9 +278,11 @@ export async function coerce(d, prior = null) {
     social_media: s(d.social_media, 400),
     team_size: s(d.team_size, 60),
     social_reach: s(d.social_reach),
-    // Economic Status / Influence Assessment
+    // Economic Status
     economic_status: s(d.economic_status, 80),
-    potential_rating: normalizeRating(d.potential_rating),
+    // Influencer Rating (1–10) — replaces the old Influence Assessment. Anything
+    // outside 1–10 stores NULL (potential_rating is retained but no longer written).
+    influencer_rating: ratingInt(d.influencer_rating),
     // Joined By — a live link to an existing Contact (id) + the looked-up phone.
     joined_by_contact_id: jbContactId(d.joined_by_contact_id),
     joined_by_phone: s(d.joined_by_phone, 30),
@@ -291,6 +298,12 @@ export async function coerce(d, prior = null) {
 function jbContactId(v) {
   const n = parseInt(v, 10);
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+// A 1–10 rating, or null for anything else (blank / out of range).
+function ratingInt(v) {
+  const n = parseInt(v, 10);
+  return Number.isInteger(n) && n >= 1 && n <= 10 ? n : null;
 }
 
 // Shape a DB row for the API. key_activities is a retired column (may hold legacy

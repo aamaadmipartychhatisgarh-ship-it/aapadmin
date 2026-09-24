@@ -103,6 +103,10 @@ export async function ensureInfluencerSchema() {
     await ensureColumn("joined_by_contact_id", "INT NULL");
     await ensureColumn("joined_by_phone", "VARCHAR(30) NULL");
     await ensureColumn("remark", "TEXT NULL");
+    // Influencer Rating (1–10). Replaces the old "Influence Assessment"
+    // (potential_rating ENUM) in the form. Added lazily; potential_rating is
+    // RETAINED so historical values are preserved, though the form no longer writes it.
+    await ensureColumn("influencer_rating", "INT NULL");
     if (!hadJoinDate) {
       // One-time migration of pre-existing statuses into Pending / Joined / Cancelled.
       // Names, assemblies, Added By and every other detail are untouched.

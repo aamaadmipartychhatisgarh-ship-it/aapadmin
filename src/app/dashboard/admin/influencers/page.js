@@ -10,6 +10,7 @@ import {
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
 import PartySelect, { usePartyMaster, PartyLogo } from "@/components/PartySelect";
+import { RatingScale, RatingBadge } from "@/components/KaryakartaRating";
 
 // Colour used across the dashboard.
 const BRAND = "#164FA3";
@@ -22,7 +23,7 @@ const BLANK = {
   joined_by_phone: "", joined_by_contact_id: "",
   party_years: "", political_position: "", org_position: "", associated_since: "",
   social_media: "", team_size: "", social_reach: "",
-  economic_status: "", potential_rating: "",
+  economic_status: "", influencer_rating: "",
   status: "Pending", join_date: "", cancelled_date: "", cancellation_remark: "", remark: "",
 };
 
@@ -622,26 +623,21 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
           </Grid>
         </Section>
 
-        {/* Influence Assessment */}
-        <Section title="Influence Assessment">
-          <Grid>
-            <Field label="Potential Strength / Influence Level">
-              <select value={f.potential_rating} onChange={(e) => set("potential_rating", e.target.value)} className={inputCls}>
-                <option value="">Select level</option>
-                {(meta?.potentialRatings || []).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-            </Field>
-          </Grid>
+        {/* Influencer Rating — a 1–10 green scale (darker as the rating rises). */}
+        <Section title="Influencer Rating">
+          <Field label="Influencer Rating (1–10)">
+            <RatingScale value={f.influencer_rating} onChange={(v) => set("influencer_rating", v)} />
+            <p className="text-[11px] text-gray-400 mt-1.5">Select a rating from 1 to 10 — the colour gets stronger/darker as the rating increases.</p>
+          </Field>
         </Section>
 
-        {/* Participation status */}
+        {/* Participation status — the Status dropdown is intentionally NOT shown in
+            this form. A new influencer keeps its default status, and an existing
+            record keeps whatever status it already has; the rest of the section
+            (Join Date, Cancellation Reason, Remark) is unchanged and still appears
+            for records already in that status. */}
         <Section title="Participation Status">
           <Grid>
-            <Field label="Status">
-              <select value={f.status} onChange={(e) => set("status", e.target.value)} className={inputCls}>
-                {(meta?.statuses || ["Pending", "Joined", "Cancelled"]).map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </Field>
             {/* Joined → record the join date (auto-stamped on save if left blank). */}
             {f.status === "Joined" && (
               <Field label="Join Date">
@@ -734,7 +730,9 @@ function ViewModal({ row, meta, onClose, onEdit }) {
         <div className="overflow-y-auto px-6 py-4 space-y-5 text-sm">
           <div className="flex flex-wrap gap-2">
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${statusChip(row.status)}`}>{row.status}</span>
-            {row.potential_rating && <span className="px-2 py-0.5 rounded-full text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">Influence: {ratingLabel(meta, row.potential_rating)}</span>}
+            {row.influencer_rating != null && row.influencer_rating !== ""
+              ? <span className="inline-flex items-center gap-1 text-xs text-gray-500">Rating: <RatingBadge value={row.influencer_rating} /></span>
+              : row.potential_rating ? <span className="px-2 py-0.5 rounded-full text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">Influence: {ratingLabel(meta, row.potential_rating)}</span> : null}
           </div>
 
           {/* Profile Details */}
