@@ -17,6 +17,15 @@ export async function deleteLocalUpload(url) {
     const name = path.basename(url); // guard against traversal
     if (!name || name.includes("..")) return;
 
+    // SAFETY: never delete a file that is STILL referenced by any record. A photo
+    // can be shared — e.g. the recovery step reconnects a linked worker's photo onto
+    // a contact, so the same file backs both the worker and the contact. Replacing
+    // ONE of them must not wipe the image the other still uses. The replace/remove
+    // caller updates its own row FIRST, so a remaining reference here means another
+    // record genuinely still needs the file — leave it. This makes deletion happen
+    // only when the file is truly orphaned (§5).
+    if (await isStillReferenced(name)) return;
+
     const ext = name.split(".").pop();
     const id = ext ? name.slice(0, name.length - ext.length - 1) : name;
     await query("DELETE FROM worker_photos WHERE id = ?", [id]).catch(() => {});
@@ -30,4 +39,27 @@ export async function deleteLocalUpload(url) {
   } catch {
     // File already gone / not writable — nothing to clean up.
   }
+}
+
+// Is the upload file (by its unique filename) still referenced by ANY record whose
+// photo it could be — contact, field worker, or registration? If so, deleting it
+// would break a photo still in use, so the caller must skip the delete. Fail-SAFE:
+// if a lookup errors, assume it IS still referenced (never delete on uncertainty).
+async function isStillReferenced(name) {
+  const like = `%${name}`;
+  const targets = [
+    ["contacts", "photo_url"],
+    ["workers", "photo_url"],
+    ["reg_people", "photo_url"],
+  ];
+  for (const [table, col] of targets) {
+    try {
+      const rows = await query(`SELECT 1 FROM \`${table}\` WHERE \`${col}\` LIKE ? LIMIT 1`, [like]);
+      if (rows.length) return true;
+    } catch (e) {
+      // Missing table → not a reference source here; any other error → play safe.
+      if (e?.code !== "ER_NO_SUCH_TABLE" && e?.errno !== 1146) return true;
+    }
+  }
+  return false;
 }

@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
-import { checkUploadExists } from "@/lib/mediaFileStore";
+import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
 import { query, getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
@@ -44,20 +44,13 @@ export async function GET(_req, { params }) {
     // and the PUT response use, so every surface reads identical data.
     const contact = await resolveContactCard(id);
     if (!contact) return NextResponse.json({ message: "Contact not found." }, { status: 404 });
-    // Self-repair a DEAD photo reference: a photo whose file no longer exists in any
-    // durable store or on disk (e.g. a legacy disk-only upload lost on redeploy) is
-    // cleared here — but ONLY when existence is definitive (never on a transient
-    // lookup error), so a still-recoverable photo is preserved (§3–§6). Photos whose
-    // files DO exist keep their (already-valid) URL and display normally.
-    if (contact.photo_url && String(contact.photo_url).startsWith("/uploads/")) {
-      const { found, errored } = await checkUploadExists(contact.photo_url);
-      if (!found && !errored) {
-        // Clear the invalid reference on the contact's OWN column only (never the
-        // linked worker's), so the UI shows Upload instead of a broken photo.
-        await query("UPDATE contacts SET photo_url = NULL WHERE id = ? AND photo_url = ?", [id, contact.photo_url]).catch(() => {});
-        contact.photo_url = null;
-      }
-    }
+    // NOTE: the photo reference is intentionally NOT auto-cleared here. Loading a
+    // contact must never delete/blank its photo reference — a freshly re-uploaded
+    // photo (or one briefly unreachable due to a transient storage hiccup) could be
+    // wrongly dropped. The UI already shows the correct state from the actual image
+    // load (View/Remove appear only when the image loads), and genuinely-dead
+    // references are cleaned only by the explicit Photo Data recovery or when the
+    // user clicks Remove — never automatically on a view.
     return NextResponse.json({ contact });
   } catch (err) {
     console.error("contact GET error:", err);
@@ -239,6 +232,14 @@ export async function PUT(req, { params }) {
       throw e;
     } finally {
       conn.release();
+    }
+
+    // A new/re-uploaded photo went in with this edit — mark it verified-available
+    // (its bytes are in the durable store) so Photo Data / the count reflect it
+    // immediately, and it is never treated as a dead reference.
+    if ("photo_url" in data && data.photo_url) {
+      await ensurePhotoVerifiedColumn();
+      await query("UPDATE contacts SET photo_verified = 1 WHERE id = ?", [id]).catch(() => {});
     }
 
     // Sync the full designation set (add/remove keeps the rest; empty clears).
