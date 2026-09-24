@@ -122,7 +122,7 @@ export async function GET(req) {
       : "";
 
     const assigned = await query(
-      `SELECT c.*, ld.name AS district_name, lw.name AS ward_name,
+      `SELECT c.*, ld.name AS district_name, lw.name AS ward_name, COALESCE(c.photo_url, w.photo_url) AS photo_url,
               (SELECT COUNT(*) FROM calls WHERE contact_id = c.id) AS attempts,
               -- "Worked" = the contact has at least one call with a SAVED call
               -- status or sentiment. This is the exact "not fresh" test: a fresh
@@ -138,6 +138,7 @@ export async function GET(req) {
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
+         LEFT JOIN workers w ON w.id = c.worker_id
          ${assignedByJoin}
         WHERE c.assigned_to_user_id = ?
           AND c.is_completed = 0
@@ -187,10 +188,11 @@ export async function GET(req) {
     // Numbers module — callers no longer see or restore them here.
 
     const lockedRows = await query(
-      `SELECT c.*, ld.name AS district_name, lw.name AS ward_name
+      `SELECT c.*, ld.name AS district_name, lw.name AS ward_name, COALESCE(c.photo_url, w.photo_url) AS photo_url
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
+         LEFT JOIN workers w ON w.id = c.worker_id
         WHERE c.locked_by_user_id = ?${notWrong}
         LIMIT 1`,
       [userId]
