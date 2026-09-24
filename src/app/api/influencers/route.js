@@ -123,32 +123,61 @@ export async function GET(req) {
     // else the legacy single designation. Scalar subqueries keep the FROM as
     // `influencers` alone, so the WHERE/search columns stay unambiguous.
     const cols = await getInfluencerColumns();
-    const joinedBySel = cols.has("joined_by_contact_id")
-      ? `,
-         (SELECT jc.person_name FROM contacts jc WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_name,
-         (SELECT COALESCE(jc.photo_url, jw.photo_url) FROM contacts jc
-            LEFT JOIN workers jw ON jw.id = jc.worker_id
-           WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_photo,
-         (SELECT jc.phone_number FROM contacts jc WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_mobile,
-         (SELECT COALESCE(
-                   (SELECT GROUP_CONCAT(dd.name ORDER BY dd.name SEPARATOR ', ')
-                      FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
-                     WHERE cd.contact_id = jc.id),
-                   NULLIF(TRIM(jw.position), ''),
-                   jdsg.name)
-            FROM contacts jc
-            LEFT JOIN workers jw ON jw.id = jc.worker_id
-            LEFT JOIN designations jdsg ON jdsg.id = jc.designation_id
-           WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_designation`
-      : "";
+    const hasJbId = cols.has("joined_by_contact_id");
+    const hasJbPhone = cols.has("joined_by_phone");
     // pageSize/offset are validated integers (parseInt + clamp above), so they
     // are inlined — mysql2's prepared execute() rejects LIMIT/OFFSET placeholders.
-    const rows = await query(
-      `SELECT influencers.*,
-              (SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name${joinedBySel}
-         FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
-      params
-    );
+    let rows;
+    if (hasJbId || hasJbPhone) {
+      // Joined By resolves the EFFECTIVE contact: the stored link id, else a match
+      // on the saved phone number (last-10-digits, same normalization as the
+      // Contacts lookup) — so existing records that only stored the phone (or were
+      // saved before the link resolved) still show the person. The mobile always
+      // falls back to the saved joined_by_phone, so the number shows even when the
+      // person isn't in Contacts. Resolution runs only on the paged slice (a
+      // derived table LIMITed first), and the phone match runs only for rows with
+      // no link (COALESCE short-circuits) — never the influencer's own details.
+      const digits = (col) => `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},' ',''),'-',''),'+',''),'(',''),')',''),'.','')`;
+      const phoneMatch = hasJbPhone
+        ? `(SELECT c2.id FROM contacts c2
+              WHERE base.joined_by_phone IS NOT NULL
+                AND LENGTH(${digits("base.joined_by_phone")}) >= 10
+                AND RIGHT(${digits("c2.phone_number")}, 10) = RIGHT(${digits("base.joined_by_phone")}, 10)
+              LIMIT 1)`
+        : null;
+      const effId = hasJbId && phoneMatch ? `COALESCE(base.joined_by_contact_id, ${phoneMatch})`
+        : hasJbId ? "base.joined_by_contact_id"
+        : phoneMatch;
+      const mobileExpr = hasJbPhone ? "COALESCE(jc.phone_number, base.joined_by_phone)" : "jc.phone_number";
+      rows = await query(
+        `SELECT base.*,
+                (SELECT username FROM users u WHERE u.id = base.created_by) AS created_by_name,
+                jc.person_name AS joined_by_name,
+                COALESCE(jc.photo_url, jcw.photo_url) AS joined_by_photo,
+                ${mobileExpr} AS joined_by_mobile,
+                COALESCE(
+                  (SELECT GROUP_CONCAT(dd.name ORDER BY dd.name SEPARATOR ', ')
+                     FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
+                    WHERE cd.contact_id = jc.id),
+                  NULLIF(TRIM(jcw.position), ''),
+                  jdsg.name) AS joined_by_designation
+           FROM (
+             SELECT influencers.* FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}
+           ) base
+           LEFT JOIN contacts jc ON jc.id = ${effId}
+           LEFT JOIN workers jcw ON jcw.id = jc.worker_id
+           LEFT JOIN designations jdsg ON jdsg.id = jc.designation_id
+          ORDER BY base.${orderBy}`,
+        params
+      );
+    } else {
+      rows = await query(
+        `SELECT influencers.*,
+                (SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name
+           FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
+        params
+      );
+    }
     const influencers = rows.map(shape);
 
     return NextResponse.json(
