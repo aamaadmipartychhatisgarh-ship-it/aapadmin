@@ -170,25 +170,43 @@ export async function GET(req) {
       const effId = hasJbId && phoneMatch ? `COALESCE(base.joined_by_contact_id, ${phoneMatch})`
         : hasJbId ? "base.joined_by_contact_id"
         : phoneMatch;
-      const mobileExpr = hasJbPhone ? "COALESCE(jc.phone_number, base.joined_by_phone)" : "jc.phone_number";
+      // Secondary profile source: if the linked number matches no Contact, resolve it
+      // against a Worker (name / mobile / photo / position). The subquery is guarded
+      // by `jc.id IS NULL` so it only runs for rows without a contact match, and
+      // returns a single id so it can never duplicate a row. Contact stays the
+      // authoritative primary; Worker is the fallback.
+      const workerMatch = hasJbPhone
+        ? `(SELECT w2.id FROM workers w2
+              WHERE base.joined_by_phone IS NOT NULL
+                AND LENGTH(${digits("base.joined_by_phone")}) >= 10
+                AND RIGHT(${digits("w2.mobile")}, 10) = RIGHT(${digits("base.joined_by_phone")}, 10)
+              LIMIT 1)`
+        : null;
+      const workerJoin = workerMatch ? `LEFT JOIN workers jw2 ON jc.id IS NULL AND jw2.id = ${workerMatch}` : "";
+      const nameExpr = workerMatch ? "COALESCE(jc.person_name, jw2.name)" : "jc.person_name";
+      const photoExpr = workerMatch ? "COALESCE(jc.photo_url, jcw.photo_url, jw2.photo_url)" : "COALESCE(jc.photo_url, jcw.photo_url)";
+      const mobileExpr = workerMatch ? "COALESCE(jc.phone_number, jw2.mobile, base.joined_by_phone)"
+        : hasJbPhone ? "COALESCE(jc.phone_number, base.joined_by_phone)" : "jc.phone_number";
+      const desigExtra = workerMatch ? ", NULLIF(TRIM(jw2.position), '')" : "";
       rows = await query(
         `SELECT base.*,
                 (SELECT username FROM users u WHERE u.id = base.created_by) AS created_by_name,
-                jc.person_name AS joined_by_name,
-                COALESCE(jc.photo_url, jcw.photo_url) AS joined_by_photo,
+                ${nameExpr} AS joined_by_name,
+                ${photoExpr} AS joined_by_photo,
                 ${mobileExpr} AS joined_by_mobile,
                 COALESCE(
                   (SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
                      FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
                     WHERE cd.contact_id = jc.id),
                   NULLIF(TRIM(jcw.position), ''),
-                  jdsg.name) AS joined_by_designation
+                  jdsg.name${desigExtra}) AS joined_by_designation
            FROM (
              SELECT influencers.* FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}
            ) base
            LEFT JOIN contacts jc ON jc.id = ${effId}
            LEFT JOIN workers jcw ON jcw.id = jc.worker_id
            LEFT JOIN designations jdsg ON jdsg.id = jc.designation_id
+           ${workerJoin}
           ORDER BY base.${orderBy}`,
         params
       );
