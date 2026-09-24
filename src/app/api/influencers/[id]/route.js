@@ -82,10 +82,14 @@ export async function PUT(req, { params }) {
       [...names.map((n) => v[n]), iid]
     );
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [iid]);
+    if (!row) throw new Error("update reported success but the record could not be read back");
     return NextResponse.json({ influencer: shape(row) }, { headers: NO_STORE });
   } catch (err) {
-    console.error("[influencer] PUT error:", err?.code || "", err?.sqlMessage || err?.message || err);
-    return NextResponse.json({ message: "Could not save the influencer. Please try again." }, { status: 500, headers: NO_STORE });
+    const detail = err?.sqlMessage || err?.message || String(err);
+    console.error("[influencer] PUT error:", err?.code || "", detail);
+    // Surface the real reason (admin/supervisor-only module) so an edit failure is
+    // never hidden behind a generic message (Bug Fix §7).
+    return NextResponse.json({ message: `Could not save the influencer: ${detail}` }, { status: 500, headers: NO_STORE });
   }
 }
 

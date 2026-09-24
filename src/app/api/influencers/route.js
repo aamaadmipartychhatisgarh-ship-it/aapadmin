@@ -139,6 +139,7 @@ export async function GET(req) {
 
 // POST /api/influencers → create.
 export async function POST(req) {
+  let payload = null; // kept in scope so a failure can log exactly what was sent
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
@@ -146,6 +147,7 @@ export async function POST(req) {
     await ensureInfluencerSchema();
 
     const d = await req.json().catch(() => null);
+    payload = d;
     if (!d || typeof d !== "object") return NextResponse.json({ message: "Invalid request body." }, { status: 400, headers: NO_STORE });
 
     const err = await validate(d);
@@ -169,13 +171,20 @@ export async function POST(req) {
       `INSERT INTO influencers (${names.map((n) => `\`${n}\``).join(", ")}) VALUES (${names.map(() => "?").join(",")})`,
       names.map((n) => record[n])
     );
+    // Read the row back so a fake success is impossible: if the INSERT didn't
+    // persist, there is no row and we surface a real error instead of "saved".
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [res.insertId]);
+    if (!row) throw new Error("insert reported success but the record could not be read back");
     return NextResponse.json({ influencer: shape(row) }, { status: 201, headers: NO_STORE });
   } catch (err) {
-    // Log the ACTUAL cause (SQL error code + driver message) so a genuine failure
-    // is diagnosable server-side; never leak it to the client (§14, §15).
-    console.error("[influencer] POST error:", err?.code || "", err?.sqlMessage || err?.message || err);
-    return NextResponse.json({ message: "Could not save the influencer. Please try again." }, { status: 500, headers: NO_STORE });
+    // Log the ACTUAL cause (SQL error code + driver message) AND the payload that
+    // was sent, so a genuine failure is fully diagnosable server-side.
+    const detail = err?.sqlMessage || err?.message || String(err);
+    console.error("[influencer] POST error:", err?.code || "", detail, "| payload:", JSON.stringify(payload));
+    // Surface the real reason to the (admin/supervisor-only) client so a save
+    // failure is never hidden behind a generic message and never mistaken for a
+    // silent "saved but not showing" (Bug Fix §2, §7).
+    return NextResponse.json({ message: `Could not save the influencer: ${detail}` }, { status: 500, headers: NO_STORE });
   }
 }
 

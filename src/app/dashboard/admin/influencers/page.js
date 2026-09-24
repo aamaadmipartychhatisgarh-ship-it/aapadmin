@@ -209,7 +209,24 @@ export default function InfluencersPage() {
         assemblies={assemblies}
         record={editId ? editRecord : null}
         onCancel={() => { setMode("list"); setEditId(null); setEditRecord(null); }}
-        onSaved={() => { setMode("list"); setEditId(null); setEditRecord(null); loadList(); }}
+        onSaved={(opts) => {
+          setEditId(null); setEditRecord(null);
+          if (opts?.created) {
+            // On CREATE, clear any active search/filters and jump to the first page so
+            // the just-created influencer is guaranteed to be on screen. Switching to
+            // the list view (and the cleared filters) makes the list effect re-fetch
+            // from the backend, so the row shown is the REAL DB record — never injected
+            // into local state (Bug Fix §4). Because it is persisted, it also survives
+            // refresh, logout/login, paging and filtering. (No manual loadList here —
+            // that would fetch with the pre-reset filter closure and could race.)
+            setSearch(""); setDebounced(""); setFStatus(""); setFAssembly(""); setFRating(""); setPage(1);
+            setMode("list");
+          } else {
+            // EDIT keeps the current view; refetch from the backend so the change shows.
+            setMode("list");
+            loadList(); loadStats();
+          }
+        }}
       />
     );
   }
@@ -496,8 +513,10 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
       const method = editing ? "PUT" : "POST";
       const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(d.message || "Could not save. Please try again."); setSaving(false); return; }
-      onSaved();
+      // Only treat it as saved when the API confirms it AND returns the persisted
+      // record — never show success on a failed insert (Bug Fix §2, §7).
+      if (!r.ok || !d.influencer) { setError(d.message || "Could not save. Please try again."); setSaving(false); return; }
+      onSaved({ created: !editing, influencer: d.influencer });
     } catch {
       setError("Could not save. Please try again.");
       setSaving(false);
