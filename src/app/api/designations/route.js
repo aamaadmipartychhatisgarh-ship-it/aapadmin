@@ -6,6 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { ensureDesignationLevelColumn, isValidDesignationLevel } from "@/lib/designationLevels";
+import { logMasterDataChange } from "@/lib/audit";
 
 export async function GET(req) {
   try {
@@ -74,6 +75,9 @@ export async function POST(req) {
     // rejected by the DB (ER_DUP_ENTRY) — no accidental dupes at any level.
     const res = await query("INSERT INTO designations (name, level) VALUES (?, ?)", [name, level]);
 
+    await logMasterDataChange(session, {
+      req, master: "designation", action: "Created", recordId: res.insertId, recordName: name, after: { name, level },
+    });
     return Response.json({ message: "Designation added successfully", id: res.insertId }, { status: 201 });
   } catch (error) {
     if (error.code === "ER_DUP_ENTRY") {

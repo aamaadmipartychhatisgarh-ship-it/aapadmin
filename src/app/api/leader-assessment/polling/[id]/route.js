@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
 import { pollingForAssembly, normalizePollingCount } from "@/lib/leaderAssessment";
+import { logMasterDataChange } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +48,7 @@ export async function GET(_req, { params }) {
 //   • Male + Female must not exceed Total Voters (when the relevant values exist).
 //   • UNIQUE assembly_id → exactly one record per assembly (no duplicates).
 export async function PUT(req, { params }) {
-  const { error } = await guard({ allowPageKeys: ["polling_master"] });
+  const { session, error } = await guard({ allowPageKeys: ["polling_master"] });
   if (error) return error;
   try {
     const { id } = await params;
@@ -72,7 +73,10 @@ export async function PUT(req, { params }) {
       return NextResponse.json({ message: "Male + Female voters cannot exceed Total Voters." }, { status: 400 });
     }
 
-    const [existing] = await query("SELECT id FROM la_polling_data WHERE assembly_id = ?", [id]);
+    const [existing] = await query(
+      "SELECT id, total_booths, total_voters, male_voters, female_voters FROM la_polling_data WHERE assembly_id = ?",
+      [id]
+    );
     if (existing) {
       await query(
         `UPDATE la_polling_data SET total_booths=?, total_voters=?, male_voters=?, female_voters=? WHERE assembly_id=?`,
@@ -88,6 +92,11 @@ export async function PUT(req, { params }) {
     // read total_voters/total_booths stay consistent with the master.
     await query("UPDATE la_assemblies SET total_voters = ?, total_booths = ? WHERE id = ?", [total_voters, total_booths, id]);
 
+    await logMasterDataChange(session, {
+      req, master: "polling_station", action: existing ? "Updated" : "Created", recordId: id, recordName: assembly.name,
+      before: existing ? { total_booths: existing.total_booths, total_voters: existing.total_voters, male_voters: existing.male_voters, female_voters: existing.female_voters } : null,
+      after: { total_booths, total_voters, male_voters, female_voters },
+    });
     const polling = await pollingForAssembly(assembly);
     return NextResponse.json({ ok: true, assembly: { id: assembly.id, name: assembly.name, district: assembly.district || null, lok_sabha: assembly.lok_sabha || null, zone: assembly.zone || null }, polling }, { headers: noStore });
   } catch (e) {

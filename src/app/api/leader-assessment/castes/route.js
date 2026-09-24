@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
 import { normalizeCasteName } from "@/lib/leaderAssessment";
+import { logMasterDataChange } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function GET(req) {
 // rejected with a clear message instead of creating a second record. New castes
 // are active by default.
 export async function POST(req) {
-  const { error } = await guard({ allowPageKeys: ["caste_master"] });
+  const { session, error } = await guard({ allowPageKeys: ["caste_master"] });
   if (error) return error;
   try {
     const d = await req.json().catch(() => ({}));
@@ -86,6 +87,10 @@ export async function POST(req) {
       throw e;
     }
     const [row] = await query("SELECT id, name, is_active, created_at, updated_at FROM la_castes WHERE id = ?", [res.insertId]);
+    await logMasterDataChange(session, {
+      req, master: "caste", action: "Created", recordId: res.insertId, recordName: name,
+      after: { name, is_active: isActive },
+    });
     return NextResponse.json(
       { ok: true, caste: { ...row, is_active: !!Number(row.is_active), usage_count: 0 } },
       { headers: noStore }

@@ -5,6 +5,7 @@ import { isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensurePartiesTable, normalizePartyName } from "@/lib/parties";
+import { logMasterDataChange } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 const noStore = { "Cache-Control": "no-store, no-cache, must-revalidate, private" };
@@ -23,7 +24,7 @@ export async function PUT(req, { params }) {
     await ensurePartiesTable();
     const { id } = await params;
     if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid party id." }, { status: 400 });
-    const [existing] = await query("SELECT id FROM parties WHERE id = ?", [id]);
+    const [existing] = await query("SELECT id, name, logo_url FROM parties WHERE id = ?", [id]);
     if (!existing) return NextResponse.json({ message: "Party not found." }, { status: 404 });
 
     const d = await req.json().catch(() => ({}));
@@ -51,6 +52,10 @@ export async function PUT(req, { params }) {
       throw e;
     }
     const [row] = await query("SELECT id, name, logo_url, created_at, updated_at FROM parties WHERE id = ?", [id]);
+    await logMasterDataChange(session, {
+      req, master: "party", action: "Updated", recordId: id, recordName: row?.name ?? existing.name,
+      before: { name: existing.name, logo_url: existing.logo_url }, after: { name: row?.name, logo_url: row?.logo_url },
+    });
     return NextResponse.json({ ok: true, party: row }, { headers: noStore });
   } catch (e) {
     console.error("[parties] PUT:", e);
@@ -62,15 +67,17 @@ export async function PUT(req, { params }) {
 // competitor records keep their stored party NAME (they are free-text values, not
 // a FK), so deleting a party here never corrupts or blanks those records — they
 // simply stop showing the (now-removed) logo.
-export async function DELETE(_req, { params }) {
+export async function DELETE(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     await ensurePartiesTable();
     const { id } = await params;
     if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid party id." }, { status: 400 });
+    const [existing] = await query("SELECT id, name, logo_url FROM parties WHERE id = ?", [id]);
     const res = await query("DELETE FROM parties WHERE id = ?", [id]);
     if (!res.affectedRows) return NextResponse.json({ message: "Party not found." }, { status: 404 });
+    await logMasterDataChange(session, { req, master: "party", action: "Deleted", recordId: id, recordName: existing?.name ?? null, before: existing ? { name: existing.name, logo_url: existing.logo_url } : null });
     return NextResponse.json({ ok: true }, { headers: noStore });
   } catch (e) {
     console.error("[parties] DELETE:", e);

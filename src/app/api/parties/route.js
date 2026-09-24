@@ -5,6 +5,7 @@ import { isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensurePartiesTable, normalizePartyName } from "@/lib/parties";
+import { logMasterDataChange } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 const noStore = { "Cache-Control": "no-store, no-cache, must-revalidate, private" };
@@ -54,6 +55,7 @@ export async function POST(req) {
       throw e;
     }
     const [row] = await query("SELECT id, name, logo_url, created_at, updated_at FROM parties WHERE id = ?", [res.insertId]);
+    await logMasterDataChange(session, { req, master: "party", action: "Created", recordId: res.insertId, recordName: name, after: { name, logo_url } });
     return NextResponse.json({ ok: true, party: row }, { headers: noStore });
   } catch (e) {
     console.error("[parties] POST:", e);

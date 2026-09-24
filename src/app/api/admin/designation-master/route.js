@@ -8,6 +8,7 @@ import {
   ensureWingSchema, listWings, getWing, listWingBases, syncWing, generatedForWing,
   designationHasAssignments, WING_LEVELS,
 } from "@/lib/wingDesignations";
+import { logMasterDataChange } from "@/lib/audit";
 
 // Designation Master API (Administration). GET reads the wings + a wing's base
 // roles and its auto-generated level designations; POST applies a mutation (by
@@ -48,7 +49,7 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
-    const { error } = await guard();
+    const { session, error } = await guard();
     if (error) return error;
     await ensureWingSchema();
     const d = await req.json().catch(() => ({}));
@@ -60,6 +61,7 @@ export async function POST(req) {
       const [{ n }] = await query(`SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM wings WHERE is_main = 0`);
       try {
         const res = await query(`INSERT INTO wings (name, sort_order, is_main) VALUES (?, ?, 0)`, [name, n]);
+        await logMasterDataChange(session, { req, master: "wing", action: "Created", recordId: res.insertId, recordName: name, after: { name } });
         return NextResponse.json({ ok: true, id: res.insertId }, { headers: NO_STORE });
       } catch (e) {
         if (e?.code === "ER_DUP_ENTRY") return NextResponse.json({ message: `"${name}" already exists.` }, { status: 409, headers: NO_STORE });
@@ -83,6 +85,7 @@ export async function POST(req) {
         throw e;
       }
       await syncWing(wing.id);
+      await logMasterDataChange(session, { req, master: "wing_designation", action: "Created", recordId: wing.id, recordName: baseName, after: { wing: wing.name, base_name: baseName } });
       return NextResponse.json({ ok: true }, { headers: NO_STORE });
     }
 
@@ -90,6 +93,7 @@ export async function POST(req) {
       const baseId = parseInt(d.base_id, 10);
       const baseName = String(d.base_name || "").replace(/\s+/g, " ").trim();
       if (!baseId || !baseName) return NextResponse.json({ message: "A valid designation and name are required." }, { status: 400, headers: NO_STORE });
+      const [prevBase] = await query(`SELECT base_name FROM wing_designations WHERE id = ?`, [baseId]);
       try {
         await query(`UPDATE wing_designations SET base_name = ? WHERE id = ?`, [baseName, baseId]);
       } catch (e) {
@@ -97,20 +101,24 @@ export async function POST(req) {
         throw e;
       }
       if (wingId) await syncWing(wingId);
+      await logMasterDataChange(session, { req, master: "wing_designation", action: "Updated", recordId: baseId, recordName: baseName, before: { base_name: prevBase?.base_name ?? null }, after: { base_name: baseName } });
       return NextResponse.json({ ok: true }, { headers: NO_STORE });
     }
 
     if (action === "toggle_base") {
       const baseId = parseInt(d.base_id, 10);
       if (!baseId) return NextResponse.json({ message: "Invalid designation." }, { status: 400, headers: NO_STORE });
+      const [b] = await query(`SELECT base_name, enabled FROM wing_designations WHERE id = ?`, [baseId]);
       await query(`UPDATE wing_designations SET enabled = ? WHERE id = ?`, [d.enabled ? 1 : 0, baseId]);
       if (wingId) await syncWing(wingId);
+      await logMasterDataChange(session, { req, master: "wing_designation", action: d.enabled ? "Activated" : "Deactivated", recordId: baseId, recordName: b?.base_name ?? null, before: { enabled: b?.enabled ? 1 : 0 }, after: { enabled: d.enabled ? 1 : 0 } });
       return NextResponse.json({ ok: true }, { headers: NO_STORE });
     }
 
     if (action === "delete_base") {
       const baseId = parseInt(d.base_id, 10);
       if (!baseId) return NextResponse.json({ message: "Invalid designation." }, { status: 400, headers: NO_STORE });
+      const [b] = await query(`SELECT base_name FROM wing_designations WHERE id = ?`, [baseId]);
       // Report whether any generated level of this base is currently assigned — the
       // caller is warned, and the generated rows are DISABLED (never deleted) by the
       // sync, so no assignment is lost.
@@ -119,6 +127,7 @@ export async function POST(req) {
       for (const g of gens) { if (await designationHasAssignments(g.id)) { assigned = true; break; } }
       await query(`DELETE FROM wing_designations WHERE id = ?`, [baseId]);
       if (wingId) await syncWing(wingId);
+      await logMasterDataChange(session, { req, master: "wing_designation", action: "Deleted", recordId: baseId, recordName: b?.base_name ?? null, before: { base_name: b?.base_name ?? null } });
       return NextResponse.json({ ok: true, had_assignments: assigned }, { headers: NO_STORE });
     }
 
@@ -131,6 +140,8 @@ export async function POST(req) {
         await query(`UPDATE wing_designations SET sort_order = ? WHERE id = ? AND wing_id = ?`, [i, order[i], wId]);
       }
       await syncWing(wId);
+      const wing = await getWing(wId);
+      await logMasterDataChange(session, { req, master: "wing_designation", action: "Reordered", recordId: wId, recordName: wing?.name ?? null, after: { order } });
       return NextResponse.json({ ok: true }, { headers: NO_STORE });
     }
 

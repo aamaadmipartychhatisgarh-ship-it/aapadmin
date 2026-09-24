@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
 import { normalizeCasteName } from "@/lib/leaderAssessment";
+import { logMasterDataChange } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export async function GET(_req, { params }) {
 //     social-profile rows keep their caste_id + name and stay valid; the caste
 //     simply stops appearing for new selections. Reactivating brings it back.
 export async function PUT(req, { params }) {
-  const { error } = await guard({ allowPageKeys: ["caste_master"] });
+  const { session, error } = await guard({ allowPageKeys: ["caste_master"] });
   if (error) return error;
   try {
     const { id } = await params;
@@ -92,6 +93,14 @@ export async function PUT(req, { params }) {
         WHERE c.id = ?`,
       [id]
     );
+    // Distinguish a pure activate/deactivate from a content edit for the trail.
+    const onlyToggle = d?.name === undefined && d?.polling_station_id === undefined && d?.is_active !== undefined;
+    const action = onlyToggle ? (d.is_active ? "Activated" : "Deactivated") : "Updated";
+    await logMasterDataChange(session, {
+      req, master: "caste", action, recordId: id, recordName: row?.name ?? existing.name,
+      before: { name: existing.name, is_active: existing.is_active },
+      after: { name: row?.name, is_active: row?.is_active, polling_station_id: row?.polling_station_id ?? null },
+    });
     return NextResponse.json(
       { ok: true, caste: { ...row, is_active: !!Number(row.is_active), polling_station_id: row.polling_station_id ?? null, polling_station_name: row.polling_station_name || null, usage_count: Number(row.usage_count) || 0 } },
       { headers: noStore }
@@ -107,14 +116,19 @@ export async function PUT(req, { params }) {
 // NAME (the FK is ON DELETE SET NULL, so only the caste_id link is cleared) — so
 // deleting never corrupts past records. Deactivate instead if you only want to
 // hide it from new selections.
-export async function DELETE(_req, { params }) {
-  const { error } = await guard();
+export async function DELETE(req, { params }) {
+  const { session, error } = await guard();
   if (error) return error;
   try {
     const { id } = await params;
     if (!/^\d+$/.test(String(id))) return NextResponse.json({ message: "Invalid caste id." }, { status: 400 });
+    const [existing] = await query("SELECT id, name, is_active FROM la_castes WHERE id = ?", [id]);
     const res = await query("DELETE FROM la_castes WHERE id = ?", [id]);
     if (!res.affectedRows) return NextResponse.json({ message: "Caste not found." }, { status: 404 });
+    await logMasterDataChange(session, {
+      req, master: "caste", action: "Deleted", recordId: id, recordName: existing?.name ?? null,
+      before: existing ? { name: existing.name, is_active: existing.is_active } : null,
+    });
     return NextResponse.json({ ok: true }, { headers: noStore });
   } catch (e) {
     console.error("[LA] caste DELETE:", e);
