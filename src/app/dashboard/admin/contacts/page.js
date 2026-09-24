@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Users as UsersIcon, Star, UserCheck, AlertCircle } from "lucide-react";
+import { Loader2, Users as UsersIcon, Star, UserCheck, AlertCircle, UserCog } from "lucide-react";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
+import { usePageAccess } from "@/components/usePageAccess";
 import ContactsModule from "@/components/contacts/ContactsModule";
 import { WrongNumbersDashboard } from "@/app/dashboard/admin/wrong-numbers/page";
 
@@ -29,6 +30,9 @@ export default function Page() {
   // Role OR a Page-Access grant for this page (managed override).
   const { ready, allowed } = usePageGuard("contacts", isAdmin(session));
   const isSuper = normalizeRole(session?.user?.role) === ROLES.SUPER_ADMIN;
+  // Designation Vacancies is now a Contacts tab (its own page-access key still
+  // governs who sees it), no longer a standalone sidebar page.
+  const { has } = usePageAccess();
 
   // Which in-page tab is active ("all" contacts | "wrong" number). Seed from
   // ?tab=wrong so a direct link can open the Wrong Number tab.
@@ -62,6 +66,10 @@ export default function Page() {
         <Link href="/dashboard/admin/active-workers" className={tabCls(false)}><UsersIcon size={15} /> Active Workers</Link>
         {isSuper && <Link href="/dashboard/admin/influencers" className={tabCls(false)}><Star size={15} /> Influencers</Link>}
         <button className={tabCls(tab === "wrong")} onClick={() => setTab("wrong")}><AlertCircle size={15} /> Wrong Number</button>
+        <Link href="/dashboard/admin/contacts-incomplete" className={tabCls(false)}><AlertCircle size={15} /> Incomplete Designation</Link>
+        {(isSuper || has("vacancies")) && (
+          <Link href="/dashboard/admin/vacancies" className={tabCls(false)}><UserCog size={15} /> Designation Vacancies</Link>
+        )}
       </div>
 
       {tab === "wrong"
