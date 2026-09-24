@@ -32,7 +32,7 @@ export const PAGES = [
     roles: [...OVERSIGHT, ROLES.CALLER] },
   { key: "calls", label: "Calls", href: "/dashboard/calls", prefixes: ["/dashboard/calls"], icon: "Database",
     roles: [ROLES.CALLER] },
-  { key: "contacts", label: "Contacts", href: "/dashboard/admin/contacts", prefixes: ["/dashboard/admin/contacts", "/dashboard/supervisor/contacts", "/dashboard/admin/contacts-hierarchy", "/dashboard/admin/contacts-incomplete", "/dashboard/admin/active-workers", "/dashboard/admin/repeat-off"], icon: "UserCheck",
+  { key: "contacts", label: "Contacts", href: "/dashboard/admin/contacts", prefixes: ["/dashboard/admin/contacts", "/dashboard/supervisor/contacts", "/dashboard/admin/contacts-hierarchy", "/dashboard/admin/contacts-incomplete", "/dashboard/admin/active-workers", "/dashboard/admin/repeat-off", "/dashboard/admin/photo-data"], icon: "UserCheck",
     roles: [...OVERSIGHT] },
   { key: "vacancies", label: "Designation Vacancies", href: "/dashboard/admin/vacancies", prefixes: ["/dashboard/admin/vacancies"], icon: "UserCog",
     roles: [...OVERSIGHT] },

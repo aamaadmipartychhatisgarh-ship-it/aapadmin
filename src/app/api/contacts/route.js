@@ -14,6 +14,20 @@ import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignat
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 
+// Cached feature-detect: does contacts.photo_verified exist yet? The Photo Update
+// Count reflects RETRIEVABLE photos (not just a populated field) once recovery has
+// verified them — but only where the column exists, so an un-migrated deployment
+// keeps the old reference-based count with no error.
+let photoVerifiedColPromise;
+async function hasPhotoVerifiedCol() {
+  if (!photoVerifiedColPromise) {
+    photoVerifiedColPromise = query("SHOW COLUMNS FROM contacts LIKE 'photo_verified'")
+      .then((r) => r.length > 0)
+      .catch(() => false);
+  }
+  return photoVerifiedColPromise;
+}
+
 // The contacts list (and its photos) must never be served from a cache: it is
 // per-user role/territory scoped and changes as contacts/photos are added, so a
 // cached copy is exactly what made different users see different counts and the
@@ -109,7 +123,15 @@ export async function GET(req) {
       where += " AND c.address IS NOT NULL AND TRIM(c.address) <> ''";
     }
     if (searchParams.get("has_photo") === "1") {
-      where += " AND COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) IS NOT NULL";
+      // Count a photo only when it is actually retrievable. Once recovery has
+      // verified rows: photo_verified = 1 counts, 0 (file genuinely missing) does
+      // NOT, and rows not yet verified fall back to the reference test — so the
+      // count starts equal to the old value and becomes exact after recovery, never
+      // inflated by a dead reference (§5).
+      const refCond = "COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) IS NOT NULL";
+      where += (await hasPhotoVerifiedCol())
+        ? ` AND (c.photo_verified = 1 OR (c.photo_verified IS NULL AND ${refCond}))`
+        : ` AND ${refCond}`;
     }
     // Duplicates: phone_number is UNIQUE, so duplicates are the same number saved
     // in different formats (+91/0 prefix, spaces). Match on the last 10 digits.

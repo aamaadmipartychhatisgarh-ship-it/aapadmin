@@ -7,6 +7,7 @@ import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
 import { hasContactPhotoColumn, hasContactPhotoUpdatedAtColumn } from "@/lib/contactExtras";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
+import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
 
 // POST /api/contacts/[id]/photo  { photo_url }
 // Saves a profile photo directly on the contact (contacts.photo_url) — no
@@ -52,6 +53,12 @@ export async function POST(req, { params }) {
     }
 
     if (oldPhoto && oldPhoto !== (photo_url || null)) await deleteLocalUpload(oldPhoto);
+
+    // Record verified availability: a fresh upload's bytes are in the durable store
+    // now (1); a remove clears it (0). Keeps the Photo Data count accurate without a
+    // re-scan. Best-effort — the column is created lazily by recovery.
+    await ensurePhotoVerifiedColumn();
+    await query("UPDATE contacts SET photo_verified = ? WHERE id = ?", [photo_url ? 1 : 0, id]).catch(() => {});
 
     return NextResponse.json({ ok: true, photo_url: photo_url || null });
   } catch (err) {

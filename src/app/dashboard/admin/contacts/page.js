@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Users as UsersIcon, Star, UserCheck, AlertCircle, UserCog } from "lucide-react";
+import { Loader2, Users as UsersIcon, Star, UserCheck, AlertCircle, UserCog, Image as ImageIcon } from "lucide-react";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 import { usePageAccess } from "@/components/usePageAccess";
@@ -70,6 +70,7 @@ export default function Page() {
         {(isSuper || has("vacancies")) && (
           <Link href="/dashboard/admin/vacancies" className={tabCls(false)}><UserCog size={15} /> Designation Vacancies</Link>
         )}
+        <Link href="/dashboard/admin/photo-data" className={tabCls(false)}><ImageIcon size={15} /> Photo Data</Link>
       </div>
 
       {tab === "wrong"
