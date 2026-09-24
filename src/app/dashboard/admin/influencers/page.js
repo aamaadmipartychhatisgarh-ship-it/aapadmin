@@ -371,7 +371,20 @@ export default function InfluencersPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{r.phone || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{r.current_party ? <PartyLogo name={r.current_party} byName={partyByName} /> : "—"}</td>
-                  <td className="px-4 py-3 text-gray-600">{r.joined_by_name || "—"}</td>
+                  <td className="px-4 py-3">
+                    {r.joined_by_name ? (
+                      <div className="flex items-center gap-2.5 min-w-[180px]">
+                        <Thumb src={r.joined_by_photo} name={r.joined_by_name} size={38} />
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 text-sm truncate">{r.joined_by_name}</div>
+                          <div className="text-xs text-gray-500 truncate">{r.joined_by_designation || "—"}</div>
+                          <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">
+                            {r.joined_by_mobile ? <><Phone size={10} /> {r.joined_by_mobile}</> : "—"}
+                          </div>
+                        </div>
+                      </div>
+                    ) : <span className="text-gray-400">—</span>}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => setViewRow(r)} title="View" className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><Eye size={16} /></button>

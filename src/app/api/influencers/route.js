@@ -7,6 +7,7 @@ import {
   ensureInfluencerSchema, getInfluencerColumns, normalizeStatus, resolveAssemblyHierarchy,
   POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES,
 } from "@/lib/influencerSchema";
+import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 
 // Access to the Influencer module is governed by the "influencers" page key
 // (Super Admin + Supervisor by baseline, plus anyone granted it in Page Access).
@@ -109,13 +110,36 @@ export async function GET(req) {
     const orderBy = SORT_COLS[searchParams.get("sort")] || SORT_COLS.newest;
 
     const [{ total }] = await query(`SELECT COUNT(*) AS total FROM influencers ${whereSql}`, params);
+    // The contact_designations table must exist for the Joined By designation
+    // subquery (idempotent + cached — no-op once created).
+    await ensureContactDesignationsSchema();
     // Only reference joined_by_contact_id when the column actually exists — a
     // deployment where the lazy ALTER couldn't run (no ALTER privilege) still lists
     // every existing influencer instead of failing the whole page with an
     // "Unknown column" 500. Older records simply have no Joined By.
+    // Joined By is resolved LIVE from the linked Contact (never copied): name,
+    // photo (contact's own or its linked worker's), mobile and designation(s) —
+    // the contact's own multi-designation set, else the linked worker's position,
+    // else the legacy single designation. Scalar subqueries keep the FROM as
+    // `influencers` alone, so the WHERE/search columns stay unambiguous.
     const cols = await getInfluencerColumns();
     const joinedBySel = cols.has("joined_by_contact_id")
-      ? ", (SELECT person_name FROM contacts jc WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_name"
+      ? `,
+         (SELECT jc.person_name FROM contacts jc WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_name,
+         (SELECT COALESCE(jc.photo_url, jw.photo_url) FROM contacts jc
+            LEFT JOIN workers jw ON jw.id = jc.worker_id
+           WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_photo,
+         (SELECT jc.phone_number FROM contacts jc WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_mobile,
+         (SELECT COALESCE(
+                   (SELECT GROUP_CONCAT(dd.name ORDER BY dd.name SEPARATOR ', ')
+                      FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
+                     WHERE cd.contact_id = jc.id),
+                   NULLIF(TRIM(jw.position), ''),
+                   jdsg.name)
+            FROM contacts jc
+            LEFT JOIN workers jw ON jw.id = jc.worker_id
+            LEFT JOIN designations jdsg ON jdsg.id = jc.designation_id
+           WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_designation`
       : "";
     // pageSize/offset are validated integers (parseInt + clamp above), so they
     // are inlined — mysql2's prepared execute() rejects LIMIT/OFFSET placeholders.
