@@ -272,9 +272,9 @@ export default function InfluencersPage() {
               <tr>
                 <th className="px-4 py-2.5 font-semibold">Assembly</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Total</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Joined</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Pending</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Cancelled</th>
+                <th className="px-4 py-2.5 font-semibold text-right">BJP</th>
+                <th className="px-4 py-2.5 font-semibold text-right">INC</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Others</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -290,9 +290,9 @@ export default function InfluencersPage() {
                     </button>
                   </td>
                   <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{a.total}</td>
-                  <td className="px-4 py-2.5 text-right text-green-700">{a.joined}</td>
-                  <td className="px-4 py-2.5 text-right text-amber-700">{a.pending}</td>
-                  <td className="px-4 py-2.5 text-right text-red-700">{a.cancelled}</td>
+                  <td className="px-4 py-2.5 text-right text-amber-700">{a.bjp}</td>
+                  <td className="px-4 py-2.5 text-right text-green-700">{a.inc}</td>
+                  <td className="px-4 py-2.5 text-right text-gray-700">{a.others}</td>
                 </tr>
               ))}
             </tbody>

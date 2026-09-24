@@ -52,12 +52,20 @@ export async function GET(req) {
     // Cancelled, computed from the actual records. Every master assembly is listed
     // (LEFT JOIN), including those with zero influencers (§2, §12, §16, §17, §25).
     if (searchParams.get("stats") === "1") {
-      // Party buckets for the dashboard cards — BJP / INC / Others, classified from
-      // the influencer's saved Party (current_party). NULL/blank/any-other party
-      // falls into Others (the CASE ELSE), so every influencer is counted exactly
-      // once and Total = BJP + INC + Others.
-      const BJP = "(LOWER(current_party) = 'bjp' OR LOWER(current_party) LIKE '%bharatiya janata%')";
-      const INC = "(LOWER(current_party) IN ('inc','congress','indian national congress') OR LOWER(current_party) LIKE '%congress%')";
+      // Party buckets for the dashboard cards + assembly table — BJP / INC / Others,
+      // classified from the influencer's saved Party (current_party). NULL/blank/any
+      // other party falls into Others, so every influencer is counted exactly once
+      // and Total = BJP + INC + Others. `current_party` is feature-detected: on a
+      // deployment where the column's ALTER never ran it simply resolves to 0 BJP /
+      // 0 INC / all Others instead of failing the whole stats query (which would
+      // blank the cards and the assembly list). `alias` prefixes the column for the
+      // assembly LEFT JOIN, where a no-influencer row (i.id IS NULL) counts as none.
+      const cols = await getInfluencerColumns();
+      const hasParty = cols.has("current_party");
+      const bjpExpr = (alias) => hasParty ? `(LOWER(${alias}current_party) = 'bjp' OR LOWER(${alias}current_party) LIKE '%bharatiya janata%')` : "(1=0)";
+      const incExpr = (alias) => hasParty ? `(LOWER(${alias}current_party) IN ('inc','congress','indian national congress') OR LOWER(${alias}current_party) LIKE '%congress%')` : "(1=0)";
+      const BJP = bjpExpr("");
+      const INC = incExpr("");
       const [totals] = await query(
         `SELECT COUNT(*) AS total,
                 COALESCE(SUM(status = 'Joined'), 0) AS joined,
@@ -68,12 +76,17 @@ export async function GET(req) {
                 COALESCE(SUM(CASE WHEN ${BJP} THEN 0 WHEN ${INC} THEN 0 ELSE 1 END), 0) AS others
            FROM influencers`
       );
+      const iBJP = bjpExpr("i.");
+      const iINC = incExpr("i.");
       const assemblies = await query(
         `SELECT a.id AS assembly_id, a.name AS assembly_name,
                 COUNT(i.id) AS total,
                 COALESCE(SUM(i.status = 'Joined'), 0) AS joined,
                 COALESCE(SUM(i.status = 'Pending'), 0) AS pending,
-                COALESCE(SUM(i.status = 'Cancelled'), 0) AS cancelled
+                COALESCE(SUM(i.status = 'Cancelled'), 0) AS cancelled,
+                COALESCE(SUM(CASE WHEN i.id IS NULL THEN 0 WHEN ${iBJP} THEN 1 ELSE 0 END), 0) AS bjp,
+                COALESCE(SUM(CASE WHEN i.id IS NULL THEN 0 WHEN ${iINC} THEN 1 ELSE 0 END), 0) AS inc,
+                COALESCE(SUM(CASE WHEN i.id IS NULL THEN 0 WHEN ${iBJP} THEN 0 WHEN ${iINC} THEN 0 ELSE 1 END), 0) AS others
            FROM locations a
            LEFT JOIN influencers i ON i.assembly_id = a.id
           WHERE a.type = 'assembly'
