@@ -73,9 +73,13 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   const notWrong = await notWrongNumberClause("c");
 
   // The designations mapped to EXACTLY this level in Designation Master (the full
-  // list drives the dropdown; the current filter narrows the matrix).
+  // list drives the dropdown; the current filter narrows the matrix). A disabled
+  // designation (Designation Master enable/disable) is excluded — feature-detected
+  // so this stays safe where the `enabled` column doesn't exist yet.
+  const hasEnabled = (await query("SHOW COLUMNS FROM designations LIKE 'enabled'")).length > 0;
+  const enabledClause = hasEnabled ? "AND (enabled = 1 OR enabled IS NULL)" : "";
   const levelDesignations = await query(
-    `SELECT id, name FROM designations WHERE level = ? ORDER BY (sort_order IS NULL), sort_order, name`,
+    `SELECT id, name FROM designations WHERE level = ? ${enabledClause} ORDER BY (sort_order IS NULL), sort_order, name`,
     [level]
   );
   const designations = designationId ? levelDesignations.filter((d) => d.id === designationId) : levelDesignations;
