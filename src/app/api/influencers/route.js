@@ -113,7 +113,8 @@ export async function GET(req) {
     // are inlined — mysql2's prepared execute() rejects LIMIT/OFFSET placeholders.
     const rows = await query(
       `SELECT influencers.*,
-              (SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name
+              (SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name,
+              (SELECT person_name FROM contacts jc WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_name
          FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
@@ -196,6 +197,14 @@ export async function validate(d) {
   if (normalizeStatus(d.status) === "Cancelled" && !String(d.cancellation_remark ?? "").trim()) {
     return "A cancellation reason/remark is required when the status is Cancelled.";
   }
+  // "Joined By" links an EXISTING contact — when supplied it must be a real
+  // contact id (the lookup resolved it), never a free-typed/duplicate person.
+  if (d.joined_by_contact_id != null && String(d.joined_by_contact_id).trim() !== "") {
+    const jb = parseInt(d.joined_by_contact_id, 10);
+    if (!Number.isInteger(jb) || jb <= 0) return "Invalid Joined By contact.";
+    const rows = await query("SELECT id FROM contacts WHERE id = ? LIMIT 1", [jb]);
+    if (!rows.length) return "The selected Joined By contact could not be found.";
+  }
   return null;
 }
 
@@ -260,10 +269,21 @@ export async function coerce(d, prior = null) {
     // Economic Status / Influence Assessment
     economic_status: s(d.economic_status, 80),
     potential_rating: normalizeRating(d.potential_rating),
+    // Joined By — a live link to an existing Contact (id) + the looked-up phone.
+    joined_by_contact_id: jbContactId(d.joined_by_contact_id),
+    joined_by_phone: s(d.joined_by_phone, 30),
+    // Free multiline remark (participation / follow-up / communication / joining …).
+    remark: s(d.remark),
     // Participation
     status: normalizeStatus(d.status),
     ...participationFields(normalizeStatus(d.status), d, prior),
   };
+}
+
+// A positive integer contact id, or null (never a copied person record).
+function jbContactId(v) {
+  const n = parseInt(v, 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 // Shape a DB row for the API. key_activities is a retired column (may hold legacy

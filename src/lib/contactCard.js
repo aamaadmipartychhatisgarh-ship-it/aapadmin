@@ -39,3 +39,38 @@ export async function resolveContactCard(id) {
   );
   return rows[0] || null;
 }
+
+// Find ONE contact by phone number (last-10-digit match, same normalization the
+// Contacts duplicate check uses) and resolve it to the full card. Returns null
+// when the phone isn't a valid 10-digit number or no contact matches — the caller
+// then shows "Contact Not Found" and never creates a duplicate.
+export async function resolveContactByPhone(phone) {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+  const ten = digits.length >= 10 ? digits.slice(-10) : null;
+  if (!ten) return null;
+  const [hit] = await query(
+    `SELECT id FROM contacts
+      WHERE RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone_number,' ',''),'-',''),'+',''),'(',''),')',''),'.','') , 10) = ?
+      LIMIT 1`,
+    [ten]
+  );
+  if (!hit) return null;
+  return resolveContactCard(hit.id);
+}
+
+// The compact "Joined By" contact snapshot the Influencer form/list/view uses. The
+// LINK is the id (details are always read live from Contacts — never copied), and
+// these fields are just the currently-resolved values for display.
+export function compactContactCard(card) {
+  if (!card) return null;
+  return {
+    id: card.id,
+    person_name: card.person_name || null,
+    phone_number: card.phone_number || null,
+    photo_url: card.photo_url || null,
+    assembly_id: card.assembly_id ?? null, assembly_name: card.assembly_name || null,
+    district_id: card.district_id ?? null, district_name: card.district_name || null,
+    lok_sabha_id: card.lok_sabha_id ?? null, lok_sabha_name: card.lok_sabha_name || null,
+    zone_id: card.zone_id ?? null, zone_name: card.zone_name || null,
+  };
+}

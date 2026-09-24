@@ -96,6 +96,13 @@ export async function ensureInfluencerSchema() {
     await ensureColumn("social_media", "VARCHAR(400) NULL");
     await ensureColumn("team_size", "VARCHAR(60) NULL");
     await ensureColumn("social_reach", "TEXT NULL");
+    // "Joined By" — links the influencer to an EXISTING Contacts record (by id) via
+    // a phone lookup, so the contact's details are referenced live (never copied /
+    // duplicated). joined_by_phone keeps the number that was looked up. `remark` is
+    // a free multiline note shown below Participation Status.
+    await ensureColumn("joined_by_contact_id", "INT NULL");
+    await ensureColumn("joined_by_phone", "VARCHAR(30) NULL");
+    await ensureColumn("remark", "TEXT NULL");
     if (!hadJoinDate) {
       // One-time migration of pre-existing statuses into Pending / Joined / Cancelled.
       // Names, assemblies, Added By and every other detail are untouched.

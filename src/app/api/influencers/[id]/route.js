@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureInfluencerSchema, getInfluencerColumns } from "@/lib/influencerSchema";
+import { resolveContactCard, compactContactCard } from "@/lib/contactCard";
 import { validate, coerce, shape } from "../route";
 
 // Every handler here is gated by the "influencers" page key (Super Admin +
@@ -33,7 +34,13 @@ export async function GET(_req, { params }) {
     if (!Number.isInteger(iid) || iid <= 0) return NextResponse.json({ message: "Invalid id." }, { status: 400, headers: NO_STORE });
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [iid]);
     if (!row) return NextResponse.json({ message: "Influencer not found." }, { status: 404, headers: NO_STORE });
-    return NextResponse.json({ influencer: shape(row) }, { headers: NO_STORE });
+    const shaped = shape(row);
+    // Resolve the linked "Joined By" contact LIVE (never a stored copy), so edits to
+    // that contact are always reflected. A since-deleted contact resolves to null.
+    if (shaped.joined_by_contact_id) {
+      shaped.joined_by_contact = compactContactCard(await resolveContactCard(shaped.joined_by_contact_id));
+    }
+    return NextResponse.json({ influencer: shaped }, { headers: NO_STORE });
   } catch (err) {
     console.error("[influencer] GET detail error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

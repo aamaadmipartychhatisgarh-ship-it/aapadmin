@@ -19,10 +19,11 @@ const BRAND = "#164FA3";
 const BLANK = {
   name: "", phone: "", photo_url: "", address: "", assembly_id: "",
   age: "", caste: "", current_party: "",
+  joined_by_phone: "", joined_by_contact_id: "",
   party_years: "", political_position: "", org_position: "", associated_since: "",
   social_media: "", team_size: "", social_reach: "",
   economic_status: "", potential_rating: "",
-  status: "Pending", join_date: "", cancelled_date: "", cancellation_remark: "",
+  status: "Pending", join_date: "", cancelled_date: "", cancellation_remark: "", remark: "",
 };
 
 // The three canonical participation statuses → chip colour.
@@ -410,21 +411,54 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // "Joined By" — the resolved existing Contact (live link) and lookup status.
+  const [joinedBy, setJoinedBy] = useState(null); // compact contact card | null
+  const [jbStatus, setJbStatus] = useState("idle"); // idle | loading | found | notfound | invalid
+
   useEffect(() => {
     if (record) {
       setF({
         ...BLANK, ...record,
         assembly_id: record.assembly_id != null ? String(record.assembly_id) : "",
         age: record.age != null ? String(record.age) : "",
+        joined_by_phone: record.joined_by_phone || "",
+        joined_by_contact_id: record.joined_by_contact_id != null ? String(record.joined_by_contact_id) : "",
+        remark: record.remark || "",
         join_date: record.join_date ? String(record.join_date).slice(0, 10) : "",
         cancelled_date: record.cancelled_date ? String(record.cancelled_date).slice(0, 10) : "",
       });
+      setJoinedBy(record.joined_by_contact || null);
+      setJbStatus(record.joined_by_contact ? "found" : "idle");
     } else {
       setF(BLANK);
+      setJoinedBy(null);
+      setJbStatus("idle");
     }
   }, [record]);
 
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  // Look up the "Joined By" contact from the entered phone (debounced). A valid
+  // 10-digit number searches Contacts; a hit links the EXISTING contact (id) and
+  // shows its live details, a miss shows "Contact Not Found" and clears the link —
+  // a contact is never created here.
+  useEffect(() => {
+    const raw = String(f.joined_by_phone || "").replace(/\D/g, "");
+    if (!raw) { setJbStatus("idle"); setJoinedBy(null); set("joined_by_contact_id", ""); return; }
+    if (raw.length < 10) { setJbStatus("invalid"); setJoinedBy(null); set("joined_by_contact_id", ""); return; }
+    let alive = true;
+    setJbStatus("loading");
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/influencers/contact-lookup?phone=${encodeURIComponent(raw)}`, { cache: "no-store" });
+        const d = await r.json().catch(() => ({}));
+        if (!alive) return;
+        if (d.found && d.contact) { setJoinedBy(d.contact); setJbStatus("found"); set("joined_by_contact_id", String(d.contact.id)); }
+        else { setJoinedBy(null); setJbStatus(d.invalid ? "invalid" : "notfound"); set("joined_by_contact_id", ""); }
+      } catch { if (alive) { setJoinedBy(null); setJbStatus("notfound"); set("joined_by_contact_id", ""); } }
+    }, 400);
+    return () => { alive = false; clearTimeout(t); };
+  }, [f.joined_by_phone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-resolved location chain (District / Lok Sabha / Zone) for the selected
   // Assembly — fetched from the backend/master data, never hardcoded. Refetches
@@ -528,6 +562,21 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
           )}
         </Section>
 
+        {/* Joined By — enter a phone number to find & LINK an existing Contact. */}
+        <Section title="Joined By">
+          <Field label="Joined By (Contact Phone Number)">
+            <input
+              value={f.joined_by_phone}
+              onChange={(e) => set("joined_by_phone", e.target.value)}
+              className={inputCls}
+              inputMode="numeric"
+              placeholder="Enter the contact's phone number"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">Enter a phone number to search Contacts and link the existing record — no duplicate contact is created.</p>
+          </Field>
+          <JoinedByPreview status={jbStatus} contact={joinedBy} />
+        </Section>
+
         {/* Political Journey */}
         <Section title="Political Journey">
           <Grid>
@@ -607,6 +656,12 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
               </Field>
             )}
           </Grid>
+          {/* General remark — participation / follow-up / communication / joining
+              notes. Free multiline; saved with the record and shown on view/edit. */}
+          <Field label="Remark">
+            <textarea value={f.remark || ""} onChange={(e) => set("remark", e.target.value)} className={areaCls} rows={3}
+                      placeholder="Notes on participation, follow-up, communication, joining status, or anything else relevant…" />
+          </Field>
         </Section>
 
         {/* Actions */}
@@ -620,6 +675,38 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
       </form>
     </div>
   );
+}
+
+// "Joined By" lookup result — the linked existing Contact's live details, or a
+// clear status message. Never a create prompt: a miss just says "Contact Not Found".
+function JoinedByPreview({ status, contact }) {
+  if (contact) {
+    return (
+      <div className="rounded-xl border border-green-200 bg-green-50/60 p-3">
+        <div className="flex items-center gap-3">
+          <Thumb src={contact.photo_url} name={contact.person_name} size={48} />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-gray-900">{contact.person_name || "—"}</span>
+              <span className="text-[11px] font-semibold text-green-700 inline-flex items-center gap-1"><CheckCircle2 size={13} /> Linked from Contacts</span>
+            </div>
+            <div className="text-xs text-gray-600 mt-0.5">{contact.phone_number || "—"}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 mt-2 text-xs">
+          <div><span className="text-gray-400">Assembly: </span><span className="text-gray-800">{contact.assembly_name || "—"}</span></div>
+          <div><span className="text-gray-400">District: </span><span className="text-gray-800">{contact.district_name || "—"}</span></div>
+          <div><span className="text-gray-400">Lok Sabha: </span><span className="text-gray-800">{contact.lok_sabha_name || "—"}</span></div>
+          <div><span className="text-gray-400">Zone: </span><span className="text-gray-800">{contact.zone_name || "—"}</span></div>
+        </div>
+        <p className="text-[11px] text-gray-400 mt-2">These details are read live from the linked Contact and are not duplicated onto the influencer.</p>
+      </div>
+    );
+  }
+  if (status === "loading") return <div className="text-sm text-gray-500 inline-flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Searching Contacts…</div>;
+  if (status === "notfound") return <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm px-3 py-2 font-medium">Contact Not Found — no matching contact for this number. A duplicate contact is not created.</div>;
+  if (status === "invalid") return <div className="text-xs text-gray-400">Enter a valid 10-digit phone number to search.</div>;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +745,7 @@ function ViewModal({ row, meta, onClose, onEdit }) {
               <ViewInline label="Added By" value={row.created_by_name} />
               <ViewInline label="Age" value={row.age != null ? String(row.age) : ""} />
               <ViewInline label="Caste" value={row.caste} />
+              <ViewInline label="Joined By" value={row.joined_by_name || row.joined_by_phone} />
             </div>
             {row.current_party && (
               <div className="mt-1"><span className="text-gray-400">Current Party: </span><span className="inline-flex align-middle"><PartyLogo name={row.current_party} byName={partyByName} /></span></div>
@@ -670,6 +758,7 @@ function ViewModal({ row, meta, onClose, onEdit }) {
             {row.status === "Cancelled" && <ViewInline label="Cancelled Date" value={fmtJoinDate(row.cancelled_date)} />}
           </div>
           {row.status === "Cancelled" && <ViewBlock label="Cancellation Reason" value={row.cancellation_remark} />}
+          <ViewBlock label="Remark" value={row.remark} />
 
           {/* Location (auto-resolved from Assembly) */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
