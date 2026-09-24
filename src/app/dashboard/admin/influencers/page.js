@@ -329,18 +329,17 @@ export default function InfluencersPage() {
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
                 <th className="px-4 py-3 font-semibold">Assembly</th>
                 <th className="px-4 py-3 font-semibold">Influencer Name</th>
+                <th className="px-4 py-3 font-semibold">Mobile Number</th>
                 <th className="px-4 py-3 font-semibold">Party</th>
-                <th className="px-4 py-3 font-semibold">Added By</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
-                <th className="px-4 py-3 font-semibold">Join Date</th>
+                <th className="px-4 py-3 font-semibold">Joined By</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400">
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400">
                   <Users size={30} className="mx-auto mb-2 opacity-40" />
                   No influencers found.
                 </td></tr>
@@ -353,10 +352,9 @@ export default function InfluencersPage() {
                       <span>{r.name}</span>
                     </div>
                   </td>
+                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{r.phone || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{r.current_party ? <PartyLogo name={r.current_party} byName={partyByName} /> : "—"}</td>
-                  <td className="px-4 py-3 text-gray-600">{r.created_by_name || "—"}</td>
-                  <td className="px-4 py-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${statusChip(r.status)}`}>{r.status || "—"}</span></td>
-                  <td className="px-4 py-3 text-gray-600">{r.status === "Joined" ? fmtJoinDate(r.join_date) : "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{r.joined_by_name || "—"}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => setViewRow(r)} title="View" className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><Eye size={16} /></button>
