@@ -109,12 +109,19 @@ export async function GET(req) {
     const orderBy = SORT_COLS[searchParams.get("sort")] || SORT_COLS.newest;
 
     const [{ total }] = await query(`SELECT COUNT(*) AS total FROM influencers ${whereSql}`, params);
+    // Only reference joined_by_contact_id when the column actually exists — a
+    // deployment where the lazy ALTER couldn't run (no ALTER privilege) still lists
+    // every existing influencer instead of failing the whole page with an
+    // "Unknown column" 500. Older records simply have no Joined By.
+    const cols = await getInfluencerColumns();
+    const joinedBySel = cols.has("joined_by_contact_id")
+      ? ", (SELECT person_name FROM contacts jc WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_name"
+      : "";
     // pageSize/offset are validated integers (parseInt + clamp above), so they
     // are inlined — mysql2's prepared execute() rejects LIMIT/OFFSET placeholders.
     const rows = await query(
       `SELECT influencers.*,
-              (SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name,
-              (SELECT person_name FROM contacts jc WHERE jc.id = influencers.joined_by_contact_id) AS joined_by_name
+              (SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name${joinedBySel}
          FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
