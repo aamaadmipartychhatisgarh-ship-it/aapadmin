@@ -9,21 +9,20 @@ import {
 } from "lucide-react";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
+import PartySelect, { usePartyMaster, PartyLogo } from "@/components/PartySelect";
 
 // Colour used across the dashboard.
 const BRAND = "#164FA3";
 
-// A blank form matching every DB field. key_activities is an array of strings
-// (4–5 entries); the conditional election block is only saved when contested.
+// A blank form matching the restructured profile: Profile Details, Political
+// Journey, Social Activity, Economic Status, Influence Assessment + participation.
 const BLANK = {
-  name: "", phone: "", photo_url: "", address: "", assembly_id: "", influence_position: "",
-  key_activities: ["", "", "", "", ""], political_journey: "",
-  contested_election: false, election_type: "", election_year: "", election_constituency: "",
-  election_party: "", election_result: "", election_votes: "", election_details: "",
-  org_social_activity: "", economic_status: "", economic_profile: "",
-  potential_rating: "", potential_areas: "", expected_contribution: "", potential_remarks: "",
-  status: "Pending", next_action: "", action_remarks: "", follow_up_date: "", responsible_person: "",
-  join_date: "", cancelled_date: "", cancellation_remark: "",
+  name: "", phone: "", photo_url: "", address: "", assembly_id: "",
+  age: "", caste: "", current_party: "",
+  party_years: "", political_position: "", org_position: "", associated_since: "",
+  social_media: "", team_size: "", social_reach: "",
+  economic_status: "", potential_rating: "",
+  status: "Pending", join_date: "", cancelled_date: "", cancellation_remark: "",
 };
 
 // The three canonical participation statuses → chip colour.
@@ -73,6 +72,9 @@ export default function InfluencersPage() {
   // Super Admin is a synchronous fast-path so their view never waits on /my-pages.
   const { has, loading: pagesLoading } = usePageAccess();
   const canAccess = isSuper || has("influencers");
+  // Party master → resolve each row's party logo live (a logo change in Party
+  // Master is reflected here immediately).
+  const { byName: partyByName } = usePartyMaster();
 
   const [meta, setMeta] = useState(null);
   const [assemblies, setAssemblies] = useState([]);
@@ -88,7 +90,6 @@ export default function InfluencersPage() {
   const [fStatus, setFStatus] = useState("");
   const [fAssembly, setFAssembly] = useState("");
   const [fRating, setFRating] = useState("");
-  const [fAction, setFAction] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
 
@@ -125,7 +126,6 @@ export default function InfluencersPage() {
       if (fStatus) p.set("status", fStatus);
       if (fAssembly) p.set("assembly_id", fAssembly);
       if (fRating) p.set("potential_rating", fRating);
-      if (fAction) p.set("next_action", fAction);
       const r = await fetch(`/api/influencers?${p.toString()}`, { cache: "no-store" });
       if (r.status === 403) { setErr("You do not have access to this module."); setRows([]); setTotal(0); return; }
       if (!r.ok) throw new Error("load failed");
@@ -139,7 +139,7 @@ export default function InfluencersPage() {
     } finally {
       setLoading(false);
     }
-  }, [canAccess, page, pageSize, debounced, fStatus, fAssembly, fRating, fAction]);
+  }, [canAccess, page, pageSize, debounced, fStatus, fAssembly, fRating]);
 
   // Live dashboard counts (overall + per-assembly), recomputed from the DB.
   const loadStats = useCallback(async () => {
@@ -283,7 +283,7 @@ export default function InfluencersPage() {
 
       {/* Filters */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="relative lg:col-span-1 md:col-span-2">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -303,17 +303,13 @@ export default function InfluencersPage() {
             {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
           <select value={fRating} onChange={(e) => { setFRating(e.target.value); setPage(1); }} className="h-10 rounded-lg border border-gray-200 text-sm px-2 text-gray-700">
-            <option value="">All potential</option>
+            <option value="">All influence levels</option>
             {(meta?.potentialRatings || []).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
-          <select value={fAction} onChange={(e) => { setFAction(e.target.value); setPage(1); }} className="h-10 rounded-lg border border-gray-200 text-sm px-2 text-gray-700">
-            <option value="">All next actions</option>
-            {(meta?.nextActions || []).map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
         </div>
-        {(fStatus || fAssembly || fRating || fAction || search) && (
+        {(fStatus || fAssembly || fRating || search) && (
           <button
-            onClick={() => { setSearch(""); setFStatus(""); setFAssembly(""); setFRating(""); setFAction(""); setPage(1); }}
+            onClick={() => { setSearch(""); setFStatus(""); setFAssembly(""); setFRating(""); setPage(1); }}
             className="mt-3 text-xs font-medium text-gray-500 hover:text-gray-700 inline-flex items-center gap-1"
           >
             <X size={13} /> Clear filters
@@ -331,6 +327,7 @@ export default function InfluencersPage() {
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
                 <th className="px-4 py-3 font-semibold">Assembly</th>
                 <th className="px-4 py-3 font-semibold">Influencer Name</th>
+                <th className="px-4 py-3 font-semibold">Party</th>
                 <th className="px-4 py-3 font-semibold">Added By</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Join Date</th>
@@ -339,9 +336,9 @@ export default function InfluencersPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400">
                   <Users size={30} className="mx-auto mb-2 opacity-40" />
                   No influencers found.
                 </td></tr>
@@ -354,6 +351,7 @@ export default function InfluencersPage() {
                       <span>{r.name}</span>
                     </div>
                   </td>
+                  <td className="px-4 py-3 text-gray-600">{r.current_party ? <PartyLogo name={r.current_party} byName={partyByName} /> : "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{r.created_by_name || "—"}</td>
                   <td className="px-4 py-3"><span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium border ${statusChip(r.status)}`}>{r.status || "—"}</span></td>
                   <td className="px-4 py-3 text-gray-600">{r.status === "Joined" ? fmtJoinDate(r.join_date) : "—"}</td>
@@ -414,15 +412,12 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
 
   useEffect(() => {
     if (record) {
-      const acts = Array.isArray(record.key_activities) ? record.key_activities : [];
-      const padded = [...acts];
-      while (padded.length < 5) padded.push("");
       setF({
         ...BLANK, ...record,
         assembly_id: record.assembly_id != null ? String(record.assembly_id) : "",
-        contested_election: !!record.contested_election,
-        key_activities: padded,
-        follow_up_date: record.follow_up_date ? String(record.follow_up_date).slice(0, 10) : "",
+        age: record.age != null ? String(record.age) : "",
+        join_date: record.join_date ? String(record.join_date).slice(0, 10) : "",
+        cancelled_date: record.cancelled_date ? String(record.cancelled_date).slice(0, 10) : "",
       });
     } else {
       setF(BLANK);
@@ -430,7 +425,6 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
   }, [record]);
 
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  const setAct = (i, v) => setF((p) => { const a = [...p.key_activities]; a[i] = v; return { ...p, key_activities: a }; });
 
   // Auto-resolved location chain (District / Lok Sabha / Zone) for the selected
   // Assembly — fetched from the backend/master data, never hardcoded. Refetches
@@ -464,11 +458,7 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
     }
     setSaving(true);
     try {
-      const body = {
-        ...f,
-        key_activities: f.key_activities.map((s) => s.trim()).filter(Boolean),
-        assembly_id: f.assembly_id || null,
-      };
+      const body = { ...f, assembly_id: f.assembly_id || null };
       const url = editing ? `/api/influencers/${record.id}` : "/api/influencers";
       const method = editing ? "PUT" : "POST";
       const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -494,25 +484,19 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
       {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{error}</div>}
 
       <form onSubmit={submit} className="space-y-5">
-        {/* Basic info */}
-        <Section title="Basic Information">
-          {/* Photo */}
+        {/* Profile Details */}
+        <Section title="Profile Details">
           <Field label="Photo">
             <PhotoUpload value={f.photo_url} name={f.name} onChange={(url) => set("photo_url", url)} />
           </Field>
           <Grid>
-            <Field label="Name" required>
+            <Field label="Influencer Name" required>
               <input value={f.name} onChange={(e) => set("name", e.target.value)} className={inputCls} placeholder="Full name" />
             </Field>
             <Field label="Phone">
               <input value={f.phone} onChange={(e) => set("phone", e.target.value)} className={inputCls} placeholder="Contact number" />
             </Field>
-          </Grid>
-          <Field label="Address">
-            <textarea value={f.address} onChange={(e) => set("address", e.target.value)} className={areaCls} rows={2} placeholder="Full address" />
-          </Field>
-          <Grid>
-            <Field label="Assembly">
+            <Field label="Assembly Name">
               <select value={f.assembly_id} onChange={(e) => set("assembly_id", e.target.value)} className={inputCls}>
                 <option value="">Select assembly</option>
                 {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -522,58 +506,63 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
             <Field label="District (auto)">
               <ReadOnly loading={f.assembly_id && loc === null} value={loc?.district_name} empty={f.assembly_id ? "Not mapped" : "Select an assembly"} />
             </Field>
-            <Field label="Lok Sabha (auto)">
-              <ReadOnly loading={f.assembly_id && loc === null} value={loc?.lok_sabha_name} empty={f.assembly_id ? "Not mapped" : "Select an assembly"} />
+            <Field label="Age">
+              <input type="number" min="1" max="120" value={f.age} onChange={(e) => set("age", e.target.value)} className={inputCls} placeholder="Age" />
             </Field>
-            <Field label="Zone (auto)">
-              <ReadOnly loading={f.assembly_id && loc === null} value={loc?.zone_name} empty={f.assembly_id ? "Not mapped" : "Select an assembly"} />
+            <Field label="Caste">
+              <input value={f.caste} onChange={(e) => set("caste", e.target.value)} className={inputCls} placeholder="Caste" />
             </Field>
           </Grid>
-          <Field label="Influence / Position in Assembly">
-            <textarea value={f.influence_position} onChange={(e) => set("influence_position", e.target.value)} className={areaCls} rows={2} placeholder="Position held, scope of influence, remarks" />
+          {/* Current Party — Party Logo is shown automatically from the Party Master. */}
+          <Field label="Current Party">
+            <PartySelect value={f.current_party} onChange={(name) => set("current_party", name)} placeholder="Select a party" />
+            <p className="text-[11px] text-gray-400 mt-1">The party logo is displayed automatically based on the selected party.</p>
           </Field>
-        </Section>
-
-        {/* Key activities */}
-        <Section title="Key Activities">
-          <div className="space-y-2">
-            {f.key_activities.map((a, i) => (
-              <input key={i} value={a} onChange={(e) => setAct(i, e.target.value)} className={inputCls} placeholder={`Activity ${i + 1}`} />
-            ))}
-          </div>
-        </Section>
-
-        {/* Political journey */}
-        <Section title="Political Journey">
-          <textarea value={f.political_journey} onChange={(e) => set("political_journey", e.target.value)} className={areaCls} rows={4} placeholder="Describe the political journey, associations, milestones…" />
-        </Section>
-
-        {/* Previous election */}
-        <Section title="Previous Election Experience">
-          <label className="inline-flex items-center gap-2 text-sm text-gray-700 mb-1">
-            <input type="checkbox" checked={f.contested_election} onChange={(e) => set("contested_election", e.target.checked)} className="w-4 h-4" />
-            Has contested an election before
-          </label>
-          {f.contested_election && (
-            <Grid>
-              <Field label="Election Type"><input value={f.election_type} onChange={(e) => set("election_type", e.target.value)} className={inputCls} placeholder="e.g. Assembly, Panchayat" /></Field>
-              <Field label="Year"><input value={f.election_year} onChange={(e) => set("election_year", e.target.value)} className={inputCls} placeholder="e.g. 2018" /></Field>
-              <Field label="Constituency"><input value={f.election_constituency} onChange={(e) => set("election_constituency", e.target.value)} className={inputCls} /></Field>
-              <Field label="Party"><input value={f.election_party} onChange={(e) => set("election_party", e.target.value)} className={inputCls} /></Field>
-              <Field label="Result"><input value={f.election_result} onChange={(e) => set("election_result", e.target.value)} className={inputCls} placeholder="Won / Lost" /></Field>
-              <Field label="Votes"><input value={f.election_votes} onChange={(e) => set("election_votes", e.target.value)} className={inputCls} /></Field>
-              <Field label="Details" full><textarea value={f.election_details} onChange={(e) => set("election_details", e.target.value)} className={areaCls} rows={2} /></Field>
-            </Grid>
+          <Field label="Address">
+            <textarea value={f.address} onChange={(e) => set("address", e.target.value)} className={areaCls} rows={2} placeholder="Full address" />
+          </Field>
+          {editing && (
+            <Field label="Added By">
+              <ReadOnly value={record?.created_by_name} empty="—" />
+            </Field>
           )}
         </Section>
 
-        {/* Org / social */}
-        <Section title="Organizational / Social Activity">
-          <textarea value={f.org_social_activity} onChange={(e) => set("org_social_activity", e.target.value)} className={areaCls} rows={3} placeholder="Organizations, social work, community roles…" />
+        {/* Political Journey */}
+        <Section title="Political Journey">
+          <Grid>
+            <Field label="Number of years associated with the party">
+              <input value={f.party_years} onChange={(e) => set("party_years", e.target.value)} className={inputCls} placeholder="e.g. 8" />
+            </Field>
+            <Field label="Since when associated">
+              <input value={f.associated_since} onChange={(e) => set("associated_since", e.target.value)} className={inputCls} placeholder="e.g. 2015" />
+            </Field>
+            <Field label="Current Political Position / Post">
+              <input value={f.political_position} onChange={(e) => set("political_position", e.target.value)} className={inputCls} placeholder="Political position / post held" />
+            </Field>
+            <Field label="Current Post / Position in the Organisation">
+              <input value={f.org_position} onChange={(e) => set("org_position", e.target.value)} className={inputCls} placeholder="Organisational post / position" />
+            </Field>
+          </Grid>
         </Section>
 
-        {/* Economic (sensitive) */}
-        <Section title="Economic Status / Profile" note="Sensitive — visible to Super Admin only">
+        {/* Social Activity */}
+        <Section title="Social Activity">
+          <Grid>
+            <Field label="Social Media Platform / Profile">
+              <input value={f.social_media} onChange={(e) => set("social_media", e.target.value)} className={inputCls} placeholder="Platform / handle / profile link" />
+            </Field>
+            <Field label="Team Size">
+              <input value={f.team_size} onChange={(e) => set("team_size", e.target.value)} className={inputCls} placeholder="e.g. 25" />
+            </Field>
+          </Grid>
+          <Field label="Social Reach or Community Engagement">
+            <textarea value={f.social_reach} onChange={(e) => set("social_reach", e.target.value)} className={areaCls} rows={2} placeholder="Reach, followers, community engagement…" />
+          </Field>
+        </Section>
+
+        {/* Economic Status (sensitive) */}
+        <Section title="Economic Status" note="Sensitive — visible to Super Admin only">
           <Grid>
             <Field label="Economic Status">
               <select value={f.economic_status} onChange={(e) => set("economic_status", e.target.value)} className={inputCls}>
@@ -582,30 +571,24 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
               </select>
             </Field>
           </Grid>
-          <Field label="Economic Profile (remarks)">
-            <textarea value={f.economic_profile} onChange={(e) => set("economic_profile", e.target.value)} className={areaCls} rows={2} placeholder="Business, assets, financial standing…" />
-          </Field>
         </Section>
 
-        {/* Potential */}
-        <Section title="Potential Strength for Party">
+        {/* Influence Assessment */}
+        <Section title="Influence Assessment">
           <Grid>
-            <Field label="Potential Rating">
+            <Field label="Potential Strength / Influence Level">
               <select value={f.potential_rating} onChange={(e) => set("potential_rating", e.target.value)} className={inputCls}>
-                <option value="">Select rating</option>
+                <option value="">Select level</option>
                 {(meta?.potentialRatings || []).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </Field>
           </Grid>
-          <Field label="Areas of Strength"><textarea value={f.potential_areas} onChange={(e) => set("potential_areas", e.target.value)} className={areaCls} rows={2} /></Field>
-          <Field label="Expected Time Contribution"><textarea value={f.expected_contribution} onChange={(e) => set("expected_contribution", e.target.value)} className={areaCls} rows={2} /></Field>
-          <Field label="Remarks"><textarea value={f.potential_remarks} onChange={(e) => set("potential_remarks", e.target.value)} className={areaCls} rows={2} /></Field>
         </Section>
 
-        {/* Status & next action */}
-        <Section title="Current Status & Next Action">
+        {/* Participation status */}
+        <Section title="Participation Status">
           <Grid>
-            <Field label="Current Status">
+            <Field label="Status">
               <select value={f.status} onChange={(e) => set("status", e.target.value)} className={inputCls}>
                 {(meta?.statuses || ["Pending", "Joined", "Cancelled"]).map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -623,16 +606,7 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
                 <textarea value={f.cancellation_remark || ""} onChange={(e) => set("cancellation_remark", e.target.value)} className={areaCls} rows={2} placeholder="Why was this cancelled? (required)" />
               </Field>
             )}
-            <Field label="Next Action">
-              <select value={f.next_action} onChange={(e) => set("next_action", e.target.value)} className={inputCls}>
-                <option value="">Select action</option>
-                {(meta?.nextActions || []).map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </Field>
-            <Field label="Follow-up Date"><input type="date" value={f.follow_up_date} onChange={(e) => set("follow_up_date", e.target.value)} className={inputCls} /></Field>
-            <Field label="Responsible Person"><input value={f.responsible_person} onChange={(e) => set("responsible_person", e.target.value)} className={inputCls} /></Field>
           </Grid>
-          <Field label="Action Remarks"><textarea value={f.action_remarks} onChange={(e) => set("action_remarks", e.target.value)} className={areaCls} rows={2} /></Field>
         </Section>
 
         {/* Actions */}
@@ -652,7 +626,7 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
 // View modal
 // ---------------------------------------------------------------------------
 function ViewModal({ row, meta, onClose, onEdit }) {
-  const acts = Array.isArray(row.key_activities) ? row.key_activities : [];
+  const { byName: partyByName } = usePartyMaster();
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[88vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
@@ -673,13 +647,25 @@ function ViewModal({ row, meta, onClose, onEdit }) {
         <div className="overflow-y-auto px-6 py-4 space-y-5 text-sm">
           <div className="flex flex-wrap gap-2">
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${statusChip(row.status)}`}>{row.status}</span>
-            {row.potential_rating && <span className="px-2 py-0.5 rounded-full text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">Potential: {ratingLabel(meta, row.potential_rating)}</span>}
-            {row.next_action && <span className="px-2 py-0.5 rounded-full text-xs font-medium border bg-gray-100 text-gray-600 border-gray-200">Next: {row.next_action}</span>}
+            {row.potential_rating && <span className="px-2 py-0.5 rounded-full text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">Influence: {ratingLabel(meta, row.potential_rating)}</span>}
           </div>
 
-          {/* Participation — Added By, Join / Cancellation info */}
+          {/* Profile Details */}
+          <div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Profile Details</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              <ViewInline label="Assembly" value={row.assembly_name} />
+              <ViewInline label="Added By" value={row.created_by_name} />
+              <ViewInline label="Age" value={row.age != null ? String(row.age) : ""} />
+              <ViewInline label="Caste" value={row.caste} />
+            </div>
+            {row.current_party && (
+              <div className="mt-1"><span className="text-gray-400">Current Party: </span><span className="inline-flex align-middle"><PartyLogo name={row.current_party} byName={partyByName} /></span></div>
+            )}
+          </div>
+
+          {/* Participation — Join / Cancellation info */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <ViewInline label="Added By" value={row.created_by_name} />
             {row.status === "Joined" && <ViewInline label="Join Date" value={fmtJoinDate(row.join_date)} />}
             {row.status === "Cancelled" && <ViewInline label="Cancelled Date" value={fmtJoinDate(row.cancelled_date)} />}
           </div>
@@ -687,51 +673,38 @@ function ViewModal({ row, meta, onClose, onEdit }) {
 
           {/* Location (auto-resolved from Assembly) */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <ViewInline label="Assembly" value={row.assembly_name} />
             <ViewInline label="District" value={row.district_name} />
             <ViewInline label="Lok Sabha" value={row.lok_sabha_name} />
             <ViewInline label="Zone" value={row.zone_name} />
           </div>
           <ViewBlock label="Address" value={row.address} />
-          <ViewBlock label="Influence / Position in Assembly" value={row.influence_position} />
 
-          {acts.length > 0 && (
+          {/* Political Journey */}
+          {(row.party_years || row.associated_since || row.political_position || row.org_position) && (
             <div>
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Key Activities</div>
-              <ul className="list-disc pl-5 space-y-0.5 text-gray-700">{acts.map((a, i) => <li key={i}>{a}</li>)}</ul>
-            </div>
-          )}
-
-          <ViewBlock label="Political Journey" value={row.political_journey} />
-
-          {row.contested_election ? (
-            <div>
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Previous Election Experience</div>
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Political Journey</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-700">
-                <ViewInline label="Type" value={row.election_type} />
-                <ViewInline label="Year" value={row.election_year} />
-                <ViewInline label="Constituency" value={row.election_constituency} />
-                <ViewInline label="Party" value={row.election_party} />
-                <ViewInline label="Result" value={row.election_result} />
-                <ViewInline label="Votes" value={row.election_votes} />
+                <ViewInline label="Years with party" value={row.party_years} />
+                <ViewInline label="Associated since" value={row.associated_since} />
+                <ViewInline label="Political Position / Post" value={row.political_position} />
+                <ViewInline label="Post in Organisation" value={row.org_position} />
               </div>
-              {row.election_details && <p className="text-gray-700 mt-1">{row.election_details}</p>}
             </div>
-          ) : (
-            <ViewBlock label="Previous Election Experience" value="No" />
           )}
 
-          <ViewBlock label="Organizational / Social Activity" value={row.org_social_activity} />
+          {/* Social Activity */}
+          {(row.social_media || row.team_size || row.social_reach) && (
+            <div>
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Social Activity</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-700">
+                <ViewInline label="Social Media" value={row.social_media} />
+                <ViewInline label="Team Size" value={row.team_size} />
+              </div>
+              {row.social_reach && <p className="text-gray-700 mt-1 whitespace-pre-wrap">{row.social_reach}</p>}
+            </div>
+          )}
+
           <ViewBlock label="Economic Status" value={row.economic_status} />
-          <ViewBlock label="Economic Profile" value={row.economic_profile} />
-          <ViewBlock label="Areas of Strength" value={row.potential_areas} />
-          <ViewBlock label="Expected Time Contribution" value={row.expected_contribution} />
-          <ViewBlock label="Potential Remarks" value={row.potential_remarks} />
-          <ViewBlock label="Action Remarks" value={row.action_remarks} />
-          <div className="grid grid-cols-2 gap-x-4">
-            <ViewInline label="Follow-up Date" value={row.follow_up_date ? String(row.follow_up_date).slice(0, 10) : ""} />
-            <ViewInline label="Responsible Person" value={row.responsible_person} />
-          </div>
         </div>
 
         <div className="flex justify-end gap-2 px-6 py-3 border-t border-gray-100">

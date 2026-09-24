@@ -81,6 +81,21 @@ export async function ensureInfluencerSchema() {
     await ensureColumn("join_date", "DATE NULL");
     await ensureColumn("cancelled_date", "DATE NULL");
     await ensureColumn("cancellation_remark", "TEXT NULL");
+    // Restructured profile (Profile Details / Political Journey / Social Activity).
+    // Added lazily so existing installs gain them without a manual migration; older
+    // free-text columns (political_journey, org_social_activity, key_activities,
+    // potential_areas, expected_contribution, potential_remarks, …) are RETAINED so
+    // no historical data is lost — the module simply no longer writes them.
+    await ensureColumn("age", "INT NULL");
+    await ensureColumn("caste", "VARCHAR(120) NULL");
+    await ensureColumn("current_party", "VARCHAR(160) NULL");
+    await ensureColumn("party_years", "VARCHAR(60) NULL");
+    await ensureColumn("political_position", "VARCHAR(200) NULL");
+    await ensureColumn("org_position", "VARCHAR(200) NULL");
+    await ensureColumn("associated_since", "VARCHAR(60) NULL");
+    await ensureColumn("social_media", "VARCHAR(400) NULL");
+    await ensureColumn("team_size", "VARCHAR(60) NULL");
+    await ensureColumn("social_reach", "TEXT NULL");
     if (!hadJoinDate) {
       // One-time migration of pre-existing statuses into Pending / Joined / Cancelled.
       // Names, assemblies, Added By and every other detail are untouched.

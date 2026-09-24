@@ -34,18 +34,6 @@ const SORT_COLS = {
   updated: "updated_at DESC",
 };
 
-// Normalize the multi-entry key-activities list to a clean JSON array string.
-function packActivities(v) {
-  let arr = [];
-  if (Array.isArray(v)) arr = v;
-  else if (typeof v === "string" && v.trim()) {
-    try { const p = JSON.parse(v); if (Array.isArray(p)) arr = p; else arr = [v]; }
-    catch { arr = v.split("\n"); }
-  }
-  const clean = arr.map((s) => String(s || "").trim()).filter(Boolean);
-  return clean.length ? JSON.stringify(clean) : null;
-}
-
 // GET /api/influencers               → paginated list (search + filters)
 // GET /api/influencers?meta=1         → option sets for the form/filters
 export async function GET(req) {
@@ -194,6 +182,11 @@ export async function validate(d) {
     const digits = phone.replace(/[^0-9]/g, "");
     if (digits.length < 7 || digits.length > 15) return "Enter a valid phone number.";
   }
+  // Age, when provided, must be a sensible whole number.
+  if (d.age != null && String(d.age).trim() !== "") {
+    const n = Number(d.age);
+    if (!Number.isInteger(n) || n < 1 || n > 120) return "Enter a valid age (1–120).";
+  }
   // Assembly, when provided, must be a real assembly in the master data.
   if (d.assembly_id != null && String(d.assembly_id).trim() !== "") {
     const rows = await query("SELECT id, name FROM locations WHERE id = ? AND type = 'assembly'", [d.assembly_id]);
@@ -234,10 +227,14 @@ export async function coerce(d, prior = null) {
     if (!v) return null;
     return max ? v.slice(0, max) : v;
   };
-  const contested = d.contested_election === true || d.contested_election === 1 ||
-    d.contested_election === "1" || d.contested_election === "yes" || d.contested_election === "Yes";
-  let follow = s(d.follow_up_date);
-  if (follow) follow = String(follow).slice(0, 10);
+  const ageStr = String(d.age ?? "").trim();
+  const age = ageStr && Number.isInteger(Number(ageStr)) ? Number(ageStr) : null;
+  // Only the fields the current module writes are returned. Superseded columns
+  // (influence_position, key_activities, political_journey, contested_election,
+  // election_*, org_social_activity, economic_profile, potential_areas,
+  // expected_contribution, potential_remarks, next_action, action_remarks,
+  // follow_up_date, responsible_person) are intentionally OMITTED, so the dynamic
+  // INSERT/UPDATE never touches them — existing historical values are preserved.
   return {
     name: String(d.name).trim().slice(0, 150),
     phone: s(d.phone, 30),
@@ -247,34 +244,30 @@ export async function coerce(d, prior = null) {
     district_id: h.district_id, district_name: h.district_name,
     lok_sabha_id: h.lok_sabha_id, lok_sabha_name: h.lok_sabha_name,
     zone_id: h.zone_id, zone_name: h.zone_name,
-    influence_position: s(d.influence_position),
-    key_activities: packActivities(d.key_activities),
-    political_journey: s(d.political_journey),
-    contested_election: contested ? 1 : 0,
-    election_type: contested ? s(d.election_type, 120) : null,
-    election_year: contested ? s(d.election_year, 12) : null,
-    election_constituency: contested ? s(d.election_constituency, 160) : null,
-    election_party: contested ? s(d.election_party, 120) : null,
-    election_result: contested ? s(d.election_result, 120) : null,
-    election_votes: contested ? s(d.election_votes, 60) : null,
-    election_details: contested ? s(d.election_details) : null,
-    org_social_activity: s(d.org_social_activity),
+    // Profile Details
+    age,
+    caste: s(d.caste, 120),
+    current_party: s(d.current_party, 160),
+    // Political Journey
+    party_years: s(d.party_years, 60),
+    political_position: s(d.political_position, 200),
+    org_position: s(d.org_position, 200),
+    associated_since: s(d.associated_since, 60),
+    // Social Activity
+    social_media: s(d.social_media, 400),
+    team_size: s(d.team_size, 60),
+    social_reach: s(d.social_reach),
+    // Economic Status / Influence Assessment
     economic_status: s(d.economic_status, 80),
-    economic_profile: s(d.economic_profile),
     potential_rating: normalizeRating(d.potential_rating),
-    potential_areas: s(d.potential_areas),
-    expected_contribution: s(d.expected_contribution),
-    potential_remarks: s(d.potential_remarks),
+    // Participation
     status: normalizeStatus(d.status),
-    next_action: s(d.next_action, 80),
-    action_remarks: s(d.action_remarks),
-    follow_up_date: follow,
-    responsible_person: s(d.responsible_person, 160),
     ...participationFields(normalizeStatus(d.status), d, prior),
   };
 }
 
-// Shape a DB row for the API — decode key_activities JSON to an array.
+// Shape a DB row for the API. key_activities is a retired column (may hold legacy
+// JSON) — decoded to an array for backward-compatible read-only display.
 export function shape(row) {
   if (!row) return row;
   let activities = [];
