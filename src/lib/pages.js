@@ -34,6 +34,8 @@ export const PAGES = [
     roles: [ROLES.CALLER] },
   { key: "contacts", label: "Contacts", href: "/dashboard/admin/contacts", prefixes: ["/dashboard/admin/contacts", "/dashboard/supervisor/contacts", "/dashboard/admin/contacts-hierarchy", "/dashboard/admin/contacts-incomplete", "/dashboard/admin/active-workers", "/dashboard/admin/repeat-off"], icon: "UserCheck",
     roles: [...OVERSIGHT] },
+  { key: "vacancies", label: "Designation Vacancies", href: "/dashboard/admin/vacancies", prefixes: ["/dashboard/admin/vacancies"], icon: "UserCog",
+    roles: [...OVERSIGHT] },
   { key: "wrong_numbers", label: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", prefixes: ["/dashboard/admin/wrong-numbers"], icon: "AlertCircle",
     roles: [...OVERSIGHT, ROLES.CALLER] },
   // Wrong Numbers sub-tabs (in-page tabs of /dashboard/admin/wrong-numbers).
