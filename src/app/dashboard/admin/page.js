@@ -7,6 +7,7 @@ import { Loader2, Gauge, TrendingUp, TrendingDown, Minus, FileText, ChevronRight
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import SummaryDashboard from "@/components/SummaryDashboard";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
+import AssemblyBreakdown from "@/components/AssemblyBreakdown";
 
 // State/Zone/District/Assembly Overview — now a single tabbed page: the daily
 // calling KPIs (Overview), the full chart suite (Analytics, merged in from the
@@ -150,7 +151,11 @@ export default function AdminDashboard() {
       ) : (
         // Overview is the default — also the fallback for any stale tab value
         // (e.g. the removed "supervisor" view) so no blank panel can show.
-        <SummaryDashboard summaryUrl="/api/admin/state-summary" exportUrl="/api/supervisor/export/summary" title={title} />
+        <>
+          <SummaryDashboard summaryUrl="/api/admin/state-summary" exportUrl="/api/supervisor/export/summary" title={title} />
+          {/* Bottom section: Worker by Assembly + Influencer by Assembly. */}
+          <AssemblyBreakdown />
+        </>
       )}
     </div>
   );

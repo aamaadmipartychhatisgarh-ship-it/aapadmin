@@ -123,17 +123,6 @@ export default function AnalyticsPanel() {
     (taData?.topAgents || []).map((r) => ({ agent: r.agent, calls: Number(r.calls), connected: Number(r.connected) })),
   [taData]);
 
-  // Workers by Assembly — EVERY master assembly from the backend (all 90,
-  // including zero-worker ones), each with its live Contacts-based worker count.
-  const workersByAssembly = useMemo(() =>
-    (data?.assemblyWorkers || []).map((a) => ({ assembly: a.assembly, workers: Number(a.workers) || 0 })),
-  [data]);
-  // Total worker count across all assemblies — consistent with the per-assembly
-  // rows above (summed from the same dataset, never a separate query).
-  const workersByAssemblyTotal = useMemo(() =>
-    workersByAssembly.reduce((s, a) => s + a.workers, 0),
-  [workersByAssembly]);
-
   // Date × hour heat map: an array of { day, hours: {10: n, …}, total } — one
   // row per actual calendar date in the window (zero-call days included).
   const heatmap = data?.heatmap || [];
@@ -198,11 +187,6 @@ export default function AnalyticsPanel() {
                       { header: "Switched Off", flex: 1, align: "right" },
                     ],
                     rows: stackedData.map((r) => [r.district, r.Connected, r["Not Picked"], r["Wrong Number"], r.Rejected, r.Busy, r["Switched Off"]]),
-                  },
-                  {
-                    title: `Workers by Assembly (Total: ${Number(workersByAssemblyTotal).toLocaleString("en-IN")})`,
-                    columns: [{ header: "Assembly", flex: 3 }, { header: "Workers", flex: 1, align: "right" }],
-                    rows: workersByAssembly.map((a) => [a.assembly, a.workers]),
                   },
                   {
                     title: "Activity Heat Map — daily totals",
@@ -351,33 +335,8 @@ export default function AnalyticsPanel() {
             )}
           </Panel>
 
-          {/* Row 6: Workers by Assembly — a horizontal bar chart of the ACTUAL
-              worker count per assembly (Assembly → workers), sorted high→low.
-              EVERY master assembly (all 90) is shown, including zero-worker ones;
-              the scroll container keeps them all accessible. Total below. */}
-          <Panel title="Workers by Assembly" icon={Layers}>
-            <div className="flex items-center justify-between -mt-3 mb-3 gap-3 flex-wrap">
-              <p className="text-xs text-gray-400">Actual workers per assembly (live Contacts count), highest to lowest. All {workersByAssembly.length} assemblies.</p>
-              <p className="text-xs font-semibold text-gray-700">Total: <span className="text-[#164FA3]">{Number(workersByAssemblyTotal).toLocaleString("en-IN")}</span></p>
-            </div>
-            {workersByAssembly.length === 0 ? (
-              <div className="h-[120px] flex items-center justify-center text-gray-400 text-sm">No assembly data available.</div>
-            ) : (
-              <div className="overflow-y-auto" style={{ maxHeight: 520 }}>
-                <ResponsiveContainer width="100%" height={Math.max(220, workersByAssembly.length * 24)}>
-                  <BarChart layout="vertical" data={workersByAssembly} margin={{ top: 4, right: 48, bottom: 4, left: 8 }} barCategoryGap={4}>
-                    <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="#eef2f7" />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: "#9ca3af" }} />
-                    <YAxis type="category" dataKey="assembly" width={150} interval={0} tick={{ fontSize: 11, fill: "#374151" }} />
-                    <Tooltip cursor={{ fill: "rgba(22,79,163,0.06)" }} content={<WorkersByAssemblyTooltip />} />
-                    <Bar dataKey="workers" fill="#164FA3" radius={[0, 4, 4, 0]} maxBarSize={18} isAnimationActive={false}>
-                      <LabelList dataKey="workers" position="right" formatter={(v) => Number(v).toLocaleString("en-IN")} style={{ fontSize: 11, fill: "#374151", fontWeight: 600 }} />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </Panel>
+          {/* Workers by Assembly moved to the Dashboard tab (bottom section),
+              alongside Influencer by Assembly — see AssemblyBreakdown. */}
         </div>
       )}
     </div>
@@ -496,19 +455,6 @@ function Panel({ title, icon: Icon, className = "", children }) {
 
 function Empty() {
   return <div className="h-[300px] flex items-center justify-center text-gray-400 text-sm">No data in this range.</div>;
-}
-
-// Workers-by-District tooltip — shows ONLY the district name and its actual
-// worker count (no required/attempt/strength values).
-function WorkersByAssemblyTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-md px-3 py-2 text-xs">
-      <div className="font-bold text-gray-900">{d.assembly}</div>
-      <div className="text-gray-600 mt-0.5">Actual Workers: <strong className="text-[#164FA3]">{Number(d.workers).toLocaleString("en-IN")}</strong></div>
-    </div>
-  );
 }
 
 function Field({ label, children }) {
