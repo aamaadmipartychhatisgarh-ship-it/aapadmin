@@ -226,8 +226,6 @@ export default function DashboardLayout({ children }) {
       // through district_admin but missing here, so the top role — the one
       // whose own comment above says "higher tiers include more" — was the
       // only admin tier that could not reach them from its own nav.
-      { name: "Strength", href: "/dashboard/strength", icon: Gauge },
-      { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
@@ -259,8 +257,6 @@ export default function DashboardLayout({ children }) {
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", icon: Vote },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Strength", href: "/dashboard/strength", icon: Gauge },
-      { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Social Command", href: "/dashboard/social-management", icon: Share2 },
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
@@ -284,8 +280,6 @@ export default function DashboardLayout({ children }) {
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Strength", href: "/dashboard/strength", icon: Gauge },
-      { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
       { name: "Audit", href: "/dashboard/admin/audit", icon: ScrollText },
     ],
@@ -306,7 +300,6 @@ export default function DashboardLayout({ children }) {
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
-      { name: "Rankings", href: "/dashboard/rankings", icon: Trophy },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
       { name: "Audit", href: "/dashboard/admin/audit", icon: ScrollText },
     ],
@@ -388,7 +381,7 @@ export default function DashboardLayout({ children }) {
     const seen = new Set();
     navItems = allowedPageKeys
       .map((key) => PAGES.find((p) => p.key === key))
-      .filter((pg) => pg && !pg.tab)
+      .filter((pg) => pg && !pg.tab && !pg.hideFromNav)
       .filter((pg) => (seen.has(pg.href) ? false : (seen.add(pg.href), true)))
       .map((pg) => ({ name: pg.label, href: pg.href, icon: PAGE_ICONS[pg.icon] || FileText }));
   }

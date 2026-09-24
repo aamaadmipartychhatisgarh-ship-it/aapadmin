@@ -102,9 +102,12 @@ export const PAGES = [
     roles: [...OVERSIGHT] },
   { key: "analytics", label: "Analytics", href: "/dashboard/analytics", prefixes: ["/dashboard/analytics"], icon: "BarChart3",
     roles: [...OVERSIGHT] },
-  { key: "strength", label: "Strength", href: "/dashboard/strength", prefixes: ["/dashboard/strength"], icon: "Gauge",
+  // Strength & Rankings are removed from the left sidebar (hideFromNav) but their
+  // routes and page-access keys are kept, so the pages stay reachable directly and
+  // access management is unaffected.
+  { key: "strength", label: "Strength", href: "/dashboard/strength", prefixes: ["/dashboard/strength"], icon: "Gauge", hideFromNav: true,
     roles: [...OVERSIGHT] },
-  { key: "rankings", label: "Rankings", href: "/dashboard/rankings", prefixes: ["/dashboard/rankings", "/dashboard/full-ranking"], icon: "Trophy",
+  { key: "rankings", label: "Rankings", href: "/dashboard/rankings", prefixes: ["/dashboard/rankings", "/dashboard/full-ranking"], icon: "Trophy", hideFromNav: true,
     roles: [...OVERSIGHT] },
   { key: "events", label: "Events", href: "/dashboard/admin/events", prefixes: ["/dashboard/admin/events"], icon: "CalendarClock",
     roles: [...OVERSIGHT] },
