@@ -78,6 +78,15 @@ export default function ProfilePhoto({
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null); // { type, text }
   const [err, setErr] = useState("");
+  // Whether the current photo actually LOADS. View / Remove are offered only when a
+  // real, retrievable image exists — not merely because `src` holds a path — so a
+  // dead reference (file gone from storage) shows the Upload option instead (§6).
+  // Reset whenever the src changes so a freshly-set photo is trusted until proven
+  // broken. A src that is a local object/preview URL (fresh upload) is always valid.
+  const [imgBroken, setImgBroken] = useState(false);
+  useEffect(() => { setImgBroken(false); }, [src]);
+  const isPreview = typeof src === "string" && /^(blob:|data:)/i.test(src);
+  const hasValidPhoto = !!src && (isPreview || !imgBroken);
   const fileRef = useRef(null);
   const cameraRef = useRef(null);
 
@@ -125,7 +134,8 @@ export default function ProfilePhoto({
 
   return (
     <div className="relative inline-block">
-      <Avatar name={name} src={src} size={size} square={square} className={className} textClassName={textClassName} />
+      <Avatar name={name} src={src} size={size} square={square} className={className} textClassName={textClassName}
+        onError={() => setImgBroken(true)} onLoad={() => setImgBroken(false)} />
 
       {editable && (
         <button
@@ -146,8 +156,9 @@ export default function ProfilePhoto({
           <div className="absolute z-50 mt-2 left-1/2 -translate-x-1/2 top-full w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-1 text-sm">
             <MenuItem icon={Upload} label="Upload Photo" onClick={() => { setMenuOpen(false); fileRef.current?.click(); }} />
             <MenuItem icon={Camera} label="Take Photo" onClick={() => { setMenuOpen(false); cameraRef.current?.click(); }} />
-            {src && <MenuItem icon={Eye} label="View Current Photo" onClick={() => { setMenuOpen(false); setViewing(true); }} />}
-            {src && <MenuItem icon={Trash2} label="Remove Photo" danger onClick={handleRemove} />}
+            {/* View / Remove only when a real, retrievable photo exists (§6). */}
+            {hasValidPhoto && <MenuItem icon={Eye} label="View Current Photo" onClick={() => { setMenuOpen(false); setViewing(true); }} />}
+            {hasValidPhoto && <MenuItem icon={Trash2} label="Remove Photo" danger onClick={handleRemove} />}
             <MenuItem icon={X} label="Cancel" onClick={() => setMenuOpen(false)} />
           </div>
         </>
@@ -172,7 +183,7 @@ export default function ProfilePhoto({
 
       {/* Full-image viewer. z sits above app modals (e.g. the z-[100] contact
           profile modal) so it's usable when ProfilePhoto is rendered inside one. */}
-      {viewing && src && createPortal(
+      {viewing && hasValidPhoto && createPortal(
         <div className="fixed inset-0 z-[130] bg-black/80 flex items-center justify-center p-4" onClick={() => setViewing(false)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={resolvePhotoUrl(src)} alt={name || "photo"} className="max-w-[90vw] max-h-[90vh] rounded-xl object-contain" />

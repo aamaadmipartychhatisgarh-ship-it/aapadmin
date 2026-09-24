@@ -48,7 +48,7 @@ export function initialsOf(name) {
 //   size          — px diameter (default 64)
 //   className     — extra classes on the circle (background/border/ring)
 //   textClassName — classes for the initials/icon (color)
-export default function Avatar({ name, src, size = 64, square = false, className = "", textClassName = "", onClick, title }) {
+export default function Avatar({ name, src, size = 64, square = false, className = "", textClassName = "", onClick, title, onError, onLoad }) {
   const [errored, setErrored] = useState(false);
   // Retry attempts (0 = first load). In a large list dozens of photos load at
   // once through the auth+DB-backed /api/media route; under that burst a request
@@ -65,7 +65,10 @@ export default function Avatar({ name, src, size = 64, square = false, className
     ? `${resolvedSrc}${resolvedSrc.includes("?") ? "&" : "?"}r=${retry}`
     : resolvedSrc;
   const showImg = resolvedSrc && !errored;
-  const onImgError = () => { if (retry < 2) setRetry((n) => n + 1); else setErrored(true); };
+  // Retry a transient failure a couple of times; only after that do we declare the
+  // image genuinely unretrievable and notify the parent (used to hide View/Remove
+  // when the actual file is gone — real retrievability, not just a DB field).
+  const onImgError = () => { if (retry < 2) setRetry((n) => n + 1); else { setErrored(true); onError?.(); } };
   return (
     <div
       onClick={onClick}
@@ -75,7 +78,7 @@ export default function Avatar({ name, src, size = 64, square = false, className
     >
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img key={retry} src={finalSrc} alt={name || "avatar"} loading="lazy" decoding="async" onError={onImgError} className="w-full h-full object-cover" />
+        <img key={retry} src={finalSrc} alt={name || "avatar"} loading="lazy" decoding="async" onError={onImgError} onLoad={() => onLoad?.()} className="w-full h-full object-cover" />
       ) : ini ? (
         <span className={`font-bold leading-none ${textClassName}`} style={{ fontSize: Math.round(size * 0.38) }}>{ini}</span>
       ) : (

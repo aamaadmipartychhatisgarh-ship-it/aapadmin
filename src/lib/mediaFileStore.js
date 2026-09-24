@@ -1,4 +1,6 @@
 import { query, mediaQuery } from "@/lib/db";
+import { access } from "fs/promises";
+import path from "path";
 
 // In-process LRU cache of served blobs (id → {data, mime_type}). Photo bytes
 // never change for a given UUID, so caching them is always correct. This absorbs
@@ -99,4 +101,50 @@ export async function getMediaFile(id) {
   } catch {
     return null;
   }
+}
+
+// Does the ACTUAL file behind a `/uploads/<uuid>.<ext>` URL still exist anywhere
+// it could be served from — the durable media store, the legacy worker/user photo
+// tables, or the local disk? This is the real "is the photo retrievable" check
+// used to (a) drive the UI's View/Remove state and (b) safely repair dead
+// references, so a photo is NEVER judged present just because a DB column holds a
+// path (§6), and a reference is NEVER cleared merely because a store lookup errored
+// (§5, §11).
+//   Returns { found, errored }:
+//     found     — true if the bytes are present in at least one store/disk
+//     errored   — true if a lookup failed in a way that leaves existence UNKNOWN
+//                 (a transient DB/pool error, NOT a missing legacy table). When
+//                 errored is true the caller must treat existence as indeterminate
+//                 and must NOT delete the reference.
+// A non-/uploads value (external http URL, empty) is treated as {found:true} —
+// not ours to audit.
+export async function checkUploadExists(url) {
+  const s = String(url || "").trim();
+  if (!s) return { found: false, errored: false };
+  if (!s.startsWith("/uploads/")) return { found: true, errored: false }; // external / already-absolute — leave alone
+  const name = path.basename(s);
+  if (!name || name.includes("..")) return { found: false, errored: false };
+  const ext = name.split(".").pop();
+  const id = ext ? name.slice(0, name.length - ext.length - 1) : name;
+
+  let errored = false;
+  const probe = async (table) => {
+    try {
+      const [r] = await mediaQuery(`SELECT 1 FROM ${table} WHERE id = ? LIMIT 1`, [id]);
+      return !!r;
+    } catch (e) {
+      // A missing legacy table is a KNOWN "absent here" (not indeterminate); any
+      // other error means we couldn't tell — mark indeterminate so we never clear.
+      if (e?.code !== "ER_NO_SUCH_TABLE" && e?.errno !== 1146) errored = true;
+      return false;
+    }
+  };
+  if (await probe("media_files")) return { found: true, errored: false };
+  if (await probe("worker_photos")) return { found: true, errored };
+  if (await probe("user_photos")) return { found: true, errored };
+  try {
+    await access(path.join(process.cwd(), "public", "uploads", name));
+    return { found: true, errored };
+  } catch { /* not on disk */ }
+  return { found: false, errored };
 }
