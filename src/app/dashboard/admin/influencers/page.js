@@ -728,7 +728,8 @@ function JoinedByPreview({ status, contact }) {
               <span className="font-semibold text-gray-900">{contact.person_name || "—"}</span>
               <span className="text-[11px] font-semibold text-green-700 inline-flex items-center gap-1"><CheckCircle2 size={13} /> Linked from Contacts</span>
             </div>
-            <div className="text-xs text-gray-600 mt-0.5">{contact.phone_number || "—"}</div>
+            <div className="text-xs text-gray-600 mt-0.5">{contact.designation_name || "—"}</div>
+            <div className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1"><Phone size={11} /> {contact.phone_number || "—"}</div>
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 mt-2 text-xs">

@@ -68,6 +68,7 @@ export function compactContactCard(card) {
     person_name: card.person_name || null,
     phone_number: card.phone_number || null,
     photo_url: card.photo_url || null,
+    designation_name: card.designation_name || null,
     assembly_id: card.assembly_id ?? null, assembly_name: card.assembly_name || null,
     district_id: card.district_id ?? null, district_name: card.district_name || null,
     lok_sabha_id: card.lok_sabha_id ?? null, lok_sabha_name: card.lok_sabha_name || null,
