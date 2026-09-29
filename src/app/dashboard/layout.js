@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -106,7 +106,7 @@ const VIEW_OPTIONS = [
 const PAGE_ICONS = {
   LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp,
   MessageSquare, ClipboardList, Gauge, Newspaper, Share2, FileText, BarChart3,
-  Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star, Users, Vote,
+  Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star, Users, Vote, ShieldCheck,
 };
 
 export default function DashboardLayout({ children }) {
@@ -204,6 +204,7 @@ export default function DashboardLayout({ children }) {
     [ROLES.SUPER_ADMIN]: [
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
+      { name: "Designation Approvals", href: "/dashboard/admin/approvals", icon: ShieldCheck },
       // Contacts is a collapsible parent — Active Workers is nested beneath it.
       // Wrong Number is NOT a side-panel item: it opens as a tab on the Contacts
       // page itself (with its Not Interested / 10+ Switched-Off / 10+ Incoming-Off

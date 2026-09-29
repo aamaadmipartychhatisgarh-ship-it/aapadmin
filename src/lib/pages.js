@@ -162,6 +162,24 @@ export const PAGES = [
   // unauthenticated by design and gated only by the worker's link token.
   { key: "voter_registration", label: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", prefixes: ["/dashboard/admin/voter-registration"], icon: "Vote",
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN] },
+  // Designation Approvals — the 7-level sequential approval chain. The page itself
+  // is visible to oversight (they also get the "All Requests" view). The initiate
+  // capability and the 7 per-level approver grants are CAPABILITY keys: roles: []
+  // so no one gets them by baseline — a Super Admin grants each approver exactly
+  // their level in Page Access, and every approval API re-checks the key
+  // server-side. They are `tab: true` (never resolved as a route by pageKeyForPath)
+  // and children of `approvals`, so granting one shows the Approvals page (ancestor)
+  // in the nav without granting the other levels.
+  { key: "approvals", label: "Designation Approvals", href: "/dashboard/admin/approvals", prefixes: ["/dashboard/admin/approvals"], icon: "ShieldCheck",
+    roles: [...OVERSIGHT] },
+  { key: "approval_initiate", label: "Approvals · Initiate Designation", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Plus", roles: [] },
+  { key: "approve_l1_district_president", label: "Approvals · L1 District President", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l2_loksabha_adhyaksh", label: "Approvals · L2 Lok Sabha Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l3_loksabha_prabhari", label: "Approvals · L3 Lok Sabha Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l4_sangathan_mantri", label: "Approvals · L4 Pradesh Sangathan Mantri", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l5_karyakari_adhyaksh", label: "Approvals · L5 Pradesh Karyakari Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l6_sah_prabhari", label: "Approvals · L6 Sah Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l7_prabhari_ji", label: "Approvals · L7 Prabhari Ji", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
 ];
 
 // Pages that are NEVER gated by this system — every signed-in user reaches them
