@@ -375,7 +375,10 @@ export default function InfluencersPage() {
                     {/* Joined By = the person whose LINKED mobile number is on the
                         influencer profile, resolved to their Contact/Worker profile:
                         Photo + Name + Designation + Mobile. Never the influencer's own
-                        details and never the viewer/creator. */}
+                        details and never the viewer. When no linked-mobile person is
+                        stored on the record, fall back to the user who created it,
+                        clearly labelled "Added by" so the column is never blank when we
+                        do know who is responsible for the entry. */}
                     {(r.joined_by_name || r.joined_by_mobile) ? (
                       <div className="flex items-center gap-2.5 min-w-[180px]">
                         <Thumb src={r.joined_by_photo} name={r.joined_by_name || "?"} size={38} />
@@ -385,6 +388,14 @@ export default function InfluencersPage() {
                           <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">
                             {r.joined_by_mobile ? <><Phone size={10} /> {r.joined_by_mobile}</> : "—"}
                           </div>
+                        </div>
+                      </div>
+                    ) : r.created_by_name ? (
+                      <div className="flex items-center gap-2.5 min-w-[180px]">
+                        <Thumb src={null} name={r.created_by_name} size={38} />
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 text-sm truncate">{r.created_by_name}</div>
+                          <div className="text-[11px] text-gray-400 uppercase tracking-wide">Added by</div>
                         </div>
                       </div>
                     ) : <span className="text-gray-400">—</span>}
