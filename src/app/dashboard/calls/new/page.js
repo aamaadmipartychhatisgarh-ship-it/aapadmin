@@ -92,6 +92,12 @@ export default function LogCall() {
     if (val) fetchLocations("district", val, setDistricts);
   };
 
+  // Changing the call Status resets the Sentiment, so a sentiment chosen for one
+  // outcome (e.g. "Wrong Number" on a connected call) can never linger onto a
+  // different status and mis-flag the contact — mirrors the calling workspace.
+  const handleStatusChange = (e) => {
+    setFormData({ ...formData, status_id: e.target.value, sentiment: "" });
+  };
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData({ ...formData, [name]: type === "checkbox" ? checked : value });
@@ -218,7 +224,7 @@ export default function LogCall() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">Status *</label>
-              <select name="status_id" required value={formData.status_id} onChange={handleChange} className="w-full bg-gray-50 border border-gray-200 text-gray-900 h-11 rounded-xl px-4 focus:ring-2 focus:ring-[#FCB712] outline-none transition-all">
+              <select name="status_id" required value={formData.status_id} onChange={handleStatusChange} className="w-full bg-gray-50 border border-gray-200 text-gray-900 h-11 rounded-xl px-4 focus:ring-2 focus:ring-[#FCB712] outline-none transition-all">
                 <option value="">Select Outcome</option>
                 {statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
@@ -235,7 +241,12 @@ export default function LogCall() {
                 {(statuses.find((s) => String(s.id) === String(formData.status_id))?.name === "Phone Picked" || formData.sentiment === "not_supporter") && (
                   <option value="not_supporter">Not a Supporter</option>
                 )}
-                <option value="wrong_number">Wrong Number</option>
+                {/* "Wrong Number" is a connected-call outcome — only offered for a
+                    "Phone Picked" call, so it can't be chosen for a Not Picked / Busy
+                    / etc. status and then mis-flag the contact as Wrong. */}
+                {(statuses.find((s) => String(s.id) === String(formData.status_id))?.name === "Phone Picked" || formData.sentiment === "wrong_number") && (
+                  <option value="wrong_number">Wrong Number</option>
+                )}
               </select>
             </div>
             <div>

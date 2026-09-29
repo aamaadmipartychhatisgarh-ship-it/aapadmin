@@ -51,13 +51,17 @@ export async function PUT(req, { params }) {
       "SELECT contact_id, person_name, phone_number, address FROM calls WHERE id = ?", [id]
     );
 
-    // Sentiment only applies to a connected ("Phone Picked") call — store NULL
-    // for any other status so a correction never leaves a stale sentiment. The new
-    // "Wrong Number" sentiment is the one exception: it is a disposition, kept
-    // regardless of status, so editing a call to it moves the contact.
-    const isWrongSentiment = String(sentiment || "").toLowerCase() === "wrong_number";
+    // Sentiment only applies to a connected ("Phone Picked") call — store NULL for
+    // any other status so a correction never leaves a stale sentiment. The
+    // "Wrong Number" OUTCOME is only genuine when the editor explicitly chose the
+    // "Wrong Number" STATUS, or the "Wrong Number" sentiment on a CONNECTED call —
+    // NOT a leftover "wrong_number" sentiment carried on some other status (which
+    // previously re-flagged the contact Wrong on any edit).
     const [statusRow] = await query("SELECT name FROM call_statuses WHERE id = ?", [status_id]);
-    const finalSentiment = isWrongSentiment ? "wrong_number" : (statusRow?.name === "Phone Picked" ? (sentiment || null) : null);
+    const isPicked = statusRow?.name === "Phone Picked";
+    const isWrongOutcome = statusRow?.name === "Wrong Number" ||
+      (isPicked && String(sentiment || "").toLowerCase() === "wrong_number");
+    const finalSentiment = isPicked ? (sentiment || null) : null;
 
     await query(
       `UPDATE calls
@@ -87,10 +91,11 @@ export async function PUT(req, { params }) {
         vals.push(oldCall.contact_id);
         await query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
       }
-      // Editing a call's sentiment to "Wrong Number" moves the contact to the Wrong
-      // Number list right away (same persistent flag the log flow sets). Set-only —
-      // editing away from it does not auto-restore (restore is explicit).
-      if (isWrongSentiment && (await hasWrongNumberColumn())) {
+      // Editing a call to the explicit Wrong-Number OUTCOME moves the contact to the
+      // Wrong Number list right away (same persistent flag the log flow sets).
+      // Set-only — editing away from it does not auto-restore (restore is explicit) —
+      // and only on a genuine Wrong outcome, never a stale sentiment on another status.
+      if (isWrongOutcome && (await hasWrongNumberColumn())) {
         await query(`UPDATE contacts SET is_wrong_number = 1 WHERE id = ?`, [oldCall.contact_id]);
       }
     }

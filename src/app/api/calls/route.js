@@ -328,9 +328,15 @@ export async function POST(req) {
     if (contact_id) {
       const finalStatuses = ["Phone Picked", "Wrong Number", "Rudely Behaved"];
       const isFinal = !!statusName && finalStatuses.includes(statusName);
-      // Wrong Number is triggered by the call STATUS "Wrong Number" OR the new
-      // "Wrong Number" SENTIMENT — both move the contact to the Wrong Number list.
-      isWrongNumber = statusName === "Wrong Number" || String(sentiment || "").toLowerCase() === "wrong_number";
+      // Wrong Number is triggered by the call STATUS "Wrong Number" OR the
+      // "Wrong Number" SENTIMENT explicitly chosen on a CONNECTED ("Phone Picked")
+      // call. Use `finalSentiment` — NOT the raw request `sentiment` — so a leftover
+      // "wrong_number" sentiment posted alongside a non-connected status (e.g. "Not
+      // Picked" from the manual log form, which doesn't reset sentiment on status
+      // change) can NEVER accidentally flag the contact Wrong. Wrong is only set when
+      // the user explicitly chose the Wrong-Number outcome (status or picked-call
+      // sentiment); every other outcome clears it.
+      isWrongNumber = statusName === "Wrong Number" || String(finalSentiment || "").toLowerCase() === "wrong_number";
       // If a follow-up was scheduled, keep the contact open and pin it to this caller.
       const wantsFollowUp = !!is_follow_up_required;
       // Re-logging a call always consumes the previous reminder: set the new
@@ -368,6 +374,13 @@ export async function POST(req) {
       // Wrong Number list; any other outcome clears the flag. Only runs once the
       // optional column exists (added by the deploy migration).
       if (await hasWrongNumberColumn()) {
+        // Traceability (§5): log every flag flip with the exact trigger, so a future
+        // "why did this become Wrong?" report can be answered from the server logs
+        // (no sensitive data — ids + status only).
+        if (isWrongNumber) {
+          const trigger = statusName === "Wrong Number" ? "status=Wrong Number" : "sentiment=wrong_number (Phone Picked)";
+          console.info(`[wrong-number] flag SET contact=${contact_id} call=${res.insertId} by user=${actingUserId} via ${trigger}`);
+        }
         await query(
           `UPDATE contacts SET is_wrong_number = ? WHERE id = ?`,
           [isWrongNumber ? 1 : 0, contact_id]

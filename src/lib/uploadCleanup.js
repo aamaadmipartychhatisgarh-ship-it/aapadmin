@@ -41,20 +41,44 @@ export async function deleteLocalUpload(url) {
   }
 }
 
+// Every table in the current database that stores an upload URL in a `photo_url`
+// column — discovered from the schema so NO reference source is missed. Besides
+// contacts / workers / reg_people, the SAME /uploads file can back a converted
+// record: a contact turned into a Spokesperson (spokespersons.photo_url) or a
+// Candidate (la_aap_candidates.photo_url) copies the contact's photo_url, and a
+// users.photo_url / media row may reference it too. Enumerating them all means a
+// replace on one record can never delete a blob another record still uses.
+// Cached per process; the list only grows across a deployment.
+let photoRefTablesCache = null;
+async function photoRefTables() {
+  if (photoRefTablesCache) return photoRefTablesCache;
+  try {
+    const rows = await query(
+      `SELECT TABLE_NAME AS t FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'photo_url'`
+    );
+    const tables = rows.map((r) => r.t).filter(Boolean);
+    // Always include the core three even if the schema probe returned nothing.
+    for (const t of ["contacts", "workers", "reg_people"]) if (!tables.includes(t)) tables.push(t);
+    photoRefTablesCache = tables;
+  } catch {
+    // Schema probe failed — fall back to the known reference tables (never fewer).
+    photoRefTablesCache = ["contacts", "workers", "reg_people", "spokespersons", "la_aap_candidates", "users"];
+  }
+  return photoRefTablesCache;
+}
+
 // Is the upload file (by its unique filename) still referenced by ANY record whose
-// photo it could be — contact, field worker, or registration? If so, deleting it
+// photo it could be — contact, field worker, registration, converted candidate /
+// spokesperson, user, … (every table with a photo_url column)? If so, deleting it
 // would break a photo still in use, so the caller must skip the delete. Fail-SAFE:
 // if a lookup errors, assume it IS still referenced (never delete on uncertainty).
 async function isStillReferenced(name) {
   const like = `%${name}`;
-  const targets = [
-    ["contacts", "photo_url"],
-    ["workers", "photo_url"],
-    ["reg_people", "photo_url"],
-  ];
-  for (const [table, col] of targets) {
+  const tables = await photoRefTables();
+  for (const table of tables) {
     try {
-      const rows = await query(`SELECT 1 FROM \`${table}\` WHERE \`${col}\` LIKE ? LIMIT 1`, [like]);
+      const rows = await query(`SELECT 1 FROM \`${table}\` WHERE \`photo_url\` LIKE ? LIMIT 1`, [like]);
       if (rows.length) return true;
     } catch (e) {
       // Missing table → not a reference source here; any other error → play safe.
