@@ -445,11 +445,28 @@ function DesignationsCard({ designations, onChanged }) {
   const [editName, setEditName] = useState("");
   const [editLevel, setEditLevel] = useState("");
   const [editWings, setEditWings] = useState(() => new Set()); // multi-select Wings on edit
+  const [addRank, setAddRank] = useState("");   // optional Rank (1-based) for a new designation
+  const [editRank, setEditRank] = useState(""); // current Rank of the designation being edited
   const [busy, setBusy] = useState(false);
 
   const toggle = (setFn, val) => setFn((prev) => { const n = new Set(prev); if (n.has(val)) n.delete(val); else n.add(val); return n; });
 
   const WING_VALUES = DESIG_WINGS.map((w) => w.value);
+
+  // Rank = the designation's 1-based position WITHIN its own (Level, Wing) group.
+  // The API returns rows already in sort_order (the single source of truth), so a
+  // running per-group counter over that order is exactly the Rank shown everywhere.
+  const rankById = useMemo(() => {
+    const seen = new Map();
+    const m = new Map();
+    for (const d of designations) {
+      const key = `${d.level || ""}::${d.wing || ""}`;
+      const next = (seen.get(key) || 0) + 1;
+      seen.set(key, next);
+      m.set(d.id, next);
+    }
+    return m;
+  }, [designations]);
 
   // Open the editor for a designation: show its BASE name (level prefix + wing
   // suffix stripped) and pre-select EVERY Wing it is configured for — i.e. all
@@ -469,6 +486,7 @@ function DesignationsCard({ designations, onChanged }) {
     setEditName(base);
     setEditLevel(level);
     setEditWings(selected);
+    setEditRank(String(rankById.get(item.id) || ""));
     setError("");
   }
 
@@ -485,7 +503,19 @@ function DesignationsCard({ designations, onChanged }) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.message || "Failed to add designation."); return; }
-      setName(""); setLevels(new Set()); setWings(new Set()); onChanged();
+      // Optional Rank: place each newly-created row at that 1-based position in its
+      // own (Level, Wing) group. Blank Rank keeps the default (appended to the end).
+      const rk = parseInt(addRank, 10);
+      if (Number.isInteger(rk) && rk >= 1 && Array.isArray(d.created)) {
+        for (const c of d.created) {
+          // eslint-disable-next-line no-await-in-loop
+          await fetch("/api/designations/rank", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: c.id, rank: rk }),
+          });
+        }
+      }
+      setName(""); setLevels(new Set()); setWings(new Set()); setAddRank(""); onChanged();
     } finally { setLoading(false); }
   }
 
@@ -502,6 +532,16 @@ function DesignationsCard({ designations, onChanged }) {
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok) {
+      // Apply the Rank (position in this designation's own Level+Wing group). The
+      // edited row keeps its id (renamed in place), so repositioning it is safe; if
+      // its own wing was removed the call simply no-ops.
+      const rk = parseInt(editRank, 10);
+      if (Number.isInteger(rk) && rk >= 1) {
+        await fetch("/api/designations/rank", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, rank: rk }),
+        }).catch(() => {});
+      }
       setEditingId(null);
       onChanged();
       if (d.keptAssigned && d.keptAssigned.length) setError(d.message || "");
@@ -547,6 +587,8 @@ function DesignationsCard({ designations, onChanged }) {
           <div className="flex gap-3">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Designation name…"
               className="flex-1 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-4 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
+            <input type="number" min="1" step="1" value={addRank} onChange={(e) => setAddRank(e.target.value)} placeholder="Rank" title="Rank (position within each Level + Wing). Blank = add at end."
+              className="w-20 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-3 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
             <button type="submit" disabled={loading} className="bg-[#FCB712] text-[#164FA3] px-4 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2 disabled:opacity-50">
               <Plus size={16} /> Add
             </button>
@@ -569,6 +611,8 @@ function DesignationsCard({ designations, onChanged }) {
                       <option value="">— level —</option>
                       {DESIG_LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
                     </select>
+                    <input type="number" min="1" step="1" value={editRank} onChange={(e) => setEditRank(e.target.value)} title="Rank (position within Level + Wing)"
+                      className="w-16 border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]" placeholder="Rank" />
                     <button onClick={() => saveEdit(s.id)} disabled={busy} title="Save" className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={16} /></button>
                     <button onClick={() => setEditingId(null)} title="Cancel" className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
                   </div>
@@ -583,6 +627,7 @@ function DesignationsCard({ designations, onChanged }) {
                 </>
               ) : (
                 <>
+                  <span title="Rank within its Level + Wing" className="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-full bg-gray-100 text-gray-600 text-xs font-bold">{rankById.get(s.id) || "—"}</span>
                   <span className="font-medium text-gray-700 flex-1 min-w-0 truncate">{s.name}</span>
                   {s.level
                     ? <span className="text-[10px] uppercase font-bold tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-1 rounded-full whitespace-nowrap">{designationLevelLabel(s.level) || s.level}</span>
@@ -602,15 +647,24 @@ function DesignationsCard({ designations, onChanged }) {
 
 // One draggable designation row (dnd-kit sortable). The drag handle is explicit so
 // the Delete button stays clickable and the row is keyboard-reorderable.
-function SortableDesignationRow({ item, index, onDelete, busy }) {
+function SortableDesignationRow({ item, index, count, onDelete, onMove, busy }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1 };
+  // Rank = 1-based position. Editable: typing a new Rank moves the row there (same
+  // effect as dragging), then "Save Order" persists it. Also drag with the handle.
+  const commit = (e) => {
+    const v = parseInt(e.target.value, 10);
+    if (Number.isInteger(v) && v >= 1 && v - 1 !== index) onMove(index, v - 1);
+  };
   return (
     <li ref={setNodeRef} style={style} className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2.5 shadow-sm">
       <button type="button" {...attributes} {...listeners} title="Drag to reorder" className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 touch-none shrink-0">
         <GripVertical size={16} />
       </button>
-      <span className="w-6 text-center text-xs font-bold text-gray-400 shrink-0">{index + 1}</span>
+      <input type="number" min="1" max={count} step="1" defaultValue={index + 1} key={`${item.id}:${index}`}
+        onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+        title="Rank — type a position to move this designation"
+        className="w-12 text-center text-xs font-bold text-gray-600 border border-gray-200 rounded-md py-1 outline-none focus:ring-2 focus:ring-[#164FA3] shrink-0" />
       <span className="flex-1 min-w-0 truncate text-sm font-medium text-gray-700">{item.name}</span>
       <button type="button" onClick={() => onDelete(item)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 shrink-0"><Trash2 size={14} /></button>
     </li>
@@ -667,6 +721,16 @@ function DesignationOrderPanel({ onChanged }) {
       const newIndex = prev.findIndex((x) => x.id === over.id);
       if (oldIndex < 0 || newIndex < 0) return prev;
       return arrayMove(prev, oldIndex, newIndex);
+    });
+    setDirty(true); setMsg("");
+  }
+
+  // Move a row to a typed Rank position (0-based target), same as dragging it there.
+  function moveToIndex(fromIndex, toIndex) {
+    setItems((prev) => {
+      const to = Math.min(Math.max(toIndex, 0), prev.length - 1);
+      if (fromIndex === to || fromIndex < 0) return prev;
+      return arrayMove(prev, fromIndex, to);
     });
     setDirty(true); setMsg("");
   }
@@ -767,7 +831,7 @@ function DesignationOrderPanel({ onChanged }) {
             <SortableContext items={items.map((x) => x.id)} strategy={verticalListSortingStrategy}>
               <ul className="space-y-2">
                 {items.map((item, idx) => (
-                  <SortableDesignationRow key={item.id} item={item} index={idx} onDelete={onDelete} busy={busy} />
+                  <SortableDesignationRow key={item.id} item={item} index={idx} count={items.length} onMove={moveToIndex} onDelete={onDelete} busy={busy} />
                 ))}
               </ul>
             </SortableContext>

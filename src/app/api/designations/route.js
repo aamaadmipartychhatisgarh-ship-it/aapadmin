@@ -35,16 +35,21 @@ export async function GET(req) {
       : "name ASC";
     const wingColD = hasWing ? "d.wing" : "NULL AS wing";
     const wingCol = hasWing ? "wing" : "NULL AS wing";
+    // sort_order is the designation's stored order value — surfaced to the client as
+    // its Rank (the UI shows a 1-based position per Level+Wing group). Guarded so the
+    // API still works on a deployment where the column was never added.
+    const sortColD = hasSortOrder ? "d.sort_order" : "NULL AS sort_order";
+    const sortCol = hasSortOrder ? "sort_order" : "NULL AS sort_order";
 
     const designations = withStats
       ? await query(
-          `SELECT d.id, d.name, d.level, ${wingColD}, COUNT(c.id) AS contact_count
+          `SELECT d.id, d.name, d.level, ${wingColD}, ${sortColD}, COUNT(c.id) AS contact_count
              FROM designations d
              LEFT JOIN contacts c ON c.designation_id = d.id${await notWrongNumberClause("c")}
-            GROUP BY d.id, d.name, d.level, ${hasWing ? "d.wing" : "d.id"}
+            GROUP BY d.id, d.name, d.level, ${hasWing ? "d.wing" : "d.id"}${hasSortOrder ? ", d.sort_order" : ""}
             ORDER BY ${orderBy}`
         )
-      : await query(`SELECT id, name, level, ${wingCol} FROM designations ORDER BY ${orderByPlain}`);
+      : await query(`SELECT id, name, level, ${wingCol}, ${sortCol} FROM designations ORDER BY ${orderByPlain}`);
     return Response.json({ designations }, { status: 200 });
   } catch (error) {
     console.error("Error fetching designations:", error);
