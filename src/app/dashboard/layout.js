@@ -238,7 +238,6 @@ export default function DashboardLayout({ children }) {
       // zero-risk move, and this page serves admin tiers the Engine module
       // excludes outright.
       { name: "Audit", href: "/dashboard/admin/audit", icon: ScrollText },
-      { name: "Master Data", href: "/dashboard/admin/settings", icon: Settings },
     ],
     [ROLES.STATE_ADMIN]: [
       // Same as super_admin except no Users management
@@ -262,7 +261,6 @@ export default function DashboardLayout({ children }) {
       { name: "Media", href: "/dashboard/media", icon: Newspaper },
       { name: "Reports", href: "/dashboard/reports", icon: FileText },
       { name: "Audit", href: "/dashboard/admin/audit", icon: ScrollText },
-      { name: "Master Data", href: "/dashboard/admin/settings", icon: Settings },
     ],
     [ROLES.ZONE_ADMIN]: [
       // Zone admins manage zone operations; no Users, Master Data, or Social Command (state-level)

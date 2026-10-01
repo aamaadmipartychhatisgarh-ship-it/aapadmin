@@ -26,12 +26,11 @@ const TABS = [
 // — only these Full-Ranking dropdown entries are gone.
 const REPORT_LINKS_BY_TIER = {
   top: [ // super_admin, state_admin, zone_admin
-    { href: "/dashboard/rankings", label: "Rankings" },
+    // The standalone "Rankings" quick-jump was removed (the page no longer exists);
+    // Area Ranking is reached via the Full Ranking link this dropdown sits on.
     { href: "/dashboard/strength", label: "Strength" },
   ],
-  district: [
-    { href: "/dashboard/rankings", label: "Rankings" },
-  ],
+  district: [],
   none: [],
 };
 

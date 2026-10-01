@@ -6,6 +6,7 @@ import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, us
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DESIGNATION_LEVELS, designationLevelLabel } from "@/lib/designationLevels";
+import { deriveDesignationBase } from "@/lib/designationName";
 
 // The Designation Chain levels (State → Lok Sabha → District → Assembly → Block).
 const DESIG_LEVELS = DESIGNATION_LEVELS.filter((l) => l.key !== "zone");
@@ -443,10 +444,33 @@ function DesignationsCard({ designations, onChanged }) {
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editLevel, setEditLevel] = useState("");
-  const [editWing, setEditWing] = useState("");
+  const [editWings, setEditWings] = useState(() => new Set()); // multi-select Wings on edit
   const [busy, setBusy] = useState(false);
 
   const toggle = (setFn, val) => setFn((prev) => { const n = new Set(prev); if (n.has(val)) n.delete(val); else n.add(val); return n; });
+
+  const WING_VALUES = DESIG_WINGS.map((w) => w.value);
+
+  // Open the editor for a designation: show its BASE name (level prefix + wing
+  // suffix stripped) and pre-select EVERY Wing it is configured for — i.e. all
+  // sibling rows that share the same base + level. This is what makes the Wings
+  // field multi-select with the current selection already ticked.
+  function openEdit(item) {
+    const level = item.level || "";
+    const base = deriveDesignationBase(item.name, level, WING_VALUES);
+    const selected = new Set();
+    for (const d of designations) {
+      if ((d.level || "") !== level) continue;
+      if (deriveDesignationBase(d.name, level, WING_VALUES).toLowerCase() !== base.toLowerCase()) continue;
+      if (d.wing) selected.add(d.wing);
+    }
+    if (item.wing) selected.add(item.wing);
+    setEditingId(item.id);
+    setEditName(base);
+    setEditLevel(level);
+    setEditWings(selected);
+    setError("");
+  }
 
   async function add(e) {
     e.preventDefault();
@@ -467,13 +491,21 @@ function DesignationsCard({ designations, onChanged }) {
 
   async function saveEdit(id) {
     if (!editName.trim()) return;
+    if (!editLevel) { setError("Please select a Level."); return; }
     setBusy(true); setError("");
-    const r = await fetch(`/api/designations/${id}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editName.trim(), level: editLevel, wing: editWing }),
+    // The Wings endpoint syncs the sibling rows (one per selected Wing) for this
+    // base + level: it creates missing Wings and removes deselected ones that have
+    // no assignments. It is the single save for name + level + the full Wing set.
+    const r = await fetch(`/api/designations/${id}/wings`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName.trim(), level: editLevel, wings: [...editWings] }),
     });
     const d = await r.json().catch(() => ({}));
-    if (r.ok) { setEditingId(null); onChanged(); } else setError(d.message || "Update failed");
+    if (r.ok) {
+      setEditingId(null);
+      onChanged();
+      if (d.keptAssigned && d.keptAssigned.length) setError(d.message || "");
+    } else setError(d.message || "Update failed");
     setBusy(false);
   }
 
@@ -525,22 +557,29 @@ function DesignationsCard({ designations, onChanged }) {
       <div className="flex-1 overflow-auto p-2">
         <ul className="divide-y divide-gray-100">
           {designations.map((s) => (
-            <li key={s.id} className="p-3.5 hover:bg-gray-50 flex items-center justify-between gap-2 rounded-lg">
+            <li key={s.id} className={`p-3.5 hover:bg-gray-50 rounded-lg ${editingId === s.id ? "flex flex-col gap-2.5" : "flex items-center justify-between gap-2"}`}>
               {editingId === s.id ? (
                 <>
-                  <input value={editName} onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveEdit(s.id); if (e.key === "Escape") setEditingId(null); }} autoFocus
-                    className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
-                  <select value={editLevel} onChange={(e) => setEditLevel(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white outline-none">
-                    <option value="">— level —</option>
-                    {DESIG_LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
-                  </select>
-                  <select value={editWing} onChange={(e) => setEditWing(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white outline-none">
-                    <option value="">— wing —</option>
-                    {DESIG_WINGS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-                  </select>
-                  <button onClick={() => saveEdit(s.id)} disabled={busy} title="Save" className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={16} /></button>
-                  <button onClick={() => setEditingId(null)} title="Cancel" className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
+                  <div className="flex items-center gap-2">
+                    <input value={editName} onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveEdit(s.id); if (e.key === "Escape") setEditingId(null); }} autoFocus
+                      placeholder="Designation name…"
+                      className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+                    <select value={editLevel} onChange={(e) => setEditLevel(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white outline-none">
+                      <option value="">— level —</option>
+                      {DESIG_LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+                    </select>
+                    <button onClick={() => saveEdit(s.id)} disabled={busy} title="Save" className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={16} /></button>
+                    <button onClick={() => setEditingId(null)} title="Cancel" className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Wings <span className="text-gray-400 normal-case font-normal">(select one or more — add/remove)</span></div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {DESIG_WINGS.map((w) => (
+                        <button type="button" key={w.value} onClick={() => toggle(setEditWings, w.value)} className={pill(editWings.has(w.value))}>{w.label}</button>
+                      ))}
+                    </div>
+                  </div>
                 </>
               ) : (
                 <>
@@ -549,7 +588,7 @@ function DesignationsCard({ designations, onChanged }) {
                     ? <span className="text-[10px] uppercase font-bold tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-1 rounded-full whitespace-nowrap">{designationLevelLabel(s.level) || s.level}</span>
                     : <span className="text-[10px] uppercase font-bold tracking-wide text-amber-700 bg-amber-100 px-2 py-1 rounded-full">No level</span>}
                   {s.wing && <span className="text-[10px] uppercase font-bold tracking-wide text-purple-700 bg-purple-100 px-2 py-1 rounded-full whitespace-nowrap">{DESIG_WING_LABEL(s.wing)}</span>}
-                  <button onClick={() => { setEditingId(s.id); setEditName(s.name); setEditLevel(s.level || ""); setEditWing(s.wing || ""); setError(""); }} title="Edit" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
+                  <button onClick={() => openEdit(s)} title="Edit (name, level & wings)" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
                   <button onClick={() => remove(s)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={14} /></button>
                 </>
               )}

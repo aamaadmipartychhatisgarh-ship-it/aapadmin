@@ -48,6 +48,11 @@ export async function GET(req) {
     const search = (searchParams.get("search") || "").trim();
     const district_id = searchParams.get("district_id");
     const assembly_id = searchParams.get("assembly_id");
+    // Active Status filter — applied server-side with EXACT equality on the
+    // canonical stored code (VERY_ACTIVE / ACTIVE / AVERAGE / NOT_ACTIVE), never a
+    // substring (so "Active" can never match "Very Active"). normalizeActiveStatus
+    // rejects anything else, so an unknown/empty value simply means "All".
+    const statusFilter = normalizeActiveStatus(searchParams.get("status"));
 
     let where = " WHERE c.assigned_to_user_id IS NOT NULL";
     const params = [];
@@ -58,6 +63,7 @@ export async function GET(req) {
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
     if (assembly_id) { where += " AND c.assembly_id = ?"; params.push(assembly_id); }
     if (search) { where += " AND u.username LIKE ?"; params.push(`%${search}%`); }
+    if (statusFilter) { where += " AND u.active_status = ?"; params.push(statusFilter); }
     // Same non-bypassable geographic/role scope the Contacts list applies.
     const scope = scopeFilterSync(session.user, "c");
     where += " " + scope.where;

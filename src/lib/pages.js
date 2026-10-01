@@ -107,7 +107,10 @@ export const PAGES = [
   // access management is unaffected.
   { key: "strength", label: "Strength", href: "/dashboard/strength", prefixes: ["/dashboard/strength"], icon: "Gauge", hideFromNav: true,
     roles: [...OVERSIGHT] },
-  { key: "rankings", label: "Rankings", href: "/dashboard/rankings", prefixes: ["/dashboard/rankings", "/dashboard/full-ranking"], icon: "Trophy", hideFromNav: true,
+  // The standalone Rankings page (/dashboard/rankings) was removed. This key is
+  // kept because the Area Ranking page (/dashboard/full-ranking) and the Area
+  // Ranking API gate on it; href + prefix now point only at that surviving route.
+  { key: "rankings", label: "Rankings", href: "/dashboard/full-ranking", prefixes: ["/dashboard/full-ranking"], icon: "Trophy", hideFromNav: true,
     roles: [...OVERSIGHT] },
   { key: "events", label: "Events", href: "/dashboard/admin/events", prefixes: ["/dashboard/admin/events"], icon: "CalendarClock",
     roles: [...OVERSIGHT] },

@@ -47,6 +47,10 @@ export default function ActiveWorkersPage() {
     try {
       const p = new URLSearchParams();
       if (search) p.set("search", search);
+      // Status filtering is applied SERVER-SIDE (exact match on the canonical code),
+      // so the counts and the whole result set reflect the filter, not just the
+      // rows currently in memory.
+      if (statusFilter) p.set("status", statusFilter);
       const r = await fetch(`/api/contacts/active-workers?${p}`);
       if (r.ok) {
         const d = await r.json();
@@ -55,13 +59,13 @@ export default function ActiveWorkersPage() {
         setCallers(d.callers || 0);
       }
     } finally { setLoading(false); }
-  }, [search]);
+  }, [search, statusFilter]);
 
   useEffect(() => {
     if (!allowed) return;
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
-  }, [allowed, search, load]);
+  }, [allowed, search, statusFilter, load]);
 
   // Persist a worker's Active Status to the backend (users.active_status) and
   // reflect it locally — the value survives refresh/relogin because it is stored,
@@ -78,12 +82,18 @@ export default function ActiveWorkersPage() {
       setGroups((gs) => gs.map((g) => (g.user_id === userId
         ? { ...g, active_status: r.ok ? (d.active_status || value) : g.active_status, _saving: false }
         : g)));
+      // When a status filter is active, a worker whose status just changed may no
+      // longer belong in the filtered list — reload so stale rows don't linger.
+      if (r.ok && statusFilter) load();
     } catch {
       setGroups((gs) => gs.map((g) => (g.user_id === userId ? { ...g, _saving: false } : g)));
     }
-  }, []);
+  }, [statusFilter, load]);
 
-  const visibleGroups = statusFilter ? groups.filter((g) => g.active_status === statusFilter) : groups;
+  // Server already returns only the matching workers (exact status match), so no
+  // client-side status filtering is done here — this avoids the classic
+  // substring-match bug and keeps counts consistent with the filtered list.
+  const visibleGroups = groups;
 
   if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;

@@ -165,6 +165,7 @@ export async function GET(req) {
               WHERE base.joined_by_phone IS NOT NULL
                 AND LENGTH(${digits("base.joined_by_phone")}) >= 10
                 AND RIGHT(${digits("c2.phone_number")}, 10) = RIGHT(${digits("base.joined_by_phone")}, 10)
+              ORDER BY c2.id ASC
               LIMIT 1)`
         : null;
       const effId = hasJbId && phoneMatch ? `COALESCE(base.joined_by_contact_id, ${phoneMatch})`

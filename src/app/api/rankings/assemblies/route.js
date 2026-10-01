@@ -39,10 +39,30 @@ export async function GET() {
     // shows its OWN current member. Defensive: on a deployment without the Leader
     // Assessment tables the members stay unmapped and every assembly renders as
     // "Not Assigned" rather than failing the ranking.
+    // The current member's PHOTO is resolved to the real person: their own uploaded
+    // Leader-Assessment photo first, else the photo on the Contact (or that contact's
+    // linked field-worker) whose mobile matches the member's phone (last-10-digit
+    // match, the app's standard key — never by name, so a namesake can't supply the
+    // wrong face). When none is found the value stays null and the <Avatar> shows its
+    // standard initials placeholder instead of a broken image.
+    const digits = (col) => `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},' ',''),'-',''),'+',''),'(',''),')',''),'.','')`;
     let memberByLoc = new Map();
     try {
       const mrows = await query(
-        `SELECT la.location_id AS location_id, mp.name AS name, mp.photo_url AS photo_url
+        `SELECT la.location_id AS location_id, mp.name AS name,
+                COALESCE(
+                  NULLIF(TRIM(mp.photo_url), ''),
+                  (SELECT NULLIF(TRIM(c.photo_url), '') FROM contacts c
+                     WHERE mp.phone IS NOT NULL AND LENGTH(${digits("mp.phone")}) >= 10
+                       AND RIGHT(${digits("c.phone_number")}, 10) = RIGHT(${digits("mp.phone")}, 10)
+                       AND NULLIF(TRIM(c.photo_url), '') IS NOT NULL
+                     ORDER BY c.id ASC LIMIT 1),
+                  (SELECT NULLIF(TRIM(w.photo_url), '') FROM workers w
+                     WHERE mp.phone IS NOT NULL AND LENGTH(${digits("mp.phone")}) >= 10
+                       AND RIGHT(${digits("w.mobile")}, 10) = RIGHT(${digits("mp.phone")}, 10)
+                       AND NULLIF(TRIM(w.photo_url), '') IS NOT NULL
+                     ORDER BY w.id ASC LIMIT 1)
+                ) AS photo_url
            FROM la_assemblies la
            JOIN la_mla_profiles mp ON mp.assembly_id = la.id
           WHERE la.location_id IS NOT NULL

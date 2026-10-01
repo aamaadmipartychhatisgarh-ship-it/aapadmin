@@ -82,8 +82,25 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     `SELECT id, name FROM designations WHERE level = ? ${enabledClause} ORDER BY (sort_order IS NULL), sort_order, name`,
     [level]
   );
-  const designations = designationId ? levelDesignations.filter((d) => d.id === designationId) : levelDesignations;
-  const allowedDes = new Set(designations.map((d) => d.id));
+  // Collapse designations that render to the SAME name at this level into a single
+  // vacancy column (case/whitespace-insensitive) so a location never shows the same
+  // designation twice (e.g. a stray duplicate row in the master). The representative
+  // keeps the lowest sort_order (the list is already in Designation Master order),
+  // and EVERY underlying id maps to its name so a position counts as occupied no
+  // matter which duplicate designation id a person was actually assigned to.
+  const normName = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const repByNorm = new Map(); // normName -> representative { id, name } (first wins = best order)
+  const idToNorm = new Map();  // every level designation id -> its normalized name
+  for (const d of levelDesignations) {
+    const nm = normName(d.name);
+    idToNorm.set(d.id, nm);
+    if (!repByNorm.has(nm)) repByNorm.set(nm, { id: d.id, name: d.name });
+  }
+  const uniqueLevelDesignations = [...repByNorm.values()];
+  const designations = designationId
+    ? uniqueLevelDesignations.filter((d) => idToNorm.get(designationId) === normName(d.name))
+    : uniqueLevelDesignations;
+  const allowedNorms = new Set(designations.map((d) => normName(d.name)));
 
   // Every location of this level (State is a single pseudo-location). New master
   // locations appear here automatically.
@@ -138,9 +155,10 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   // Bucket assigned people by EXACT (location id : designation id).
   const bucket = new Map();
   for (const r of peopleRows) {
-    if (!allowedDes.has(r.designation_id)) continue;
+    const nm = idToNorm.get(r.designation_id) || normName(r.designation_name);
+    if (!allowedNorms.has(nm)) continue;
     const loc = r.loc_id ?? 0;
-    const key = `${loc}:${r.designation_id}`;
+    const key = `${loc}:${nm}`;
     if (!bucket.has(key)) bucket.set(key, []);
     bucket.get(key).push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url });
   }
@@ -149,7 +167,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   const allRows = [];
   for (const loc of locations) {
     for (const d of designations) {
-      const people = bucket.get(`${loc.id}:${d.id}`) || [];
+      const people = bucket.get(`${loc.id}:${normName(d.name)}`) || [];
       allRows.push({
         location_id: loc.id,
         location_name: loc.name,
@@ -216,7 +234,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
       level_label: LEVEL_LABEL[level],
       view: "persons",
       status,
-      level_designations: levelDesignations,
+      level_designations: uniqueLevelDesignations,
       all_locations: allLocations,
       persons: assignedPersons.slice(start, start + pageSize),
       persons_total: total,
@@ -235,7 +253,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     level_label: LEVEL_LABEL[level],
     view: "matrix",
     status,
-    level_designations: levelDesignations,
+    level_designations: uniqueLevelDesignations,
     all_locations: allLocations,
     rows,
     counts,
