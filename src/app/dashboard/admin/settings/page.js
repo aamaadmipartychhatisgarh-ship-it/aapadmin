@@ -504,7 +504,7 @@ function DesignationsCard({ designations, onChanged }) {
         body: JSON.stringify({ name: name.trim(), levels: [...levels], wings: [...wings] }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(d.message || "Failed to add designation."); return; }
+      if (!r.ok) { setError([d.message || "Failed to add designation.", d.detail].filter(Boolean).join(" — ")); return; }
       // Place each newly-created row at the chosen 1-based Rank within its own
       // (Level, Wing) group (rk is validated above and required).
       if (Array.isArray(d.created)) {

@@ -32,9 +32,16 @@ export function designationLevelLabel(key) {
 let ensured = false;
 export async function ensureDesignationLevelColumn(query) {
   if (ensured) return;
-  const cols = await query("SHOW COLUMNS FROM designations LIKE 'level'");
-  if (cols.length === 0) {
-    await query("ALTER TABLE designations ADD COLUMN level VARCHAR(32) NULL AFTER name");
+  // Defensive: a failed SHOW/ALTER (locked table, permissions) must NOT bubble up
+  // and turn a plain designations read/write into a 500 — the feature-detected
+  // callers already cope with a missing column. Log and move on.
+  try {
+    const cols = await query("SHOW COLUMNS FROM designations LIKE 'level'");
+    if (cols.length === 0) {
+      await query("ALTER TABLE designations ADD COLUMN level VARCHAR(32) NULL AFTER name");
+    }
+    ensured = true;
+  } catch (e) {
+    console.error("[designationLevels] ensureDesignationLevelColumn:", e?.message || e);
   }
-  ensured = true;
 }

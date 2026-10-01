@@ -53,7 +53,7 @@ export async function GET(req) {
     return Response.json({ designations }, { status: 200 });
   } catch (error) {
     console.error("Error fetching designations:", error);
-    return Response.json({ message: "Internal server error" }, { status: 500 });
+    return Response.json({ message: "Internal server error", detail: error?.sqlMessage || error?.message || null }, { status: 500 });
   }
 }
 
@@ -89,6 +89,17 @@ export async function POST(req) {
     await ensureDesignationLevelColumn(query);
     await ensureWingSchema(); // guarantees the wing / sort_order / enabled columns exist
 
+    // Build INSERT/UPDATE from the columns that ACTUALLY exist. If a schema
+    // migration (ensureWingSchema) could not add wing/sort_order/enabled — e.g. a
+    // locked table or missing privilege on this deployment — we still create the
+    // core row instead of throwing "Unknown column" and 500-ing the whole add.
+    const colRows = await query("SHOW COLUMNS FROM designations").catch(() => []);
+    const cols = new Set(colRows.map((c) => c.Field));
+    const hasLevelCol = cols.has("level");
+    const hasWingCol = cols.has("wing");
+    const hasSortCol = cols.has("sort_order");
+    const hasEnabledCol = cols.has("enabled");
+
     const created = [];
     let reused = 0;
     for (const level of levels) {
@@ -102,15 +113,38 @@ export async function POST(req) {
         // eslint-disable-next-line no-await-in-loop
         const [existing] = await query("SELECT id FROM designations WHERE name = ? LIMIT 1", [composed]);
         if (existing) {
-          // eslint-disable-next-line no-await-in-loop
-          await query("UPDATE designations SET level = ?, wing = ? WHERE id = ?", [level, wing, existing.id]);
+          const sets = [];
+          const args = [];
+          if (hasLevelCol) { sets.push("level = ?"); args.push(level); }
+          if (hasWingCol) { sets.push("wing = ?"); args.push(wing); }
+          if (sets.length) {
+            // eslint-disable-next-line no-await-in-loop
+            await query(`UPDATE designations SET ${sets.join(", ")} WHERE id = ?`, [...args, existing.id]);
+          }
           reused++;
           continue;
         }
+        // Next order value in this (level, wing) group, when the column exists.
+        let nextSort = null;
+        if (hasSortCol) {
+          // eslint-disable-next-line no-await-in-loop
+          const [{ n }] = await query(
+            `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM designations WHERE ${hasLevelCol ? "level = ?" : "1=1"}${hasWingCol ? " AND (wing <=> ?)" : ""}`,
+            [...(hasLevelCol ? [level] : []), ...(hasWingCol ? [wing] : [])]
+          );
+          nextSort = n;
+        }
+        const insCols = ["name"];
+        const insArgs = [composed];
+        if (hasLevelCol) { insCols.push("level"); insArgs.push(level); }
+        if (hasWingCol) { insCols.push("wing"); insArgs.push(wing); }
+        if (hasSortCol) { insCols.push("sort_order"); insArgs.push(nextSort); }
+        if (hasEnabledCol) { insCols.push("enabled"); insArgs.push(1); }
         // eslint-disable-next-line no-await-in-loop
-        const [{ n }] = await query("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM designations WHERE level = ? AND (wing <=> ?)", [level, wing]);
-        // eslint-disable-next-line no-await-in-loop
-        const res = await query("INSERT INTO designations (name, level, wing, sort_order, enabled) VALUES (?, ?, ?, ?, 1)", [composed, level, wing, n]);
+        const res = await query(
+          `INSERT INTO designations (${insCols.map((c) => `\`${c}\``).join(", ")}) VALUES (${insCols.map(() => "?").join(", ")})`,
+          insArgs
+        );
         created.push({ id: res.insertId, name: composed, level, wing });
       }
     }
@@ -129,6 +163,6 @@ export async function POST(req) {
       return Response.json({ message: "A designation with this name already exists" }, { status: 409 });
     }
     console.error("Error adding designation:", error);
-    return Response.json({ message: "Internal server error" }, { status: 500 });
+    return Response.json({ message: "Internal server error", detail: error?.sqlMessage || error?.message || null }, { status: 500 });
   }
 }
