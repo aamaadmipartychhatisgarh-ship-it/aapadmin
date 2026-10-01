@@ -213,7 +213,10 @@ export async function runReport({ moduleKey, session, body, opts = {}, roleOverr
   // Sorting — validate against known columns; default to date field desc.
   let sortCol = module.dateField;
   const sortKeyDef = module.columns.find((c) => c.key === body.sort?.key);
-  if (sortKeyDef) sortCol = sortKeyDef.sql;
+  // A column may define a separate `sortSql` so it SORTS differently from how it
+  // DISPLAYS — e.g. the Designation column shows the name but sorts by the
+  // Designation Master's configured sort_order, never alphabetically.
+  if (sortKeyDef) sortCol = sortKeyDef.sortSql || sortKeyDef.sql;
   const dir = String(body.sort?.dir).toLowerCase() === "asc" ? "ASC" : "DESC";
 
   const [{ total }] = await query(`SELECT COUNT(*) AS total ${from} ${where}`, params);

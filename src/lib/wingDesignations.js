@@ -84,6 +84,11 @@ export async function ensureWingSchema() {
     await ensureDesignationColumn("wing", "VARCHAR(120) NULL");
     await ensureDesignationColumn("wing_base_id", "INT NULL");
     await ensureDesignationColumn("enabled", "TINYINT NOT NULL DEFAULT 1");
+    // manual_order marks a (level, wing) bucket whose designation order was set by
+    // hand in the Designation Order panel. When set, the auto-generator below
+    // (syncWing) NEVER overwrites that row's sort_order — the admin's manual order
+    // is the single source of truth and survives later wing/base edits.
+    await ensureDesignationColumn("manual_order", "TINYINT NOT NULL DEFAULT 0");
     if (!(await query("SHOW COLUMNS FROM designations LIKE 'sort_order'")).length) {
       await ensureDesignationColumn("sort_order", "INT NULL");
     }
@@ -221,9 +226,12 @@ export async function syncWing(wingId) {
       );
       try {
         if (existing) {
+          // Preserve a manually-configured order: sort_order is only refreshed from
+          // the generated sequence when the bucket has NOT been hand-ordered.
           // eslint-disable-next-line no-await-in-loop
           await query(
-            `UPDATE designations SET name = ?, level = ?, wing = ?, sort_order = ?, enabled = ? WHERE id = ?`,
+            `UPDATE designations SET name = ?, level = ?, wing = ?,
+               sort_order = IF(manual_order = 1, sort_order, ?), enabled = ? WHERE id = ?`,
             [name, level, wing.name, sort, base.enabled ? 1 : 0, existing.id]
           );
         } else {

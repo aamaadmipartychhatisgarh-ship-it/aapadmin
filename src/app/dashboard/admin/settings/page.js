@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X, Search } from "lucide-react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X, Search, GripVertical, ArrowUpDown } from "lucide-react";
+import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { DESIGNATION_LEVELS, designationLevelLabel } from "@/lib/designationLevels";
 
 // The Designation Chain levels (State → Lok Sabha → District → Assembly → Block).
@@ -99,6 +102,11 @@ export default function MasterDataSettings({ embedded = false }) {
             in sort_order (followed everywhere the app lists designations). */}
         <DesignationsCard designations={designations} onChanged={fetchDesignations} />
       </div>
+
+      {/* Designation Order — per (Level, Wing) manual drag-and-drop ordering. The
+          saved order is the single source of truth used everywhere the app lists
+          designations (worker lists, search, reports, organisation structure). */}
+      <DesignationOrderPanel onChanged={fetchDesignations} />
 
       {/* Merge duplicate / synonymous designations — full width */}
       <MergeDesignations onChanged={fetchDesignations} />
@@ -548,6 +556,184 @@ function DesignationsCard({ designations, onChanged }) {
             </li>
           ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// One draggable designation row (dnd-kit sortable). The drag handle is explicit so
+// the Delete button stays clickable and the row is keyboard-reorderable.
+function SortableDesignationRow({ item, index, onDelete, busy }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1 };
+  return (
+    <li ref={setNodeRef} style={style} className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2.5 shadow-sm">
+      <button type="button" {...attributes} {...listeners} title="Drag to reorder" className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 touch-none shrink-0">
+        <GripVertical size={16} />
+      </button>
+      <span className="w-6 text-center text-xs font-bold text-gray-400 shrink-0">{index + 1}</span>
+      <span className="flex-1 min-w-0 truncate text-sm font-medium text-gray-700">{item.name}</span>
+      <button type="button" onClick={() => onDelete(item)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 shrink-0"><Trash2 size={14} /></button>
+    </li>
+  );
+}
+
+// Designation Order — manual per-(Level, Wing) ordering with drag-and-drop. The
+// admin picks ONE Level + Wing (each combination is ordered independently), drags
+// the designations into the desired sequence and saves. The saved order
+// (designations.sort_order, flagged manual_order=1) becomes the single source of
+// truth read everywhere the app lists designations — no alphabetical/auto sorting.
+function DesignationOrderPanel({ onChanged }) {
+  const [level, setLevel] = useState("assembly");
+  const [wing, setWing] = useState("Main Organisation");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [newName, setNewName] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr(""); setMsg("");
+    try {
+      const r = await fetch("/api/designations");
+      const d = await r.json().catch(() => ({}));
+      const all = d.designations || [];
+      const wingVal = wing || null;
+      // /api/designations returns rows already ordered by sort_order, so filtering
+      // preserves each bucket's current order.
+      const bucket = all.filter((x) => (x.level || "") === level && ((x.wing || null) === wingVal));
+      setItems(bucket);
+      setDirty(false);
+    } catch {
+      setErr("Could not load designations.");
+    } finally { setLoading(false); }
+  }, [level, wing]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function onDragEnd(e) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    setItems((prev) => {
+      const oldIndex = prev.findIndex((x) => x.id === active.id);
+      const newIndex = prev.findIndex((x) => x.id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
+    setDirty(true); setMsg("");
+  }
+
+  async function save() {
+    setSaving(true); setErr(""); setMsg("");
+    try {
+      const r = await fetch("/api/designations/reorder", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level, wing: wing || null, orderedIds: items.map((x) => x.id) }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || "Failed to save order."); return; }
+      setDirty(false);
+      setMsg("Order saved. This order now applies everywhere designations are shown.");
+      onChanged?.();
+    } finally { setSaving(false); }
+  }
+
+  async function addToBucket(e) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setAdding(true); setErr(""); setMsg("");
+    try {
+      const r = await fetch("/api/designations", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName.trim(), levels: [level], wings: wing ? [wing] : [] }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || "Failed to add designation."); return; }
+      setNewName("");
+      await load();
+      onChanged?.();
+    } finally { setAdding(false); }
+  }
+
+  async function onDelete(item) {
+    if (!confirm(`Delete "${item.name}"? Records using it keep their data but show no designation.`)) return;
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      const r = await fetch(`/api/designations/${item.id}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || "Delete failed"); return; }
+      await load();
+      onChanged?.();
+    } finally { setBusy(false); }
+  }
+
+  const bucketLabel = `${designationLevelLabel(level) || level}${wing ? " · " + DESIG_WING_LABEL(wing) : " · No Wing"}`;
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="p-6 border-b border-gray-100 flex items-start gap-2 text-[#164FA3]">
+        <ArrowUpDown size={18} className="mt-0.5 shrink-0" />
+        <div>
+          <h2 className="font-bold text-lg">Designation Order</h2>
+          <p className="text-xs text-gray-500 font-normal mt-0.5">Set the manual display order for a Level + Wing by dragging. Each Level + Wing is ordered independently, and the saved order is used everywhere — worker lists, search, reports and the organisation structure. No alphabetical or automatic sorting is applied.</p>
+        </div>
+      </div>
+      <div className="p-5 space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Level</label>
+            <select value={level} onChange={(e) => setLevel(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]">
+              {DESIG_LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Wing</label>
+            <select value={wing} onChange={(e) => setWing(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]">
+              <option value="">— No Wing —</option>
+              {DESIG_WINGS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+            </select>
+          </div>
+          <button type="button" onClick={save} disabled={saving || !dirty} className="ml-auto bg-[#FCB712] text-[#164FA3] px-4 py-2 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2 disabled:opacity-50">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Save Order
+          </button>
+        </div>
+
+        <form onSubmit={addToBucket} className="flex gap-2">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={`Add a designation to ${bucketLabel}…`}
+            className="flex-1 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-4 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
+          <button type="submit" disabled={adding} className="border border-gray-300 text-gray-700 px-4 rounded-lg font-semibold hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50">
+            {adding ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Add
+          </button>
+        </form>
+
+        {err && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-xs">{err}</div>}
+        {msg && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-2 text-xs">{msg}</div>}
+        {dirty && <div className="text-xs text-amber-700 font-medium">Unsaved order — click “Save Order” to persist it.</div>}
+
+        {loading ? (
+          <div className="py-10 text-center text-gray-400"><Loader2 className="animate-spin inline" size={20} /></div>
+        ) : items.length === 0 ? (
+          <div className="py-10 text-center text-gray-400 text-sm">No designations for {bucketLabel} yet. Add one above, or create them in the Designations panel.</div>
+        ) : (
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={items.map((x) => x.id)} strategy={verticalListSortingStrategy}>
+              <ul className="space-y-2">
+                {items.map((item, idx) => (
+                  <SortableDesignationRow key={item.id} item={item} index={idx} onDelete={onDelete} busy={busy} />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
+        )}
       </div>
     </div>
   );
