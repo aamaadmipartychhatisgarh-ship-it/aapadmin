@@ -453,20 +453,11 @@ function DesignationsCard({ designations, onChanged }) {
 
   const WING_VALUES = DESIG_WINGS.map((w) => w.value);
 
-  // Rank = the designation's 1-based position WITHIN its own (Level, Wing) group.
-  // The API returns rows already in sort_order (the single source of truth), so a
-  // running per-group counter over that order is exactly the Rank shown everywhere.
-  const rankById = useMemo(() => {
-    const seen = new Map();
-    const m = new Map();
-    for (const d of designations) {
-      const key = `${d.level || ""}::${d.wing || ""}`;
-      const next = (seen.get(key) || 0) + 1;
-      seen.set(key, next);
-      m.set(d.id, next);
-    }
-    return m;
-  }, [designations]);
+  // Rank = the designation's GLOBAL rank, returned by the API as `rank` (the single
+  // source of truth for designation order across the whole app). Rows arrive already
+  // ordered by rank. A display fallback (1-based list position) covers any legacy row
+  // not yet ranked, so the column never shows blank.
+  const rankOf = (item, idx) => (item.rank != null ? item.rank : idx + 1);
 
   // Open the editor for a designation: show its BASE name (level prefix + wing
   // suffix stripped) and pre-select EVERY Wing it is configured for — i.e. all
@@ -486,7 +477,7 @@ function DesignationsCard({ designations, onChanged }) {
     setEditName(base);
     setEditLevel(level);
     setEditWings(selected);
-    setEditRank(String(rankById.get(item.id) || ""));
+    setEditRank(item.rank != null ? String(item.rank) : "");
     setError("");
   }
 
@@ -505,14 +496,15 @@ function DesignationsCard({ designations, onChanged }) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError([d.message || "Failed to add designation.", d.detail].filter(Boolean).join(" — ")); return; }
-      // Place each newly-created row at the chosen 1-based Rank within its own
-      // (Level, Wing) group (rk is validated above and required).
+      // Place each newly-created row at the chosen global Rank (rk is validated above
+      // and required). When several rows are created at once (multiple Levels/Wings)
+      // they land consecutively from rk, keeping their order.
       if (Array.isArray(d.created)) {
-        for (const c of d.created) {
+        for (let i = 0; i < d.created.length; i++) {
           // eslint-disable-next-line no-await-in-loop
           await fetch("/api/designations/rank", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: c.id, rank: rk }),
+            body: JSON.stringify({ id: d.created[i].id, rank: rk + i }),
           });
         }
       }
@@ -588,7 +580,7 @@ function DesignationsCard({ designations, onChanged }) {
           <div className="flex gap-3">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Designation name…"
               className="flex-1 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-4 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
-            <input type="number" min="1" step="1" required value={addRank} onChange={(e) => setAddRank(e.target.value)} placeholder="Rank *" title="Rank — required. The designation's position within each selected Level + Wing."
+            <input type="number" min="1" step="1" required value={addRank} onChange={(e) => setAddRank(e.target.value)} placeholder="Rank *" title="Rank — required. The designation's global position (1 = first). Others re-sequence to keep a clean 1..N order."
               className="w-24 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-3 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
             <button type="submit" disabled={loading} className="bg-[#FCB712] text-[#164FA3] px-4 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2 disabled:opacity-50">
               <Plus size={16} /> Add
@@ -599,7 +591,7 @@ function DesignationsCard({ designations, onChanged }) {
       </div>
       <div className="flex-1 overflow-auto p-2">
         <ul className="divide-y divide-gray-100">
-          {designations.map((s) => (
+          {designations.map((s, sIdx) => (
             <li key={s.id} className={`p-3.5 hover:bg-gray-50 rounded-lg ${editingId === s.id ? "flex flex-col gap-2.5" : "flex items-center justify-between gap-2"}`}>
               {editingId === s.id ? (
                 <>
@@ -612,7 +604,7 @@ function DesignationsCard({ designations, onChanged }) {
                       <option value="">— level —</option>
                       {DESIG_LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
                     </select>
-                    <input type="number" min="1" step="1" value={editRank} onChange={(e) => setEditRank(e.target.value)} title="Rank (position within Level + Wing)"
+                    <input type="number" min="1" step="1" value={editRank} onChange={(e) => setEditRank(e.target.value)} title="Global Rank — change to move this designation; others re-sequence automatically"
                       className="w-16 border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]" placeholder="Rank" />
                     <button onClick={() => saveEdit(s.id)} disabled={busy} title="Save" className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={16} /></button>
                     <button onClick={() => setEditingId(null)} title="Cancel" className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
@@ -628,7 +620,7 @@ function DesignationsCard({ designations, onChanged }) {
                 </>
               ) : (
                 <>
-                  <span title="Rank within its Level + Wing" className="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-full bg-gray-100 text-gray-600 text-xs font-bold">{rankById.get(s.id) || "—"}</span>
+                  <span title="Global designation Rank" className="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-full bg-gray-100 text-gray-600 text-xs font-bold">{rankOf(s, sIdx)}</span>
                   <span className="font-medium text-gray-700 flex-1 min-w-0 truncate">{s.name}</span>
                   {s.level
                     ? <span className="text-[10px] uppercase font-bold tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-1 rounded-full whitespace-nowrap">{designationLevelLabel(s.level) || s.level}</span>
@@ -648,11 +640,11 @@ function DesignationsCard({ designations, onChanged }) {
 
 // One draggable designation row (dnd-kit sortable). The drag handle is explicit so
 // the Delete button stays clickable and the row is keyboard-reorderable.
-function SortableDesignationRow({ item, index, count, onDelete, onMove, busy }) {
+function SortableDesignationRow({ item, index, count, onDelete, onMove, busy, dim }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : 1 };
-  // Rank = 1-based position. Editable: typing a new Rank moves the row there (same
-  // effect as dragging), then "Save Order" persists it. Also drag with the handle.
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.6 : dim ? 0.4 : 1 };
+  // Rank = the GLOBAL 1-based position. Editable: typing a new Rank moves the row
+  // there (same as dragging), then "Save Rank Order" persists it. Also drag.
   const commit = (e) => {
     const v = parseInt(e.target.value, 10);
     if (Number.isInteger(v) && v >= 1 && v - 1 !== index) onMove(index, v - 1);
@@ -667,6 +659,8 @@ function SortableDesignationRow({ item, index, count, onDelete, onMove, busy }) 
         title="Rank — type a position to move this designation"
         className="w-12 text-center text-xs font-bold text-gray-600 border border-gray-200 rounded-md py-1 outline-none focus:ring-2 focus:ring-[#164FA3] shrink-0" />
       <span className="flex-1 min-w-0 truncate text-sm font-medium text-gray-700">{item.name}</span>
+      {item.level && <span className="hidden sm:inline text-[10px] uppercase font-bold tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-1 rounded-full whitespace-nowrap shrink-0">{designationLevelLabel(item.level) || item.level}</span>}
+      {item.wing && <span className="hidden md:inline text-[10px] uppercase font-bold tracking-wide text-purple-700 bg-purple-100 px-2 py-1 rounded-full whitespace-nowrap shrink-0">{DESIG_WING_LABEL(item.wing)}</span>}
       <button type="button" onClick={() => onDelete(item)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 shrink-0"><Trash2 size={14} /></button>
     </li>
   );
@@ -678,8 +672,6 @@ function SortableDesignationRow({ item, index, count, onDelete, onMove, busy }) 
 // (designations.sort_order, flagged manual_order=1) becomes the single source of
 // truth read everywhere the app lists designations — no alphabetical/auto sorting.
 function DesignationOrderPanel({ onChanged }) {
-  const [level, setLevel] = useState("assembly");
-  const [wing, setWing] = useState("Main Organisation");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -687,8 +679,7 @@ function DesignationOrderPanel({ onChanged }) {
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
-  const [newName, setNewName] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [q, setQ] = useState("");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -700,20 +691,18 @@ function DesignationOrderPanel({ onChanged }) {
     try {
       const r = await fetch("/api/designations");
       const d = await r.json().catch(() => ({}));
-      const all = d.designations || [];
-      const wingVal = wing || null;
-      // /api/designations returns rows already ordered by sort_order, so filtering
-      // preserves each bucket's current order.
-      const bucket = all.filter((x) => (x.level || "") === level && ((x.wing || null) === wingVal));
-      setItems(bucket);
+      // /api/designations returns ALL designations already in global Rank order.
+      setItems(d.designations || []);
       setDirty(false);
     } catch {
       setErr("Could not load designations.");
     } finally { setLoading(false); }
-  }, [level, wing]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
+  // Dragging/typing only reorders the FULL list (never a filtered subset), so the
+  // global 1..N rank saved is always complete and unambiguous.
   function onDragEnd(e) {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
@@ -726,7 +715,6 @@ function DesignationOrderPanel({ onChanged }) {
     setDirty(true); setMsg("");
   }
 
-  // Move a row to a typed Rank position (0-based target), same as dragging it there.
   function moveToIndex(fromIndex, toIndex) {
     setItems((prev) => {
       const to = Math.min(Math.max(toIndex, 0), prev.length - 1);
@@ -739,33 +727,17 @@ function DesignationOrderPanel({ onChanged }) {
   async function save() {
     setSaving(true); setErr(""); setMsg("");
     try {
-      const r = await fetch("/api/designations/reorder", {
+      const r = await fetch("/api/designations/rank", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ level, wing: wing || null, orderedIds: items.map((x) => x.id) }),
+        body: JSON.stringify({ orderedIds: items.map((x) => x.id) }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setErr(d.message || "Failed to save order."); return; }
+      if (!r.ok) { setErr([d.message || "Failed to save order.", d.detail].filter(Boolean).join(" — ")); return; }
       setDirty(false);
-      setMsg("Order saved. This order now applies everywhere designations are shown.");
-      onChanged?.();
-    } finally { setSaving(false); }
-  }
-
-  async function addToBucket(e) {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    setAdding(true); setErr(""); setMsg("");
-    try {
-      const r = await fetch("/api/designations", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName.trim(), levels: [level], wings: wing ? [wing] : [] }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setErr(d.message || "Failed to add designation."); return; }
-      setNewName("");
+      setMsg("Rank saved. This order now applies everywhere designations are shown.");
       await load();
       onChanged?.();
-    } finally { setAdding(false); }
+    } finally { setSaving(false); }
   }
 
   async function onDelete(item) {
@@ -780,59 +752,46 @@ function DesignationOrderPanel({ onChanged }) {
     } finally { setBusy(false); }
   }
 
-  const bucketLabel = `${designationLevelLabel(level) || level}${wing ? " · " + DESIG_WING_LABEL(wing) : " · No Wing"}`;
+  const needle = q.trim().toLowerCase();
+  // A search only DIMS non-matches (matches are highlighted) — the list order and the
+  // draggable set stay the FULL list so a save always writes a complete global rank.
+  const matches = (it) => !needle || String(it.name || "").toLowerCase().includes(needle);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="p-6 border-b border-gray-100 flex items-start gap-2 text-[#164FA3]">
         <ArrowUpDown size={18} className="mt-0.5 shrink-0" />
         <div>
-          <h2 className="font-bold text-lg">Designation Order</h2>
-          <p className="text-xs text-gray-500 font-normal mt-0.5">Set the manual display order for a Level + Wing by dragging. Each Level + Wing is ordered independently, and the saved order is used everywhere — worker lists, search, reports and the organisation structure. No alphabetical or automatic sorting is applied.</p>
+          <h2 className="font-bold text-lg">Designation Rank Order</h2>
+          <p className="text-xs text-gray-500 font-normal mt-0.5">Drag, or type a Rank number, to set the GLOBAL designation order (1, 2, 3 …). This single order is used everywhere designations appear — Contacts, Incomplete, worker lists, dropdowns, filters, search, vacancies, reports and the organisation structure. No alphabetical or automatic sorting is applied.</p>
         </div>
       </div>
       <div className="p-5 space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Level</label>
-            <select value={level} onChange={(e) => setLevel(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]">
-              {DESIG_LEVELS.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
-            </select>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a designation…"
+              className="w-full pl-9 h-10 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
           </div>
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Wing</label>
-            <select value={wing} onChange={(e) => setWing(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]">
-              <option value="">— No Wing —</option>
-              {DESIG_WINGS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-            </select>
-          </div>
-          <button type="button" onClick={save} disabled={saving || !dirty} className="ml-auto bg-[#FCB712] text-[#164FA3] px-4 py-2 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2 disabled:opacity-50">
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Save Order
+          <button type="button" onClick={save} disabled={saving || !dirty} className="bg-[#FCB712] text-[#164FA3] px-4 py-2 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2 disabled:opacity-50">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Save Rank Order
           </button>
         </div>
 
-        <form onSubmit={addToBucket} className="flex gap-2">
-          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={`Add a designation to ${bucketLabel}…`}
-            className="flex-1 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-4 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
-          <button type="submit" disabled={adding} className="border border-gray-300 text-gray-700 px-4 rounded-lg font-semibold hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50">
-            {adding ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Add
-          </button>
-        </form>
-
         {err && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-xs">{err}</div>}
         {msg && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-2 text-xs">{msg}</div>}
-        {dirty && <div className="text-xs text-amber-700 font-medium">Unsaved order — click “Save Order” to persist it.</div>}
+        {dirty && <div className="text-xs text-amber-700 font-medium">Unsaved order — click “Save Rank Order” to persist it.</div>}
 
         {loading ? (
           <div className="py-10 text-center text-gray-400"><Loader2 className="animate-spin inline" size={20} /></div>
         ) : items.length === 0 ? (
-          <div className="py-10 text-center text-gray-400 text-sm">No designations for {bucketLabel} yet. Add one above, or create them in the Designations panel.</div>
+          <div className="py-10 text-center text-gray-400 text-sm">No designations yet. Create them in the Designations panel above.</div>
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={items.map((x) => x.id)} strategy={verticalListSortingStrategy}>
-              <ul className="space-y-2">
+              <ul className="space-y-2 max-h-[460px] overflow-auto pr-1">
                 {items.map((item, idx) => (
-                  <SortableDesignationRow key={item.id} item={item} index={idx} count={items.length} onMove={moveToIndex} onDelete={onDelete} busy={busy} />
+                  <SortableDesignationRow key={item.id} item={item} index={idx} count={items.length} onMove={moveToIndex} onDelete={onDelete} busy={busy} dim={!matches(item)} />
                 ))}
               </ul>
             </SortableContext>

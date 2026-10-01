@@ -92,6 +92,11 @@ export async function ensureWingSchema() {
     if (!(await query("SHOW COLUMNS FROM designations LIKE 'sort_order'")).length) {
       await ensureDesignationColumn("sort_order", "INT NULL");
     }
+    // `rank` is the GLOBAL, single-source designation order (1,2,3… across the whole
+    // master). It is the PRIMARY ordering key everywhere designations are shown; the
+    // older per-group sort_order remains only as a tie-breaker fallback. `rank` is a
+    // reserved word, so it is always back-quoted in SQL.
+    await ensureDesignationColumn("rank", "INT NULL");
 
     // The one-time-migration ledger (also created by pageAccess) — created here too
     // in case the wing schema initialises first.
@@ -108,8 +113,44 @@ export async function ensureWingSchema() {
     // ensureWingSchema) short-circuit instead of recursing.
     await backfillBlockLevel();
     await backfillDesignationRank();
+    await backfillDesignationGlobalRank();
   } catch (e) {
     console.error("[wing] ensure schema:", e?.message || e);
+  }
+}
+
+// One-time: initialise the GLOBAL `rank` for every designation from the existing
+// manual order — NEVER alphabetically. Rows are sequenced by level priority
+// (State → Lok Sabha → District → Assembly → Block → Zone) and then by their
+// existing within-group order (sort_order, then name), producing a clean global
+// 1..N that matches the hierarchy the admin already sees. Only runs when no row is
+// ranked yet, and is guarded by the migration ledger, so an admin-set rank is never
+// overwritten. Existing ids/assignments/levels/wings are untouched.
+async function backfillDesignationGlobalRank() {
+  try {
+    const done = await query(`SELECT 1 FROM app_migrations WHERE name = ? LIMIT 1`, ["designation_global_rank_v1"]).catch(() => []);
+    if (done.length) return;
+    const [{ n }] = await query("SELECT COUNT(*) AS n FROM designations WHERE `rank` IS NOT NULL").catch(() => [{ n: 0 }]);
+    if (Number(n) === 0) {
+      const rows = await query(
+        `SELECT id FROM designations
+          ORDER BY CASE level
+                     WHEN 'state' THEN 0 WHEN 'lok_sabha' THEN 1 WHEN 'district' THEN 2
+                     WHEN 'assembly' THEN 3 WHEN 'block' THEN 4 WHEN 'zone' THEN 5 ELSE 6 END,
+                   (sort_order IS NULL), sort_order, name, id`
+      );
+      // Write rank AND mirror it into sort_order (+ manual_order=1) so every existing
+      // ordering consumer — which already orders by sort_order — reflects the global
+      // rank WITHOUT referencing the (possibly un-migrated) `rank` column in its SQL,
+      // and the wing auto-generator never overwrites it.
+      for (let i = 0; i < rows.length; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await query("UPDATE designations SET `rank` = ?, sort_order = ?, manual_order = 1 WHERE id = ?", [i + 1, i + 1, rows[i].id]);
+      }
+    }
+    await query(`INSERT IGNORE INTO app_migrations (name) VALUES (?)`, ["designation_global_rank_v1"]).catch(() => {});
+  } catch (e) {
+    console.error("[wing] backfillDesignationGlobalRank:", e?.message || e);
   }
 }
 

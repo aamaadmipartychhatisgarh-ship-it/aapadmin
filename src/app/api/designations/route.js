@@ -6,6 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { ensureDesignationLevelColumn, isValidDesignationLevel, designationLevelLabel } from "@/lib/designationLevels";
+import { ensureWingSchema } from "@/lib/wingDesignations";
 import { logMasterDataChange } from "@/lib/audit";
 
 export async function GET(req) {
@@ -23,32 +24,41 @@ export async function GET(req) {
     // to plain name ordering so the app keeps working.
     const withStats = new URL(req.url).searchParams.get("stats") === "1";
     await ensureDesignationLevelColumn(query); // PROMPT 13 — level column
+    // Ensures the `rank` column exists and runs the one-time global-rank backfill so
+    // ranks are populated on first read. Self-guarded (swallows its own errors) and
+    // module-cached, so it never 500s the list and only does real work once.
+    await ensureWingSchema();
     const hasSortOrder =
       (await query("SHOW COLUMNS FROM designations LIKE 'sort_order'").catch(() => [])).length > 0;
     const hasWing = (await query("SHOW COLUMNS FROM designations LIKE 'wing'").catch(() => [])).length > 0;
+    const hasRank = (await query("SHOW COLUMNS FROM designations LIKE 'rank'").catch(() => [])).length > 0;
+    // GLOBAL Rank is the primary order (1,2,3… across the whole master); sort_order
+    // and name are only tie-breakers/fallbacks. `rank` is reserved → back-quoted.
+    const rankLead = (a) => (hasRank ? `(${a}\`rank\` IS NULL), ${a}\`rank\` ASC, ` : "");
     const orderBy = hasSortOrder
-      ? "(d.sort_order IS NULL), d.sort_order ASC, d.name ASC"
-      : "d.name ASC";
+      ? `${rankLead("d.")}(d.sort_order IS NULL), d.sort_order ASC, d.name ASC`
+      : `${rankLead("d.")}d.name ASC`;
     const orderByPlain = hasSortOrder
-      ? "(sort_order IS NULL), sort_order ASC, name ASC"
-      : "name ASC";
+      ? `${rankLead("")}(sort_order IS NULL), sort_order ASC, name ASC`
+      : `${rankLead("")}name ASC`;
     const wingColD = hasWing ? "d.wing" : "NULL AS wing";
     const wingCol = hasWing ? "wing" : "NULL AS wing";
-    // sort_order is the designation's stored order value — surfaced to the client as
-    // its Rank (the UI shows a 1-based position per Level+Wing group). Guarded so the
-    // API still works on a deployment where the column was never added.
     const sortColD = hasSortOrder ? "d.sort_order" : "NULL AS sort_order";
     const sortCol = hasSortOrder ? "sort_order" : "NULL AS sort_order";
+    // The designation's global Rank, surfaced to the client (1-based). NULL until the
+    // backfill/admin sets it.
+    const rankColD = hasRank ? "d.`rank` AS `rank`" : "NULL AS `rank`";
+    const rankCol = hasRank ? "`rank`" : "NULL AS `rank`";
 
     const designations = withStats
       ? await query(
-          `SELECT d.id, d.name, d.level, ${wingColD}, ${sortColD}, COUNT(c.id) AS contact_count
+          `SELECT d.id, d.name, d.level, ${wingColD}, ${sortColD}, ${rankColD}, COUNT(c.id) AS contact_count
              FROM designations d
              LEFT JOIN contacts c ON c.designation_id = d.id${await notWrongNumberClause("c")}
-            GROUP BY d.id, d.name, d.level, ${hasWing ? "d.wing" : "d.id"}${hasSortOrder ? ", d.sort_order" : ""}
+            GROUP BY d.id, d.name, d.level, ${hasWing ? "d.wing" : "d.id"}${hasSortOrder ? ", d.sort_order" : ""}${hasRank ? ", d.`rank`" : ""}
             ORDER BY ${orderBy}`
         )
-      : await query(`SELECT id, name, level, ${wingCol}, ${sortCol} FROM designations ORDER BY ${orderByPlain}`);
+      : await query(`SELECT id, name, level, ${wingCol}, ${sortCol}, ${rankCol} FROM designations ORDER BY ${orderByPlain}`);
     return Response.json({ designations }, { status: 200 });
   } catch (error) {
     console.error("Error fetching designations:", error);
@@ -104,6 +114,7 @@ export async function POST(req) {
       ["wing", "VARCHAR(120) NULL"],
       ["sort_order", "INT NULL"],
       ["enabled", "TINYINT NOT NULL DEFAULT 1"],
+      ["rank", "INT NULL"], // GLOBAL designation order (the ALTER back-quotes the name)
     ];
     let altered = false;
     for (const [col, def] of WANT) {
