@@ -107,8 +107,44 @@ export async function ensureWingSchema() {
     // ensured is set BEFORE this so the syncWing calls below (which call
     // ensureWingSchema) short-circuit instead of recursing.
     await backfillBlockLevel();
+    await backfillDesignationRank();
   } catch (e) {
     console.error("[wing] ensure schema:", e?.message || e);
+  }
+}
+
+// One-time: give every designation a stored Rank (sort_order) so none is left
+// without an order. Only rows with a NULL sort_order are touched — they are
+// appended to the END of their own (level, wing) group in INSERTION (id) order,
+// never alphabetically — so existing manual order is fully preserved and no row
+// moves. Guarded by the migration ledger so it runs at most once per deployment.
+async function backfillDesignationRank() {
+  try {
+    const done = await query(`SELECT 1 FROM app_migrations WHERE name = ? LIMIT 1`, ["designation_rank_backfill_v1"]).catch(() => []);
+    if (done.length) return;
+    const groups = await query(
+      `SELECT DISTINCT level, wing FROM designations WHERE sort_order IS NULL`
+    ).catch(() => []);
+    for (const g of groups) {
+      // eslint-disable-next-line no-await-in-loop
+      const [{ mx }] = await query(
+        `SELECT COALESCE(MAX(sort_order), -1) AS mx FROM designations WHERE level <=> ? AND wing <=> ?`,
+        [g.level ?? null, g.wing ?? null]
+      );
+      // eslint-disable-next-line no-await-in-loop
+      const nulls = await query(
+        `SELECT id FROM designations WHERE level <=> ? AND wing <=> ? AND sort_order IS NULL ORDER BY id ASC`,
+        [g.level ?? null, g.wing ?? null]
+      );
+      let next = Number(mx) + 1;
+      for (const row of nulls) {
+        // eslint-disable-next-line no-await-in-loop
+        await query(`UPDATE designations SET sort_order = ? WHERE id = ?`, [next++, row.id]);
+      }
+    }
+    await query(`INSERT IGNORE INTO app_migrations (name) VALUES (?)`, ["designation_rank_backfill_v1"]).catch(() => {});
+  } catch (e) {
+    console.error("[wing] backfillDesignationRank:", e?.message || e);
   }
 }
 

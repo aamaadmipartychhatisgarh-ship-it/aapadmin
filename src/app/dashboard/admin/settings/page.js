@@ -495,6 +495,8 @@ function DesignationsCard({ designations, onChanged }) {
     setError("");
     if (!name.trim()) { setError("Please enter a Designation name."); return; }
     if (levels.size === 0) { setError("Please select at least one Level."); return; }
+    const rk = parseInt(addRank, 10);
+    if (!Number.isInteger(rk) || rk < 1) { setError("Please enter a Rank (a whole number ≥ 1)."); return; }
     setLoading(true);
     try {
       const r = await fetch("/api/designations", {
@@ -503,10 +505,9 @@ function DesignationsCard({ designations, onChanged }) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.message || "Failed to add designation."); return; }
-      // Optional Rank: place each newly-created row at that 1-based position in its
-      // own (Level, Wing) group. Blank Rank keeps the default (appended to the end).
-      const rk = parseInt(addRank, 10);
-      if (Number.isInteger(rk) && rk >= 1 && Array.isArray(d.created)) {
+      // Place each newly-created row at the chosen 1-based Rank within its own
+      // (Level, Wing) group (rk is validated above and required).
+      if (Array.isArray(d.created)) {
         for (const c of d.created) {
           // eslint-disable-next-line no-await-in-loop
           await fetch("/api/designations/rank", {
@@ -587,8 +588,8 @@ function DesignationsCard({ designations, onChanged }) {
           <div className="flex gap-3">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Designation name…"
               className="flex-1 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-4 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
-            <input type="number" min="1" step="1" value={addRank} onChange={(e) => setAddRank(e.target.value)} placeholder="Rank" title="Rank (position within each Level + Wing). Blank = add at end."
-              className="w-20 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-3 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
+            <input type="number" min="1" step="1" required value={addRank} onChange={(e) => setAddRank(e.target.value)} placeholder="Rank *" title="Rank — required. The designation's position within each selected Level + Wing."
+              className="w-24 bg-white border border-gray-200 text-gray-900 h-10 rounded-lg px-3 text-sm focus:ring-2 focus:ring-[#164FA3] outline-none" />
             <button type="submit" disabled={loading} className="bg-[#FCB712] text-[#164FA3] px-4 rounded-lg font-bold hover:bg-yellow-500 transition-colors flex items-center gap-2 disabled:opacity-50">
               <Plus size={16} /> Add
             </button>
