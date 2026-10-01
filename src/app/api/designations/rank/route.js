@@ -65,6 +65,6 @@ export async function POST(req) {
     return Response.json({ ok: true, id, rank: target + 1 });
   } catch (error) {
     console.error("designation rank error:", error);
-    return Response.json({ message: "Internal server error" }, { status: 500 });
+    return Response.json({ message: "Internal server error", detail: error?.sqlMessage || error?.message || null }, { status: 500 });
   }
 }

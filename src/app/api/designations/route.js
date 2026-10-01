@@ -6,7 +6,6 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause } from "@/lib/contactExtras";
 import { ensureDesignationLevelColumn, isValidDesignationLevel, designationLevelLabel } from "@/lib/designationLevels";
-import { ensureWingSchema } from "@/lib/wingDesignations";
 import { logMasterDataChange } from "@/lib/audit";
 
 export async function GET(req) {
@@ -25,8 +24,8 @@ export async function GET(req) {
     const withStats = new URL(req.url).searchParams.get("stats") === "1";
     await ensureDesignationLevelColumn(query); // PROMPT 13 — level column
     const hasSortOrder =
-      (await query("SHOW COLUMNS FROM designations LIKE 'sort_order'")).length > 0;
-    const hasWing = (await query("SHOW COLUMNS FROM designations LIKE 'wing'")).length > 0;
+      (await query("SHOW COLUMNS FROM designations LIKE 'sort_order'").catch(() => [])).length > 0;
+    const hasWing = (await query("SHOW COLUMNS FROM designations LIKE 'wing'").catch(() => [])).length > 0;
     const orderBy = hasSortOrder
       ? "(d.sort_order IS NULL), d.sort_order ASC, d.name ASC"
       : "d.name ASC";
@@ -87,14 +86,37 @@ export async function POST(req) {
     const multi = levels.length > 1 || rawWings.length > 0;
 
     await ensureDesignationLevelColumn(query);
-    await ensureWingSchema(); // guarantees the wing / sort_order / enabled columns exist
 
-    // Build INSERT/UPDATE from the columns that ACTUALLY exist. If a schema
-    // migration (ensureWingSchema) could not add wing/sort_order/enabled — e.g. a
-    // locked table or missing privilege on this deployment — we still create the
-    // core row instead of throwing "Unknown column" and 500-ing the whole add.
-    const colRows = await query("SHOW COLUMNS FROM designations").catch(() => []);
-    const cols = new Set(colRows.map((c) => c.Field));
+    // Self-contained, lightweight schema ensure for exactly the columns this INSERT
+    // uses. Each ALTER is guarded on its own, so one failing can't block the others
+    // or the create. We deliberately DON'T call the heavy ensureWingSchema() here
+    // (wing seeding + per-wing generation + rank backfill): the create doesn't need
+    // it, and on a large/locked table that work could stall or fail and take the
+    // add down with it. After this, the INSERT/UPDATE is built from the columns that
+    // ACTUALLY exist, so a still-missing column degrades gracefully instead of
+    // throwing "Unknown column" and 500-ing the whole request.
+    const detectCols = async () => {
+      const rows = await query("SHOW COLUMNS FROM designations").catch(() => []);
+      return new Set(rows.map((c) => c.Field));
+    };
+    let cols = await detectCols();
+    const WANT = [
+      ["wing", "VARCHAR(120) NULL"],
+      ["sort_order", "INT NULL"],
+      ["enabled", "TINYINT NOT NULL DEFAULT 1"],
+    ];
+    let altered = false;
+    for (const [col, def] of WANT) {
+      if (!cols.has(col)) {
+        try {
+          await query(`ALTER TABLE designations ADD COLUMN \`${col}\` ${def}`);
+          altered = true;
+        } catch (e) {
+          console.error(`[designations] add column ${col}:`, e?.sqlMessage || e?.message || e);
+        }
+      }
+    }
+    if (altered) cols = await detectCols();
     const hasLevelCol = cols.has("level");
     const hasWingCol = cols.has("wing");
     const hasSortCol = cols.has("sort_order");

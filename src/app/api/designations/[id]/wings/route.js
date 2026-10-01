@@ -127,6 +127,6 @@ export async function POST(req, { params }) {
       return Response.json({ message: "A designation with this name already exists" }, { status: 409 });
     }
     console.error("designation wings POST error:", error);
-    return Response.json({ message: "Internal server error" }, { status: 500 });
+    return Response.json({ message: "Internal server error", detail: error?.sqlMessage || error?.message || null }, { status: 500 });
   }
 }

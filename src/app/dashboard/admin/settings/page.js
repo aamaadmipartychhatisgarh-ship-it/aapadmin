@@ -546,7 +546,7 @@ function DesignationsCard({ designations, onChanged }) {
       setEditingId(null);
       onChanged();
       if (d.keptAssigned && d.keptAssigned.length) setError(d.message || "");
-    } else setError(d.message || "Update failed");
+    } else setError([d.message || "Update failed", d.detail].filter(Boolean).join(" — "));
     setBusy(false);
   }
 
