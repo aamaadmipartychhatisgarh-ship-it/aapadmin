@@ -46,6 +46,15 @@ export async function PATCH(req, { params }) {
     if (d.ward_number !== undefined) { sets.push("ward_number = ?"); vals.push(clip(d.ward_number, 60)); }
     if (d.area_booth !== undefined) { sets.push("area_booth = ?"); vals.push(clip(d.area_booth, 160)); }
     if (d.status !== undefined && PERSON_STATUSES.includes(d.status)) { sets.push("status = ?"); vals.push(d.status); }
+    if (d.photo_url !== undefined) {
+      // Only an app-relative /uploads/<file> reference is accepted; omitting the
+      // field entirely (the usual edit) leaves the existing photo untouched.
+      const p = String(d.photo_url || "").trim();
+      if (p && !/^\/uploads\/[A-Za-z0-9._-]+$/.test(p)) {
+        return NextResponse.json({ message: "Invalid photo reference." }, { status: 400, headers: NO_STORE });
+      }
+      sets.push("photo_url = ?"); vals.push(p || null);
+    }
     if (!sets.length) return NextResponse.json({ message: "Nothing to update." }, { status: 400, headers: NO_STORE });
 
     await query(`UPDATE reg_people SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);

@@ -4,9 +4,9 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { PhoneCall, PhoneForwarded, TrendingUp, Trophy, Heart, ArrowRight, Loader2 } from "lucide-react";
+import { PhoneCall, PhoneForwarded, TrendingUp, Trophy, Heart, ArrowRight, Loader2, Vote, UserCheck } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { isAdmin, isSupervisorRole, isPressMedia, isSocialMedia, isMediaUser } from "@/lib/permissions";
+import { isAdmin, isSupervisorRole, isPressMedia, isSocialMedia, isMediaUser, isCaller } from "@/lib/permissions";
 import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 
 export default function UserDashboard() {
@@ -73,6 +73,29 @@ export default function UserDashboard() {
         <StatCard label="Interested" value={today.interested} icon={Heart} />
         <StatCard label="Follow-ups" value={today.follow_ups} icon={TrendingUp} />
       </div>
+
+      {/* Registration quick-access — callers run the drive on the ground. These open
+          the Worker & Voter Registration module (access also enforced server-side). */}
+      {(isCaller(session) || previewingCaller) && (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <Link href="/dashboard/admin/voter-registration?tab=people" className="group bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 hover:border-[#164FA3]/40 hover:shadow-md transition">
+          <div className="w-12 h-12 rounded-xl bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center shrink-0"><Vote size={22} /></div>
+          <div className="min-w-0 flex-1">
+            <div className="font-bold text-gray-900">Voter Registration</div>
+            <div className="text-sm text-gray-500">Register voters and view submissions</div>
+          </div>
+          <ArrowRight size={18} className="text-gray-300 group-hover:text-[#164FA3]" />
+        </Link>
+        <Link href="/dashboard/admin/voter-registration?tab=workers" className="group bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 hover:border-[#164FA3]/40 hover:shadow-md transition">
+          <div className="w-12 h-12 rounded-xl bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center shrink-0"><UserCheck size={22} /></div>
+          <div className="min-w-0 flex-1">
+            <div className="font-bold text-gray-900">Worker Registration</div>
+            <div className="text-sm text-gray-500">Register karyakartas and manage links</div>
+          </div>
+          <ArrowRight size={18} className="text-gray-300 group-hover:text-[#164FA3]" />
+        </Link>
+      </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 lg:col-span-2">

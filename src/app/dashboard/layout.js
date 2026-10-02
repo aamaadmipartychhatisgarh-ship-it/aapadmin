@@ -80,6 +80,10 @@ const CALLER_NAV = [
   { name: "My Calls", href: "/dashboard/calls", icon: Database },
   { name: "Complaints", href: "/dashboard/complaints", icon: MessageSquare },
   { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
+  // Callers run the Worker & Voter Registration drive on the ground (access is also
+  // enforced by role in the page guard + every /api/registration route).
+  { name: "Voter Registration", href: "/dashboard/admin/voter-registration?tab=people", icon: Vote },
+  { name: "Worker Registration", href: "/dashboard/admin/voter-registration?tab=workers", icon: UserCheck },
   // The Not Interested tab of the Wrong Numbers dashboard, scoped to this caller.
   { name: "Not Interested", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
 ];

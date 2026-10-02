@@ -163,8 +163,10 @@ export const PAGES = [
   // Access; every /api/registration route re-checks this key server-side. The
   // PUBLIC form at /r/<token> is deliberately outside this model — it is
   // unauthenticated by design and gated only by the worker's link token.
+  // Callers run the registration drive on the ground, so they get this module by
+  // role (dashboard cards + nav + page + API), alongside the central admins.
   { key: "voter_registration", label: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", prefixes: ["/dashboard/admin/voter-registration"], icon: "Vote",
-    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN] },
+    roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.CALLER] },
   // Designation Approvals — the 7-level sequential approval chain. The page itself
   // is visible to oversight (they also get the "All Requests" view). The initiate
   // capability and the 7 per-level approver grants are CAPABILITY keys: roles: []

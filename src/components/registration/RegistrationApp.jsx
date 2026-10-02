@@ -5,10 +5,10 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import {
   BarChart3, Check, ChevronLeft, ChevronRight, Copy, Download, Link2, Loader2,
-  MessageCircle, Plus, RefreshCw, Search, Settings2, Shield, Trash2, Trophy,
+  MessageCircle, Pencil, Plus, RefreshCw, Search, Settings2, Shield, Trash2, Trophy,
   UserPlus, Users, Vote, X,
 } from "lucide-react";
-import { isTopAdmin } from "@/lib/permissions";
+import { isTopAdmin, isCaller } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 import Avatar from "@/components/Avatar";
 import { RatingBadge } from "@/components/KaryakartaRating";
@@ -138,9 +138,17 @@ function RankBadge({ rank }) {
 export default function RegistrationApp() {
   const { data: session } = useSession();
   const router = useRouter();
-  const { ready, allowed } = usePageGuard("voter_registration", isTopAdmin(session));
+  const { ready, allowed } = usePageGuard("voter_registration", isTopAdmin(session) || isCaller(session));
 
   const [tab, setTab] = useState("dashboard");
+  // Honor ?tab=people|workers|dashboard so the caller "Voter Registration" /
+  // "Worker Registration" links (and any deep link) open the right tab.
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get("tab");
+      if (t && ["dashboard", "workers", "people"].includes(t)) setTab(t);
+    } catch { /* ignore */ }
+  }, []);
   const [campaigns, setCampaigns] = useState([]);
   const [sms, setSms] = useState(null);   // { configured, balance } — drives the OTP switch
   const [campaignId, setCampaignId] = useState("");
@@ -461,6 +469,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
   // id whose delete is in flight (guards against a double-click firing twice).
   const [confirmDel, setConfirmDel] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [editing, setEditing] = useState(null); // the karyakarta being edited (full form), or null
 
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
@@ -496,9 +505,10 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { onError(d?.message || "Could not update this worker."); return; }
+      if (!r.ok) { onError(d?.message || "Could not update this worker."); return false; }
       load();
-    } catch { onError("Could not update this worker."); }
+      return true;
+    } catch { onError("Could not update this worker."); return false; }
   }
 
   // Runs ONLY after explicit confirmation in the dialog. Guarded by deletingId so
@@ -632,6 +642,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1">
+                      <button onClick={() => setEditing(w)} title="Edit worker" aria-label={`Edit ${w.name}`} className="p-1.5 rounded-md hover:bg-blue-50 text-[#164FA3]"><Pencil size={15} /></button>
                       <button onClick={() => setConfirmDel(w)} title="Delete worker" aria-label={`Delete ${w.name}`} className="p-1.5 rounded-md hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
                     </div>
                   </td>
@@ -641,6 +652,63 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
           </table>
         </div>
         <Pager page={page} pages={pages} onPage={setPage} />
+      </div>
+
+      {editing && (
+        <EditWorkerDialog
+          worker={editing}
+          onClose={() => setEditing(null)}
+          onSave={async (body) => { const ok = await patch(editing.id, body); if (ok !== false) setEditing(null); return ok; }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Full-field edit for one karyakarta link row (reg_workers). PATCHes the SAME id;
+// the login token/username and credited registrations are untouched.
+function EditWorkerDialog({ worker, onClose, onSave }) {
+  const [f, setF] = useState({
+    name: worker.name || "", mobile: worker.mobile || "",
+    ward_number: worker.ward_number || "", area_booth: worker.area_booth || "",
+    status: worker.status || "active",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  async function save() {
+    if (!String(f.name).trim()) return;
+    setSaving(true);
+    try { await onSave({ ...f }); } finally { setSaving(false); }
+  }
+  const inp = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  const lbl = "block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="font-bold text-lg text-gray-900">Edit Karyakarta</h3>
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div><label className={lbl}>Name *</label><input className={inp} value={f.name} onChange={(e) => set("name", e.target.value)} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Mobile</label><input className={inp} value={f.mobile} onChange={(e) => set("mobile", e.target.value)} /></div>
+            <div><label className={lbl}>Ward</label><input className={inp} value={f.ward_number} onChange={(e) => set("ward_number", e.target.value)} /></div>
+          </div>
+          <div><label className={lbl}>Area / Booth</label><input className={inp} value={f.area_booth} onChange={(e) => set("area_booth", e.target.value)} /></div>
+          <div><label className={lbl}>Link status</label>
+            <select className={inp} value={f.status} onChange={(e) => set("status", e.target.value)}>
+              <option value="active">Active</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </div>
+        </div>
+        <div className="p-5 border-t border-gray-100 flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50">Cancel</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg bg-[#164FA3] text-white font-semibold hover:bg-blue-800 disabled:opacity-50 inline-flex items-center gap-2">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Save changes
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -858,6 +926,7 @@ function PeopleTab({ filterQs, onError }) {
   const [confirmDel, setConfirmDel] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [okMsg, setOkMsg] = useState("");
+  const [editing, setEditing] = useState(null); // the registration being edited (full form), or null
 
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
@@ -997,11 +1066,13 @@ function PeopleTab({ filterQs, onError }) {
                       <option value="rejected">Rejected</option>
                     </select>
                   </td>
-                  {/* Delete — aligned to the right of the row (spec §2). Opens a
-                      confirmation dialog; never deletes on the first click. */}
-                  <td className="px-3 py-2.5 text-right">
+                  {/* Edit (full record) + Delete — aligned to the right of the row.
+                      Edit updates the SAME record (same id) and preserves the photo. */}
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                    <button onClick={() => setEditing(p)} title="Edit registration" aria-label={`Edit ${p.name}`}
+                            className="p-1.5 rounded-md hover:bg-blue-50 text-[#164FA3]"><Pencil size={15} /></button>
                     <button onClick={() => setConfirmDel(p)} title="Delete registration" aria-label={`Delete ${p.name}`}
-                            className="p-1.5 rounded-md hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
+                            className="p-1.5 rounded-md hover:bg-red-50 text-red-500 ml-1"><Trash2 size={15} /></button>
                   </td>
                 </tr>
               ))}
@@ -1021,6 +1092,104 @@ function PeopleTab({ filterQs, onError }) {
           onConfirm={confirmRemove}
         />
       )}
+
+      {editing && (
+        <EditPersonDialog
+          person={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); setOkMsg("Registration updated."); setTimeout(() => setOkMsg(""), 2500); load(); }}
+          onError={onError}
+        />
+      )}
+    </div>
+  );
+}
+
+// Full-field edit for one registration (reg_people). Loads every editable field of
+// the EXISTING record and PATCHes the same id — the photo is preserved (its
+// /uploads reference is re-sent unchanged) and no new row is ever created.
+function EditPersonDialog({ person, onClose, onSaved, onError }) {
+  const [f, setF] = useState({
+    name: person.name || "",
+    mobile: person.mobile || "",
+    person_type: person.person_type || "voter",
+    worker_rating: person.worker_rating ?? "",
+    address: person.address || "",
+    ward_number: person.ward_number || "",
+    area_booth: person.area_booth || "",
+    status: person.status || "active",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  async function save() {
+    if (!String(f.name).trim()) { onError("Name is required."); return; }
+    setSaving(true);
+    try {
+      const body = {
+        name: f.name, mobile: f.mobile, person_type: f.person_type,
+        worker_rating: f.person_type === "worker" ? (f.worker_rating === "" ? null : f.worker_rating) : null,
+        address: f.address, ward_number: f.ward_number, area_booth: f.area_booth, status: f.status,
+        photo_url: person.photo_url || undefined, // preserve the existing photo
+      };
+      const r = await fetch(`/api/registration/people/${person.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { onError(d?.message || "Could not update this registration."); return; }
+      onSaved();
+    } finally { setSaving(false); }
+  }
+
+  const inp = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  const lbl = "block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="font-bold text-lg text-gray-900">Edit Registration</h3>
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="flex items-center gap-3">
+            <Avatar name={f.name} src={person.photo_url} size={44} square className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-sm" />
+            <span className="text-xs text-gray-400">Photo is kept from the original registration.</span>
+          </div>
+          <div><label className={lbl}>Name *</label><input className={inp} value={f.name} onChange={(e) => set("name", e.target.value)} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Mobile</label><input className={inp} value={f.mobile} onChange={(e) => set("mobile", e.target.value)} /></div>
+            <div>
+              <label className={lbl}>Type</label>
+              <select className={inp} value={f.person_type} onChange={(e) => set("person_type", e.target.value)}>
+                <option value="voter">Voter</option>
+                <option value="worker">New worker</option>
+              </select>
+            </div>
+          </div>
+          {f.person_type === "worker" && (
+            <div><label className={lbl}>Karyakarta Rating (1–10)</label>
+              <input type="number" min="1" max="10" className={inp} value={f.worker_rating} onChange={(e) => set("worker_rating", e.target.value)} /></div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Ward</label><input className={inp} value={f.ward_number} onChange={(e) => set("ward_number", e.target.value)} /></div>
+            <div><label className={lbl}>Area / Booth</label><input className={inp} value={f.area_booth} onChange={(e) => set("area_booth", e.target.value)} /></div>
+          </div>
+          <div><label className={lbl}>Address</label><textarea rows={2} className={inp} value={f.address} onChange={(e) => set("address", e.target.value)} /></div>
+          <div><label className={lbl}>Status</label>
+            <select className={inp} value={f.status} onChange={(e) => set("status", e.target.value)}>
+              <option value="active">Counted</option>
+              <option value="duplicate">Duplicate</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+        </div>
+        <div className="p-5 border-t border-gray-100 flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50">Cancel</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg bg-[#164FA3] text-white font-semibold hover:bg-blue-800 disabled:opacity-50 inline-flex items-center gap-2">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Save changes
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

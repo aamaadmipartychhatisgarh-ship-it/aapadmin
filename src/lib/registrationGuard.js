@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isTopAdmin, isSuperAdmin } from "@/lib/permissions";
+import { isTopAdmin, isSuperAdmin, isCaller } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSchema";
 
@@ -19,14 +19,17 @@ export async function requireRegistrationAccess({ superAdminOnly = false } = {})
   const session = await getServerSession(authOptions);
   if (!session) return { error: NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE }) };
 
+  // Callers hold this module by role (they run the drive on the ground); central
+  // admins hold it by role too, and any other user can be granted it via Page Access.
+  const roleOk = isTopAdmin(session) || isCaller(session);
   let permitted = false;
   try {
-    permitted = await pageAllowed(session, "voter_registration", isTopAdmin(session));
+    permitted = await pageAllowed(session, "voter_registration", roleOk);
   } catch (e) {
-    // A Page-Access lookup failure must never deny an admin who holds the page by
-    // role — fall back to the baseline role check rather than locking everyone out.
+    // A Page-Access lookup failure must never deny a user who holds the page by role
+    // — fall back to the baseline role check rather than locking everyone out.
     console.error("[registration] guard access check failed, falling back to role:", e?.message || e);
-    permitted = isTopAdmin(session);
+    permitted = roleOk;
   }
   if (!permitted) return { error: NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE }) };
   if (superAdminOnly && !isSuperAdmin(session)) {
