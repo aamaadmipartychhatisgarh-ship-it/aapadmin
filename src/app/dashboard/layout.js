@@ -49,6 +49,7 @@ const SUPERVISOR_NAV = [
     href: "/dashboard/supervisor/contacts",
     icon: UserCheck,
     children: [
+      { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
       { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },

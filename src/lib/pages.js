@@ -114,6 +114,10 @@ export const PAGES = [
     roles: [...OVERSIGHT] },
   { key: "events", label: "Events", href: "/dashboard/admin/events", prefixes: ["/dashboard/admin/events"], icon: "CalendarClock",
     roles: [...OVERSIGHT] },
+  // Pending Approval — caller-submitted contacts a Supervisor reviews before they go
+  // live. Oversight + Supervisor by role (the API enforces the same).
+  { key: "pending_contacts", label: "Pending Contacts", href: "/dashboard/supervisor/pending-contacts", prefixes: ["/dashboard/supervisor/pending-contacts"], icon: "Check",
+    roles: [...OVERSIGHT] },
   { key: "number_corrections", label: "Number Corrections", href: "/dashboard/admin/number-corrections", prefixes: ["/dashboard/admin/number-corrections", "/dashboard/number-corrections"], icon: "Flag",
     roles: [ROLES.STATE_ADMIN, ROLES.ZONE_ADMIN, ROLES.DISTRICT_ADMIN, ROLES.ASSEMBLY_ADMIN] },
   { key: "administration", label: "Administration", href: "/dashboard/admin/administration", prefixes: ["/dashboard/admin/administration"], icon: "UserCog",

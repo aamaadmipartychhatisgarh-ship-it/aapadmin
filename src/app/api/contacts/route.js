@@ -6,7 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
@@ -102,6 +102,9 @@ export async function GET(req) {
       // Contacts dispositioned Switched Off / Incoming Off more than 10 times drop
       // out of the main list (they live on the dedicated "10+ Times …" pages).
       where += await repeatOffExclusion("c");
+      // Caller-created contacts awaiting (or refused in) Supervisor approval are not
+      // live yet — they live only in the Pending Approval queue.
+      where += await notPendingClause("c");
     }
     // Zone / Lok Sabha / District / Assembly / Designation — filter by the PERSON
     // (their linked worker) via the shared helper, so the same selection returns

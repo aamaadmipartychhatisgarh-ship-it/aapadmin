@@ -6,7 +6,7 @@ import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { getPool } from "@/lib/db";
 import { zoneMatch } from "@/lib/assignmentRules";
-import { hasWrongNumberColumn, hasFollowUpTimeColumn, ensureNotInterestedColumns } from "@/lib/contactExtras";
+import { hasWrongNumberColumn, hasFollowUpTimeColumn, ensureNotInterestedColumns, hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { dueClause } from "@/lib/followup";
 import { buildAssignedFilters } from "@/lib/workspaceFilters";
@@ -45,6 +45,9 @@ export async function POST(req) {
       ? " AND (is_not_interested = 0 OR is_not_interested IS NULL)" : "";
     // 10+ Switch Off / Incoming Off contacts are never claimable (restore is explicit).
     const repeatOff = await repeatOffExclusion("contacts");
+    // Caller-created contacts awaiting Supervisor approval are never claimable.
+    const notPending = (await hasApprovalStatusColumn())
+      ? " AND (approval_status IS NULL OR approval_status = 'approved')" : "";
     // A reminder is due at its date + optional time (feature-detected).
     const dueSql = dueClause("", await hasFollowUpTimeColumn());
 
@@ -67,7 +70,7 @@ export async function POST(req) {
         // works). Pool contacts still respect the due-date and lock rules.
         const [rows] = await conn.execute(
           `SELECT * FROM contacts WHERE id = ?
-             AND is_completed = 0${notWrong}${notInterested}${repeatOff}
+             AND is_completed = 0${notWrong}${notInterested}${repeatOff}${notPending}
              AND (locked_by_user_id IS NULL OR locked_by_user_id = ? OR locked_at < NOW() - INTERVAL 10 MINUTE)
              AND (assigned_to_user_id = ?
                   OR (assigned_to_user_id IS NULL
@@ -114,7 +117,7 @@ export async function POST(req) {
         const freshOnly = "AND NOT EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = contacts.id AND (cx.status_id IS NOT NULL OR cx.sentiment IS NOT NULL))";
         const [freshRows] = await conn.execute(
           `SELECT * FROM contacts
-            WHERE is_completed = 0${notWrong}${notInterested}${repeatOff}
+            WHERE is_completed = 0${notWrong}${notInterested}${repeatOff}${notPending}
               AND assigned_to_user_id = ?
               AND ${dueSql}
               ${freshOnly}
@@ -131,7 +134,7 @@ export async function POST(req) {
           // ordered to match the My Workspace follow-up section (nearest first).
           const [assignedRows] = await conn.execute(
             `SELECT * FROM contacts
-              WHERE is_completed = 0${notWrong}${notInterested}${repeatOff}
+              WHERE is_completed = 0${notWrong}${notInterested}${repeatOff}${notPending}
                 AND assigned_to_user_id = ?
                 AND ${dueSql}
                 AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)
@@ -148,7 +151,7 @@ export async function POST(req) {
             // caller's filtered "Assigned to You" dataset (no random/pool pick).
             const [poolRows] = await conn.execute(
               `SELECT * FROM contacts
-                WHERE is_completed = 0${notWrong}${notInterested}${repeatOff}
+                WHERE is_completed = 0${notWrong}${notInterested}${repeatOff}${notPending}
                   AND assigned_to_user_id IS NULL
                   AND ${dueSql}
                   AND (locked_by_user_id IS NULL OR locked_at < NOW() - INTERVAL 10 MINUTE)

@@ -105,6 +105,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // Quick section filter for the assigned list: "all" | "fresh" | "followup".
   // Ordering itself stays server-side; this only chooses which section(s) show.
   const [queueTab, setQueueTab] = useState("all");
+  const [showAddContact, setShowAddContact] = useState(false); // caller "Add Contact" modal (pending approval)
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [activeStatus, setActiveStatus] = useState(null); // users.active_status (this caller's) — editable here
@@ -701,9 +702,17 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <h3 className="font-bold text-sm text-gray-900 mb-3 flex items-center gap-2">
-            <Users size={16} /> Assigned to You
-          </h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+              <Users size={16} /> Assigned to You
+            </h3>
+            {/* Callers can submit a new contact — it is held for Supervisor approval
+                before it goes live (never added straight to the list). */}
+            <button onClick={() => setShowAddContact(true)}
+              className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-blue-800">
+              <Plus size={14} /> Add Contact
+            </button>
+          </div>
 
           {/* Search + filters */}
           <div className="space-y-2 mb-3">
@@ -1299,6 +1308,78 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
           onSaved={() => { setShowComplaint(false); setMessage("Complaint logged."); }}
         />
       )}
+
+      {showAddContact && (
+        <AddPendingContactModal
+          designations={designations}
+          onClose={() => setShowAddContact(false)}
+          onDone={() => { setShowAddContact(false); setMessage("Contact submitted for Supervisor approval."); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Caller "Add Contact" — submits a NEW contact for Supervisor approval (it is NOT
+// added to the live list until approved). Same core fields as the admin form;
+// geography defaults to the caller's own territory server-side.
+function AddPendingContactModal({ designations, onClose, onDone }) {
+  const [f, setF] = useState({ person_name: "", phone_number: "", address: "", designation_ids: [] });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  async function submit() {
+    setErr("");
+    if (!f.person_name.trim()) { setErr("Name is required."); return; }
+    if (!f.phone_number.trim()) { setErr("Mobile number is required."); return; }
+    setSaving(true);
+    try {
+      const r = await fetch("/api/contacts/pending", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          person_name: f.person_name.trim(), phone_number: f.phone_number.trim(),
+          address: f.address.trim() || null, designation_ids: f.designation_ids,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr([d.message, d.detail].filter(Boolean).join(" — ") || "Could not submit."); return; }
+      onDone();
+    } finally { setSaving(false); }
+  }
+
+  const inp = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  const lbl = "block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+          <h3 className="font-bold text-lg text-gray-900">Add Contact</h3>
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={18} /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2.5 text-xs">
+            This contact will be sent to your Supervisor for approval. It becomes a live contact only after they approve it.
+          </div>
+          <div><label className={lbl}>Name *</label><input className={inp} value={f.person_name} onChange={(e) => set("person_name", e.target.value)} autoFocus /></div>
+          <div><label className={lbl}>Mobile *</label><input className={inp} value={f.phone_number} onChange={(e) => set("phone_number", e.target.value)} /></div>
+          <div>
+            <label className={lbl}>Designation</label>
+            <select className={inp} value={f.designation_ids[0] || ""} onChange={(e) => set("designation_ids", e.target.value ? [e.target.value] : [])}>
+              <option value="">— none —</option>
+              {(designations || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <div><label className={lbl}>Address</label><textarea rows={2} className={inp} value={f.address} onChange={(e) => set("address", e.target.value)} /></div>
+          {err && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-xs">{err}</div>}
+        </div>
+        <div className="p-5 border-t border-gray-100 flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50">Cancel</button>
+          <button onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg bg-[#164FA3] text-white font-semibold hover:bg-blue-800 disabled:opacity-50 inline-flex items-center gap-2">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Submit for approval
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

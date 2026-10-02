@@ -6,7 +6,7 @@ import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
@@ -62,6 +62,7 @@ export async function GET(req) {
       where += await notWrongNumberClause("c");
     where += await notNotInterestedClause("c");
       where += await repeatOffExclusion("c");
+      where += await notPendingClause("c");
     }
     const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });
     where += person.where;

@@ -87,6 +87,52 @@ export async function notWrongNumberClause(alias = "c") {
   return ` AND (${alias}.is_wrong_number = 0 OR ${alias}.is_wrong_number IS NULL)`;
 }
 
+// Caller-created contacts await Supervisor approval before they go live. Two
+// optional columns carry this: `approval_status` ('pending' | 'rejected' | NULL =
+// live/approved) and `created_by_user_id` (the caller who added it). A pending OR
+// rejected contact must stay OUT of every live list / queue / assignment, exactly
+// like the Wrong Number flag — surfacing only in the Pending Approval queue.
+let _approvalCol; // undefined = unknown, then boolean
+export async function hasApprovalStatusColumn() {
+  if (_approvalCol !== undefined) return _approvalCol;
+  try {
+    _approvalCol = (await query("SHOW COLUMNS FROM contacts LIKE 'approval_status'")).length > 0;
+  } catch {
+    _approvalCol = false;
+  }
+  return _approvalCol;
+}
+
+// Create the two approval columns if missing (called by the pending-contact
+// endpoints). Each ALTER is individually guarded, and the cache is primed to true
+// so every notPendingClause() after this immediately starts excluding pending rows.
+export async function ensureContactApprovalColumns() {
+  try {
+    if (!(await hasApprovalStatusColumn())) {
+      try { await query("ALTER TABLE contacts ADD COLUMN approval_status VARCHAR(16) NULL"); }
+      catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
+      _approvalCol = true;
+    }
+    const hasCreatedBy = (await query("SHOW COLUMNS FROM contacts LIKE 'created_by_user_id'")).length > 0;
+    if (!hasCreatedBy) {
+      try { await query("ALTER TABLE contacts ADD COLUMN created_by_user_id INT NULL"); }
+      catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
+    }
+    return true;
+  } catch (e) {
+    console.error("[contact-approval] ensureContactApprovalColumns:", e?.message || e);
+    return false;
+  }
+}
+
+// AND-clause that keeps pending/rejected (caller-created, not-yet-approved) contacts
+// OUT of any live list/queue. No-op until the column exists (no pending contacts can
+// exist before then, so nothing to hide).
+export async function notPendingClause(alias = "c") {
+  if (!(await hasApprovalStatusColumn())) return "";
+  return ` AND (${alias}.approval_status IS NULL OR ${alias}.approval_status = 'approved')`;
+}
+
 // "Not Interested" — a PERSISTENT contact state (mirrors the Wrong Number flag).
 // A contact enters it when a call sentiment is Negative / Opponent / Not a Supporter
 // (set in /api/calls), and it then disappears from every active/Main contacts list
