@@ -118,6 +118,14 @@ export const PAGES = [
   // live. Oversight + Supervisor by role (the API enforces the same).
   { key: "pending_contacts", label: "Pending Contacts", href: "/dashboard/supervisor/pending-contacts", prefixes: ["/dashboard/supervisor/pending-contacts"], icon: "Check",
     roles: [...OVERSIGHT] },
+  // Member Portal — for designation-holders up to Vidhansabha (auto-provisioned
+  // accounts, managed via Page Access). The admin provisioning console is oversight.
+  { key: "portal_home", label: "My Dashboard", href: "/dashboard/portal", prefixes: ["/dashboard/portal"], icon: "LayoutDashboard",
+    roles: [...OVERSIGHT, ROLES.WORKER, ROLES.CALLER] },
+  { key: "portal_announcements", label: "Announcements", href: "/dashboard/portal/announcements", prefixes: ["/dashboard/portal/announcements"], icon: "MessageSquare",
+    roles: [...OVERSIGHT, ROLES.WORKER, ROLES.CALLER] },
+  { key: "portal_accounts", label: "Member Accounts", href: "/dashboard/admin/portal-accounts", prefixes: ["/dashboard/admin/portal-accounts"], icon: "UserCog",
+    roles: [...OVERSIGHT] },
   { key: "number_corrections", label: "Number Corrections", href: "/dashboard/admin/number-corrections", prefixes: ["/dashboard/admin/number-corrections", "/dashboard/number-corrections"], icon: "Flag",
     roles: [ROLES.STATE_ADMIN, ROLES.ZONE_ADMIN, ROLES.DISTRICT_ADMIN, ROLES.ASSEMBLY_ADMIN] },
   { key: "administration", label: "Administration", href: "/dashboard/admin/administration", prefixes: ["/dashboard/admin/administration"], icon: "UserCog",

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, isSupervisorRole } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { phoneAlreadyRegistered } from "@/lib/contactDuplicate";
 import { ensureContactApprovalColumns } from "@/lib/contactExtras";
@@ -19,7 +20,7 @@ const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-ag
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !(isOversight(session) || isSupervisorRole(session))) {
+    if (!session || !(await pageAllowed(session, "pending_contacts", isOversight(session) || isSupervisorRole(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     }
     await ensureContactApprovalColumns();

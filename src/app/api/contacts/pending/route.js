@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isCaller, isOversight, isSupervisorRole, scopeFilterSync } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds } from "@/lib/contactDesignations";
@@ -80,7 +81,9 @@ export async function POST(req) {
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !(isOversight(session) || isSupervisorRole(session))) {
+    // Oversight / Supervisor by role, OR a Member-Portal account granted the Worker
+    // Approval (pending_contacts) page.
+    if (!session || !(await pageAllowed(session, "pending_contacts", isOversight(session) || isSupervisorRole(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     }
     if (!(await ensureContactApprovalColumns())) {
