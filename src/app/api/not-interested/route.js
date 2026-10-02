@@ -98,6 +98,14 @@ export async function GET(req) {
     }
     // Super/State admin: no geographic restriction.
 
+    // A contact explicitly RESTORED from Not-Interested stays OUT of this list — even
+    // when it still matches a purely-derived reason (switched-off>5 / rude) — until a
+    // NEW qualifying call arrives after the restore. This makes Restore a real move
+    // out of the source for every reason, not only the flag-based ones.
+    if (cols.has("not_interested_restored_at")) {
+      where += " AND (c.not_interested_restored_at IS NULL OR agg.last_call_date > c.not_interested_restored_at)";
+    }
+
     const FROM = `
       FROM contacts c
       LEFT JOIN workers w ON w.id = c.worker_id

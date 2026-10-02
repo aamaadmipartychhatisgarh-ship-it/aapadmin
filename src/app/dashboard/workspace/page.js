@@ -85,15 +85,23 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // Queue search / hierarchical geography + designation filters. Zone is not a
   // dropdown — it's the caller's own zone (shown in Your Queue) and auto-scopes
   // the Lok Sabha list.
+  // Caller filters PERSIST across refresh / remount / starting a call (stored
+  // per-browser), so the selected dataset is never silently reset — they change only
+  // when the caller edits a filter or clears it.
+  const WS_FILTER_KEY = "aapadmin.workspace.filters.v1";
+  const loadWsFilters = () => {
+    if (typeof window === "undefined") return {};
+    try { return JSON.parse(window.localStorage.getItem(WS_FILTER_KEY) || "{}") || {}; } catch { return {}; }
+  };
   const [qSearch, setQSearch] = useState("");
   // Multi-select filters — each holds an array of selected ids ([] = All).
-  const [qLokSabha, setQLokSabha] = useState([]);
-  const [qDistrict, setQDistrict] = useState([]);
-  const [qAssembly, setQAssembly] = useState([]);
-  const [qDesignation, setQDesignation] = useState([]);
+  const [qLokSabha, setQLokSabha] = useState(() => loadWsFilters().lok_sabha || []);
+  const [qDistrict, setQDistrict] = useState(() => loadWsFilters().district || []);
+  const [qAssembly, setQAssembly] = useState(() => loadWsFilters().assembly || []);
+  const [qDesignation, setQDesignation] = useState(() => loadWsFilters().designation || []);
   // Call History filter (single-select): "" | blank | picked | not_picked | busy.
   // Filters the assigned list by the contact's COMPLETE past-call history.
-  const [qCallHistory, setQCallHistory] = useState("");
+  const [qCallHistory, setQCallHistory] = useState(() => loadWsFilters().call_history || "");
   // Quick section filter for the assigned list: "all" | "fresh" | "followup".
   // Ordering itself stays server-side; this only chooses which section(s) show.
   const [queueTab, setQueueTab] = useState("all");
@@ -331,12 +339,17 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // that no longer belongs to a selected parent ([] parent = "All" → no pruning).
   useEffect(() => {
     if (!qLokSabha.length) return;
+    // Don't prune while the option list is still loading/empty — otherwise a valid
+    // child selection would be wiped the moment the queue (and its scoped options)
+    // is refreshed, e.g. right after starting a call.
+    if (!districts.length) return;
     const ok = new Set(districts.filter((d) => qLokSabha.map(String).includes(String(d.parent_id))).map((d) => String(d.id)));
     setQDistrict((prev) => { const nx = prev.filter((id) => ok.has(String(id))); return nx.length === prev.length ? prev : nx; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qLokSabha.join(",")]);
   useEffect(() => {
     if (!qDistrict.length && !qLokSabha.length) return;
+    if (!assemblies.length) return; // same guard — never prune against an empty list
     const dLS = {}; districts.forEach((d) => { dLS[d.id] = d.parent_id; });
     const ok = new Set(assemblies.filter((a) =>
       qDistrict.length ? qDistrict.map(String).includes(String(a.parent_id))
@@ -345,6 +358,18 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     setQAssembly((prev) => { const nx = prev.filter((id) => ok.has(String(id))); return nx.length === prev.length ? prev : nx; });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qLokSabha.join(","), qDistrict.join(",")]);
+
+  // Persist the current filter selection so it survives refresh / remount / a call.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(WS_FILTER_KEY, JSON.stringify({
+        lok_sabha: qLokSabha, district: qDistrict, assembly: qAssembly,
+        designation: qDesignation, call_history: qCallHistory,
+      }));
+    } catch { /* ignore quota/private-mode */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(","), qCallHistory]);
 
   function startActive(contact, startedAtMs = Date.now()) {
     setActive({ ...contact, started_at: startedAtMs });

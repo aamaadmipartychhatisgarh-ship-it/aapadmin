@@ -45,11 +45,17 @@ export function MultiSelect({ options, value, onChange, allLabel = "All", classN
   // cleared, leaves it cleared — both mean "all". Never materializes a full list.
   function toggleAll() { onChange([]); }
 
+  const selCount = (value || []).length;
   const names = (value || [])
     .map((v) => options.find((o) => String(o.id) === String(v))?.name)
     .filter(Boolean);
   let summary;
-  if (allChecked || names.length === 0) summary = allLabel;
+  // Only the EMPTY/all state reads as "All". A non-empty selection whose names are
+  // not in the current (e.g. zone-scoped) option list still shows it is filtered —
+  // as a count — instead of wrongly reading "All", so a live filter never looks
+  // cleared after the option list is recomputed (e.g. after starting a call).
+  if (allChecked || selCount === 0) summary = allLabel;
+  else if (names.length === 0) summary = `${selCount} selected`;
   else if (names.length <= 2) summary = names.join(", ");
   else summary = `${names.slice(0, 2).join(", ")} (+${names.length - 2})`;
 

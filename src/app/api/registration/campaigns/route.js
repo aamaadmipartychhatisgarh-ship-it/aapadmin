@@ -55,11 +55,10 @@ export async function POST(req) {
       if (loc) { constituencyId = loc.id; constituency = loc.name; }
     }
 
-    // /join always opens the ACTIVE drive, so only one may be active at a time —
-    // creating a live drive closes whatever was running, and the shared link
-    // simply starts pointing at the new one.
+    // Creating a drive no longer closes the others — a registration link stays ON
+    // until an admin explicitly turns it OFF. Several drives may be active at once;
+    // the tokenless /join link resolves to the most recent active drive.
     const status = d.status === "closed" ? "closed" : "active";
-    if (status === "active") await query(`UPDATE reg_campaigns SET status = 'closed' WHERE status = 'active'`);
 
     const res = await query(
       `INSERT INTO reg_campaigns (name, election_type, constituency, constituency_id, ward_number, election_year, public_token, status, created_by)

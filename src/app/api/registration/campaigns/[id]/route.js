@@ -38,12 +38,12 @@ export async function PATCH(req, { params }) {
     if (d.otp_required !== undefined) { sets.push("otp_required = ?"); vals.push(d.otp_required ? 1 : 0); }
     if (!sets.length) return NextResponse.json({ message: "Nothing to update." }, { status: 400, headers: NO_STORE });
 
-    // /join opens the ACTIVE drive, so exactly one may be active at a time.
-    // Opening this one therefore closes the others — otherwise the link's
-    // destination would depend on a tiebreak nobody can see.
-    if (d.status === "active") {
-      await query(`UPDATE reg_campaigns SET status = 'closed' WHERE id <> ? AND status = 'active'`, [id]);
-    }
+    // A registration link stays ON until an admin explicitly turns it OFF — opening
+    // this drive no longer force-closes the others (that auto-close was the only
+    // thing that silently disabled a previously-live link). Several drives may be
+    // active at once; the tokenless /join link resolves to the most recent active
+    // drive, while every per-drive and per-worker token link keeps pointing at its
+    // own drive regardless.
     await query(`UPDATE reg_campaigns SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);
     const [campaign] = await query(`SELECT * FROM reg_campaigns WHERE id = ?`, [id]);
     if (!campaign) return NextResponse.json({ message: "Not found." }, { status: 404, headers: NO_STORE });

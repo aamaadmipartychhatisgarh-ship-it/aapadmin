@@ -32,7 +32,8 @@ export async function PUT(req, { params }) {
     // call history are untouched.
     await query(
       `UPDATE contacts
-          SET is_not_interested = 0, not_interested_reason = NULL, not_interested_at = NULL, is_completed = 0
+          SET is_not_interested = 0, not_interested_reason = NULL, not_interested_at = NULL,
+              not_interested_restored_at = NOW(), is_completed = 0
         WHERE id = ?`,
       [id]
     );

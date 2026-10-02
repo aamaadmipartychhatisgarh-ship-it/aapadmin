@@ -98,7 +98,7 @@ export async function notWrongNumberClause(alias = "c") {
 let _notInterestedReady = false; // only ever cached as true (a failure retries)
 const _niColsSql = `SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'
-          AND COLUMN_NAME IN ('is_not_interested','not_interested_reason','not_interested_at')`;
+          AND COLUMN_NAME IN ('is_not_interested','not_interested_reason','not_interested_at','not_interested_restored_at')`;
 export async function ensureNotInterestedColumns() {
   if (_notInterestedReady) return true;
   try {
@@ -115,6 +115,11 @@ export async function ensureNotInterestedColumns() {
     await add("is_not_interested", "TINYINT NOT NULL DEFAULT 0");
     await add("not_interested_reason", "VARCHAR(40) NULL");
     await add("not_interested_at", "TIMESTAMP NULL");
+    // Marks when a contact was explicitly RESTORED from Not-Interested. Used to keep
+    // a restored contact OUT of the list even when it still matches a purely-derived
+    // reason (switched-off>5 / rude) — it only re-appears if a NEW qualifying call
+    // arrives after this time.
+    await add("not_interested_restored_at", "TIMESTAMP NULL");
     try { await query("CREATE INDEX idx_contacts_not_interested ON contacts (is_not_interested)"); } catch { /* index already exists */ }
     have = new Set((await query(_niColsSql)).map((r) => r.c));
     const ok = have.has("is_not_interested");
