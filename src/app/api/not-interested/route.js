@@ -58,17 +58,15 @@ export async function GET(req) {
     const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get("page_size") || "50", 10)));
     const offset = (page - 1) * pageSize;
 
+    // Ensure the Not-Interested columns (incl. not_interested_restored_at) exist
+    // BEFORE reading the cached contacts column set, so the restore-suppression
+    // clause below is never skipped on a freshly-migrated process.
+    const niReady = await ensureNotInterestedColumns();
     // Switched-Off count: only computable where both feature columns exist.
     const cols = await contactColumns();
     const switchedExpr = (cols.has("wrong_number_reason") && cols.has("wrong_attempts"))
       ? "CASE WHEN c.wrong_number_reason = 'switched_off' THEN COALESCE(c.wrong_attempts, 0) ELSE 0 END"
       : "0";
-    // The persistent Not-Interested flag drives the sentiment reasons: a contact
-    // enters via a Negative/Opponent/Not-a-Supporter call and LEAVES this page the
-    // moment it is restored (flag cleared) — so restore is consistent with the Main
-    // list. Switched-off / rude stay purely derived. If the column can't be created
-    // on this deployment, fall back to the original sentiment-derived matching.
-    const niReady = await ensureNotInterestedColumns();
     const niSel = niReady ? "c.is_not_interested AS is_not_interested" : "0 AS is_not_interested";
 
     // ---- Filters (identical semantics to the Contacts dashboard) ----
