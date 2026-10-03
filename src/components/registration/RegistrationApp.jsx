@@ -1130,7 +1130,8 @@ function EditPersonDialog({ person, onClose, onSaved, onError }) {
         name: f.name, mobile: f.mobile, person_type: f.person_type,
         worker_rating: f.person_type === "worker" ? (f.worker_rating === "" ? null : f.worker_rating) : null,
         address: f.address, ward_number: f.ward_number, area_booth: f.area_booth, status: f.status,
-        photo_url: person.photo_url || undefined, // preserve the existing photo
+        // photo_url is intentionally OMITTED — the PATCH only touches sent fields, so
+        // the existing photo is preserved without re-validating a legacy path shape.
       };
       const r = await fetch(`/api/registration/people/${person.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),

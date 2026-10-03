@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { LayoutDashboard, MessageSquare, Check, ArrowRight, Loader2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
+import { isOversight } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 
 // Member Portal home — the landing for auto-provisioned designation-holder accounts.
@@ -14,7 +15,7 @@ import { usePageGuard } from "@/components/usePageGuard";
 export default function PortalHomePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const { ready, allowed } = usePageGuard("portal_home", false);
+  const { ready, allowed } = usePageGuard("portal_home", isOversight(session));
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");

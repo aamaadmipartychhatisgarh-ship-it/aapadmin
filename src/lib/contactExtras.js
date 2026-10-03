@@ -92,15 +92,17 @@ export async function notWrongNumberClause(alias = "c") {
 // live/approved) and `created_by_user_id` (the caller who added it). A pending OR
 // rejected contact must stay OUT of every live list / queue / assignment, exactly
 // like the Wrong Number flag — surfacing only in the Pending Approval queue.
-let _approvalCol; // undefined = unknown, then boolean
+let _approvalCol; // undefined = unknown; cached true once seen. false/undefined re-detect.
 export async function hasApprovalStatusColumn() {
-  if (_approvalCol !== undefined) return _approvalCol;
+  // Only a TRUE result is cached permanently. A false/undefined result is re-checked
+  // each call, so an instance that first ran before the column existed (e.g. another
+  // instance created it) starts excluding pending rows as soon as it does exist —
+  // never leaking them for the life of the process.
+  if (_approvalCol === true) return true;
   try {
-    _approvalCol = (await query("SHOW COLUMNS FROM contacts LIKE 'approval_status'")).length > 0;
-  } catch {
-    _approvalCol = false;
-  }
-  return _approvalCol;
+    if ((await query("SHOW COLUMNS FROM contacts LIKE 'approval_status'")).length > 0) _approvalCol = true;
+  } catch { /* keep re-detecting */ }
+  return _approvalCol === true;
 }
 
 // Create the two approval columns if missing (called by the pending-contact

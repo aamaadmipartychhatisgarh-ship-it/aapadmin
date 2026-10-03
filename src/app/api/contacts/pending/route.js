@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isCaller, isOversight, isSupervisorRole, scopeFilterSync } from "@/lib/permissions";
+import { isCaller, isOversight, isSupervisorRole } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
+import { pendingContactScope } from "@/lib/pendingContactScope";
 import { query } from "@/lib/db";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds } from "@/lib/contactDesignations";
@@ -94,13 +95,11 @@ export async function GET(req) {
 
     let where = " WHERE c.approval_status = ?";
     const params = [statusF];
-    // Territory scope: a supervisor sees only pending contacts in their area; super/
-    // state admins see all. scopeFilterSync is the same non-bypassable geo scope the
-    // rest of the app uses.
-    if (!isOversight(session) || isSupervisorRole(session)) {
-      const scope = scopeFilterSync(session.user, "c");
-      if (scope.where) { where += " " + scope.where; params.push(...scope.params); }
-    }
+    // Territory scope — a Supervisor/sub-admin/portal member sees only pending
+    // contacts in their own area; super/state admins see all (shared helper, so the
+    // list and the approve/reject mutation enforce exactly the same boundary).
+    const scope = pendingContactScope(session, "c");
+    if (scope.where) { where += " " + scope.where; params.push(...scope.params); }
 
     const rows = await query(
       `SELECT c.id, c.person_name, c.phone_number, c.address, c.photo_url, c.approval_status,

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, isSupervisorRole } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
+import { pendingContactScope } from "@/lib/pendingContactScope";
 import { query } from "@/lib/db";
 import { phoneAlreadyRegistered } from "@/lib/contactDuplicate";
 import { ensureContactApprovalColumns } from "@/lib/contactExtras";
@@ -34,6 +35,15 @@ export async function PUT(req, { params }) {
       return NextResponse.json({ message: "This contact is not awaiting approval." }, { status: 409, headers: NO_STORE });
     }
 
+    // Territory check (no IDOR): the same scope the queue list uses must also hold
+    // for the id being acted on, so a reviewer can't approve/reject a contact
+    // outside their own area.
+    const scope = pendingContactScope(session, "c");
+    if (scope.where) {
+      const [inScope] = await query(`SELECT c.id FROM contacts c WHERE c.id = ?${scope.where} LIMIT 1`, [id, ...scope.params]);
+      if (!inScope) return NextResponse.json({ message: "This contact is outside your area." }, { status: 403, headers: NO_STORE });
+    }
+
     if (action === "approve") {
       // A different live contact could have claimed this phone in the meantime —
       // re-check so approval never creates a duplicate live number.
@@ -45,8 +55,12 @@ export async function PUT(req, { params }) {
       return NextResponse.json({ ok: true, status: "approved" }, { headers: NO_STORE });
     }
     if (action === "reject") {
-      await query("UPDATE contacts SET approval_status = 'rejected' WHERE id = ?", [id]);
-      logAudit(session, { action: "contact.pending.reject", entityType: "contact", entityId: Number(id), details: { person_name: row.person_name, reason: String(d?.reason || "").slice(0, 300) || null } });
+      // A rejected submission is discarded (it was never a live contact), which also
+      // FREES its phone number — keeping a 'rejected' row would reserve the number
+      // forever via the unique phone index. The rejection is kept in the audit log.
+      await query("DELETE FROM contact_designations WHERE contact_id = ?", [id]).catch(() => {});
+      await query("DELETE FROM contacts WHERE id = ?", [id]);
+      logAudit(session, { action: "contact.pending.reject", entityType: "contact", entityId: Number(id), details: { person_name: row.person_name, phone_number: row.phone_number, reason: String(d?.reason || "").slice(0, 300) || null } });
       return NextResponse.json({ ok: true, status: "rejected" }, { headers: NO_STORE });
     }
     return NextResponse.json({ message: "Invalid action." }, { status: 400, headers: NO_STORE });

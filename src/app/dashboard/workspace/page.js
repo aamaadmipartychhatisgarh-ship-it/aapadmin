@@ -94,14 +94,17 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     try { return JSON.parse(window.localStorage.getItem(WS_FILTER_KEY) || "{}") || {}; } catch { return {}; }
   };
   const [qSearch, setQSearch] = useState("");
-  // Multi-select filters — each holds an array of selected ids ([] = All).
-  const [qLokSabha, setQLokSabha] = useState(() => loadWsFilters().lok_sabha || []);
-  const [qDistrict, setQDistrict] = useState(() => loadWsFilters().district || []);
-  const [qAssembly, setQAssembly] = useState(() => loadWsFilters().assembly || []);
-  const [qDesignation, setQDesignation] = useState(() => loadWsFilters().designation || []);
+  // Multi-select filters — each holds an array of selected ids ([] = All). They start
+  // empty (so SSR and the first client render match — no hydration mismatch) and are
+  // hydrated from localStorage in a mount effect below.
+  const [qLokSabha, setQLokSabha] = useState([]);
+  const [qDistrict, setQDistrict] = useState([]);
+  const [qAssembly, setQAssembly] = useState([]);
+  const [qDesignation, setQDesignation] = useState([]);
   // Call History filter (single-select): "" | blank | picked | not_picked | busy.
   // Filters the assigned list by the contact's COMPLETE past-call history.
-  const [qCallHistory, setQCallHistory] = useState(() => loadWsFilters().call_history || "");
+  const [qCallHistory, setQCallHistory] = useState("");
+  const filtersHydrated = useRef(false);
   // Quick section filter for the assigned list: "all" | "fresh" | "followup".
   // Ordering itself stays server-side; this only chooses which section(s) show.
   const [queueTab, setQueueTab] = useState("all");
@@ -360,9 +363,24 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qLokSabha.join(","), qDistrict.join(",")]);
 
+  // Hydrate saved filters AFTER mount (not in the useState initializer) so the first
+  // client render matches the server HTML. Runs once; marks hydrated so the persist
+  // effect below never writes an empty set over the saved one before this restores it.
+  useEffect(() => {
+    if (filtersHydrated.current) return;
+    const s = loadWsFilters();
+    if (Array.isArray(s.lok_sabha) && s.lok_sabha.length) setQLokSabha(s.lok_sabha);
+    if (Array.isArray(s.district) && s.district.length) setQDistrict(s.district);
+    if (Array.isArray(s.assembly) && s.assembly.length) setQAssembly(s.assembly);
+    if (Array.isArray(s.designation) && s.designation.length) setQDesignation(s.designation);
+    if (s.call_history) setQCallHistory(s.call_history);
+    filtersHydrated.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Persist the current filter selection so it survives refresh / remount / a call.
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !filtersHydrated.current) return;
     try {
       window.localStorage.setItem(WS_FILTER_KEY, JSON.stringify({
         lok_sabha: qLokSabha, district: qDistrict, assembly: qAssembly,
