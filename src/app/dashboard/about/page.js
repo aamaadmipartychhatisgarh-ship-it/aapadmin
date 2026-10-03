@@ -114,6 +114,11 @@ function PluginCard({ p, dims }) {
             <Check size={14} /> Fully certified — no pending tasks.
           </div>
         )}
+        {p.note && (
+          <div className="mt-2 flex items-start gap-2 text-[11.5px] text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+            <Info size={12} className="mt-0.5 shrink-0" /> <span>{p.note}</span>
+          </div>
+        )}
       </div>
     </article>
   );

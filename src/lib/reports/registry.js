@@ -60,6 +60,9 @@ function timeGroupBys(dateField) {
     { key: "quarter", label: "Quarter", sql: `CONCAT(YEAR(${ist}),'-Q',QUARTER(${ist}))` },
     { key: "year", label: "Year", sql: `YEAR(${ist})` },
     { key: "hour", label: "Hour of day", sql: `HOUR(${ist})` },
+    // Day-of-week drill-down: WEEKDAY() (0=Mon…6=Sun) prefixes the label so the
+    // chart orders Mon→Sun instead of alphabetically.
+    { key: "weekday", label: "Day of week", sql: `CONCAT(WEEKDAY(${ist}),'·',DATE_FORMAT(${ist},'%a'))` },
   ];
 }
 

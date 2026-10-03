@@ -9,6 +9,11 @@ import { query } from "@/lib/db";
 // monitor them. Both can view (callers stay geo-scoped).
 const canUseComplaints = (session) => isOversight(session) || isCaller(session);
 
+// SLA: an unresolved complaint (open / in_progress) older than this many hours is
+// OVERDUE and should be escalated. One flat target keeps the rule legible; it is a
+// plain integer constant, so it is safe to inline into SQL intervals below.
+export const COMPLAINT_SLA_HOURS = 72;
+
 // Optional complaints.designation_id column — the complainant's Designation, stored
 // independently from their name and complaint (references the existing designations
 // master). Added lazily & idempotently (feature-detected) so a deployment that
@@ -50,8 +55,9 @@ export async function GET(req) {
     if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
-    const complaints = await query(
-      `SELECT c.*, ld.name AS district_name, t.name AS team_name, dg.name AS designation_name
+    const rows = await query(
+      `SELECT c.*, ld.name AS district_name, t.name AS team_name, dg.name AS designation_name,
+              TIMESTAMPDIFF(HOUR, c.created_at, NOW()) AS age_hours
          FROM complaints c
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN teams t ON t.id = c.assigned_team_id
@@ -60,16 +66,32 @@ export async function GET(req) {
          ORDER BY FIELD(c.status,'open','in_progress','resolved','closed'), c.created_at DESC`,
       params
     );
+    // SLA timer + escalation flag, derived (no stored column): an unresolved
+    // complaint past the SLA target is overdue and its hours-overdue is reported so
+    // the UI can show the timer and flag it for escalation.
+    const open = new Set(["open", "in_progress"]);
+    const complaints = rows.map((c) => {
+      const age = Number(c.age_hours) || 0;
+      const unresolved = open.has(c.status);
+      return {
+        ...c,
+        age_hours: age,
+        sla_hours: COMPLAINT_SLA_HOURS,
+        hours_remaining: unresolved ? COMPLAINT_SLA_HOURS - age : null,
+        overdue: unresolved && age >= COMPLAINT_SLA_HOURS,
+      };
+    });
     const [[counts]] = await query(
       `SELECT COUNT(*) AS total,
               SUM(status='open') AS open,
               SUM(status='in_progress') AS in_progress,
-              SUM(status='resolved') AS resolved
+              SUM(status='resolved') AS resolved,
+              SUM(status IN ('open','in_progress') AND created_at < NOW() - INTERVAL ${COMPLAINT_SLA_HOURS} HOUR) AS overdue
        FROM complaints c ${scope.where ? `WHERE ${scope.where.replace(/^AND /, "")}` : ""}`,
       scope.params
     ).then((r) => [r]);
     const byType = await query(`SELECT type, COUNT(*) AS n FROM complaints GROUP BY type`);
-    return NextResponse.json({ complaints, counts, byType });
+    return NextResponse.json({ complaints, counts, byType, slaHours: COMPLAINT_SLA_HOURS });
   } catch (err) {
     console.error("complaints GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

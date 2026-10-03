@@ -86,8 +86,115 @@ export default function MediaDashboardTab({ onOpenTab }) {
         })}
       </div>
 
+      <CoverageSentiment />
+
       <DayReport />
     </div>
+  );
+}
+
+// Coverage Sentiment — the share of positive / neutral / negative press coverage
+// over a recent window (from press_notes.sentiment), plus the newspapers driving
+// it. Answers "how is our press doing?" at a glance without opening Reports.
+function CoverageSentiment() {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetch(`/api/media/sentiment?days=${days}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (active) setData(d); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [days]);
+
+  const c = data?.counts || { total: 0, positive: 0, neutral: 0, negative: 0 };
+  const pct = (n) => (c.total > 0 ? Math.round((n / c.total) * 100) : 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Coverage Sentiment</h2>
+          <p className="text-sm text-gray-500">Tone of published coverage over the selected window.</p>
+        </div>
+        <label className="inline-flex items-center gap-2 text-sm">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Window</span>
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white outline-none focus:ring-2 focus:ring-[#164FA3]">
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select>
+        </label>
+      </div>
+
+      {loading && !data ? (
+        <div className="flex h-28 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
+      ) : data && data.available === false ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 text-center text-sm text-gray-400">Sentiment tracking is not enabled yet.</div>
+      ) : c.total === 0 ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 text-center text-sm text-gray-400">No coverage recorded in this window.</div>
+      ) : (
+        <div className={`grid grid-cols-1 lg:grid-cols-3 gap-4 ${loading ? "opacity-60" : ""}`}>
+          {/* Overall tone */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 lg:col-span-1">
+            <div className="text-4xl font-bold text-emerald-600 tabular-nums">{pct(c.positive)}%</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wide mt-1">Positive coverage</div>
+            <div className="mt-4 flex h-3 w-full rounded-full overflow-hidden bg-gray-100">
+              <div style={{ width: `${pct(c.positive)}%` }} className="bg-emerald-500" title={`Positive ${c.positive}`} />
+              <div style={{ width: `${pct(c.neutral)}%` }} className="bg-gray-300" title={`Neutral ${c.neutral}`} />
+              <div style={{ width: `${pct(c.negative)}%` }} className="bg-red-400" title={`Negative ${c.negative}`} />
+            </div>
+            <div className="mt-3 flex items-center gap-4 text-xs">
+              <Legend color="bg-emerald-500" label="Positive" n={c.positive} />
+              <Legend color="bg-gray-300" label="Neutral" n={c.neutral} />
+              <Legend color="bg-red-400" label="Negative" n={c.negative} />
+            </div>
+            <div className="text-[11px] text-gray-400 mt-3">{c.total} coverage item{c.total === 1 ? "" : "s"} in the last {data?.days} days</div>
+          </div>
+
+          {/* Per-newspaper */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 lg:col-span-2">
+            <div className="text-sm font-bold text-gray-900 mb-3">By newspaper</div>
+            {(data?.byNewspaper || []).length === 0 ? (
+              <div className="text-xs text-gray-400 py-6 text-center">No per-newspaper data.</div>
+            ) : (
+              <div className="space-y-2.5">
+                {data.byNewspaper.map((r) => {
+                  const p = r.total > 0 ? Math.round((r.positive / r.total) * 100) : 0;
+                  const ne = r.total > 0 ? Math.round((r.neutral / r.total) * 100) : 0;
+                  const neg = Math.max(0, 100 - p - ne);
+                  return (
+                    <div key={r.newspaper}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="font-medium text-gray-700 truncate">{r.newspaper}</span>
+                        <span className="text-gray-400 tabular-nums">{r.total}</span>
+                      </div>
+                      <div className="flex h-2.5 w-full rounded-full overflow-hidden bg-gray-100">
+                        <div style={{ width: `${p}%` }} className="bg-emerald-500" />
+                        <div style={{ width: `${ne}%` }} className="bg-gray-300" />
+                        <div style={{ width: `${neg}%` }} className="bg-red-400" />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Legend({ color, label, n }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-gray-500">
+      <span className={`w-2.5 h-2.5 rounded-full ${color}`} /> {label} <span className="font-semibold text-gray-700 tabular-nums">{n}</span>
+    </span>
   );
 }
 

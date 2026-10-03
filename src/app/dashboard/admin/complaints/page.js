@@ -128,11 +128,12 @@ function Body() {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <SumCard label="Total" value={c.total || 0} accent />
         <SumCard label="Open" value={c.open || 0} danger={Number(c.open) > 0} />
         <SumCard label="In Progress" value={c.in_progress || 0} />
         <SumCard label="Resolved" value={c.resolved || 0} />
+        <SumCard label={`Overdue (>${data.slaHours || 72}h)`} value={c.overdue || 0} danger={Number(c.overdue) > 0} />
       </div>
 
       <CollapsibleSection title="Search & Filters">
@@ -188,7 +189,10 @@ function Body() {
                         long text so the row layout never breaks. */}
                     <td className="px-4 py-3 text-gray-600 max-w-xs"><div className="line-clamp-2 whitespace-pre-wrap">{cm.description || <span className="text-gray-300">—</span>}</div></td>
                     <td className="px-4 py-3 text-gray-600">{cm.district_name || "—"}</td>
-                    <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span></td>
+                    <td className="px-4 py-3">
+                      <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span>
+                      <div className="mt-1"><SlaBadge cm={cm} /></div>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <select value={cm.status} onChange={(e) => setStatus(cm.id, e.target.value)} className="text-xs border border-gray-200 rounded px-2 py-1 bg-white">
@@ -209,6 +213,18 @@ function Body() {
       {editing && <AddModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );
+}
+
+// SLA timer + escalation flag for one complaint. Resolved/closed rows show nothing;
+// unresolved rows show either the time left before the SLA or an "Overdue" flag
+// (red) once the target has passed — the signal an escalation is due.
+function SlaBadge({ cm }) {
+  if (cm.status === "resolved" || cm.status === "closed") return null;
+  const fmt = (h) => { const n = Math.abs(Math.round(h)); return n >= 48 ? `${Math.round(n / 24)}d` : `${n}h`; };
+  if (cm.overdue) {
+    return <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5" title={`Overdue by ${fmt(-(cm.hours_remaining ?? 0))} (SLA ${cm.sla_hours}h)`}>⚠ Overdue · escalate</span>;
+  }
+  return <span className="text-[10px] text-gray-400" title={`Age ${fmt(cm.age_hours)} · SLA ${cm.sla_hours}h`}>{fmt(cm.hours_remaining)} left</span>;
 }
 
 function SumCard({ label, value, accent, danger }) {

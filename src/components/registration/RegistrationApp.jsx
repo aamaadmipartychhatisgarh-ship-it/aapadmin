@@ -251,6 +251,23 @@ export default function RegistrationApp() {
         </div>
       </div>
 
+      {/* SMS/OTP gateway status — OTP verification needs a configured SMS gateway.
+          When it isn't configured, admins get a clear pointer to the one place it
+          is set (Administration → Integrations); non-admins just see it's off. */}
+      {sms && !sms.configured && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 px-4 py-3 text-sm flex flex-wrap items-center gap-2">
+          <span>⚠ SMS/OTP gateway is not configured — OTP verification is disabled.</span>
+          {isTopAdmin(session) && (
+            <a href="/dashboard/admin/integrations" className="font-semibold underline underline-offset-2 hover:text-amber-900">Configure it in Integrations →</a>
+          )}
+        </div>
+      )}
+      {sms && sms.configured && (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-2.5 text-sm flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" /> SMS/OTP gateway active{sms.balance != null ? ` · balance ${sms.balance}` : ""}.
+        </div>
+      )}
+
       {/* Filters shared by every tab (Election Drive filter removed — §4). */}
       <div className={`${cardCls} p-3 mb-4 flex flex-wrap items-center gap-2`}>
         <select className={inputCls} value={period} onChange={(e) => setPeriod(e.target.value)}>
