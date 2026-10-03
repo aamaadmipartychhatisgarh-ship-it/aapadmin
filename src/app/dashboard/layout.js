@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText, Info } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -545,6 +545,16 @@ export default function DashboardLayout({ children }) {
 
         {/* Bottom Area */}
         <div className="p-4 mt-auto space-y-1">
+          {/* About & Features — open to every signed-in user (ungated route), so
+              it sits here rather than in any one role's nav list. */}
+          <Link
+            href="/dashboard/about"
+            onClick={() => setMobileNavOpen(false)}
+            className="flex items-center gap-3 px-4 py-2.5 rounded-md text-blue-200 hover:text-white hover:bg-white/10 w-full transition-all text-sm"
+          >
+            <Info size={18} />
+            <span>About &amp; Features</span>
+          </Link>
           <InstallApp variant="sidebar" />
           <button
             onClick={handleSignOut}

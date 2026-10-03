@@ -202,7 +202,10 @@ export const PAGES = [
 // Pages that are NEVER gated by this system — every signed-in user reaches them
 // (their own profile, the admin home hub). Matching these returns null below so
 // the guard always permits them.
-const UNGATED_PREFIXES = ["/dashboard/profile", "/dashboard/admin/administration"];
+// "/dashboard/about" (About & Features) is informational and open to every
+// signed-in user — including managed portal accounts — so it is ungated here
+// (pageKeyForPath returns null → always allowed), the same as the profile page.
+const UNGATED_PREFIXES = ["/dashboard/profile", "/dashboard/admin/administration", "/dashboard/about"];
 
 const byKey = new Map(PAGES.map((p) => [p.key, p]));
 export const PAGE_KEYS = PAGES.map((p) => p.key);
