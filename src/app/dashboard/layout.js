@@ -190,6 +190,26 @@ export default function DashboardLayout({ children }) {
     if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
 
+  // H1 — the generic landing route (/dashboard) resolves to the "dashboard" page
+  // key, which is NOT in an auto-provisioned portal/worker account's granted set
+  // (portal_home, portal_announcements, pending_contacts). Without this, such a
+  // user would be greeted by the red Access-Denied screen on first login. Redirect
+  // them straight to their first allowed page instead. Scoped to EXACTLY
+  // "/dashboard" so deep links to other unassigned pages still show Access Denied,
+  // and only redirects to a non-dashboard target so there is no loop.
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    const canon = normalizeRole(session?.user?.role);
+    const isPreviewing = canon === ROLES.SUPER_ADMIN && viewAs !== "super_admin";
+    if (isPreviewing || !pageRestricted || !Array.isArray(allowedPageKeys) || allowedPageKeys.length === 0) return;
+    if (pathname !== "/dashboard") return;
+    const landingKey = pageKeyForPath("/dashboard");
+    if (landingKey && !allowedPageKeys.includes(landingKey)) {
+      const first = allowedPageKeys.map((k) => PAGES.find((p) => p.key === k)).find(Boolean);
+      if (first?.href && first.href !== "/dashboard") router.replace(first.href);
+    }
+  }, [status, session, viewAs, pageRestricted, allowedPageKeys, pathname, router]);
+
   if (status === "loading" || status === "unauthenticated") {
     return <div className="min-h-screen bg-[#0B3A82] flex items-center justify-center text-white">Loading...</div>;
   }
@@ -775,7 +795,14 @@ export default function DashboardLayout({ children }) {
             page gets a hard Access Denied screen instead of the page (the
             unauthorized page is never rendered). */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-8 relative">
-          {accessBlocked ? <AccessDenied fallbackHref={accessFallbackHref} /> : children}
+          {accessBlocked
+            ? (pathname === "/dashboard"
+                // Managed portal/worker landing — the redirect effect above is
+                // sending them to their first allowed page; show a spinner, not
+                // the Access-Denied screen, so the portal never looks broken.
+                ? <div className="flex h-full min-h-[60vh] items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" size={28} /></div>
+                : <AccessDenied fallbackHref={accessFallbackHref} />)
+            : children}
         </main>
 
         {/* Footer */}

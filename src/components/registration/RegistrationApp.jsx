@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   BarChart3, Check, ChevronLeft, ChevronRight, Copy, Download, Link2, Loader2,
   MessageCircle, Pencil, Plus, RefreshCw, Search, Settings2, Shield, Trash2, Trophy,
@@ -102,18 +102,44 @@ function LinkSwitch({ drive, drives, reload, onError }) {
   // When nothing is live, the switch reopens the drive that ran most recently.
   const target = drive || [...drives].sort((a, b) => new Date(b.created_at) - new Date(a.created_at) || b.id - a.id)[0] || null;
   const on = !!drive;
+  // EVERY currently-open drive — /join resolves to the newest active one, so the
+  // link stays live while ANY drive is active, not just the newest (M4).
+  const activeDrives = (drives || []).filter((c) => c.status === "active");
 
   async function toggle() {
     if (!target) { onError("Create an election drive first — the link opens whichever drive is active."); return; }
-    if (on && !window.confirm(`Switch the public link OFF? “${target.name}” will close and anyone opening the link will be told registration is not open.`)) return;
+    if (on) {
+      const msg = activeDrives.length > 1
+        ? `Switch the public link OFF? All ${activeDrives.length} open drives (${activeDrives.map((d) => `“${d.name}”`).join(", ")}) will close, and anyone opening the link will be told registration is not open.`
+        : `Switch the public link OFF? “${target.name}” will close and anyone opening the link will be told registration is not open.`;
+      if (!window.confirm(msg)) return;
+    }
     setBusy(true);
     try {
-      const r = await fetch(`/api/registration/campaigns/${target.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: on ? "closed" : "active" }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { onError(d?.message || "Could not change the link."); return; }
+      if (on) {
+        // Close ALL active drives, not just the newest. Closing only the newest
+        // would leave /join live on the next-newest active drive, contradicting the
+        // switch and still accepting public registrations (M4).
+        for (const d of activeDrives) {
+          // eslint-disable-next-line no-await-in-loop
+          const r = await fetch(`/api/registration/campaigns/${d.id}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "closed" }),
+          });
+          if (!r.ok) {
+            // eslint-disable-next-line no-await-in-loop
+            const e = await r.json().catch(() => ({}));
+            onError(e?.message || "Could not change the link."); return;
+          }
+        }
+      } else {
+        const r = await fetch(`/api/registration/campaigns/${target.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "active" }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { onError(d?.message || "Could not change the link."); return; }
+      }
       reload();
     } catch { onError("Could not change the link."); }
     finally { setBusy(false); }
@@ -138,17 +164,19 @@ function RankBadge({ rank }) {
 export default function RegistrationApp() {
   const { data: session } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { ready, allowed } = usePageGuard("voter_registration", isTopAdmin(session) || isCaller(session));
 
   const [tab, setTab] = useState("dashboard");
   // Honor ?tab=people|workers|dashboard so the caller "Voter Registration" /
-  // "Worker Registration" links (and any deep link) open the right tab.
+  // "Worker Registration" links (and any deep link) open the right tab. Driven off
+  // useSearchParams (not a one-shot window.location read) so switching between the
+  // two same-route nav links — which is a query-only client navigation that does
+  // NOT remount this component — actually changes the tab (M5).
   useEffect(() => {
-    try {
-      const t = new URLSearchParams(window.location.search).get("tab");
-      if (t && ["dashboard", "workers", "people"].includes(t)) setTab(t);
-    } catch { /* ignore */ }
-  }, []);
+    const t = searchParams.get("tab");
+    if (t && ["dashboard", "workers", "people"].includes(t)) setTab(t);
+  }, [searchParams]);
   const [campaigns, setCampaigns] = useState([]);
   const [sms, setSms] = useState(null);   // { configured, balance } — drives the OTP switch
   const [campaignId, setCampaignId] = useState("");
@@ -261,6 +289,11 @@ export default function RegistrationApp() {
                 ? <>One link for the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. It opens a login screen: every karyakarta signs in with their <span className="font-semibold text-gray-700">username and password</span> (created for them in <span className="font-semibold text-gray-700">Workers &amp; Links → Generate Links</span>), and their registrations are credited to them. No per-person link is issued.</>
                 : <>The link is switched off, so anyone who opens it sees “Registration is not open right now”. Use the switch to make it live.</>}
             </p>
+            {campaigns.filter((c) => c.status === "active").length > 1 && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-2 max-w-2xl">
+                {campaigns.filter((c) => c.status === "active").length} drives are currently open. The link opens <span className="font-semibold">{liveDrive?.name}</span> (the newest); switching the link off will close all of them.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <a href="/join" target="_blank" rel="noreferrer" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>Open login</a>

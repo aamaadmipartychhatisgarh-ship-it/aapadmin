@@ -6,6 +6,12 @@ import { setUserPages } from "@/lib/pageAccess";
 // designation up to Vidhansabha (Assembly). Block, Zone and anything literally
 // named "member" are excluded. Nothing is hard-coded by designation name.
 export const PORTAL_LEVELS = ["state", "lok_sabha", "district", "assembly"];
+// Generic rank-and-file "member" designations are excluded, but ONLY when the
+// name IS "member" (case-insensitive, trimmed) — a substring `LIKE '%member%'`
+// wrongly dropped leadership roles like "Executive Member" / "Member President".
+// Centralised so the inner GROUP_CONCAT and the outer WHERE use the identical test.
+const NOT_GENERIC_MEMBER = "LOWER(TRIM(%A.name)) <> 'member'";
+function notGenericMember(alias) { return NOT_GENERIC_MEMBER.replace("%A", alias); }
 // A portal account is "managed" and gets EXACTLY these pages (role is secondary):
 // its Dashboard, Announcements, and the Worker Approval (pending contacts) queue.
 export const PORTAL_PAGES = ["portal_home", "portal_announcements", "pending_contacts"];
@@ -56,12 +62,12 @@ export async function listEligiblePeople() {
             c.zone_id, c.lok_sabha_id, c.district_id, c.assembly_id,
             (SELECT GROUP_CONCAT(DISTINCT d2.name ORDER BY (d2.sort_order IS NULL), d2.sort_order, d2.name SEPARATOR ', ')
                FROM contact_designations cd2 JOIN designations d2 ON d2.id = cd2.designation_id
-              WHERE cd2.contact_id = c.id AND d2.level IN (${ph}) AND d2.name NOT LIKE '%member%') AS designations,
+              WHERE cd2.contact_id = c.id AND d2.level IN (${ph}) AND ${notGenericMember("d2")}) AS designations,
             (SELECT u.username FROM users u WHERE u.contact_id = c.id LIMIT 1) AS existing_username
        FROM contacts c
        JOIN contact_designations cd ON cd.contact_id = c.id
        JOIN designations d ON d.id = cd.designation_id
-      WHERE d.level IN (${ph}) AND d.name NOT LIKE '%member%'
+      WHERE d.level IN (${ph}) AND ${notGenericMember("d")}
         AND NULLIF(TRIM(c.person_name), '') IS NOT NULL
         AND NULLIF(TRIM(c.phone_number), '') IS NOT NULL
       GROUP BY c.id, c.person_name, c.phone_number, c.zone_id, c.lok_sabha_id, c.district_id, c.assembly_id
@@ -92,23 +98,37 @@ export async function provisionPortalAccounts(session) {
       continue;
     }
     // Collision-safe: BASE, BASE1, BASE2 … so two people with the same User ID never
-    // overwrite each other, and the final id is reported to the admin.
-    let username = base, n = 1;
-    // eslint-disable-next-line no-await-in-loop
-    while ((await query("SELECT id FROM users WHERE username = ? LIMIT 1", [username])).length) username = `${base}${n++}`;
+    // overwrite each other, and the final id is reported to the admin. The free-id
+    // probe below is a fast path, but it is check-then-insert and so races with a
+    // concurrent provision run; the real guard is the retry loop — if the INSERT
+    // hits a duplicate-key (users.username unique), we advance the suffix and try
+    // again rather than losing that person to `skipped` (L2).
     const hash = await bcrypt.hash("#", 10); // spec password; never returned in plaintext
-    try {
+    let username = base, n = 1, res = null, lastErr = null;
+    for (let attempt = 0; attempt < 30 && !res; attempt++) {
       // eslint-disable-next-line no-await-in-loop
-      const res = await query(
-        `INSERT INTO users (username, password, role, home_district_id, scope_zone_id, scope_lok_sabha_id, scope_assembly_id, contact_id)
-         VALUES (?, ?, 'worker', ?, ?, ?, ?, ?)`,
-        [username, hash, p.district_id || null, p.zone_id || null, p.lok_sabha_id || null, p.assembly_id || null, p.contact_id]
-      );
+      while ((await query("SELECT id FROM users WHERE username = ? LIMIT 1", [username])).length) username = `${base}${n++}`;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        res = await query(
+          `INSERT INTO users (username, password, role, home_district_id, scope_zone_id, scope_lok_sabha_id, scope_assembly_id, contact_id)
+           VALUES (?, ?, 'worker', ?, ?, ?, ?, ?)`,
+          [username, hash, p.district_id || null, p.zone_id || null, p.lok_sabha_id || null, p.assembly_id || null, p.contact_id]
+        );
+      } catch (e) {
+        lastErr = e;
+        // A duplicate-key means another run claimed this username between the probe
+        // and the INSERT — bump the suffix and retry. Any other error is terminal.
+        if (/duplicate|ER_DUP_ENTRY/i.test(e?.code || e?.message || "")) { username = `${base}${n++}`; continue; }
+        break;
+      }
+    }
+    if (res) {
       // eslint-disable-next-line no-await-in-loop
       await setUserPages(res.insertId, PORTAL_PAGES, session?.user?.id || null);
       created.push({ contact_id: p.contact_id, name: p.person_name, username, designations: p.designations });
-    } catch (e) {
-      skipped.push({ contact_id: p.contact_id, name: p.person_name, reason: e?.sqlMessage || e?.message || "Insert failed" });
+    } else {
+      skipped.push({ contact_id: p.contact_id, name: p.person_name, reason: lastErr?.sqlMessage || lastErr?.message || "Insert failed" });
     }
   }
   return { eligible: people.length, created, skipped };

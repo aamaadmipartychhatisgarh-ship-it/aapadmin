@@ -496,17 +496,14 @@ function DesignationsCard({ designations, onChanged }) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError([d.message || "Failed to add designation.", d.detail].filter(Boolean).join(" — ")); return; }
-      // Place each newly-created row at the chosen global Rank (rk is validated above
-      // and required). When several rows are created at once (multiple Levels/Wings)
-      // they land consecutively from rk, keeping their order.
-      if (Array.isArray(d.created)) {
-        for (let i = 0; i < d.created.length; i++) {
-          // eslint-disable-next-line no-await-in-loop
-          await fetch("/api/designations/rank", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: d.created[i].id, rank: rk + i }),
-          });
-        }
+      // Place ALL newly-created rows at the chosen global Rank in ONE request: the
+      // batch-place endpoint drops them consecutively from rk in a single
+      // re-sequence, instead of one full-table re-sequence per created row.
+      if (Array.isArray(d.created) && d.created.length) {
+        await fetch("/api/designations/rank", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ placeIds: d.created.map((c) => c.id), atRank: rk }),
+        }).catch(() => {});
       }
       setName(""); setLevels(new Set()); setWings(new Set()); setAddRank(""); onChanged();
     } finally { setLoading(false); }

@@ -54,13 +54,32 @@ export async function POST(req) {
 
     // --- Bulk mode: an explicit full/partial order from the drag editor ----------
     if (Array.isArray(body?.orderedIds)) {
-      const wanted = body.orderedIds.map((x) => parseInt(x, 10)).filter((x) => Number.isInteger(x) && x > 0);
+      // De-duplicate so a repeated id can't be assigned two different ranks (which
+      // would push a legitimate designation off the tail / skip a rank number) — L1.
+      const wanted = [...new Set(body.orderedIds.map((x) => parseInt(x, 10)).filter((x) => Number.isInteger(x) && x > 0))];
       const seen = new Set(wanted);
       const ids = [...wanted, ...all.filter((x) => !seen.has(x))]; // listed first, rest keep order
       if (!ids.length) return Response.json({ message: "Nothing to rank" }, { status: 400 });
       await resequence(ids);
       await logMasterDataChange(session, { req, master: "designation", action: "Reranked", after: { count: wanted.length } });
       return Response.json({ ok: true, count: ids.length });
+    }
+
+    // --- Batch-place mode: drop a SET of ids consecutively at a target rank in ONE
+    //     re-sequence. The Add form creates several rows at once (multiple Levels ×
+    //     Wings); calling single mode per row did a full-table re-sequence N times
+    //     (N+1 round-trips, tens of thousands of row UPDATEs). This does it once (M3).
+    if (Array.isArray(body?.placeIds)) {
+      const place = [...new Set(body.placeIds.map((x) => parseInt(x, 10)).filter((x) => Number.isInteger(x) && x > 0))];
+      if (!place.length) return Response.json({ message: "Nothing to rank" }, { status: 400 });
+      const placeSet = new Set(place);
+      const rest = all.filter((x) => !placeSet.has(x));
+      const atRank = parseInt(body?.atRank, 10);
+      const target = Number.isInteger(atRank) && atRank >= 1 ? Math.min(atRank - 1, rest.length) : rest.length;
+      const ids = [...rest.slice(0, target), ...place, ...rest.slice(target)];
+      await resequence(ids);
+      await logMasterDataChange(session, { req, master: "designation", action: "Reranked", after: { count: place.length } });
+      return Response.json({ ok: true, count: ids.length, placed: place.length, atRank: target + 1 });
     }
 
     // --- Single mode: move one designation to a target global rank --------------

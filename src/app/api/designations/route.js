@@ -9,6 +9,18 @@ import { ensureDesignationLevelColumn, isValidDesignationLevel, designationLevel
 import { ensureWingSchema } from "@/lib/wingDesignations";
 import { logMasterDataChange } from "@/lib/audit";
 
+// L3 — the list read feature-detects three optional columns on every GET. Cache a
+// TRUE result for the process lifetime (a column, once present, never disappears);
+// a false/unknown result is re-probed so an instance that started before
+// ensureWingSchema created the column picks it up as soon as it exists.
+const _colCache = { sort_order: false, wing: false, rank: false };
+async function hasDesignationColumn(name) {
+  if (_colCache[name]) return true;
+  const present = (await query(`SHOW COLUMNS FROM designations LIKE '${name}'`).catch(() => [])).length > 0;
+  if (present) _colCache[name] = true;
+  return present;
+}
+
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -28,10 +40,9 @@ export async function GET(req) {
     // ranks are populated on first read. Self-guarded (swallows its own errors) and
     // module-cached, so it never 500s the list and only does real work once.
     await ensureWingSchema();
-    const hasSortOrder =
-      (await query("SHOW COLUMNS FROM designations LIKE 'sort_order'").catch(() => [])).length > 0;
-    const hasWing = (await query("SHOW COLUMNS FROM designations LIKE 'wing'").catch(() => [])).length > 0;
-    const hasRank = (await query("SHOW COLUMNS FROM designations LIKE 'rank'").catch(() => [])).length > 0;
+    const hasSortOrder = await hasDesignationColumn("sort_order");
+    const hasWing = await hasDesignationColumn("wing");
+    const hasRank = await hasDesignationColumn("rank");
     // GLOBAL Rank is the primary order (1,2,3… across the whole master); sort_order
     // and name are only tie-breakers/fallbacks. `rank` is reserved → back-quoted.
     const rankLead = (a) => (hasRank ? `(${a}\`rank\` IS NULL), ${a}\`rank\` ASC, ` : "");
@@ -132,9 +143,20 @@ export async function POST(req) {
     const hasWingCol = cols.has("wing");
     const hasSortCol = cols.has("sort_order");
     const hasEnabledCol = cols.has("enabled");
+    const hasRankCol = cols.has("rank");
 
     const created = [];
     let reused = 0;
+    // M2 — seed the GLOBAL `rank` on every newly-created row (appended to the end of
+    // the sequence) so a new designation never lands with rank = NULL, which would
+    // sort it to the bottom of rank-ordered screens while sort_order placed it
+    // mid-hierarchy elsewhere. The Add form may then re-sequence to a chosen slot,
+    // but this guarantees a sane, non-NULL rank even if that follow-up never runs.
+    let nextRank = null;
+    if (hasRankCol) {
+      const [{ n } = { n: null }] = await query("SELECT COALESCE(MAX(`rank`), 0) + 1 AS n FROM designations").catch(() => [{ n: null }]);
+      nextRank = n == null ? null : Number(n);
+    }
     for (const level of levels) {
       const levelLabel = designationLevelLabel(level) || level;
       for (const wing of wings) {
@@ -173,6 +195,7 @@ export async function POST(req) {
         if (hasWingCol) { insCols.push("wing"); insArgs.push(wing); }
         if (hasSortCol) { insCols.push("sort_order"); insArgs.push(nextSort); }
         if (hasEnabledCol) { insCols.push("enabled"); insArgs.push(1); }
+        if (hasRankCol && nextRank != null) { insCols.push("rank"); insArgs.push(nextRank); nextRank++; }
         // eslint-disable-next-line no-await-in-loop
         const res = await query(
           `INSERT INTO designations (${insCols.map((c) => `\`${c}\``).join(", ")}) VALUES (${insCols.map(() => "?").join(", ")})`,

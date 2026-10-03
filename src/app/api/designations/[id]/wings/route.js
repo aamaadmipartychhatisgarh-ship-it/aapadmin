@@ -68,6 +68,11 @@ export async function POST(req, { params }) {
     const wantWings = selected.length ? selected : [null];
 
     const created = [];
+    // M2 — new sibling rows get the next GLOBAL `rank` (appended to the sequence) so
+    // they are never left with rank = NULL, which would sort them to the bottom of
+    // rank-ordered screens while sort_order placed them in-hierarchy elsewhere.
+    let [{ nr: nextRank } = { nr: null }] = await query("SELECT COALESCE(MAX(`rank`), 0) + 1 AS nr FROM designations").catch(() => [{ nr: null }]);
+    nextRank = nextRank == null ? null : Number(nextRank);
     for (const wing of wantWings) {
       const wkey = wing == null ? "" : String(wing);
       const composed = composeDesignationName(level, newBase, wing);
@@ -90,10 +95,15 @@ export async function POST(req, { params }) {
           [level, wing]
         );
         // eslint-disable-next-line no-await-in-loop
-        const res = await query(
-          "INSERT INTO designations (name, level, wing, sort_order, enabled) VALUES (?, ?, ?, ?, 1)",
-          [composed, level, wing, n]
-        );
+        const res = nextRank == null
+          ? await query(
+              "INSERT INTO designations (name, level, wing, sort_order, enabled) VALUES (?, ?, ?, ?, 1)",
+              [composed, level, wing, n]
+            )
+          : await query(
+              "INSERT INTO designations (name, level, wing, sort_order, `rank`, enabled) VALUES (?, ?, ?, ?, ?, 1)",
+              [composed, level, wing, n, nextRank++]
+            );
         created.push(res.insertId);
       }
     }

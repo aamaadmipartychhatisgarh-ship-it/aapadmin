@@ -51,8 +51,17 @@ export function generatedName(levelKey, baseName, wingName) {
 }
 
 let ensured = false;
+// M1 — if any step before `ensured = true` throws (a transient lock / statement
+// timeout on wings/designations), `ensured` stays false and WITHOUT this throttle
+// every subsequent GET /api/designations would re-run the whole heavy path
+// (column probes, 2× CREATE TABLE, 16× INSERT IGNORE seed, 14 upserts) and re-wait
+// on the same timing-out DB. A failed attempt parks retries for a short cooldown;
+// once a full run succeeds, `ensured` latches true for the process lifetime.
+let lastEnsureFailAt = 0;
+const ENSURE_RETRY_COOLDOWN_MS = 15000;
 export async function ensureWingSchema() {
   if (ensured) return;
+  if (lastEnsureFailAt && Date.now() - lastEnsureFailAt < ENSURE_RETRY_COOLDOWN_MS) return;
   try {
     await ensureDesignationLevelColumn(query);
     await query(
@@ -106,15 +115,20 @@ export async function ensureWingSchema() {
          applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     ).catch(() => {});
-    await seedWings();
-    await seedMainStateDesignations();
+    // Default-data seeds are idempotent (INSERT IGNORE / upsert) but can throw on a
+    // transient lock; guard each so a seed hiccup doesn't abort the schema setup and
+    // leave `ensured` false (which would re-run everything on the next read).
+    try { await seedWings(); } catch (e) { console.error("[wing] seedWings:", e?.message || e); }
+    try { await seedMainStateDesignations(); } catch (e) { console.error("[wing] seedMainState:", e?.message || e); }
     ensured = true;
+    lastEnsureFailAt = 0;
     // ensured is set BEFORE this so the syncWing calls below (which call
     // ensureWingSchema) short-circuit instead of recursing.
     await backfillBlockLevel();
     await backfillDesignationRank();
     await backfillDesignationGlobalRank();
   } catch (e) {
+    lastEnsureFailAt = Date.now();
     console.error("[wing] ensure schema:", e?.message || e);
   }
 }
@@ -304,21 +318,29 @@ export async function syncWing(wingId) {
       try {
         if (existing) {
           // Preserve a manually-configured order: sort_order is only refreshed from
-          // the generated sequence when the bucket has NOT been hand-ordered.
+          // the generated sequence when the bucket has NOT been hand-ordered. `rank`
+          // (the global primary order) is mirrored from the same value in lockstep so
+          // rank-ordered screens and sort_order-ordered screens never disagree (M2) —
+          // again only when the bucket has NOT been hand-ordered/ranked.
           // eslint-disable-next-line no-await-in-loop
           await query(
-            `UPDATE designations SET name = ?, level = ?, wing = ?,
-               sort_order = IF(manual_order = 1, sort_order, ?), enabled = ? WHERE id = ?`,
-            [name, level, wing.name, sort, base.enabled ? 1 : 0, existing.id]
+            "UPDATE designations SET name = ?, level = ?, wing = ?," +
+              " sort_order = IF(manual_order = 1, sort_order, ?)," +
+              " `rank` = IF(manual_order = 1, `rank`, ?), enabled = ? WHERE id = ?",
+            [name, level, wing.name, sort, sort, base.enabled ? 1 : 0, existing.id]
           );
         } else {
+          // New generated row: seed BOTH sort_order and the global `rank` from the
+          // generated hierarchical position, so it lands in its correct place on every
+          // screen immediately instead of sorting to the bottom with rank = NULL (M2).
           // eslint-disable-next-line no-await-in-loop
           await query(
-            `INSERT INTO designations (name, level, wing, wing_base_id, sort_order, enabled)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE level = VALUES(level), wing = VALUES(wing),
-               wing_base_id = VALUES(wing_base_id), sort_order = VALUES(sort_order), enabled = VALUES(enabled)`,
-            [name, level, wing.name, base.id, sort, base.enabled ? 1 : 0]
+            "INSERT INTO designations (name, level, wing, wing_base_id, sort_order, `rank`, enabled)" +
+              " VALUES (?, ?, ?, ?, ?, ?, ?)" +
+              " ON DUPLICATE KEY UPDATE level = VALUES(level), wing = VALUES(wing)," +
+              " wing_base_id = VALUES(wing_base_id), sort_order = VALUES(sort_order)," +
+              " `rank` = VALUES(`rank`), enabled = VALUES(enabled)",
+            [name, level, wing.name, base.id, sort, sort, base.enabled ? 1 : 0]
           );
         }
       } catch (e) {
