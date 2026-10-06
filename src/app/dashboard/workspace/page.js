@@ -115,6 +115,10 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [activeStatus, setActiveStatus] = useState(null); // users.active_status (this caller's) — editable here
   const [savingActiveStatus, setSavingActiveStatus] = useState(false);
+  // Worker Status of the contact currently on the call (contacts.active_status —
+  // stored against the WORKER, read back from the DB; null = not rated yet).
+  const [workerStatus, setWorkerStatus] = useState(null);
+  const [savingWorkerStatus, setSavingWorkerStatus] = useState(false);
   const [statuses, setStatuses] = useState([]);
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -489,6 +493,44 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       setError(e?.message === "Failed" ? "Could not update Active Status. Please try again." : (e?.message || "Could not update Active Status."));
     } finally {
       setSavingActiveStatus(false);
+    }
+  }
+
+  // Load the current worker's stored status whenever a call opens (never assumed).
+  useEffect(() => {
+    if (!active?.id) { setWorkerStatus(null); return; }
+    let alive = true;
+    fetch(`/api/contacts/${active.id}/active-status`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { active_status: null }))
+      .then((d) => { if (alive) setWorkerStatus(d.active_status || null); })
+      .catch(() => { if (alive) setWorkerStatus(null); });
+    return () => { alive = false; };
+  }, [active?.id]);
+
+  // Caller marks THIS worker as Active / Very Active / Average / Not Active. Saved
+  // on the contact row (one value per worker) so the Active Workers page shows the
+  // same stored value. Optimistic; reverts if the save fails. Never touches the
+  // Calling Status or the caller's own My Active Status.
+  async function updateWorkerStatus(value) {
+    if (!active?.id || !value || value === workerStatus || savingWorkerStatus) return;
+    const prev = workerStatus;
+    setWorkerStatus(value);
+    setSavingWorkerStatus(true);
+    setError("");
+    try {
+      const r = await fetch(`/api/contacts/${active.id}/active-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_status: value }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.message || "Could not update the worker status.");
+      if (d?.active_status) setWorkerStatus(d.active_status);
+    } catch (e) {
+      setWorkerStatus(prev);
+      setError(e?.message || "Could not update the worker status.");
+    } finally {
+      setSavingWorkerStatus(false);
     }
   }
 
@@ -1166,18 +1208,20 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                 <h3 className="font-bold text-gray-900 flex items-center gap-2"><Square size={16} /> Log Outcome</h3>
                 <div className="flex items-center gap-2">
-                  {/* Active Status — editable here too (beside the Calling Status),
-                      writing the same users.active_status the Active Workers page
-                      reads. Changing it here never affects the Calling Status below. */}
-                  <label className="inline-flex items-center gap-1.5 text-xs">
-                    <span className="font-semibold uppercase tracking-wide text-gray-400">Active Status</span>
+                  {/* Worker Status — how active THIS worker is (Active / Very Active /
+                      Average / Not Active). Stored on the contact row and shown on the
+                      Active Workers page. Separate from the Calling Status below and
+                      from the caller's own "My Active Status". */}
+                  <label className="inline-flex items-center gap-1.5 text-xs" title={workerStatus ? `Worker status: ${ACTIVE_STATUS_LABEL[workerStatus]}` : "Worker status not set yet"}>
+                    <span className="font-semibold uppercase tracking-wide text-gray-400">Worker Status</span>
                     <select
-                      value={activeStatus || ""}
-                      onChange={(e) => updateActiveStatus(e.target.value)}
-                      disabled={savingActiveStatus}
-                      className={`text-xs font-semibold rounded-lg border px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-[#164FA3] disabled:opacity-60 ${activeStatus ? "border-gray-300 text-gray-800" : "border-gray-200 text-gray-400"}`}
+                      value={workerStatus || ""}
+                      onChange={(e) => updateWorkerStatus(e.target.value)}
+                      disabled={savingWorkerStatus}
+                      aria-label="Worker status"
+                      className={`text-xs font-semibold rounded-lg border px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-[#164FA3] disabled:opacity-60 ${workerStatus ? "border-gray-300 text-gray-800" : "border-gray-200 text-gray-400"}`}
                     >
-                      <option value="" disabled>Set…</option>
+                      <option value="" disabled>Not set</option>
                       {ACTIVE_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </label>

@@ -4,9 +4,9 @@ import { authOptions, isSupervisor } from "@/lib/auth";
 import { scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureContactActiveStatusColumns } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
-import { normalizeActiveStatus } from "@/lib/activeStatus";
+import { normalizeActiveStatus, ACTIVE_STATUS_VALUES } from "@/lib/activeStatus";
 
 // The Active Status lives on users.active_status (the ONE authoritative value,
 // shared with the caller's Log Outcome display). Ensure the column exists before
@@ -44,6 +44,9 @@ export async function GET(req) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     await ensureActiveStatusColumn();
+    // Worker Status lives on each CONTACT row (contacts.active_status); per-caller
+    // counts of it are aggregated below from the stored values, never assumed.
+    const workerStatusReady = await ensureContactActiveStatusColumns();
     const { searchParams } = new URL(req.url);
     const search = (searchParams.get("search") || "").trim();
     const district_id = searchParams.get("district_id");
@@ -70,8 +73,13 @@ export async function GET(req) {
     where += " " + scope.where;
     params.push(...scope.params);
 
+    const workerStatusSums = workerStatusReady
+      ? ACTIVE_STATUS_VALUES.map((v) => `COALESCE(SUM(c.active_status = '${v}'), 0) AS ws_${v.toLowerCase()},`).join("\n              ")
+        + "\n              COALESCE(SUM(c.active_status IS NULL OR c.active_status = ''), 0) AS ws_unset,"
+      : "0 AS ws_unset,";
     const rows = await query(
       `SELECT c.assigned_to_user_id AS user_id, u.username, u.active_status,
+              ${workerStatusSums}
               COUNT(*) AS active_count,
               COALESCE(SUM(c.is_completed = 1), 0) AS done_count,
               COALESCE(SUM(c.is_completed = 0), 0) AS pending_count
@@ -86,7 +94,12 @@ export async function GET(req) {
     const groups = rows.map((r) => ({
       user_id: r.user_id,
       username: r.username,
-      active_status: r.active_status || null, // the ONE authoritative value (users.active_status)
+      active_status: r.active_status || null, // the caller's own status (users.active_status)
+      // Worker Status counts for this caller's contacts (from contacts.active_status).
+      worker_status_counts: Object.fromEntries([
+        ...ACTIVE_STATUS_VALUES.map((v) => [v, Number(r[`ws_${v.toLowerCase()}`]) || 0]),
+        ["UNSET", Number(r.ws_unset) || 0],
+      ]),
       active_count: Number(r.active_count) || 0,
       done_count: Number(r.done_count) || 0,
       pending_count: Number(r.pending_count) || 0,
