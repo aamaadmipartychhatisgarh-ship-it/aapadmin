@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Search, Loader2, RefreshCcw, Phone, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import Avatar from "@/components/Avatar";
 
@@ -21,6 +21,8 @@ export default function RepeatOffPanel({ type }) {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [restoringId, setRestoringId] = useState(null);
+  const [notice, setNotice] = useState(null); // { kind: "ok" | "warn", text }
+  const inFlight = useRef(new Set()); // contact ids with a restore request in progress
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -37,24 +39,42 @@ export default function RepeatOffPanel({ type }) {
     } finally { setLoading(false); }
   }, [type, page, search]);
 
-  // Explicitly restore a contact to Main Contacts (per this list's type). Confirms
-  // first; the backend stamps the restore time (history preserved) and the contact
-  // leaves this list and becomes active/assignable again.
+  // Explicitly restore a contact out of this list (per this list's type). Confirms
+  // first; the backend performs a true MOVE of the same contact row (history
+  // preserved) and reports where it now lives. The row is removed from the table
+  // immediately and the list is re-fetched from the server, so what is shown is
+  // never stale. Double clicks / repeated requests are swallowed client-side (one
+  // in-flight request per contact) AND are harmless server-side (idempotent).
   const restore = useCallback(async (c) => {
-    if (!window.confirm(`Restore ${c.person_name || "this contact"} to Main Contacts? Its call history stays intact and it becomes assignable again.`)) return;
+    if (inFlight.current.has(c.id)) return;
+    if (!window.confirm(`Restore ${c.person_name || "this contact"} from this list? Its call history stays intact and it becomes active again.`)) return;
+    inFlight.current.add(c.id);
     setRestoringId(c.id);
+    setNotice(null);
     try {
       const r = await fetch(`/api/contacts/repeat-off/${c.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type }),
       });
-      if (r.ok) load();
-      else {
-        const d = await r.json().catch(() => ({}));
-        alert(d.message || "Could not restore this contact.");
-      }
-    } finally { setRestoringId(null); }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setNotice({ kind: "warn", text: d.message || "Could not restore this contact." }); return; }
+      // Drop the row locally right away (true move: it must not linger here), then
+      // reload from the server to confirm and keep total/paging accurate.
+      setRows((prev) => prev.filter((x) => x.id !== c.id));
+      setTotal((t) => Math.max(0, t - 1));
+      const dest = d.destination?.label || "Main Contacts";
+      setNotice({
+        kind: "ok",
+        text: d.moved
+          ? `${c.person_name || "Contact"} moved to ${dest}.`
+          : `${c.person_name || "Contact"} was already out of this list (now in ${dest}). List refreshed.`,
+      });
+      await load();
+    } finally {
+      inFlight.current.delete(c.id);
+      setRestoringId(null);
+    }
   }, [type, load]);
 
   // Reset to page 1 whenever the type (tab) or search changes, so switching tabs
@@ -75,6 +95,12 @@ export default function RepeatOffPanel({ type }) {
         </button>
         <span className="ml-auto text-sm text-gray-500"><strong className="text-gray-900">{Number(total).toLocaleString("en-IN")}</strong> contact{total === 1 ? "" : "s"}</span>
       </div>
+
+      {notice && (
+        <div className={`rounded-xl px-4 py-3 text-sm border ${notice.kind === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-red-50 border-red-200 text-red-800"}`}>
+          {notice.text}
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
@@ -109,7 +135,7 @@ export default function RepeatOffPanel({ type }) {
                   <td className="px-4 py-3 text-gray-600">{c.assigned_to_username || "—"}</td>
                   <td className="px-4 py-3 text-right"><span className="inline-flex items-center px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 font-bold">{c.off_count}</span></td>
                   <td className="px-4 py-3">
-                    <button onClick={() => restore(c)} disabled={restoringId === c.id} title="Restore to Main Contacts"
+                    <button onClick={() => restore(c)} disabled={restoringId !== null} title="Restore out of this list"
                             className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#164FA3] hover:bg-blue-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50">
                       {restoringId === c.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Restore
                     </button>

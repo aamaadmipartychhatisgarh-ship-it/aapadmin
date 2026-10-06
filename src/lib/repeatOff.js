@@ -19,14 +19,33 @@ import { query } from "@/lib/db";
 
 export const REPEAT_OFF_THRESHOLD = 10; // 10 or more → qualifies (>= 10, not > 10)
 export const REPEAT_OFF_STATUSES = { switched: "Switched Off", incoming: "Incoming Off" };
+// Per-type restore markers. `*_restored_at` is the audit timestamp; `*_restored_call_id`
+// is the WATERMARK the membership rule actually uses: the highest calls.id that
+// existed when the restore happened. "A newer off-call" is then `calls.id > watermark`
+// — monotonic and clock-independent, so a restore can never be undone by a
+// timezone/clock skew between NOW() and called_at (the old timestamp-only compare).
 const RESTORE_COL = { switched: "switched_off_restored_at", incoming: "incoming_off_restored_at" };
+const RESTORE_WM_COL = { switched: "switched_off_restored_call_id", incoming: "incoming_off_restored_call_id" };
+const RESTORE_COLUMNS = [...Object.values(RESTORE_COL), ...Object.values(RESTORE_WM_COL)];
 
-let ensured = false;
+let ensured = false;        // true only once EVERYTHING below succeeded (else retried)
 let idCache = null;
-let restoreColsReady = false; // whether the per-type restore timestamp columns exist
+let restoreColsReady = false; // whether all four restore marker columns exist
 
-// Seed the "Incoming Off" disposition, index the count subqueries, and add the two
-// per-type restore timestamp columns (additive; feature-detected).
+async function detectRestoreCols() {
+  const cols = new Set((await query(
+    `SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'
+        AND COLUMN_NAME IN (${RESTORE_COLUMNS.map(() => "?").join(",")})`,
+    RESTORE_COLUMNS
+  )).map((r) => r.c));
+  return cols;
+}
+
+// Seed the "Incoming Off" disposition, index the count subqueries, and add the four
+// restore marker columns (additive; feature-detected). Only a fully successful run is
+// cached — a partial failure is retried on the next request, so a process can never
+// get stuck serving the lists with restore silently disabled.
 export async function ensureRepeatOffSchema() {
   if (ensured) return;
   try {
@@ -40,25 +59,33 @@ export async function ensureRepeatOffSchema() {
         await query(`ALTER TABLE calls ADD INDEX idx_calls_contact_status (contact_id, status_id)`);
       }
     } catch (e) { console.error("[repeatOff] index:", e?.message || e); }
-    try {
-      let cols = new Set((await query(
-        `SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS
-          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'
-            AND COLUMN_NAME IN ('switched_off_restored_at','incoming_off_restored_at')`
-      )).map((r) => r.c));
-      if (!cols.has("switched_off_restored_at")) await query("ALTER TABLE contacts ADD COLUMN switched_off_restored_at TIMESTAMP NULL").catch(() => {});
-      if (!cols.has("incoming_off_restored_at")) await query("ALTER TABLE contacts ADD COLUMN incoming_off_restored_at TIMESTAMP NULL").catch(() => {});
-      cols = new Set((await query(
-        `SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS
-          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'
-            AND COLUMN_NAME IN ('switched_off_restored_at','incoming_off_restored_at')`
-      )).map((r) => r.c));
-      restoreColsReady = cols.has("switched_off_restored_at") && cols.has("incoming_off_restored_at");
-    } catch (e) { console.error("[repeatOff] restore cols:", e?.message || e); }
-    ensured = true;
+    let cols = await detectRestoreCols();
+    for (const c of Object.values(RESTORE_COL)) {
+      if (!cols.has(c)) {
+        try { await query(`ALTER TABLE contacts ADD COLUMN ${c} TIMESTAMP NULL`); }
+        catch (e) { if (!/duplicate column/i.test(e?.message || "")) console.error(`[repeatOff] add ${c}:`, e?.message || e); }
+      }
+    }
+    for (const c of Object.values(RESTORE_WM_COL)) {
+      if (!cols.has(c)) {
+        try { await query(`ALTER TABLE contacts ADD COLUMN ${c} INT NULL`); }
+        catch (e) { if (!/duplicate column/i.test(e?.message || "")) console.error(`[repeatOff] add ${c}:`, e?.message || e); }
+      }
+    }
+    cols = await detectRestoreCols();
+    restoreColsReady = RESTORE_COLUMNS.every((c) => cols.has(c));
+    if (!restoreColsReady) console.error("[repeatOff] restore marker columns missing — restore disabled until they exist:", RESTORE_COLUMNS.filter((c) => !cols.has(c)).join(", "));
+    ensured = restoreColsReady;
   } catch (e) {
     console.error("[repeatOff] ensure:", e?.message || e);
   }
+}
+
+// True when the restore markers are usable (schema ensured). Exposed so the restore
+// endpoint can refuse clearly instead of pretending a restore worked.
+export async function repeatOffRestoreAvailable() {
+  await ensureRepeatOffSchema();
+  return restoreColsReady;
 }
 
 async function statusIds() {
@@ -70,8 +97,10 @@ async function statusIds() {
   );
   const by = {};
   for (const r of rows) by[r.name] = Number(r.id);
-  idCache = { switched: by[REPEAT_OFF_STATUSES.switched] || null, incoming: by[REPEAT_OFF_STATUSES.incoming] || null };
-  return idCache;
+  const ids = { switched: by[REPEAT_OFF_STATUSES.switched] || null, incoming: by[REPEAT_OFF_STATUSES.incoming] || null };
+  // Cache only a complete answer — a status seeded later must be picked up.
+  if (ids.switched && ids.incoming) idCache = ids;
+  return ids;
 }
 
 // Count of a contact's calls with one status id — a correlated subquery keyed on the
@@ -81,14 +110,20 @@ function countExpr(alias, statusId) {
 }
 
 // The boolean SQL expression "this contact is currently IN the 10+ list for `type`":
-// at/over the threshold AND not restored (or re-qualified by a newer off-call).
+// at/over the threshold AND (never restored, OR an off-call of that type was logged
+// AFTER the last restore). "After" is decided by the call-id watermark; the
+// timestamp is only consulted for rows restored before the watermark column
+// existed (watermark NULL, timestamp set).
 function inListExpr(type, statusId, alias) {
   const over = `${countExpr(alias, statusId)} >= ${REPEAT_OFF_THRESHOLD}`;
-  // Without the restore columns, membership is purely the count (restore disabled).
+  // Without the restore columns, membership is purely the count (restore disabled —
+  // ensureRepeatOffSchema keeps retrying so this is transient, never silent-forever).
   if (!restoreColsReady) return `(${over})`;
-  const rcol = `${alias}.${RESTORE_COL[type]}`;
-  const newer = `EXISTS (SELECT 1 FROM calls cy WHERE cy.contact_id = ${alias}.id AND cy.status_id = ${Number(statusId)} AND cy.called_at > ${rcol})`;
-  return `(${over} AND (${rcol} IS NULL OR ${newer}))`;
+  const ts = `${alias}.${RESTORE_COL[type]}`;
+  const wm = `${alias}.${RESTORE_WM_COL[type]}`;
+  const newer = `EXISTS (SELECT 1 FROM calls cy WHERE cy.contact_id = ${alias}.id AND cy.status_id = ${Number(statusId)}
+                   AND (CASE WHEN ${wm} IS NOT NULL THEN cy.id > ${wm} ELSE cy.called_at > ${ts} END))`;
+  return `(${over} AND ((${ts} IS NULL AND ${wm} IS NULL) OR ${newer}))`;
 }
 
 // AND clause for the MAIN contacts list/count/assignment queries: keep only contacts
@@ -124,11 +159,42 @@ export async function isContactRepeatOff(contactId) {
   } catch { return false; }
 }
 
-// Explicit restore of a contact from ONE 10+ list back to Main: stamp the per-type
-// restore time (so it leaves the list and re-enters active/assignable) and reopen
-// the record. No call history is touched, and a later off-call re-triggers the rule.
+// Is this contact currently in the 10+ list for ONE type?
+export async function isContactInRepeatOffList(contactId, type) {
+  const { switched, incoming } = await statusIds();
+  const t = type === "incoming" ? "incoming" : "switched";
+  const id = t === "incoming" ? incoming : switched;
+  if (!id) return false;
+  const [row] = await query(`SELECT ${inListExpr(t, id, "c")} AS hit FROM contacts c WHERE c.id = ?`, [contactId]);
+  return !!(row && Number(row.hit) === 1);
+}
+
+// Explicit restore of a contact from ONE 10+ list: a true MOVE of the same row.
+// Stamps the per-type watermark (highest existing calls.id) + timestamp, reopens the
+// record and drops any caller lock, so the contact leaves that list on the very next
+// read and re-enters the active/assignable pool. No call history is touched; a later
+// off-call of that type (id > watermark) re-triggers the automatic rule.
+//
+// Idempotent: only a contact CURRENTLY in the list is stamped. A second click /
+// repeated request / stale page finds nothing to move and returns { moved: false }
+// without touching the row (so it can never push the watermark past a newer
+// off-call that legitimately re-qualified the contact in between).
 export async function restoreRepeatOff(contactId, type) {
   await ensureRepeatOffSchema();
-  const col = RESTORE_COL[type === "incoming" ? "incoming" : "switched"];
-  await query(`UPDATE contacts SET ${col} = NOW(), is_completed = 0 WHERE id = ?`, [contactId]);
+  if (!restoreColsReady) throw new Error("Restore markers are not available on this database.");
+  const t = type === "incoming" ? "incoming" : "switched";
+  if (!(await isContactInRepeatOffList(contactId, t))) return { moved: false };
+  const { switched, incoming } = await statusIds();
+  const statusId = t === "incoming" ? incoming : switched;
+  const res = await query(
+    `UPDATE contacts c
+        SET c.${RESTORE_WM_COL[t]} = (SELECT COALESCE(MAX(x.id), 0) FROM calls x),
+            c.${RESTORE_COL[t]} = NOW(),
+            c.is_completed = 0,
+            c.locked_by_user_id = NULL,
+            c.locked_at = NULL
+      WHERE c.id = ? AND ${inListExpr(t, statusId, "c")}`,
+    [contactId]
+  );
+  return { moved: (res?.affectedRows || 0) > 0 };
 }
