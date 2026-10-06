@@ -8,9 +8,10 @@ import {
   MessageCircle, Pencil, Plus, RefreshCw, Search, Settings2, Shield, Trash2, Trophy,
   UserPlus, Users, Vote, X,
 } from "lucide-react";
-import { isTopAdmin, isCaller } from "@/lib/permissions";
+import { isTopAdmin, isCaller, isSuperAdmin, canManageRegistration } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 import Avatar from "@/components/Avatar";
+import ProfilePhoto from "@/components/ProfilePhoto";
 import { RatingBadge } from "@/components/KaryakartaRating";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 
@@ -139,16 +140,24 @@ export default function RegistrationApp() {
   const { data: session } = useSession();
   const router = useRouter();
   const { ready, allowed } = usePageGuard("voter_registration", isTopAdmin(session) || isCaller(session));
+  // Callers hold the module to REGISTER and review people/karyakartas; drive
+  // management (the Dashboard tab, the public-link switch) is for admins. The same
+  // rule gates the APIs (requireRegistrationAccess({ manageOnly })), so this only
+  // mirrors what the server enforces. Delete stays Super-Admin only (as the API).
+  const canManage = canManageRegistration(session);
+  const canDelete = isSuperAdmin(session);
 
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = useState("people");
   // Honor ?tab=people|workers|dashboard so the caller "Voter Registration" /
-  // "Worker Registration" links (and any deep link) open the right tab.
+  // "Worker Registration" links (and any deep link) open the right tab. Admins land
+  // on the Dashboard by default; a non-manager can never land on it.
   useEffect(() => {
     try {
       const t = new URLSearchParams(window.location.search).get("tab");
-      if (t && ["dashboard", "workers", "people"].includes(t)) setTab(t);
+      const wanted = t && ["dashboard", "workers", "people"].includes(t) ? t : (canManage ? "dashboard" : "people");
+      setTab(wanted === "dashboard" && !canManage ? "people" : wanted);
     } catch { /* ignore */ }
-  }, []);
+  }, [canManage]);
   const [campaigns, setCampaigns] = useState([]);
   const [sms, setSms] = useState(null);   // { configured, balance } — drives the OTP switch
   const [campaignId, setCampaignId] = useState("");
@@ -206,9 +215,9 @@ export default function RegistrationApp() {
   // the single active drive automatically (resolved server-side); the on/off of the
   // public link stays available on the Common-registration-link card below.
   const TABS = [
-    ["dashboard", "Dashboard", BarChart3],
-    ["workers", "Workers & Links", Link2],
-    ["people", "Registrations", Users],
+    ...(canManage ? [["dashboard", "Dashboard", BarChart3]] : []),
+    ["workers", canManage ? "Workers & Links" : "Worker Registration", Link2],
+    ["people", canManage ? "Registrations" : "Voter Registration", Users],
   ];
 
   return (
@@ -264,7 +273,7 @@ export default function RegistrationApp() {
           </div>
           <div className="flex items-center gap-2">
             <a href="/join" target="_blank" rel="noreferrer" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>Open login</a>
-            <LinkSwitch drive={liveDrive} drives={campaigns} reload={loadCampaigns} onError={setErr} />
+            {canManage && <LinkSwitch drive={liveDrive} drives={campaigns} reload={loadCampaigns} onError={setErr} />}
           </div>
         </div>
         <div className="mt-3">
@@ -275,9 +284,9 @@ export default function RegistrationApp() {
 
       {err ? <p className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{err}</p> : null}
 
-      {tab === "dashboard" && <DashboardTab filterQs={filterQs} onWard={setWard} onError={setErr} />}
-      {tab === "workers" && <WorkersTab filterQs={filterQs} campaignId={campaignId} campaigns={campaigns} onError={setErr} />}
-      {tab === "people" && <PeopleTab filterQs={filterQs} onError={setErr} />}
+      {tab === "dashboard" && canManage && <DashboardTab filterQs={filterQs} onWard={setWard} onError={setErr} />}
+      {tab === "workers" && <WorkersTab filterQs={filterQs} campaignId={campaignId} campaigns={campaigns} onError={setErr} canDelete={canDelete} />}
+      {tab === "people" && <PeopleTab filterQs={filterQs} onError={setErr} canDelete={canDelete} />}
     </div>
   );
 }
@@ -455,7 +464,7 @@ function RankTable({ title, subtitle, head, rows, empty, exportHref }) {
 }
 
 // -------------------------------------------------------------- WORKERS/LINKS
-function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
+function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = false }) {
   const [rows, setRows] = useState([]);
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -643,7 +652,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError }) {
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1">
                       <button onClick={() => setEditing(w)} title="Edit worker" aria-label={`Edit ${w.name}`} className="p-1.5 rounded-md hover:bg-blue-50 text-[#164FA3]"><Pencil size={15} /></button>
-                      <button onClick={() => setConfirmDel(w)} title="Delete worker" aria-label={`Delete ${w.name}`} className="p-1.5 rounded-md hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>
+                      {canDelete && <button onClick={() => setConfirmDel(w)} title="Delete worker" aria-label={`Delete ${w.name}`} className="p-1.5 rounded-md hover:bg-red-50 text-red-500"><Trash2 size={15} /></button>}
                     </div>
                   </td>
                 </tr>
@@ -910,7 +919,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
 }
 
 // ------------------------------------------------------------- REGISTRATIONS
-function PeopleTab({ filterQs, onError }) {
+function PeopleTab({ filterQs, onError, canDelete = false }) {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
@@ -1071,8 +1080,8 @@ function PeopleTab({ filterQs, onError }) {
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">
                     <button onClick={() => setEditing(p)} title="Edit registration" aria-label={`Edit ${p.name}`}
                             className="p-1.5 rounded-md hover:bg-blue-50 text-[#164FA3]"><Pencil size={15} /></button>
-                    <button onClick={() => setConfirmDel(p)} title="Delete registration" aria-label={`Delete ${p.name}`}
-                            className="p-1.5 rounded-md hover:bg-red-50 text-red-500 ml-1"><Trash2 size={15} /></button>
+                    {canDelete && <button onClick={() => setConfirmDel(p)} title="Delete registration" aria-label={`Delete ${p.name}`}
+                            className="p-1.5 rounded-md hover:bg-red-50 text-red-500 ml-1"><Trash2 size={15} /></button>}
                   </td>
                 </tr>
               ))}
@@ -1105,9 +1114,13 @@ function PeopleTab({ filterQs, onError }) {
   );
 }
 
-// Full-field edit for one registration (reg_people). Loads every editable field of
-// the EXISTING record and PATCHes the same id — the photo is preserved (its
-// /uploads reference is re-sent unchanged) and no new row is ever created.
+// Full-field edit for one registration (reg_people). Mirrors EVERY field of the
+// registration form — photo, name, mobile, type, Karyakarta rating, assembly,
+// block (ward name), ward no., area/booth, address — plus the triage status, and
+// applies the same rules (name required; a worker needs a block; the block must
+// belong to the chosen assembly — re-validated server-side). It PATCHes the SAME
+// record id: the photo is only sent when the user changed it, so an untouched
+// photo is never dropped, and no new row is ever created.
 function EditPersonDialog({ person, onClose, onSaved, onError }) {
   const [f, setF] = useState({
     name: person.name || "",
@@ -1115,50 +1128,104 @@ function EditPersonDialog({ person, onClose, onSaved, onError }) {
     person_type: person.person_type || "voter",
     worker_rating: person.worker_rating ?? "",
     address: person.address || "",
+    assembly_id: person.assembly_id != null ? String(person.assembly_id) : "",
+    block_id: person.block_id != null ? String(person.block_id) : "",
     ward_number: person.ward_number || "",
     area_booth: person.area_booth || "",
     status: person.status || "active",
+    photo_url: person.photo_url || "",
   });
+  const [photoChanged, setPhotoChanged] = useState(false);
+  const [assemblies, setAssemblies] = useState([]);
+  const [blocks, setBlocks] = useState(null); // null = loading / no assembly
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+  // Assemblies from the location master (same source as the registration form).
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/locations?type=assembly", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { locations: [] }))
+      .then((d) => { if (alive) setAssemblies((d.locations || []).filter((l) => l.type === "assembly")); })
+      .catch(() => { if (alive) setAssemblies([]); });
+    return () => { alive = false; };
+  }, []);
+  // Blocks mapped to the chosen assembly — the same endpoint the form's dependent
+  // Block dropdown uses, so the options can never disagree with it.
+  useEffect(() => {
+    if (!f.assembly_id) return;
+    let alive = true;
+    fetch(`/api/public/registration/assemblies/${encodeURIComponent(f.assembly_id)}/blocks`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { blocks: [] }))
+      .then((d) => { if (alive) setBlocks(d.blocks || []); })
+      .catch(() => { if (alive) setBlocks([]); });
+    return () => { alive = false; };
+  }, [f.assembly_id]);
+  const blockOptions = f.assembly_id ? (blocks || []) : [];
+
+  // Photo: upload a new one via the app's upload store (same /uploads reference
+  // the PATCH accepts). Only an actual change is sent on save.
+  async function persistPhoto(blob) {
+    if (!blob) return null;
+    const fd = new FormData();
+    fd.append("file", new File([blob], "photo.jpg", { type: "image/jpeg" }));
+    const up = await fetch("/api/uploads", { method: "POST", body: fd });
+    const d = await up.json().catch(() => ({}));
+    if (!up.ok) throw new Error(d.message || "Image upload failed");
+    return d.url;
+  }
+
   async function save() {
     if (!String(f.name).trim()) { onError("Name is required."); return; }
+    if (!f.assembly_id) { onError("Select the assembly."); return; }
+    if (f.person_type === "worker" && !f.block_id) { onError("Select the Block (ward name) for a worker."); return; }
     setSaving(true);
     try {
       const body = {
         name: f.name, mobile: f.mobile, person_type: f.person_type,
         worker_rating: f.person_type === "worker" ? (f.worker_rating === "" ? null : f.worker_rating) : null,
-        address: f.address, ward_number: f.ward_number, area_booth: f.area_booth, status: f.status,
-        // photo_url is intentionally OMITTED — the PATCH only touches sent fields, so
-        // the existing photo is preserved without re-validating a legacy path shape.
+        address: f.address,
+        assembly_id: f.assembly_id,
+        block_id: f.person_type === "worker" ? f.block_id : (f.block_id || ""),
+        ward_number: f.ward_number, area_booth: f.area_booth, status: f.status,
       };
+      // Sent only when changed — the PATCH touches only the fields it receives, so
+      // an untouched photo is preserved exactly as stored.
+      if (photoChanged) body.photo_url = f.photo_url || "";
       const r = await fetch(`/api/registration/people/${person.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { onError(d?.message || "Could not update this registration."); return; }
-      onSaved();
+      onSaved(d.person);
     } finally { setSaving(false); }
   }
 
-  const inp = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
+  const inp = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3] disabled:bg-gray-50 disabled:text-gray-400";
   const lbl = "block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="font-bold text-lg text-gray-900">Edit Registration</h3>
+          <div>
+            <h3 className="font-bold text-lg text-gray-900">Edit Registration</h3>
+            <p className="text-xs text-gray-500">Record #{person.id} — every field of the registration form can be changed; the same record is updated.</p>
+          </div>
           <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={18} /></button>
         </div>
         <div className="p-5 space-y-3">
           <div className="flex items-center gap-3">
-            <Avatar name={f.name} src={person.photo_url} size={44} square className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-sm" />
-            <span className="text-xs text-gray-400">Photo is kept from the original registration.</span>
+            <ProfilePhoto
+              name={f.name} src={f.photo_url} size={64} square editable
+              persist={persistPhoto}
+              onChange={(url) => { set("photo_url", url || ""); setPhotoChanged(true); }}
+              className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]"
+            />
+            <span className="text-xs text-gray-400">{photoChanged ? "Photo will be updated on save." : "Photo is kept unless you change it."}</span>
           </div>
           <div><label className={lbl}>Name *</label><input className={inp} value={f.name} onChange={(e) => set("name", e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={lbl}>Mobile</label><input className={inp} value={f.mobile} onChange={(e) => set("mobile", e.target.value)} /></div>
+            <div><label className={lbl}>Mobile</label><input className={inp} value={f.mobile} onChange={(e) => set("mobile", e.target.value)} inputMode="numeric" /></div>
             <div>
               <label className={lbl}>Type</label>
               <select className={inp} value={f.person_type} onChange={(e) => set("person_type", e.target.value)}>
@@ -1172,7 +1239,27 @@ function EditPersonDialog({ person, onClose, onSaved, onError }) {
               <input type="number" min="1" max="10" className={inp} value={f.worker_rating} onChange={(e) => set("worker_rating", e.target.value)} /></div>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={lbl}>Ward</label><input className={inp} value={f.ward_number} onChange={(e) => set("ward_number", e.target.value)} /></div>
+            <div><label className={lbl}>Assembly *</label>
+              <select className={inp} value={f.assembly_id} onChange={(e) => { setBlocks(null); setF((p) => ({ ...p, assembly_id: e.target.value, block_id: "" })); }}>
+                <option value="">Select assembly…</option>
+                {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {f.assembly_id && !assemblies.some((a) => String(a.id) === String(f.assembly_id)) && (
+                  <option value={f.assembly_id}>{person.assembly_name || `Assembly #${f.assembly_id}`}</option>
+                )}
+              </select>
+            </div>
+            <div><label className={lbl}>Block (Ward Name){f.person_type === "worker" ? " *" : ""}</label>
+              <select className={inp} value={f.block_id} onChange={(e) => set("block_id", e.target.value)} disabled={!f.assembly_id}>
+                <option value="">{!f.assembly_id ? "Pick assembly first" : blocks === null ? "Loading…" : blockOptions.length ? "Select block…" : "No blocks mapped"}</option>
+                {blockOptions.map((b) => <option key={b.id} value={b.id}>{b.name_en || b.name_hi || b.name}</option>)}
+                {f.block_id && !blockOptions.some((b) => String(b.id) === String(f.block_id)) && (
+                  <option value={f.block_id}>{person.ward_name || `Block #${f.block_id}`}</option>
+                )}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Ward no.</label><input className={inp} value={f.ward_number} onChange={(e) => set("ward_number", e.target.value)} /></div>
             <div><label className={lbl}>Area / Booth</label><input className={inp} value={f.area_booth} onChange={(e) => set("area_booth", e.target.value)} /></div>
           </div>
           <div><label className={lbl}>Address</label><textarea rows={2} className={inp} value={f.address} onChange={(e) => set("address", e.target.value)} /></div>
