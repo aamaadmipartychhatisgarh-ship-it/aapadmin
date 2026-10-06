@@ -1,6 +1,10 @@
 import bcrypt from "bcryptjs";
 import { query } from "@/lib/db";
 import { setUserPages } from "@/lib/pageAccess";
+import { logAudit } from "@/lib/audit";
+import { phoneKey, last10Sql } from "@/lib/phone";
+import { ensureWingSchema } from "@/lib/wingDesignations";
+import { syncContactDesignations, parseDesignationIds } from "@/lib/contactDesignations";
 
 // Eligibility is driven by the Designation Master LEVEL — everyone holding a
 // designation up to Vidhansabha (Assembly). Block, Zone and anything literally
@@ -91,25 +95,165 @@ export async function provisionPortalAccounts(session) {
       skipped.push({ contact_id: p.contact_id, name: p.person_name, reason: "Name/phone too short to generate a User ID" });
       continue;
     }
-    // Collision-safe: BASE, BASE1, BASE2 … so two people with the same User ID never
-    // overwrite each other, and the final id is reported to the admin.
-    let username = base, n = 1;
-    // eslint-disable-next-line no-await-in-loop
-    while ((await query("SELECT id FROM users WHERE username = ? LIMIT 1", [username])).length) username = `${base}${n++}`;
-    const hash = await bcrypt.hash("#", 10); // spec password; never returned in plaintext
     try {
-      // eslint-disable-next-line no-await-in-loop
-      const res = await query(
-        `INSERT INTO users (username, password, role, home_district_id, scope_zone_id, scope_lok_sabha_id, scope_assembly_id, contact_id)
-         VALUES (?, ?, 'worker', ?, ?, ?, ?, ?)`,
-        [username, hash, p.district_id || null, p.zone_id || null, p.lok_sabha_id || null, p.assembly_id || null, p.contact_id]
-      );
-      // eslint-disable-next-line no-await-in-loop
-      await setUserPages(res.insertId, PORTAL_PAGES, session?.user?.id || null);
+      const { username } = await insertPortalUser(base, p, session);
       created.push({ contact_id: p.contact_id, name: p.person_name, username, designations: p.designations });
     } catch (e) {
       skipped.push({ contact_id: p.contact_id, name: p.person_name, reason: e?.sqlMessage || e?.message || "Insert failed" });
     }
   }
   return { eligible: people.length, created, skipped };
+}
+
+// The single place a portal login row is written (used by BOTH the bulk
+// provisioning above and the one-person creation form below), so the username
+// collision rule, the fixed '#' password, the non-admin role, the territory scope
+// and the exact page grants can never drift apart.
+//
+// Collision-safe: BASE, BASE1, BASE2 … so two people with the same User ID never
+// overwrite each other; the final id is returned to the admin. The DB's UNIQUE
+// username index is the race-safe backstop: a lost race is retried with the next
+// suffix instead of touching the existing row.
+async function insertPortalUser(base, person, session) {
+  const hash = await bcrypt.hash("#", 10); // spec password; never returned in plaintext
+  let n = 1;
+  let username = base;
+  while (true) {
+    while ((await query("SELECT id FROM users WHERE username = ? LIMIT 1", [username])).length) username = `${base}${n++}`;
+    try {
+      const res = await query(
+        `INSERT INTO users (username, password, role, home_district_id, scope_zone_id, scope_lok_sabha_id, scope_assembly_id, contact_id)
+         VALUES (?, ?, 'worker', ?, ?, ?, ?, ?)`,
+        [username, hash, person.district_id || null, person.zone_id || null, person.lok_sabha_id || null, person.assembly_id || null, person.contact_id]
+      );
+      await setUserPages(res.insertId, PORTAL_PAGES, session?.user?.id || null);
+      return { user_id: res.insertId, username };
+    } catch (e) {
+      if (e?.code === "ER_DUP_ENTRY" && /username/i.test(e?.sqlMessage || "")) { username = `${base}${n++}`; continue; }
+      throw e;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// One-person creation form ("User Creation / Access Form").
+// ---------------------------------------------------------------------------
+
+// Designations an admin may pick in the form: eligible LEVELS only (State, Lok
+// Sabha, District, Assembly). Block/Zone-level rows, rows with no level, disabled
+// rows and anything named "member" never appear — the same rule listEligiblePeople
+// uses, so the form and the bulk provisioning can never disagree.
+export async function listEligibleDesignations() {
+  await ensureWingSchema(); // adds level / enabled / rank columns on a current schema
+  // Feature-detect the optional columns (same approach as /api/designations) so an
+  // older schema degrades to "nothing eligible" instead of a 500.
+  const cols = new Set((await query("SHOW COLUMNS FROM designations")).map((c) => c.Field));
+  if (!cols.has("level")) return [];
+  const ph = PORTAL_LEVELS.map(() => "?").join(",");
+  const order = [
+    cols.has("rank") ? "(`rank` IS NULL), `rank` ASC" : null,
+    cols.has("sort_order") ? "(sort_order IS NULL), sort_order ASC" : null,
+    "name ASC", "id ASC",
+  ].filter(Boolean).join(", ");
+  return query(
+    `SELECT id, name, level, ${cols.has("wing") ? "wing" : "NULL AS wing"}
+       FROM designations
+      WHERE level IN (${ph}) AND name NOT LIKE '%member%'${cols.has("enabled") ? " AND enabled = 1" : ""}
+      ORDER BY ${order}`,
+    PORTAL_LEVELS
+  );
+}
+
+// Thrown for admin-facing validation problems; the route maps `status` to HTTP.
+export class PortalAccountError extends Error {
+  constructor(message, status = 400, extra = {}) { super(message); this.status = status; Object.assign(this, extra); }
+}
+
+// Create ONE member account from the form. Flow:
+//   1. validate name / phone / designation (all server-side, never trusting the UI);
+//   2. reuse the person's existing contact record (matched on mobile) or create one;
+//   3. refuse if that contact already owns a login — an existing user's credentials
+//      are NEVER overwritten (admin is told the existing User ID instead);
+//   4. write the user row via insertPortalUser (auto User ID, '#' password, role
+//      'worker', territory scope, EXACTLY the three portal pages).
+// Returns { user_id, username, contact_id, reused_contact } — no password, ever.
+export async function createPortalAccount(input, session) {
+  await ensurePortalSchema();
+  const name = String(input?.name ?? "").trim().replace(/\s+/g, " ");
+  const phoneRaw = String(input?.phone ?? "").trim();
+  const digits = phoneRaw.replace(/\D/g, "");
+  if (!name) throw new PortalAccountError("Name is required.");
+  if ((name.match(/\p{L}/gu) || []).length < 2) throw new PortalAccountError("Name must contain at least 2 letters (needed to generate the User ID).");
+  if (!phoneRaw) throw new PortalAccountError("Phone number is required.");
+  if (digits.length < 10 || digits.length > 13) throw new PortalAccountError("Enter a valid mobile number (10 digits).");
+
+  // Designation: at least one, every one must be on the eligible list. Member and
+  // Block level ids are rejected here even if a client sends them.
+  const designationIds = parseDesignationIds(input?.designation_ids ?? (input?.designation_id ? [input.designation_id] : []));
+  if (!designationIds.length) throw new PortalAccountError("Select the person's designation.");
+  const eligible = await listEligibleDesignations();
+  const eligibleIds = new Set(eligible.map((d) => d.id));
+  const bad = designationIds.filter((id) => !eligibleIds.has(id));
+  if (bad.length) throw new PortalAccountError("Only State, Lok Sabha, District and Assembly level designations are allowed for member accounts.");
+
+  const base = portalUserId(name, phoneRaw);
+  if (!base) throw new PortalAccountError("Could not generate a User ID from this name and phone.");
+
+  const geo = {
+    zone_id: Number(input?.zone_id) || null,
+    lok_sabha_id: Number(input?.lok_sabha_id) || null,
+    district_id: Number(input?.district_id) || null,
+    assembly_id: Number(input?.assembly_id) || null,
+  };
+
+  // 2. Existing contact for this mobile (exact string, or same last-10 digits)?
+  const key = phoneKey(phoneRaw);
+  const found = await query(
+    `SELECT id, person_name, zone_id, lok_sabha_id, district_id, assembly_id
+       FROM contacts WHERE phone_number = ? OR ${last10Sql("phone_number")} = ? LIMIT 1`,
+    [phoneRaw, key]
+  );
+  let contactId;
+  let reusedContact = false;
+  if (found.length) {
+    contactId = found[0].id;
+    reusedContact = true;
+    // 3. Never overwrite an existing login.
+    const owner = await query("SELECT username FROM users WHERE contact_id = ? LIMIT 1", [contactId]);
+    if (owner.length) {
+      throw new PortalAccountError(`This person already has a login account (User ID ${owner[0].username}).`, 409, { username: owner[0].username, contact_id: contactId });
+    }
+    // Keep the contact's own data; only ADD the chosen designation(s) and fill in
+    // territory fields that are still blank.
+    for (const d of designationIds) {
+      await query("INSERT IGNORE INTO contact_designations (contact_id, designation_id) VALUES (?, ?)", [contactId, d]);
+    }
+    const fill = Object.entries(geo).filter(([k, v]) => v && !found[0][k]);
+    if (fill.length) {
+      await query(`UPDATE contacts SET ${fill.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`, [...fill.map(([, v]) => v), contactId]);
+    }
+    for (const k of Object.keys(geo)) geo[k] = found[0][k] || geo[k];
+  } else {
+    const cols = new Set((await query(
+      `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'`
+    )).map((r) => r.name));
+    const desired = { person_name: name, phone_number: phoneRaw, designation_id: designationIds[0], ...geo };
+    const names = Object.keys(desired).filter((k) => cols.has(k));
+    const res = await query(
+      `INSERT INTO contacts (${names.join(", ")}) VALUES (${names.map(() => "?").join(", ")})`,
+      names.map((k) => desired[k])
+    );
+    contactId = res.insertId;
+    await syncContactDesignations(contactId, designationIds);
+  }
+
+  // 4. The login row.
+  const { user_id, username } = await insertPortalUser(base, { contact_id: contactId, ...geo }, session);
+  await logAudit(session, {
+    action: "user.create",
+    entityType: "user",
+    entityId: user_id,
+    details: { username, role: "worker", pages: PORTAL_PAGES, source: "member_account_form", contact_id: contactId, designation_ids: designationIds },
+  });
+  return { user_id, username, contact_id: contactId, reused_contact: reusedContact, name };
 }
