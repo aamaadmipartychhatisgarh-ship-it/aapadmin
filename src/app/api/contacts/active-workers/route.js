@@ -4,7 +4,7 @@ import { authOptions, isSupervisor } from "@/lib/auth";
 import { scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { normalizeActiveStatus } from "@/lib/activeStatus";
 
@@ -58,6 +58,7 @@ export async function GET(req) {
     const params = [];
     // "Active" excludes wrong-number contacts — identical rule to the list.
     where += await notWrongNumberClause("c");
+    where += await notPendingClause("c"); // caller submissions awaiting approval are not live
     where += await notNotInterestedClause("c");
     where += await repeatOffExclusion("c");
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }

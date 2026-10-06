@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 
 // District-wise ACTUAL people/worker count sourced from Contacts — the SINGLE
 // source of truth shared by the Strength page, Area Ranking, Organization Map
@@ -24,7 +24,7 @@ import { notWrongNumberClause } from "@/lib/contactExtras";
 // No total is hardcoded and it auto-updates live as contacts change.
 // Returns Map<district_id, count>.
 export async function contactsByDistrict() {
-  const notWrong = await notWrongNumberClause("ct");
+  const notWrong = (await notWrongNumberClause("ct")) + (await notPendingClause("ct"));
   // The contact's effective (person-aware) district, identical to the Contacts
   // list filter. GROUP BY this so a worker-linked contact lands in its worker's
   // district and a link-less contact in its own.
@@ -50,7 +50,7 @@ export async function contactsByDistrict() {
 // contact is counted once. Returns Map<assembly_id, count>. No total is
 // hardcoded; it updates live as contacts/workers change.
 export async function contactsByAssembly() {
-  const notWrong = await notWrongNumberClause("ct");
+  const notWrong = (await notWrongNumberClause("ct")) + (await notPendingClause("ct"));
   const effAssembly =
     "CASE WHEN ct.worker_id IS NOT NULL THEN w.assembly_id ELSE ct.assembly_id END";
   const rows = await query(

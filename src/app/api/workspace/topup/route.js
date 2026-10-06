@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { getPool } from "@/lib/db";
 import { resolveActingUserId } from "@/lib/actAs";
 import { buildRuleMatch, zoneMatch } from "@/lib/assignmentRules";
-import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
@@ -41,7 +41,7 @@ export async function POST() {
       const zone = zoneMatch(me?.scope_zone_id);
       // The daily top-up must never hand a caller a Wrong Number contact —
       // neither from the pool nor pulled from another caller.
-      const notWrong = await notWrongNumberClause("c");
+      const notWrong = (await notWrongNumberClause("c")) + (await notPendingClause("c"));
       const notInterested = await notNotInterestedClause("c");
       const repeatOff = await repeatOffExclusion("c");
 

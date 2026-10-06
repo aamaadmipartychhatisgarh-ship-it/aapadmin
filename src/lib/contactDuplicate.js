@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 
 // Single source of truth for the duplicate-mobile message so every add/edit
 // path (admin + supervisor) shows exactly the same text the UI expects.
@@ -9,12 +10,15 @@ export const DUPLICATE_PHONE_MESSAGE = "This mobile number is already registered
 // EDIT keep the contact's own number (it only flags a clash with a DIFFERENT
 // contact). Matches the exact trimmed string, consistent with the uniq_phone
 // unique index that also enforces this at the DB layer.
+// A REJECTED caller submission does not count: it is not a live contact, and the
+// create paths revive that same row for the number (see findRejectedContactByPhone).
 export async function phoneAlreadyRegistered(phone, exceptId = null) {
   const trimmed = String(phone ?? "").trim();
   if (!trimmed) return false;
+  const notRejected = (await hasApprovalStatusColumn()) ? " AND (approval_status IS NULL OR approval_status <> 'rejected')" : "";
   const rows = exceptId != null
-    ? await query("SELECT id FROM contacts WHERE phone_number = ? AND id <> ? LIMIT 1", [trimmed, exceptId])
-    : await query("SELECT id FROM contacts WHERE phone_number = ? LIMIT 1", [trimmed]);
+    ? await query(`SELECT id FROM contacts WHERE phone_number = ? AND id <> ?${notRejected} LIMIT 1`, [trimmed, exceptId])
+    : await query(`SELECT id FROM contacts WHERE phone_number = ?${notRejected} LIMIT 1`, [trimmed]);
   return rows.length > 0;
 }
 

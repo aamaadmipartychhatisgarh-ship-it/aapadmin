@@ -217,6 +217,8 @@ export default function DashboardLayout({ children }) {
       // sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       // Influencers — a STANDALONE page directly below Contacts (its own route and
       // "influencers" page-access key), NOT a Contacts child/tab.
@@ -255,6 +257,8 @@ export default function DashboardLayout({ children }) {
       // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -278,6 +282,8 @@ export default function DashboardLayout({ children }) {
       // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -298,6 +304,8 @@ export default function DashboardLayout({ children }) {
       // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -318,6 +326,8 @@ export default function DashboardLayout({ children }) {
       // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },

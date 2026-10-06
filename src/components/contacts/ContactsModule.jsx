@@ -1078,6 +1078,15 @@ export default function ContactsModule({ session, mode }) {
                       <button onClick={() => setViewingContact(c)} className="hover:underline hover:text-[#164FA3] text-left" title="View details">
                         {c.person_name}
                       </button>
+                      {/* Approved caller submission — stays identifiable after approval. */}
+                      {c.approval_status === "approved" && (
+                        <span
+                          title={`Added by caller${c.submitted_by_name ? ` ${c.submitted_by_name}` : ""} and approved by a Supervisor`}
+                          className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        >
+                          Caller-added
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">
@@ -1671,7 +1680,10 @@ function ChevronRightIcon() { return <svg width="16" height="16" viewBox="0 0 24
 // own scope: their geography is applied server-side regardless, and the UI
 // reflects that — a fixed district for a district/assembly supervisor, or a
 // choice among the zone's districts for a zone-level supervisor.
-function AddContactModal({ addUrl, territory = null, territoryLabel = "", scopedDistricts = null, onClose, onSaved }) {
+// Exported so the Caller workspace reuses this EXACT form (same fields, validation
+// and payload) with addUrl pointed at the pending-approval endpoint. `notice`
+// (optional) renders an info banner at the top of the form.
+export function AddContactModal({ addUrl, territory = null, territoryLabel = "", scopedDistricts = null, notice = "", onClose, onSaved }) {
   const districtLocked = !!(territory && territory.district); // district/assembly anchor → fixed
   const zoneLevel = !!(territory && territory.level === "zone"); // may pick a district in-zone
   const [form, setForm] = useState({
@@ -1766,6 +1778,9 @@ function AddContactModal({ addUrl, territory = null, territoryLabel = "", scoped
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-auto">
         <h2 className="text-xl font-bold text-gray-900">Add Contact</h2>
+        {notice && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs">{notice}</div>
+        )}
         {territory && territoryLabel && (
           <div className="bg-blue-50 border border-blue-100 text-[#164FA3] rounded-lg px-3 py-2 text-xs flex items-center gap-1.5">
             <MapPin size={14} /> Added to your territory: <span className="font-semibold">{territoryLabel}</span>
