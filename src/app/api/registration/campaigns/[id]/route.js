@@ -12,7 +12,7 @@ export const revalidate = 0;
 
 export async function PATCH(req, { params }) {
   try {
-    const { error } = await requireRegistrationAccess();
+    const { error } = await requireRegistrationAccess({ manageOnly: true });
     if (error) return error;
     const { id } = await params;
     const d = await req.json().catch(() => null);

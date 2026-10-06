@@ -74,28 +74,12 @@ export default function UserDashboard() {
         <StatCard label="Follow-ups" value={today.follow_ups} icon={TrendingUp} />
       </div>
 
-      {/* Registration quick-access — callers run the drive on the ground. These open
-          the Worker & Voter Registration module (access also enforced server-side). */}
-      {(isCaller(session) || previewingCaller) && (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        <Link href="/dashboard/admin/voter-registration?tab=people" className="group bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 hover:border-[#164FA3]/40 hover:shadow-md transition">
-          <div className="w-12 h-12 rounded-xl bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center shrink-0"><Vote size={22} /></div>
-          <div className="min-w-0 flex-1">
-            <div className="font-bold text-gray-900">Voter Registration</div>
-            <div className="text-sm text-gray-500">Register voters and view submissions</div>
-          </div>
-          <ArrowRight size={18} className="text-gray-300 group-hover:text-[#164FA3]" />
-        </Link>
-        <Link href="/dashboard/admin/voter-registration?tab=workers" className="group bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 hover:border-[#164FA3]/40 hover:shadow-md transition">
-          <div className="w-12 h-12 rounded-xl bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center shrink-0"><UserCheck size={22} /></div>
-          <div className="min-w-0 flex-1">
-            <div className="font-bold text-gray-900">Worker Registration</div>
-            <div className="text-sm text-gray-500">Register karyakartas and manage links</div>
-          </div>
-          <ArrowRight size={18} className="text-gray-300 group-hover:text-[#164FA3]" />
-        </Link>
-      </div>
-      )}
+      {/* Registration sections — callers run the drive on the ground. Visible ONLY
+          to callers (or a Super Admin previewing the caller dashboard); every other
+          role must be granted the page. Access is enforced again by the page guard
+          and by every /api/registration route, never by this card alone. Counts are
+          the live registration data (same API the module's own Dashboard uses). */}
+      {(isCaller(session) || previewingCaller) && <RegistrationSections />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 lg:col-span-2">
@@ -161,6 +145,49 @@ function StatCard({ label, value, icon: Icon, accent }) {
         <h3 className={`text-3xl font-bold tracking-tighter ${accent ? "text-white" : "text-gray-900"}`}>{value}</h3>
         <p className={`text-sm font-medium mt-1 ${accent ? "text-blue-200" : "text-gray-500"}`}>{label}</p>
       </div>
+    </div>
+  );
+}
+
+// The two Caller-dashboard registration sections with live counts from the drive.
+function RegistrationSections() {
+  const [sum, setSum] = useState(null); // { voters, new_workers, total_workers, active_workers } | null
+  const [denied, setDenied] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/registration/dashboard", { cache: "no-store" })
+      .then(async (r) => { if (!r.ok) { if (alive) setDenied(true); return null; } return r.json(); })
+      .then((d) => {
+        if (!alive || !d) return;
+        // Lifetime registrations (voters / new workers) + karyakarta link counts.
+        const sm = d.summary || {};
+        setSum({ voters: sm.lifetime?.voters, new_workers: sm.lifetime?.new_workers, total_workers: sm.total_workers, active_workers: sm.active_workers });
+      })
+      .catch(() => { if (alive) setDenied(true); });
+    return () => { alive = false; };
+  }, []);
+  if (denied) return null; // not permitted server-side → show nothing
+  const n = (v) => (sum ? Number(v || 0).toLocaleString("en-IN") : "…");
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+      <Link href="/dashboard/admin/voter-registration?tab=people" className="group bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 hover:border-[#164FA3]/40 hover:shadow-md transition">
+        <div className="w-12 h-12 rounded-xl bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center shrink-0"><Vote size={22} /></div>
+        <div className="min-w-0 flex-1">
+          <div className="font-bold text-gray-900">Voter Registration</div>
+          <div className="text-sm text-gray-500">Register voters and review submissions</div>
+          <div className="text-xs text-gray-500 mt-1"><span className="font-semibold text-gray-900">{n(sum?.voters)}</span> voters registered · <span className="font-semibold text-gray-900">{n(sum?.new_workers)}</span> new workers</div>
+        </div>
+        <ArrowRight size={18} className="text-gray-300 group-hover:text-[#164FA3]" />
+      </Link>
+      <Link href="/dashboard/admin/voter-registration?tab=workers" className="group bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 hover:border-[#164FA3]/40 hover:shadow-md transition">
+        <div className="w-12 h-12 rounded-xl bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center shrink-0"><UserCheck size={22} /></div>
+        <div className="min-w-0 flex-1">
+          <div className="font-bold text-gray-900">Worker Registration</div>
+          <div className="text-sm text-gray-500">Register karyakartas and their login links</div>
+          <div className="text-xs text-gray-500 mt-1"><span className="font-semibold text-gray-900">{n(sum?.active_workers)}</span> active of <span className="font-semibold text-gray-900">{n(sum?.total_workers)}</span> karyakartas</div>
+        </div>
+        <ArrowRight size={18} className="text-gray-300 group-hover:text-[#164FA3]" />
+      </Link>
     </div>
   );
 }

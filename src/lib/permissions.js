@@ -330,3 +330,13 @@ export async function loadUserScope(session, query) {
   return session.user;
 }
 
+
+// Worker & Voter Registration: who may MANAGE the drive (create/edit a drive,
+// switch the public link on/off) as opposed to registering and reviewing people.
+// Central admins, or anyone who holds the page other than by the caller role.
+// Pure (no DB) so the UI and the API guard apply the identical rule.
+export function canManageRegistration(session) {
+  if (!session) return false;
+  if (isTopAdmin(session)) return true;
+  return !isCaller(session);
+}
