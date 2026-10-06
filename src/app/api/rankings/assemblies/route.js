@@ -5,15 +5,16 @@ import { isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { contactsByAssembly } from "@/lib/workerCounts";
+import { prabhariByAssembly } from "@/lib/assemblyPrabhari";
 
 // Assembly-wise "Area Ranking" for Strength & Ranking. Every assembly (from the
 // locations master) is ranked by its ACTUAL worker/contact count — the same
 // person-aware, active-record count the rest of Strength uses (contactsByAssembly),
 // so the numbers reconcile and nothing is hardcoded. An assembly with zero workers
-// still appears (count 0). Each assembly also carries its CURRENT MEMBER (MLA), read
-// from the existing Leader Assessment relationship by id — never by name — so every
-// assembly shows its own current member (or "Not Assigned"). Gated by the same
-// "rankings" access as the Rankings page.
+// still appears (count 0). Each assembly also carries its CURRENT MEMBER — the
+// Vidhansabha Prabhari — read from the existing designation relationships by id,
+// never by name, so every assembly shows its own Prabhari (or "Not Assigned").
+// Gated by the same "rankings" access as the Rankings page.
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
@@ -32,46 +33,13 @@ export async function GET() {
       ),
     ]);
 
-    // Current Member per master assembly, via the AUTHORITATIVE id chain:
-    //   locations.id (master assembly) ← la_assemblies.location_id
-    //   la_assemblies.id              ← la_mla_profiles.assembly_id
-    // Keyed by the master assembly id (never matched by name), so each assembly
-    // shows its OWN current member. Defensive: on a deployment without the Leader
-    // Assessment tables the members stay unmapped and every assembly renders as
-    // "Not Assigned" rather than failing the ranking.
-    // The current member's PHOTO is resolved to the real person: their own uploaded
-    // Leader-Assessment photo first, else the photo on the Contact (or that contact's
-    // linked field-worker) whose mobile matches the member's phone (last-10-digit
-    // match, the app's standard key — never by name, so a namesake can't supply the
-    // wrong face). When none is found the value stays null and the <Avatar> shows its
-    // standard initials placeholder instead of a broken image.
-    const digits = (col) => `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},' ',''),'-',''),'+',''),'(',''),')',''),'.','')`;
-    let memberByLoc = new Map();
-    try {
-      const mrows = await query(
-        `SELECT la.location_id AS location_id, mp.name AS name,
-                COALESCE(
-                  NULLIF(TRIM(mp.photo_url), ''),
-                  (SELECT NULLIF(TRIM(c.photo_url), '') FROM contacts c
-                     WHERE mp.phone IS NOT NULL AND LENGTH(${digits("mp.phone")}) >= 10
-                       AND RIGHT(${digits("c.phone_number")}, 10) = RIGHT(${digits("mp.phone")}, 10)
-                       AND NULLIF(TRIM(c.photo_url), '') IS NOT NULL
-                     ORDER BY c.id ASC LIMIT 1),
-                  (SELECT NULLIF(TRIM(w.photo_url), '') FROM workers w
-                     WHERE mp.phone IS NOT NULL AND LENGTH(${digits("mp.phone")}) >= 10
-                       AND RIGHT(${digits("w.mobile")}, 10) = RIGHT(${digits("mp.phone")}, 10)
-                       AND NULLIF(TRIM(w.photo_url), '') IS NOT NULL
-                     ORDER BY w.id ASC LIMIT 1)
-                ) AS photo_url
-           FROM la_assemblies la
-           JOIN la_mla_profiles mp ON mp.assembly_id = la.id
-          WHERE la.location_id IS NOT NULL
-            AND NULLIF(TRIM(mp.name), '') IS NOT NULL`
-      );
-      memberByLoc = new Map(mrows.map((r) => [Number(r.location_id), { name: r.name, photo_url: r.photo_url || null }]));
-    } catch (e) {
-      console.error("[assembly rankings] current member lookup:", e?.message || e);
-    }
+    // Current Member per master assembly = the assembly's VIDHANSABHA PRABHARI,
+    // resolved by id from the existing designation relationships (final-approved
+    // designation assignment first, else the Designation Master link on a live
+    // contact in that assembly) with the person's own profile photo. See
+    // lib/assemblyPrabhari.js. Nothing is matched by name text or by a random
+    // contact; an assembly with no Prabhari renders "Not Assigned".
+    const memberByLoc = await prabhariByAssembly();
 
     const ranked = rows
       .map((r) => {
@@ -83,6 +51,8 @@ export async function GET() {
           workers: Number(byAssembly.get(r.id) || 0),
           current_member_name: m?.name || null,
           current_member_photo: m?.photo_url || null,
+          current_member_role: m ? "Vidhansabha Prabhari" : null,
+          current_member_contact_id: m?.contact_id || null,
         };
       })
       // Highest worker count first; ties broken by name for a stable order.
