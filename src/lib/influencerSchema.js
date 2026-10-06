@@ -102,6 +102,10 @@ export async function ensureInfluencerSchema() {
     // a free multiline note shown below Participation Status.
     await ensureColumn("joined_by_contact_id", "INT NULL");
     await ensureColumn("joined_by_phone", "VARCHAR(30) NULL");
+    // Snapshot of the linked contact's name at save time. The live Contact (by id)
+    // stays the source of truth for display; this only guarantees the name survives
+    // if that contact is later deleted or the id could not be resolved.
+    await ensureColumn("joined_by_name", "VARCHAR(150) NULL");
     await ensureColumn("remark", "TEXT NULL");
     // Influencer Rating (1–10). Replaces the old "Influence Assessment"
     // (potential_rating ENUM) in the form. Added lazily; potential_rating is
@@ -132,11 +136,22 @@ export async function ensureInfluencerSchema() {
 
 // Add a column to `influencers` only if it doesn't already exist. A successful
 // add invalidates the cached column snapshot so the write paths pick it up.
+// NOTE: the existence check goes through information_schema with a bound
+// parameter. The app runs every statement as a PREPARED statement, and MySQL 8
+// rejects `SHOW COLUMNS … LIKE ?` with a syntax error — which this helper used to
+// swallow, so the column was never added, the column snapshot never contained it,
+// and the INSERT/UPDATE silently dropped the field (the "Joined By is fetched but
+// not saved" bug).
 async function ensureColumn(column, definition) {
   try {
-    const rows = await query("SHOW COLUMNS FROM influencers LIKE ?", [column]);
+    const rows = await query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'influencers' AND COLUMN_NAME = ?`,
+      [column]
+    );
     if (!rows.length) {
-      await query(`ALTER TABLE influencers ADD COLUMN \`${column}\` ${definition}`);
+      try { await query(`ALTER TABLE influencers ADD COLUMN \`${column}\` ${definition}`); }
+      catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
       columnCache = null;
     }
   } catch (e) {
@@ -162,6 +177,8 @@ export async function getInfluencerColumns() {
   if (!columnCache) await refreshColumnCache();
   return columnCache || new Set();
 }
+
+export const JOINED_BY_COLUMNS = ["joined_by_contact_id", "joined_by_phone", "joined_by_name"];
 
 // Resolve an assembly's full location chain from master data (DB-driven):
 //   assembly → district → lok_sabha → zone (via locations.parent_id).

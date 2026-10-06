@@ -124,7 +124,10 @@ export async function ensureContactApprovalColumns() {
       ["reviewed_at", "TIMESTAMP NULL"],
       ["rejection_reason", "VARCHAR(300) NULL"],
     ]) {
-      const has = (await query("SHOW COLUMNS FROM contacts LIKE ?", [name]).catch(() => [])).length > 0;
+      const has = (await query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts' AND COLUMN_NAME = ?`,
+        [name]
+      ).catch(() => [])).length > 0;
       if (!has) {
         try { await query(`ALTER TABLE contacts ADD COLUMN ${name} ${ddl}`); }
         catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
@@ -280,4 +283,35 @@ export async function findRejectedContactByPhone(phone) {
     [trimmed, digits || trimmed]
   );
   return rows[0]?.id ?? null;
+}
+
+// Worker Status — the Active / Very Active / Average / Not Active rating a CALLER
+// gives the WORKER (contact) they are calling. Stored ON THE CONTACT ROW
+// (contacts.active_status, one value per worker — an UPDATE, never a new row, so
+// several callers rating the same worker can never create duplicates), with who
+// set it and when. Distinct from users.active_status, which is a caller's own
+// self-reported working status. Canonical values: see lib/activeStatus.js.
+let _contactActiveReady = false; // cached only as true
+export async function ensureContactActiveStatusColumns() {
+  if (_contactActiveReady) return true;
+  try {
+    for (const [name, ddl] of [
+      ["active_status", "VARCHAR(20) NULL"],
+      ["active_status_updated_by", "INT NULL"],
+      ["active_status_updated_at", "TIMESTAMP NULL"],
+    ]) {
+      const has = (await query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts' AND COLUMN_NAME = ?`,
+        [name]
+      ).catch(() => [])).length > 0;
+      if (!has) {
+        try { await query(`ALTER TABLE contacts ADD COLUMN ${name} ${ddl}`); }
+        catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
+      }
+    }
+    _contactActiveReady = true;
+  } catch (e) {
+    console.error("[contact-active-status] ensure:", e?.message || e);
+  }
+  return _contactActiveReady;
 }

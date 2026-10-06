@@ -5,7 +5,7 @@ import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureInfluencerSchema, getInfluencerColumns } from "@/lib/influencerSchema";
 import { resolveContactCard, compactContactCard } from "@/lib/contactCard";
-import { validate, coerce, shape } from "../route";
+import { validate, coerce, shape, assertJoinedByStorable } from "../route";
 
 // Every handler here is gated by the "influencers" page key (Super Admin +
 // Supervisor by baseline, plus Page-Access grants), verified server-side (403
@@ -77,13 +77,16 @@ export async function PUT(req, { params }) {
     const cols = await getInfluencerColumns();
     const names = Object.keys(v).filter((k) => cols.has(k));
     if (!names.length) throw new Error("influencers table is missing expected columns");
+    assertJoinedByStorable(v, cols);
     await query(
       `UPDATE influencers SET ${names.map((n) => `\`${n}\`=?`).join(", ")} WHERE id=?`,
       [...names.map((n) => v[n]), iid]
     );
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [iid]);
     if (!row) throw new Error("update reported success but the record could not be read back");
-    return NextResponse.json({ influencer: shape(row) }, { headers: NO_STORE });
+    const shaped = shape(row);
+    if (shaped.joined_by_contact_id) shaped.joined_by_contact = compactContactCard(await resolveContactCard(shaped.joined_by_contact_id));
+    return NextResponse.json({ influencer: shaped }, { headers: NO_STORE });
   } catch (err) {
     const detail = err?.sqlMessage || err?.message || String(err);
     console.error("[influencer] PUT error:", err?.code || "", detail);
