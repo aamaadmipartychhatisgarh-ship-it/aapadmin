@@ -133,8 +133,10 @@ export async function GET(req) {
 
     const [{ total }] = await query(`SELECT COUNT(*) AS total FROM influencers ${whereSql}`, params);
     // The contact_designations table must exist for the Joined By designation
-    // subquery (idempotent + cached — no-op once created).
-    await ensureContactDesignationsSchema();
+    // subquery (idempotent + cached — no-op once created). Non-fatal: if it can't be
+    // ensured (e.g. no CREATE privilege), the Joined-By enrichment degrades below
+    // rather than failing the whole list.
+    await ensureContactDesignationsSchema().catch((e) => console.error("[influencer] ensureContactDesignationsSchema:", e?.sqlMessage || e?.message || e));
     // Only reference joined_by_contact_id when the column actually exists — a
     // deployment where the lazy ALTER couldn't run (no ALTER privilege) still lists
     // every existing influencer instead of failing the whole page with an
@@ -149,6 +151,21 @@ export async function GET(req) {
     const hasJbPhone = cols.has("joined_by_phone");
     // pageSize/offset are validated integers (parseInt + clamp above), so they
     // are inlined — mysql2's prepared execute() rejects LIMIT/OFFSET placeholders.
+    // The plain list (no Joined-By enrichment) is the guaranteed fallback: the
+    // enrichment query joins several other tables/columns, so if any of those is
+    // missing/incompatible on a given deployment we still return the influencers
+    // (Joined By just won't resolve) instead of 500-ing the whole page.
+    // created_by is feature-detected: on an older influencers table that predates
+    // the column, referencing it would 500 BOTH list queries (while stats, which
+    // never touches it, still works — exactly this failure's shape).
+    const createdBySel = cols.has("created_by")
+      ? "(SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name"
+      : "NULL AS created_by_name";
+    const simpleList = () => query(
+      `SELECT influencers.*, ${createdBySel}
+         FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
+      params
+    );
     let rows;
     if (hasJbId || hasJbPhone) {
       // Joined By resolves the EFFECTIVE contact: the stored link id, else a match
@@ -190,6 +207,7 @@ export async function GET(req) {
       const mobileExpr = workerMatch ? "COALESCE(jc.phone_number, jw2.mobile, base.joined_by_phone)"
         : hasJbPhone ? "COALESCE(jc.phone_number, base.joined_by_phone)" : "jc.phone_number";
       const desigExtra = workerMatch ? ", NULLIF(TRIM(jw2.position), '')" : "";
+      try {
       rows = await query(
         `SELECT base.*,
                 (SELECT username FROM users u WHERE u.id = base.created_by) AS created_by_name,
@@ -212,13 +230,16 @@ export async function GET(req) {
           ORDER BY base.${orderBy}`,
         params
       );
+      } catch (e) {
+        // The enrichment query touches several other tables/columns (contacts,
+        // workers, contact_designations, designations). If any is missing or
+        // incompatible on this deployment, fall back to the plain list so the page
+        // still loads — the real cause is logged for a proper fix.
+        console.error("[influencer] Joined-By enrichment failed, falling back to plain list:", e?.sqlMessage || e?.message || e);
+        rows = await simpleList();
+      }
     } else {
-      rows = await query(
-        `SELECT influencers.*,
-                (SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name
-           FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
-        params
-      );
+      rows = await simpleList();
     }
     const influencers = rows.map(shape);
 
@@ -227,8 +248,9 @@ export async function GET(req) {
       { headers: NO_STORE }
     );
   } catch (err) {
-    console.error("[influencer] GET list error:", err);
-    return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });
+    const detail = err?.sqlMessage || err?.message || String(err);
+    console.error("[influencer] GET list error:", err?.code || "", detail);
+    return NextResponse.json({ message: "Internal server error", detail }, { status: 500, headers: NO_STORE });
   }
 }
 
