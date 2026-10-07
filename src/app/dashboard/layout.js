@@ -109,7 +109,7 @@ const VIEW_OPTIONS = [
 // so a page GRANTED to a user can be appended to their sidebar with the right
 // icon. Any unmapped name falls back to a generic file icon.
 const PAGE_ICONS = {
-  LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp,
+  LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp, MapPin,
   MessageSquare, ClipboardList, Gauge, Newspaper, Share2, FileText, BarChart3,
   Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star, Users, Vote, ShieldCheck,
 };
