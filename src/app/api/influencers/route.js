@@ -5,9 +5,9 @@ import { userCanAccessPageKey } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import {
   ensureInfluencerSchema, getInfluencerColumns, normalizeStatus, resolveAssemblyHierarchy,
-  POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES,
-} from "@/lib/influencerSchema";
+  POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES, JOINED_BY_COLUMNS } from "@/lib/influencerSchema";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
+import { resolveContactCard, resolveContactByPhone } from "@/lib/contactCard";
 
 // Access to the Influencer module is governed by the "influencers" page key
 // (Super Admin + Supervisor by baseline, plus anyone granted it in Page Access).
@@ -184,7 +184,8 @@ export async function GET(req) {
               LIMIT 1)`
         : null;
       const workerJoin = workerMatch ? `LEFT JOIN workers jw2 ON jc.id IS NULL AND jw2.id = ${workerMatch}` : "";
-      const nameExpr = workerMatch ? "COALESCE(jc.person_name, jw2.name)" : "jc.person_name";
+      const hasJbName = cols.has("joined_by_name");
+      const nameExpr = `COALESCE(jc.person_name${workerMatch ? ", jw2.name" : ""}${hasJbName ? ", base.joined_by_name" : ""})`;
       const photoExpr = workerMatch ? "COALESCE(jc.photo_url, jcw.photo_url, jw2.photo_url)" : "COALESCE(jc.photo_url, jcw.photo_url)";
       const mobileExpr = workerMatch ? "COALESCE(jc.phone_number, jw2.mobile, base.joined_by_phone)"
         : hasJbPhone ? "COALESCE(jc.phone_number, base.joined_by_phone)" : "jc.phone_number";
@@ -261,6 +262,7 @@ export async function POST(req) {
       // Table isn't reachable / has no expected columns — surface, don't fake success.
       throw new Error("influencers table is missing expected columns");
     }
+    assertJoinedByStorable(record, cols);
     const res = await query(
       `INSERT INTO influencers (${names.map((n) => `\`${n}\``).join(", ")}) VALUES (${names.map(() => "?").join(",")})`,
       names.map((n) => record[n])
@@ -280,6 +282,15 @@ export async function POST(req) {
     // silent "saved but not showing" (Bug Fix §2, §7).
     return NextResponse.json({ message: `Could not save the influencer: ${detail}` }, { status: 500, headers: NO_STORE });
   }
+}
+
+// A Joined By link the user resolved must never be dropped silently because the
+// columns are missing: surface it, so the admin sees a real error instead of a
+// "saved" record with no Joined By.
+export function assertJoinedByStorable(record, cols) {
+  if (record.joined_by_contact_id == null && !record.joined_by_phone) return;
+  const missing = JOINED_BY_COLUMNS.filter((c) => !cols.has(c));
+  if (missing.length) throw new Error(`Joined By could not be saved: the influencers table is missing ${missing.join(", ")} (schema migration failed — check the server log).`);
 }
 
 // --- shared validation / coercion (also used by [id] PUT) ------------------
@@ -346,6 +357,7 @@ export async function coerce(d, prior = null) {
   // Assembly → District / Lok Sabha / Zone resolved authoritatively from master
   // data (never trusts client-supplied location names). Nulls where unmapped.
   const h = await resolveAssemblyHierarchy(d.assembly_id);
+  const jb = await resolveJoinedBy(d);
   const s = (x, max) => {
     const v = String(x ?? "").trim();
     if (!v) return null;
@@ -386,14 +398,35 @@ export async function coerce(d, prior = null) {
     // Influencer Rating (1–10) — replaces the old Influence Assessment. Anything
     // outside 1–10 stores NULL (potential_rating is retained but no longer written).
     influencer_rating: ratingInt(d.influencer_rating),
-    // Joined By — a live link to an existing Contact (id) + the looked-up phone.
-    joined_by_contact_id: jbContactId(d.joined_by_contact_id),
-    joined_by_phone: s(d.joined_by_phone, 30),
+    // Joined By — the Contact id is the relationship; phone + name are preserved
+    // alongside it (resolved server-side, see resolveJoinedBy — never trusted text).
+    ...jb,
     // Free multiline remark (participation / follow-up / communication / joining …).
     remark: s(d.remark),
     // Participation
     status: normalizeStatus(d.status),
     ...participationFields(normalizeStatus(d.status), d, prior),
+  };
+}
+
+// The persisted Joined By triple { joined_by_contact_id, joined_by_phone,
+// joined_by_name }. The id is the relationship. If the client sent a phone but no
+// id (e.g. Save clicked before the debounced lookup finished), the contact is
+// resolved here by phone so the link is never lost; the name is snapshotted from
+// the resolved contact (never from free text). No match → phone only, id/name null.
+async function resolveJoinedBy(d) {
+  const phone = String(d.joined_by_phone ?? "").trim().slice(0, 30) || null;
+  let id = jbContactId(d.joined_by_contact_id);
+  let card = id ? await resolveContactCard(id) : null;
+  if (!card && phone) {
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length >= 10 && digits.length <= 12) card = await resolveContactByPhone(digits);
+  }
+  if (card) id = Number(card.id) || id;
+  return {
+    joined_by_contact_id: card ? id : null,
+    joined_by_phone: card?.phone_number ? String(card.phone_number).slice(0, 30) : phone,
+    joined_by_name: card?.person_name ? String(card.person_name).slice(0, 150) : null,
   };
 }
 

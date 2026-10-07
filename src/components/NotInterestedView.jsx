@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, Loader2, HeartCrack, RotateCcw } from "lucide-react";
 import Avatar from "@/components/Avatar";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -43,6 +43,8 @@ export default function NotInterestedView({ session, onCount }) {
   // Restore is an authorized action (oversight roles) — matches the backend gate.
   const canRestore = isOversight(session);
   const [restoringId, setRestoringId] = useState(null);
+  const [notice, setNotice] = useState(null); // { kind: "ok" | "warn", text }
+  const inFlight = useRef(new Set()); // contact ids with a restore request in progress
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -107,24 +109,42 @@ export default function NotInterestedView({ session, onCount }) {
     setLoading(false);
   }
 
-  // Explicitly restore a contact to Main Contacts. Confirms first, then clears the
-  // persistent Not-Interested state server-side; on success the row leaves this list
-  // (and returns to the active/assignable contacts).
+  // Explicitly restore a contact out of Not Interested. Confirms first; the backend
+  // performs a true MOVE of the same contact row (flag cleared, restore watermark
+  // stamped so derived reasons stop matching) and reports where it now lives. The
+  // row is removed immediately and the list re-fetched, so nothing stale remains.
+  // Double clicks / repeated requests are swallowed client-side (one in-flight
+  // request per contact) AND are harmless server-side (idempotent).
   async function restore(c) {
-    if (!window.confirm(`Restore ${c.person_name || "this contact"} to Main Contacts? They will become active and assignable again.`)) return;
+    if (inFlight.current.has(c.id)) return;
+    if (!window.confirm(`Restore ${c.person_name || "this contact"} from Not Interested? They will become active and assignable again.`)) return;
+    inFlight.current.add(c.id);
     setRestoringId(c.id);
+    setNotice(null);
     try {
       const r = await fetch(`/api/not-interested/${c.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "restore" }),
       });
-      if (r.ok) load(page);
-      else {
-        const d = await r.json().catch(() => ({}));
-        alert(d.message || "Could not restore this contact.");
-      }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setNotice({ kind: "warn", text: d.message || "Could not restore this contact." }); return; }
+      setRows((prev) => prev.filter((x) => x.id !== c.id));
+      // Keep the tab badge in step with the optimistic removal. Computed here (not
+      // inside a state updater) so the parent's setState never runs during render.
+      const remaining = Math.max(0, total - 1);
+      setTotal(remaining);
+      onCount?.(remaining);
+      const dest = d.destination?.label || "Main Contacts";
+      setNotice({
+        kind: "ok",
+        text: d.moved
+          ? `${c.person_name || "Contact"} moved to ${dest}.`
+          : `${c.person_name || "Contact"} was already out of this list (now in ${dest}). List refreshed.`,
+      });
+      await load(page);
     } finally {
+      inFlight.current.delete(c.id);
       setRestoringId(null);
     }
   }
@@ -165,6 +185,11 @@ export default function NotInterestedView({ session, onCount }) {
         </div>
       </CollapsibleSection>
 
+      {notice && (
+        <div className={`rounded-xl px-4 py-3 text-sm border ${notice.kind === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-red-50 border-red-200 text-red-800"}`}>
+          {notice.text}
+        </div>
+      )}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="p-12 text-center text-gray-400"><Loader2 className="inline animate-spin" /></div>
@@ -203,7 +228,7 @@ export default function NotInterestedView({ session, onCount }) {
                       <td className="px-3 py-3">
                         <button
                           onClick={() => restore(c)}
-                          disabled={restoringId === c.id}
+                          disabled={restoringId !== null}
                           title="Restore to Main Contacts"
                           className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#164FA3] hover:bg-blue-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
                         >

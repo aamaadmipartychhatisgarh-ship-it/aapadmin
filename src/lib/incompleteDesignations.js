@@ -1,6 +1,6 @@
 import { query } from "@/lib/db";
 import { scopeFilterSync } from "@/lib/permissions";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 
@@ -70,7 +70,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   await ensureDesignationLevelColumn(query);
 
   const scope = scopeFilterSync(session.user, "c");
-  const notWrong = await notWrongNumberClause("c");
+  const notWrong = (await notWrongNumberClause("c")) + (await notPendingClause("c"));
 
   // The designations mapped to EXACTLY this level in Designation Master (the full
   // list drives the dropdown; the current filter narrows the matrix). A disabled

@@ -109,7 +109,7 @@ const VIEW_OPTIONS = [
 // so a page GRANTED to a user can be appended to their sidebar with the right
 // icon. Any unmapped name falls back to a generic file icon.
 const PAGE_ICONS = {
-  LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp,
+  LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp, MapPin,
   MessageSquare, ClipboardList, Gauge, Newspaper, Share2, FileText, BarChart3,
   Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star, Users, Vote, ShieldCheck,
 };
@@ -237,6 +237,8 @@ export default function DashboardLayout({ children }) {
       // sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       // Influencers — a STANDALONE page directly below Contacts (its own route and
       // "influencers" page-access key), NOT a Contacts child/tab.
@@ -275,6 +277,8 @@ export default function DashboardLayout({ children }) {
       // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -298,6 +302,8 @@ export default function DashboardLayout({ children }) {
       // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -318,6 +324,8 @@ export default function DashboardLayout({ children }) {
       // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -338,6 +346,8 @@ export default function DashboardLayout({ children }) {
       // Incoming-Off sub-tabs). Routes/pages/permissions are unchanged.
       { name: "Contacts", href: "/dashboard/admin/contacts", icon: UserCheck, children: [
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
+        // Caller-submitted contacts awaiting review (same page Supervisors use).
+        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },

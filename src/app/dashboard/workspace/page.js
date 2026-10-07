@@ -10,6 +10,7 @@ import Avatar from "@/components/Avatar";
 import CallActionIcons, { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
+import { AddContactModal } from "@/components/contacts/ContactsModule";
 import { MultiSelect } from "@/components/MultiSelect";
 import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
@@ -109,10 +110,15 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // Ordering itself stays server-side; this only chooses which section(s) show.
   const [queueTab, setQueueTab] = useState("all");
   const [showAddContact, setShowAddContact] = useState(false); // caller "Add Contact" modal (pending approval)
+  const [submissionsKey, setSubmissionsKey] = useState(0); // bump to refresh "My submitted contacts"
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
   const [activeStatus, setActiveStatus] = useState(null); // users.active_status (this caller's) — editable here
   const [savingActiveStatus, setSavingActiveStatus] = useState(false);
+  // Worker Status of the contact currently on the call (contacts.active_status —
+  // stored against the WORKER, read back from the DB; null = not rated yet).
+  const [workerStatus, setWorkerStatus] = useState(null);
+  const [savingWorkerStatus, setSavingWorkerStatus] = useState(false);
   const [statuses, setStatuses] = useState([]);
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -487,6 +493,44 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       setError(e?.message === "Failed" ? "Could not update Active Status. Please try again." : (e?.message || "Could not update Active Status."));
     } finally {
       setSavingActiveStatus(false);
+    }
+  }
+
+  // Load the current worker's stored status whenever a call opens (never assumed).
+  useEffect(() => {
+    if (!active?.id) { setWorkerStatus(null); return; }
+    let alive = true;
+    fetch(`/api/contacts/${active.id}/active-status`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { active_status: null }))
+      .then((d) => { if (alive) setWorkerStatus(d.active_status || null); })
+      .catch(() => { if (alive) setWorkerStatus(null); });
+    return () => { alive = false; };
+  }, [active?.id]);
+
+  // Caller marks THIS worker as Active / Very Active / Average / Not Active. Saved
+  // on the contact row (one value per worker) so the Active Workers page shows the
+  // same stored value. Optimistic; reverts if the save fails. Never touches the
+  // Calling Status or the caller's own My Active Status.
+  async function updateWorkerStatus(value) {
+    if (!active?.id || !value || value === workerStatus || savingWorkerStatus) return;
+    const prev = workerStatus;
+    setWorkerStatus(value);
+    setSavingWorkerStatus(true);
+    setError("");
+    try {
+      const r = await fetch(`/api/contacts/${active.id}/active-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_status: value }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.message || "Could not update the worker status.");
+      if (d?.active_status) setWorkerStatus(d.active_status);
+    } catch (e) {
+      setWorkerStatus(prev);
+      setError(e?.message || "Could not update the worker status.");
+    } finally {
+      setSavingWorkerStatus(false);
     }
   }
 
@@ -875,6 +919,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
           )}
         </div>
 
+        {/* What happened to the contacts this caller submitted (pending / approved / rejected). */}
+        <MySubmittedContacts refreshKey={submissionsKey} />
         <FollowUpCalls scheduled={queue.scheduled || []} disabled={!!active} onOpen={(id) => claim(id)} />
 
         <ProgressPanel refreshKey={progressKey} />
@@ -1162,18 +1208,20 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                 <h3 className="font-bold text-gray-900 flex items-center gap-2"><Square size={16} /> Log Outcome</h3>
                 <div className="flex items-center gap-2">
-                  {/* Active Status — editable here too (beside the Calling Status),
-                      writing the same users.active_status the Active Workers page
-                      reads. Changing it here never affects the Calling Status below. */}
-                  <label className="inline-flex items-center gap-1.5 text-xs">
-                    <span className="font-semibold uppercase tracking-wide text-gray-400">Active Status</span>
+                  {/* Worker Status — how active THIS worker is (Active / Very Active /
+                      Average / Not Active). Stored on the contact row and shown on the
+                      Active Workers page. Separate from the Calling Status below and
+                      from the caller's own "My Active Status". */}
+                  <label className="inline-flex items-center gap-1.5 text-xs" title={workerStatus ? `Worker status: ${ACTIVE_STATUS_LABEL[workerStatus]}` : "Worker status not set yet"}>
+                    <span className="font-semibold uppercase tracking-wide text-gray-400">Worker Status</span>
                     <select
-                      value={activeStatus || ""}
-                      onChange={(e) => updateActiveStatus(e.target.value)}
-                      disabled={savingActiveStatus}
-                      className={`text-xs font-semibold rounded-lg border px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-[#164FA3] disabled:opacity-60 ${activeStatus ? "border-gray-300 text-gray-800" : "border-gray-200 text-gray-400"}`}
+                      value={workerStatus || ""}
+                      onChange={(e) => updateWorkerStatus(e.target.value)}
+                      disabled={savingWorkerStatus}
+                      aria-label="Worker status"
+                      className={`text-xs font-semibold rounded-lg border px-2 py-1 bg-white outline-none focus:ring-2 focus:ring-[#164FA3] disabled:opacity-60 ${workerStatus ? "border-gray-300 text-gray-800" : "border-gray-200 text-gray-400"}`}
                     >
-                      <option value="" disabled>Set…</option>
+                      <option value="" disabled>Not set</option>
                       {ACTIVE_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </label>
@@ -1328,76 +1376,16 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       )}
 
       {showAddContact && (
-        <AddPendingContactModal
-          designations={designations}
+        // The SAME Add Contact form the admin Contacts page uses (identical fields,
+        // validation and payload) — only the destination differs: the submission is
+        // held as "pending" for Supervisor approval and is never live until approved.
+        <AddContactModal
+          addUrl="/api/contacts/pending"
+          notice="This contact will be sent to your Supervisor for approval. It becomes a live contact only after they approve it."
           onClose={() => setShowAddContact(false)}
-          onDone={() => { setShowAddContact(false); setMessage("Contact submitted for Supervisor approval."); }}
+          onSaved={() => { setShowAddContact(false); setMessage("Contact submitted for Supervisor approval."); setSubmissionsKey((k) => k + 1); }}
         />
       )}
-    </div>
-  );
-}
-
-// Caller "Add Contact" — submits a NEW contact for Supervisor approval (it is NOT
-// added to the live list until approved). Same core fields as the admin form;
-// geography defaults to the caller's own territory server-side.
-function AddPendingContactModal({ designations, onClose, onDone }) {
-  const [f, setF] = useState({ person_name: "", phone_number: "", address: "", designation_ids: [] });
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
-  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-
-  async function submit() {
-    setErr("");
-    if (!f.person_name.trim()) { setErr("Name is required."); return; }
-    if (!f.phone_number.trim()) { setErr("Mobile number is required."); return; }
-    setSaving(true);
-    try {
-      const r = await fetch("/api/contacts/pending", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          person_name: f.person_name.trim(), phone_number: f.phone_number.trim(),
-          address: f.address.trim() || null, designation_ids: f.designation_ids,
-        }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setErr([d.message, d.detail].filter(Boolean).join(" — ") || "Could not submit."); return; }
-      onDone();
-    } finally { setSaving(false); }
-  }
-
-  const inp = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
-  const lbl = "block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1";
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="font-bold text-lg text-gray-900">Add Contact</h3>
-          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={18} /></button>
-        </div>
-        <div className="p-5 space-y-3">
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2.5 text-xs">
-            This contact will be sent to your Supervisor for approval. It becomes a live contact only after they approve it.
-          </div>
-          <div><label className={lbl}>Name *</label><input className={inp} value={f.person_name} onChange={(e) => set("person_name", e.target.value)} autoFocus /></div>
-          <div><label className={lbl}>Mobile *</label><input className={inp} value={f.phone_number} onChange={(e) => set("phone_number", e.target.value)} /></div>
-          <div>
-            <label className={lbl}>Designation</label>
-            <select className={inp} value={f.designation_ids[0] || ""} onChange={(e) => set("designation_ids", e.target.value ? [e.target.value] : [])}>
-              <option value="">— none —</option>
-              {(designations || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          </div>
-          <div><label className={lbl}>Address</label><textarea rows={2} className={inp} value={f.address} onChange={(e) => set("address", e.target.value)} /></div>
-          {err && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-xs">{err}</div>}
-        </div>
-        <div className="p-5 border-t border-gray-100 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-semibold hover:bg-gray-50">Cancel</button>
-          <button onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg bg-[#164FA3] text-white font-semibold hover:bg-blue-800 disabled:opacity-50 inline-flex items-center gap-2">
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Submit for approval
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1796,6 +1784,61 @@ function Field({ label, children, className = "" }) {
     <div className={className}>
       <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">{label}</label>
       {children}
+    </div>
+  );
+}
+
+// The caller's own Add Contact submissions and their review status. Read-only;
+// pending ones are not live yet, rejected ones show the Supervisor's reason.
+function MySubmittedContacts({ refreshKey }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/contacts/pending?mine=1", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { contacts: [] }))
+      .then((d) => { if (alive) setRows(d.contacts || []); })
+      .catch(() => { if (alive) setRows([]); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [refreshKey]);
+  if (!loading && rows.length === 0) return null;
+  const chip = {
+    pending: "bg-amber-50 text-amber-700 border-amber-200",
+    approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    rejected: "bg-red-50 text-red-700 border-red-200",
+  };
+  const label = { pending: "Pending approval", approved: "Approved", rejected: "Rejected" };
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between">
+        <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2"><Plus size={16} /> My submitted contacts</h3>
+        <span className="text-xs text-gray-500">{rows.length} · {open ? "hide" : "show"}</span>
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-2 max-h-[240px] overflow-y-auto">
+          {loading ? <li className="text-sm text-gray-400">Loading…</li> : rows.map((c) => (
+            <li key={c.id} className="p-3 rounded-lg border border-gray-100">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-gray-900 text-sm truncate">{c.person_name}</div>
+                  <div className="text-xs text-gray-500">{c.phone_number}{c.designation_names ? ` · ${c.designation_names}` : ""}</div>
+                </div>
+                <span className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${chip[c.approval_status] || ""}`}>{label[c.approval_status] || c.approval_status}</span>
+              </div>
+              {c.approval_status === "rejected" && (
+                <div className="text-[11px] text-red-700 mt-1">
+                  Rejected{c.reviewed_by_name ? ` by ${c.reviewed_by_name}` : ""}{c.rejection_reason ? `: ${c.rejection_reason}` : ""}. You can submit this number again with corrected details.
+                </div>
+              )}
+              {c.approval_status === "approved" && c.reviewed_by_name && (
+                <div className="text-[11px] text-emerald-700 mt-1">Approved by {c.reviewed_by_name} — now in the Contact List.</div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

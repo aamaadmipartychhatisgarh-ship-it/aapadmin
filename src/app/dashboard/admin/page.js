@@ -183,7 +183,7 @@ function StrengthStrip({ summary }) {
         );
       })}
       <a href="/dashboard/full-ranking" className="ml-auto inline-flex items-center gap-1 text-sm font-medium text-[#164FA3] hover:underline">
-        Full ranking <ChevronRight size={14} />
+        Area ranking <ChevronRight size={14} />
       </a>
     </div>
   );

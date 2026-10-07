@@ -4,15 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import SupervisorGuard from "@/components/SupervisorGuard";
 import StrengthView from "@/components/StrengthView";
-import RankingsView from "@/components/RankingsView";
 import AssemblyRankingView from "@/components/AssemblyRankingView";
-import { Gauge, Trophy, ArrowLeft, MapPin } from "lucide-react";
+import { Gauge, ArrowLeft, MapPin } from "lucide-react";
 
-// Combined Strength & Ranking view — opened from the Dashboard Overview's "Full
-// ranking" button. Three tabs (Area Ranking / Strength / Ranking) that reuse the
-// existing content components (same data/APIs, no duplication). The former "State
-// Overview" tab has been removed; its Assembly-wise ranking now lives under
-// "Area Ranking" (all assemblies + each assembly's current member).
+// Area Ranking & Strength — opened from the Dashboard Overview's "Area ranking"
+// button. Two tabs (Area Ranking / Strength) that reuse the existing content
+// components (same data/APIs, no duplication). The former "State Overview" tab
+// and the obsolete performance "Ranking" tab have been removed; the Assembly-wise
+// ranking lives under "Area Ranking" (all assemblies + each assembly's current
+// member, the Vidhansabha Prabhari).
 export default function Page() {
   return <SupervisorGuard><Body /></SupervisorGuard>;
 }
@@ -20,7 +20,6 @@ export default function Page() {
 const TABS = [
   { key: "area", label: "Area Ranking", icon: MapPin },
   { key: "strength", label: "Strength", icon: Gauge },
-  { key: "rankings", label: "Ranking", icon: Trophy },
 ];
 
 function Body() {
@@ -38,8 +37,8 @@ function Body() {
         <ArrowLeft size={15} /> Back to Dashboard
       </button>
       <div>
-        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Strength &amp; Ranking</h1>
-        <p className="text-gray-500 mt-2 font-medium">Area ranking, organization strength and performance rankings.</p>
+        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Area Ranking &amp; Strength</h1>
+        <p className="text-gray-500 mt-2 font-medium">Every assembly ranked by worker count with its current member, and organization strength.</p>
       </div>
 
       {/* Native-style tab switcher (matches the dashboard's Overview/Analytics tabs). */}
@@ -61,8 +60,7 @@ function Body() {
       </div>
 
       {/* Area Ranking carries the Assembly-wise ranking (all assemblies, each with
-          its current member); Strength and Ranking reuse the existing content
-          components unchanged. */}
+          its current member); Strength reuses the existing content component. */}
       {tab === "area" ? (
         <div className="space-y-4">
           <div>
@@ -71,7 +69,7 @@ function Body() {
           </div>
           <AssemblyRankingView />
         </div>
-      ) : tab === "strength" ? <StrengthView /> : <RankingsView />}
+      ) : <StrengthView />}
     </div>
   );
 }

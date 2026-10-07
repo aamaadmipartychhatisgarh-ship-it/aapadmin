@@ -8,7 +8,7 @@ import PageHeader from "@/components/PageHeader";
 import Avatar from "@/components/Avatar";
 import { isAdmin } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
-import { ACTIVE_STATUS_OPTIONS, ACTIVE_STATUS_LABEL } from "@/lib/activeStatus";
+import { ACTIVE_STATUS_OPTIONS, ACTIVE_STATUS_LABEL, normalizeActiveStatus } from "@/lib/activeStatus";
 
 // Badge colours for the four canonical Active Status values (Very Active / Active
 // stand out clearly). Unset → a plain "Not set" chip.
@@ -153,6 +153,8 @@ export default function ActiveWorkersPage() {
                   <div className="flex items-center gap-2 text-xs shrink-0">
                     {/* Active Status — VIEW + ADD/UPDATE here (the authoritative place). */}
                     <StatusControl group={g} onChange={(v) => saveStatus(g.user_id, v)} />
+                    {/* Worker Status breakdown of this caller's contacts (stored per contact). */}
+                    <WorkerStatusChips counts={g.worker_status_counts} />
                     <span className="text-gray-400 hidden md:inline">{g.pending_count} pending · {g.done_count} done</span>
                     <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#164FA3] text-white font-bold">{Number(g.active_count).toLocaleString("en-IN")}</span>
                   </div>
@@ -173,7 +175,7 @@ function CallerContacts({ userId }) {
   const [rows, setRows] = useState(null);
   useEffect(() => {
     let alive = true;
-    fetch(`/api/contacts?assigned_to=${encodeURIComponent(userId)}&page_size=200`)
+    fetch(`/api/contacts?assigned_to=${encodeURIComponent(userId)}&page_size=200`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : { contacts: [] })
       .then((d) => { if (alive) setRows(d.contacts || []); })
       .catch(() => { if (alive) setRows([]); });
@@ -187,7 +189,7 @@ function CallerContacts({ userId }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-left text-xs text-gray-500">
-            <tr><th className="px-3 py-2 font-semibold">Name</th><th className="px-3 py-2 font-semibold">Phone</th><th className="px-3 py-2 font-semibold">Designation</th><th className="px-3 py-2 font-semibold">Location</th><th className="px-3 py-2 font-semibold">Status</th></tr>
+            <tr><th className="px-3 py-2 font-semibold">Name</th><th className="px-3 py-2 font-semibold">Phone</th><th className="px-3 py-2 font-semibold">Designation</th><th className="px-3 py-2 font-semibold">Location</th><th className="px-3 py-2 font-semibold">Worker Status</th><th className="px-3 py-2 font-semibold">Calling</th></tr>
           </thead>
           <tbody>
             {rows.map((c) => (
@@ -201,6 +203,7 @@ function CallerContacts({ userId }) {
                 <td className="px-3 py-2 font-mono text-xs text-gray-600 whitespace-nowrap"><Phone size={11} className="inline mr-1 text-gray-400" />{c.phone_number}</td>
                 <td className="px-3 py-2 text-gray-700">{c.designation_name || "—"}</td>
                 <td className="px-3 py-2 text-gray-500 text-xs">{[c.district_name, c.assembly_name].filter(Boolean).join(" / ") || "—"}</td>
+                <td className="px-3 py-2"><WorkerStatusBadge value={c.active_status} /></td>
                 <td className="px-3 py-2">
                   <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${c.is_completed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{c.is_completed ? "Done" : "Pending"}</span>
                 </td>
@@ -243,5 +246,34 @@ function SumCard({ label, value, accent }) {
       <div className={`text-2xl font-bold ${accent ? "" : "text-gray-900"}`}>{value}</div>
       <div className={`text-xs font-medium mt-1 ${accent ? "text-blue-200" : "text-gray-500"}`}>{label}</div>
     </div>
+  );
+}
+
+// The worker's stored status (contacts.active_status) as a badge. Anything that is
+// not one of the four canonical values — including "not rated yet" — renders as
+// "Not set", never as a guessed status.
+function WorkerStatusBadge({ value }) {
+  const code = normalizeActiveStatus(value);
+  return (
+    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${code ? STATUS_STYLE[code] : "bg-gray-100 text-gray-400"}`} title={code ? "Worker status set by a caller" : "No worker status recorded yet"}>
+      {code ? ACTIVE_STATUS_LABEL[code] : "Not set"}
+    </span>
+  );
+}
+
+// Per-caller breakdown of their contacts' Worker Status (only non-zero buckets).
+function WorkerStatusChips({ counts }) {
+  if (!counts) return null;
+  const items = ACTIVE_STATUS_OPTIONS.filter((o) => counts[o.value] > 0);
+  if (!items.length) return <span className="text-gray-400 hidden lg:inline">No worker status yet</span>;
+  return (
+    <span className="hidden lg:inline-flex items-center gap-1">
+      {items.map((o) => (
+        <span key={o.value} className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_STYLE[o.value]}`} title={`${counts[o.value]} ${o.label}`}>
+          {counts[o.value]} {o.label}
+        </span>
+      ))}
+      {counts.UNSET > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-400" title="No worker status yet">{counts.UNSET} not set</span>}
+    </span>
   );
 }

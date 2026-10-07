@@ -7,7 +7,7 @@ import { query, getPool } from "@/lib/db";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
@@ -125,6 +125,7 @@ export async function POST(req) {
     // NEVER assign a Wrong Number contact, `reassign=false` must never pull
     // from another caller's queue, and geographic scope is never bypassable.
     where += await notWrongNumberClause("c");
+    where += await notPendingClause("c"); // caller submissions awaiting approval are not live
     where += await notNotInterestedClause("c");
     where += await repeatOffExclusion("c");
     if (!reassign) where += " AND c.assigned_to_user_id IS NULL";

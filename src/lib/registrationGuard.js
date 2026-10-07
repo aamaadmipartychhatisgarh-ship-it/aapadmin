@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isTopAdmin, isSuperAdmin, isCaller } from "@/lib/permissions";
+import { isTopAdmin, isSuperAdmin, isCaller, canManageRegistration } from "@/lib/permissions";
+export { canManageRegistration };
 import { pageAllowed } from "@/lib/pageAccess";
 import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSchema";
 
@@ -15,7 +16,14 @@ import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSc
 // to any other user through Page Access and pageAllowed() admits them here.
 export const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
 
-export async function requireRegistrationAccess({ superAdminOnly = false } = {}) {
+// Options:
+//   superAdminOnly — destructive actions (delete): Super Admin only.
+//   manageOnly     — drive management (create/edit a drive, switch the public link
+//                    on/off): central admins, or a non-caller user granted the page.
+//                    Callers hold the module by role to REGISTER and review people
+//                    and karyakartas, not to run the drive — enforced here, never
+//                    only by hiding a button.
+export async function requireRegistrationAccess({ superAdminOnly = false, manageOnly = false } = {}) {
   const session = await getServerSession(authOptions);
   if (!session) return { error: NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE }) };
 
@@ -34,6 +42,9 @@ export async function requireRegistrationAccess({ superAdminOnly = false } = {})
   if (!permitted) return { error: NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE }) };
   if (superAdminOnly && !isSuperAdmin(session)) {
     return { error: NextResponse.json({ message: "You do not have permission to do that." }, { status: 403, headers: NO_STORE }) };
+  }
+  if (manageOnly && !canManageRegistration(session)) {
+    return { error: NextResponse.json({ message: "Only administrators can manage the registration drive." }, { status: 403, headers: NO_STORE }) };
   }
 
   await ensureRegistrationSchema();
@@ -59,3 +70,4 @@ export function parseRegFilters(searchParams) {
     search: str("search"),
   };
 }
+

@@ -457,7 +457,16 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
 
   // "Joined By" — the resolved existing Contact (live link) and lookup status.
   const [joinedBy, setJoinedBy] = useState(null); // compact contact card | null
-  const [jbStatus, setJbStatus] = useState("idle"); // idle | loading | found | notfound | invalid
+  const [jbStatus, setJbStatus] = useState("idle"); // idle | loading | found | notfound | invalid | saved
+  // The Joined By phone exactly as loaded from the saved record. While the field
+  // still equals it, the saved link is kept as-is — the lookup only runs for a
+  // phone the user actually changed, so a flaky/failed re-lookup on edit can never
+  // wipe a relationship that is already stored.
+  const savedJbPhone = useRef(null);
+  // Both effects below run in the same commit when `record` changes; the lookup
+  // effect would otherwise see the still-blank phone and wipe the card the record
+  // effect just set. The record effect arms this so the lookup skips that one run.
+  const jbSkipOnce = useRef(false);
 
   useEffect(() => {
     if (record) {
@@ -476,9 +485,18 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
         join_date: record.join_date ? String(record.join_date).slice(0, 10) : "",
         cancelled_date: record.cancelled_date ? String(record.cancelled_date).slice(0, 10) : "",
       });
-      setJoinedBy(record.joined_by_contact || null);
-      setJbStatus(record.joined_by_contact ? "found" : "idle");
+      savedJbPhone.current = String(record.joined_by_phone || "");
+      jbSkipOnce.current = true;
+      if (record.joined_by_contact) { setJoinedBy(record.joined_by_contact); setJbStatus("found"); }
+      else if (record.joined_by_contact_id || record.joined_by_name) {
+        // Saved link whose contact no longer resolves live — show the stored
+        // snapshot rather than pretending nothing was saved.
+        setJoinedBy({ id: record.joined_by_contact_id, person_name: record.joined_by_name, phone_number: record.joined_by_phone, _snapshot: true });
+        setJbStatus("saved");
+      } else { setJoinedBy(null); setJbStatus("idle"); }
     } else {
+      savedJbPhone.current = null;
+      jbSkipOnce.current = true;
       setF(BLANK);
       setJoinedBy(null);
       setJbStatus("idle");
@@ -492,6 +510,9 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
   // shows its live details, a miss shows "Contact Not Found" and clears the link —
   // a contact is never created here.
   useEffect(() => {
+    if (jbSkipOnce.current) { jbSkipOnce.current = false; return; } // record just loaded (see above)
+    // Unchanged from the saved record → keep the saved link; nothing to look up.
+    if (savedJbPhone.current !== null && String(f.joined_by_phone || "") === savedJbPhone.current) return;
     const raw = String(f.joined_by_phone || "").replace(/\D/g, "");
     if (!raw) { setJbStatus("idle"); setJoinedBy(null); set("joined_by_contact_id", ""); return; }
     if (raw.length < 10) { setJbStatus("invalid"); setJoinedBy(null); set("joined_by_contact_id", ""); return; }
@@ -729,6 +750,15 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
 // "Joined By" lookup result — the linked existing Contact's live details, or a
 // clear status message. Never a create prompt: a miss just says "Contact Not Found".
 function JoinedByPreview({ status, contact }) {
+  if (contact && contact._snapshot) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm">
+        <div className="font-semibold text-gray-900">{contact.person_name || "—"}</div>
+        <div className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1"><Phone size={11} /> {contact.phone_number || "—"}</div>
+        <p className="text-[11px] text-amber-700 mt-1">Saved Joined By (contact #{contact.id || "?"}). The linked contact could not be loaded live — it may have been deleted. Enter a different number to change it.</p>
+      </div>
+    );
+  }
   if (contact) {
     return (
       <div className="rounded-xl border border-green-200 bg-green-50/60 p-3">

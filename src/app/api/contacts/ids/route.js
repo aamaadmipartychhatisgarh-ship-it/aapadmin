@@ -6,7 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 
 // GET /api/contacts/ids?<same filters as GET /api/contacts> — every matching
@@ -47,6 +47,7 @@ export async function GET(req) {
     const statusCond = statusWhere(status);
     if (statusCond) where += ` AND ${statusCond}`;
     if (wrong !== "1") where += await notWrongNumberClause("c");
+    where += await notPendingClause("c"); // never select a not-yet-approved caller submission
     if (wrong !== "1") where += await notNotInterestedClause("c");
     if (wrong !== "1") where += await repeatOffExclusion("c");
     const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });

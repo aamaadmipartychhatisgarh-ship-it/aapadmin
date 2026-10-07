@@ -36,7 +36,7 @@ export async function GET() {
 
 export async function POST(req) {
   try {
-    const { session, error } = await requireRegistrationAccess();
+    const { session, error } = await requireRegistrationAccess({ manageOnly: true });
     if (error) return error;
     const d = await req.json().catch(() => null);
     if (!d || typeof d !== "object") return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });

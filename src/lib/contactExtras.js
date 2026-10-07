@@ -115,10 +115,23 @@ export async function ensureContactApprovalColumns() {
       catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
       _approvalCol = true;
     }
-    const hasCreatedBy = (await query("SHOW COLUMNS FROM contacts LIKE 'created_by_user_id'")).length > 0;
-    if (!hasCreatedBy) {
-      try { await query("ALTER TABLE contacts ADD COLUMN created_by_user_id INT NULL"); }
-      catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
+    // created_by_user_id = the caller who submitted it (preserved for life, incl.
+    // after approval). reviewed_by_user_id / reviewed_at / rejection_reason = the
+    // Supervisor decision, so a Rejected submission is a real, reviewable state.
+    for (const [name, ddl] of [
+      ["created_by_user_id", "INT NULL"],
+      ["reviewed_by_user_id", "INT NULL"],
+      ["reviewed_at", "TIMESTAMP NULL"],
+      ["rejection_reason", "VARCHAR(300) NULL"],
+    ]) {
+      const has = (await query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts' AND COLUMN_NAME = ?`,
+        [name]
+      ).catch(() => [])).length > 0;
+      if (!has) {
+        try { await query(`ALTER TABLE contacts ADD COLUMN ${name} ${ddl}`); }
+        catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
+      }
     }
     return true;
   } catch (e) {
@@ -146,7 +159,7 @@ export async function notPendingClause(alias = "c") {
 let _notInterestedReady = false; // only ever cached as true (a failure retries)
 const _niColsSql = `SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'
-          AND COLUMN_NAME IN ('is_not_interested','not_interested_reason','not_interested_at','not_interested_restored_at')`;
+          AND COLUMN_NAME IN ('is_not_interested','not_interested_reason','not_interested_at','not_interested_restored_at','not_interested_restored_call_id')`;
 export async function ensureNotInterestedColumns() {
   if (_notInterestedReady) return true;
   try {
@@ -168,6 +181,10 @@ export async function ensureNotInterestedColumns() {
     // reason (switched-off>5 / rude) — it only re-appears if a NEW qualifying call
     // arrives after this time.
     await add("not_interested_restored_at", "TIMESTAMP NULL");
+    // Call-id WATERMARK of that restore (highest calls.id at the time). The list's
+    // "a NEW qualifying call arrived after the restore" test uses `calls.id > this`
+    // — monotonic and clock-independent, unlike comparing called_at with NOW().
+    await add("not_interested_restored_call_id", "INT NULL");
     try { await query("CREATE INDEX idx_contacts_not_interested ON contacts (is_not_interested)"); } catch { /* index already exists */ }
     have = new Set((await query(_niColsSql)).map((r) => r.c));
     const ok = have.has("is_not_interested");
@@ -207,4 +224,94 @@ export async function isContactNotInterested(contactId) {
     const [row] = await query("SELECT is_not_interested FROM contacts WHERE id = ?", [contactId]);
     return !!(row && Number(row.is_not_interested) === 1);
   } catch { return false; }
+}
+
+// SQL guard (for a query that joins the per-contact call aggregate as `agg` with
+// MAX(cx.id) AS last_call_id and MAX(cx.called_at) AS last_call_date): keeps a contact
+// that was explicitly RESTORED from Not-Interested OUT of the list until a NEW call
+// arrives after the restore. The watermark decides; the timestamp is only used for
+// rows restored before the watermark column existed.
+export function notInterestedRestoredGuard(alias = "c", agg = "agg") {
+  return ` AND ((${alias}.not_interested_restored_at IS NULL AND ${alias}.not_interested_restored_call_id IS NULL)
+            OR (CASE WHEN ${alias}.not_interested_restored_call_id IS NOT NULL
+                     THEN ${agg}.last_call_id > ${alias}.not_interested_restored_call_id
+                     ELSE ${agg}.last_call_date > ${alias}.not_interested_restored_at END))`;
+}
+
+// Explicit restore from Not Interested — a true MOVE of the same contact row. Clears
+// the persistent flag, stamps the restore watermark + timestamp (so the derived
+// reasons — switched-off>5 / rude — stop matching until a NEW call), reopens the
+// record and drops any caller lock. Idempotent: a contact that is neither flagged
+// nor restorable-by-derivation (already restored, no newer call) is left untouched
+// and reported as moved:false, so a repeated click never pushes the watermark past
+// a legitimately newer call.
+export async function restoreNotInterested(contactId) {
+  if (!(await ensureNotInterestedColumns())) return { moved: false, available: false };
+  const res = await query(
+    `UPDATE contacts c
+        SET c.is_not_interested = 0, c.not_interested_reason = NULL, c.not_interested_at = NULL,
+            c.not_interested_restored_at = NOW(),
+            c.not_interested_restored_call_id = (SELECT COALESCE(MAX(x.id), 0) FROM calls x),
+            c.is_completed = 0, c.locked_by_user_id = NULL, c.locked_at = NULL
+      WHERE c.id = ?
+        AND (COALESCE(c.is_not_interested, 0) = 1
+             OR (c.not_interested_restored_at IS NULL AND c.not_interested_restored_call_id IS NULL)
+             OR EXISTS (SELECT 1 FROM calls cy WHERE cy.contact_id = c.id
+                          AND (CASE WHEN c.not_interested_restored_call_id IS NOT NULL
+                                    THEN cy.id > c.not_interested_restored_call_id
+                                    ELSE cy.called_at > c.not_interested_restored_at END)))`,
+    [contactId]
+  );
+  return { moved: (res?.affectedRows || 0) > 0, available: true };
+}
+
+// A REJECTED caller submission keeps its row (status, submitter, reviewer and reason
+// are preserved for review) but it is not a live contact, so its mobile number is
+// free to be registered again. The create paths call this: a match is REVIVED in
+// place (same id, fresh data) instead of inserting a second row for that number —
+// which the unique phone index would refuse anyway.
+export async function findRejectedContactByPhone(phone) {
+  if (!(await hasApprovalStatusColumn())) return null;
+  const trimmed = String(phone ?? "").trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/\D/g, "").slice(-10);
+  const rows = await query(
+    `SELECT id FROM contacts
+      WHERE approval_status = 'rejected'
+        AND (phone_number = ? OR RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) = ?)
+      LIMIT 1`,
+    [trimmed, digits || trimmed]
+  );
+  return rows[0]?.id ?? null;
+}
+
+// Worker Status — the Active / Very Active / Average / Not Active rating a CALLER
+// gives the WORKER (contact) they are calling. Stored ON THE CONTACT ROW
+// (contacts.active_status, one value per worker — an UPDATE, never a new row, so
+// several callers rating the same worker can never create duplicates), with who
+// set it and when. Distinct from users.active_status, which is a caller's own
+// self-reported working status. Canonical values: see lib/activeStatus.js.
+let _contactActiveReady = false; // cached only as true
+export async function ensureContactActiveStatusColumns() {
+  if (_contactActiveReady) return true;
+  try {
+    for (const [name, ddl] of [
+      ["active_status", "VARCHAR(20) NULL"],
+      ["active_status_updated_by", "INT NULL"],
+      ["active_status_updated_at", "TIMESTAMP NULL"],
+    ]) {
+      const has = (await query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts' AND COLUMN_NAME = ?`,
+        [name]
+      ).catch(() => [])).length > 0;
+      if (!has) {
+        try { await query(`ALTER TABLE contacts ADD COLUMN ${name} ${ddl}`); }
+        catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
+      }
+    }
+    _contactActiveReady = true;
+  } catch (e) {
+    console.error("[contact-active-status] ensure:", e?.message || e);
+  }
+  return _contactActiveReady;
 }

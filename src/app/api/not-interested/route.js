@@ -5,7 +5,7 @@ import { isAdmin, isSupervisorRole, isCaller, scopeFilterSync, normalizeRole, RO
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { supervisorScopeFilter } from "@/lib/supervisorScope";
-import { ensureNotInterestedColumns } from "@/lib/contactExtras";
+import { ensureNotInterestedColumns, notInterestedRestoredGuard } from "@/lib/contactExtras";
 
 // GET /api/not-interested — contacts that match ANY "Not Interested" rule:
 //   1. Switched Off more than 5 times          (feature-detected columns)
@@ -100,7 +100,9 @@ export async function GET(req) {
     // when it still matches a purely-derived reason (switched-off>5 / rude) — until a
     // NEW qualifying call arrives after the restore. This makes Restore a real move
     // out of the source for every reason, not only the flag-based ones.
-    if (cols.has("not_interested_restored_at")) {
+    if (niReady && cols.has("not_interested_restored_call_id")) {
+      where += notInterestedRestoredGuard("c", "agg");
+    } else if (cols.has("not_interested_restored_at")) {
       where += " AND (c.not_interested_restored_at IS NULL OR agg.last_call_date > c.not_interested_restored_at)";
     }
 
@@ -111,6 +113,7 @@ export async function GET(req) {
         SELECT cx.contact_id,
                COUNT(*) AS total_calls,
                MAX(cx.called_at) AS last_call_date,
+               MAX(cx.id) AS last_call_id,
                MAX(cx.sentiment = 'negative') AS has_negative,
                MAX(cx.sentiment = 'opponent') AS has_opponent,
                MAX(cx.sentiment = 'not_supporter') AS has_not_supporter,
@@ -186,6 +189,7 @@ export async function GET(req) {
            SELECT cx.contact_id,
                   COUNT(*) AS total_calls,
                   MAX(cx.called_at) AS last_call_date,
+               MAX(cx.id) AS last_call_id,
                   MAX(cx.sentiment = 'negative') AS has_negative,
                   MAX(cx.sentiment = 'opponent') AS has_opponent,
                   MAX(cx.sentiment = 'not_supporter') AS has_not_supporter,

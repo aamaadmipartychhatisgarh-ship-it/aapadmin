@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 import { ensureDesignationLevelColumn, isValidDesignationLevel, designationLevelLabel } from "@/lib/designationLevels";
 import { ensureWingSchema } from "@/lib/wingDesignations";
 import { logMasterDataChange } from "@/lib/audit";
@@ -65,7 +65,7 @@ export async function GET(req) {
       ? await query(
           `SELECT d.id, d.name, d.level, ${wingColD}, ${sortColD}, ${rankColD}, COUNT(c.id) AS contact_count
              FROM designations d
-             LEFT JOIN contacts c ON c.designation_id = d.id${await notWrongNumberClause("c")}
+             LEFT JOIN contacts c ON c.designation_id = d.id${await notWrongNumberClause("c")}${await notPendingClause("c")}
             GROUP BY d.id, d.name, d.level, ${hasWing ? "d.wing" : "d.id"}${hasSortOrder ? ", d.sort_order" : ""}${hasRank ? ", d.`rank`" : ""}
             ORDER BY ${orderBy}`
         )

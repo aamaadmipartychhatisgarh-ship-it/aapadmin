@@ -6,7 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause, findRejectedContactByPhone, hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
@@ -233,6 +233,10 @@ export async function GET(req) {
     const countRows = await query(`SELECT COUNT(*) AS total FROM contacts c ${workerJoin} ${where}`, params);
     const total = Number(countRows[0]?.total || 0);
 
+    // Caller-submitted contacts stay identifiable after approval: who submitted them.
+    const submittedBySql = (await hasApprovalStatusColumn())
+      ? "(SELECT u2.username FROM users u2 WHERE u2.id = c.created_by_user_id) AS submitted_by_name,"
+      : "NULL AS submitted_by_name,";
     const contacts = await query(
       `SELECT c.*,
               u.username AS assigned_to_username,
@@ -250,6 +254,7 @@ export async function GET(req) {
               -- legacy designation. designation_ids (CSV) preloads the edit form.
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
+              ${submittedBySql}
               -- Resolve the photo EXACTLY like the has_photo count condition:
               -- NULLIF(TRIM(...)) so an empty-string c.photo_url falls back to the
               -- linked worker photo. A plain COALESCE returned '' for such rows, so
@@ -336,13 +341,28 @@ export async function POST(req) {
       if (existing.has("assigned_at")) { cols.push("assigned_at"); vals.push(new Date()); }
       if (existing.has("assigned_by_user_id")) { cols.push("assigned_by_user_id"); vals.push(session.user.id); }
     }
-    const res = await query(
-      `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
-      vals
-    );
+    // A REJECTED caller submission for this number is not live, so an admin may add
+    // the contact: the rejected row is revived in place as a live contact (same id —
+    // never two rows for one number). Otherwise insert as before.
+    const rejectedId = await findRejectedContactByPhone(desired.phone_number);
+    let newId;
+    if (rejectedId) {
+      const live = ["approval_status", "created_by_user_id", "reviewed_by_user_id", "reviewed_at", "rejection_reason", "locked_by_user_id", "locked_at"].filter((c) => existing.has(c));
+      await query(
+        `UPDATE contacts SET ${[...cols.map((c) => `${c} = ?`), ...live.map((c) => `${c} = NULL`), ...(existing.has("is_completed") ? ["is_completed = 0"] : [])].join(", ")} WHERE id = ?`,
+        [...vals, rejectedId]
+      );
+      newId = rejectedId;
+    } else {
+      const res = await query(
+        `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
+        vals
+      );
+      newId = res.insertId;
+    }
     // Save the full designation set against the new contact.
-    await syncContactDesignations(res.insertId, designationIds);
-    return NextResponse.json({ id: res.insertId }, { status: 201 });
+    await syncContactDesignations(newId, designationIds);
+    return NextResponse.json({ id: newId }, { status: 201 });
   } catch (err) {
     return contactWriteError(err, "contacts POST");
   }

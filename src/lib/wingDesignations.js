@@ -225,7 +225,13 @@ async function backfillBlockLevel() {
 
 async function ensureDesignationColumn(column, def) {
   try {
-    const rows = await query("SHOW COLUMNS FROM designations LIKE ?", [column]);
+    // information_schema with a bound parameter: `SHOW COLUMNS … LIKE ?` is rejected
+    // by MySQL 8 as a prepared statement, which silently prevented these columns
+    // from ever being added.
+    const rows = await query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'designations' AND COLUMN_NAME = ?`,
+      [column]
+    );
     if (!rows.length) await query(`ALTER TABLE designations ADD COLUMN \`${column}\` ${def}`);
   } catch (e) {
     console.error(`[wing] ensureDesignationColumn ${column}:`, e?.message || e);

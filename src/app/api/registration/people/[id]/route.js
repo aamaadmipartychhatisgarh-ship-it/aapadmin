@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
 import { normalizeMobile, PERSON_TYPES, PERSON_STATUSES } from "@/lib/registrationSchema";
+import { isAssembly, blockBelongsToAssembly } from "@/lib/politicalLocation";
 
 // Correct or triage one registration. Marking a row 'duplicate' / 'rejected'
 // removes it from every count and ranking without erasing the record — the
@@ -46,6 +47,40 @@ export async function PATCH(req, { params }) {
     if (d.ward_number !== undefined) { sets.push("ward_number = ?"); vals.push(clip(d.ward_number, 60)); }
     if (d.area_booth !== undefined) { sets.push("area_booth = ?"); vals.push(clip(d.area_booth, 160)); }
     if (d.status !== undefined && PERSON_STATUSES.includes(d.status)) { sets.push("status = ?"); vals.push(d.status); }
+
+    // Assembly → Block (Ward Name): the same validation the registration form's
+    // submit applies. The assembly must be a real assembly and the block must
+    // belong to it; the readable names are resolved server-side from master data,
+    // never trusted from the client. An empty block clears block_id + ward_name.
+    const [current] = await query("SELECT assembly_id, block_id FROM reg_people WHERE id = ?", [id]);
+    if (!current) return NextResponse.json({ message: "Not found." }, { status: 404, headers: NO_STORE });
+    let assemblyId = current.assembly_id;
+    if (d.assembly_id !== undefined) {
+      const a = String(d.assembly_id ?? "").trim();
+      if (!a) {
+        sets.push("assembly_id = ?, assembly_name = ?"); vals.push(null, null);
+        assemblyId = null;
+      } else {
+        if (!(await isAssembly(a))) return NextResponse.json({ message: "Select a valid assembly." }, { status: 400, headers: NO_STORE });
+        const [row] = await query("SELECT name FROM locations WHERE id = ? LIMIT 1", [a]);
+        sets.push("assembly_id = ?, assembly_name = ?"); vals.push(Number(a), row?.name || null);
+        assemblyId = Number(a);
+      }
+    }
+    if (d.block_id !== undefined) {
+      const b = String(d.block_id ?? "").trim();
+      if (!b) { sets.push("block_id = ?, ward_name = ?"); vals.push(null, null); }
+      else {
+        if (!assemblyId || !(await blockBelongsToAssembly(b, assemblyId))) {
+          return NextResponse.json({ message: "Select a Block that belongs to the chosen assembly." }, { status: 400, headers: NO_STORE });
+        }
+        const [row] = await query("SELECT name FROM locations WHERE id = ? AND type = 'ward' LIMIT 1", [b]);
+        sets.push("block_id = ?, ward_name = ?"); vals.push(Number(b), row?.name || null);
+      }
+    } else if (d.assembly_id !== undefined && Number(assemblyId || 0) !== Number(current.assembly_id || 0) && current.block_id) {
+      // Assembly changed without a new block: the old block no longer applies.
+      sets.push("block_id = ?, ward_name = ?"); vals.push(null, null);
+    }
     if (d.photo_url !== undefined) {
       // Only an app-relative /uploads/<file> reference is accepted; omitting the
       // field entirely (the usual edit) leaves the existing photo untouched.
@@ -56,6 +91,14 @@ export async function PATCH(req, { params }) {
       sets.push("photo_url = ?"); vals.push(p || null);
     }
     if (!sets.length) return NextResponse.json({ message: "Nothing to update." }, { status: 400, headers: NO_STORE });
+
+    // Same rule as the registration form's submit: a worker must have a Block.
+    const [cur2] = await query("SELECT person_type, block_id FROM reg_people WHERE id = ?", [id]);
+    const effType = d.person_type !== undefined && PERSON_TYPES.includes(d.person_type) ? d.person_type : cur2?.person_type;
+    const effBlock = d.block_id !== undefined ? (String(d.block_id ?? "").trim() || null) : cur2?.block_id;
+    if (effType === "worker" && !effBlock) {
+      return NextResponse.json({ message: "A worker registration needs a Block (ward name)." }, { status: 400, headers: NO_STORE });
+    }
 
     await query(`UPDATE reg_people SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);
     const [person] = await query(`SELECT * FROM reg_people WHERE id = ?`, [id]);

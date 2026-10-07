@@ -7,7 +7,7 @@ import { pendingContactScope } from "@/lib/pendingContactScope";
 import { query } from "@/lib/db";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds } from "@/lib/contactDesignations";
-import { ensureContactApprovalColumns } from "@/lib/contactExtras";
+import { ensureContactApprovalColumns, findRejectedContactByPhone } from "@/lib/contactExtras";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { logAudit } from "@/lib/audit";
 
@@ -65,52 +65,85 @@ export async function POST(req) {
     const cols = [];
     const vals = [];
     for (const [k, v] of Object.entries(desired)) if (existing.has(k)) { cols.push(k); vals.push(v); }
-    const res = await query(
-      `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
-      vals
-    );
-    await syncContactDesignations(res.insertId, designationIds);
-    logAudit(session, { action: "contact.pending.create", entityType: "contact", entityId: res.insertId, details: { person_name: desired.person_name, phone_number: desired.phone_number } });
-    return NextResponse.json({ id: res.insertId, status: "pending" }, { status: 201, headers: NO_STORE });
+    // A previously REJECTED submission for this number is revived in place (same
+    // row, fresh data, back to pending) — never a second row for one number.
+    const rejectedId = await findRejectedContactByPhone(desired.phone_number);
+    let id;
+    if (rejectedId) {
+      const resetCols = ["reviewed_by_user_id", "reviewed_at", "rejection_reason", "assigned_to_user_id", "locked_by_user_id", "locked_at"].filter((c) => existing.has(c));
+      await query(
+        `UPDATE contacts SET ${[...cols.map((c) => `${c} = ?`), ...resetCols.map((c) => `${c} = NULL`)].join(", ")} WHERE id = ?`,
+        [...vals, rejectedId]
+      );
+      id = rejectedId;
+    } else {
+      const res = await query(
+        `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
+        vals
+      );
+      id = res.insertId;
+    }
+    await syncContactDesignations(id, designationIds);
+    logAudit(session, { action: "contact.pending.create", entityType: "contact", entityId: id, details: { person_name: desired.person_name, phone_number: desired.phone_number, revived_rejected: !!rejectedId } });
+    return NextResponse.json({ id, status: "pending", revived: !!rejectedId }, { status: 201, headers: NO_STORE });
   } catch (err) {
     return contactWriteError(err, "contacts pending POST");
   }
 }
 
-// GET /api/contacts/pending — the Supervisor/oversight review queue: contacts a
-// caller submitted that are awaiting approval, scoped to the viewer's territory.
+// GET /api/contacts/pending — two uses:
+//   • ?mine=1 — the signed-in user's OWN submissions (any status: pending /
+//     approved / rejected, with the reviewer's decision), so a caller can follow
+//     what happened to what they added. Any signed-in user, own rows only.
+//   • otherwise — the Supervisor/oversight review queue (?status=pending|rejected),
+//     scoped to the viewer's territory.
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    // Oversight / Supervisor by role, OR a Member-Portal account granted the Worker
-    // Approval (pending_contacts) page.
-    if (!session || !(await pageAllowed(session, "pending_contacts", isOversight(session) || isSupervisorRole(session)))) {
+    if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
+    const url = new URL(req.url);
+    const mine = url.searchParams.get("mine") === "1";
+    if (!mine && !(await pageAllowed(session, "pending_contacts", isOversight(session) || isSupervisorRole(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     }
     if (!(await ensureContactApprovalColumns())) {
       return NextResponse.json({ contacts: [] }, { headers: NO_STORE });
     }
-    const url = new URL(req.url);
-    const statusF = ["pending", "rejected"].includes(url.searchParams.get("status")) ? url.searchParams.get("status") : "pending";
 
-    let where = " WHERE c.approval_status = ?";
-    const params = [statusF];
-    // Territory scope — a Supervisor/sub-admin/portal member sees only pending
-    // contacts in their own area; super/state admins see all (shared helper, so the
-    // list and the approve/reject mutation enforce exactly the same boundary).
-    const scope = pendingContactScope(session, "c");
-    if (scope.where) { where += " " + scope.where; params.push(...scope.params); }
+    let where;
+    const params = [];
+    if (mine) {
+      where = " WHERE c.created_by_user_id = ? AND c.approval_status IN ('pending','approved','rejected')";
+      params.push(session.user.id);
+    } else {
+      const statusF = ["pending", "rejected"].includes(url.searchParams.get("status")) ? url.searchParams.get("status") : "pending";
+      where = " WHERE c.approval_status = ?";
+      params.push(statusF);
+      // Territory scope — a Supervisor/sub-admin/portal member sees only pending
+      // contacts in their own area; super/state admins see all (shared helper, so the
+      // list and the approve/reject mutation enforce exactly the same boundary).
+      const scope = pendingContactScope(session, "c");
+      if (scope.where) { where += " " + scope.where; params.push(...scope.params); }
+    }
 
     const rows = await query(
       `SELECT c.id, c.person_name, c.phone_number, c.address, c.photo_url, c.approval_status,
-              c.created_by_user_id,
+              c.created_by_user_id, c.reviewed_by_user_id, c.reviewed_at, c.rejection_reason, c.created_at,
               (SELECT username FROM users u WHERE u.id = c.created_by_user_id) AS created_by_name,
+              (SELECT username FROM users u WHERE u.id = c.reviewed_by_user_id) AS reviewed_by_name,
               dsg.name AS designation_name,
-              ld.name AS district_name, la.name AS assembly_name
+              (SELECT GROUP_CONCAT(dd.name ORDER BY dd.name SEPARATOR ', ')
+                 FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
+                WHERE cd.contact_id = c.id) AS designation_names,
+              lz.name AS zone_name, lls.name AS lok_sabha_name,
+              ld.name AS district_name, la.name AS assembly_name, lw.name AS block_name
          FROM contacts c
          LEFT JOIN designations dsg ON dsg.id = c.designation_id
+         LEFT JOIN locations lz ON lz.id = c.zone_id
+         LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations la ON la.id = c.assembly_id
+         LEFT JOIN locations lw ON lw.id = c.ward_id
         ${where}
         ORDER BY c.id DESC
         LIMIT 500`,

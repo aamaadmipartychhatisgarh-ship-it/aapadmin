@@ -2,11 +2,10 @@
 
 import { useState } from "react";
 import SupervisorGuard from "@/components/SupervisorGuard";
-import { BarChart3, Activity, Trophy, Gauge } from "lucide-react";
+import { BarChart3, Activity, Gauge } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
 import LiveStatusView from "@/components/LiveStatusView";
-import RankingsView from "@/components/RankingsView";
 import StrengthView from "@/components/StrengthView";
 
 export default function Page() {
@@ -16,7 +15,6 @@ export default function Page() {
 const TABS = [
   { key: "analytics", label: "Analytics", icon: BarChart3 },
   { key: "live", label: "Live Status", icon: Activity },
-  { key: "rankings", label: "Rankings", icon: Trophy },
   { key: "strength", label: "Strength", icon: Gauge },
 ];
 
@@ -60,7 +58,6 @@ function Body() {
 
       {tab === "analytics" && <AnalyticsPanel />}
       {tab === "live" && <LiveStatusView />}
-      {tab === "rankings" && <RankingsView />}
       {tab === "strength" && <StrengthView />}
     </div>
   );

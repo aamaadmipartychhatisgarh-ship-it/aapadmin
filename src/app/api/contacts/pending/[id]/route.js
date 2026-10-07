@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight, isSupervisorRole } from "@/lib/permissions";
+import { isOversight, isSupervisorRole, isCaller, isTopAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { pendingContactScope } from "@/lib/pendingContactScope";
 import { query } from "@/lib/db";
@@ -13,26 +13,39 @@ export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
 
 // PUT /api/contacts/pending/[id]  { action: "approve" | "reject", reason? }
-// A Supervisor (or oversight) approves or rejects a caller-submitted contact.
-//  - approve → approval_status = 'approved' → the SAME contact row goes live.
-//  - reject  → approval_status = 'rejected' → stays out of every live list.
-// The record id, name, phone, photo, designation, location and audit trail are all
-// preserved; no duplicate contact is ever created.
+// A Supervisor (or oversight) reviews a caller-submitted contact. States:
+//   pending  → awaiting review (not live anywhere)
+//   approved → the SAME contact row goes live (Contact List + every contact feature)
+//   rejected → kept as a reviewable record (submitter, reviewer, reason) but never
+//              live; its mobile number is free to be registered again, and a later
+//              submission for that number revives this row instead of duplicating it.
+// Guards (server-side, never only the UI): the reviewer must hold the Worker
+// Approval page; callers can never review; nobody but a top admin may approve or
+// reject their OWN submission; the id must be inside the reviewer's territory.
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !(await pageAllowed(session, "pending_contacts", isOversight(session) || isSupervisorRole(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     }
+    if (isCaller(session)) {
+      return NextResponse.json({ message: "Callers cannot approve or reject contact submissions." }, { status: 403, headers: NO_STORE });
+    }
     await ensureContactApprovalColumns();
     const { id } = await params;
     const d = await req.json().catch(() => ({}));
     const action = d?.action;
 
-    const [row] = await query("SELECT id, person_name, phone_number, approval_status FROM contacts WHERE id = ?", [id]);
+    const [row] = await query(
+      "SELECT id, person_name, phone_number, approval_status, created_by_user_id FROM contacts WHERE id = ?",
+      [id]
+    );
     if (!row) return NextResponse.json({ message: "Contact not found." }, { status: 404, headers: NO_STORE });
     if (row.approval_status !== "pending" && row.approval_status !== "rejected") {
       return NextResponse.json({ message: "This contact is not awaiting approval." }, { status: 409, headers: NO_STORE });
+    }
+    if (row.created_by_user_id && Number(row.created_by_user_id) === Number(session.user.id) && !isTopAdmin(session)) {
+      return NextResponse.json({ message: "You cannot approve or reject a contact you submitted yourself." }, { status: 403, headers: NO_STORE });
     }
 
     // Territory check (no IDOR): the same scope the queue list uses must also hold
@@ -50,17 +63,22 @@ export async function PUT(req, { params }) {
       if (await phoneAlreadyRegistered(row.phone_number, id)) {
         return NextResponse.json({ message: "Another live contact already uses this mobile number." }, { status: 409, headers: NO_STORE });
       }
-      await query("UPDATE contacts SET approval_status = 'approved' WHERE id = ?", [id]);
-      logAudit(session, { action: "contact.pending.approve", entityType: "contact", entityId: Number(id), details: { person_name: row.person_name } });
+      await query(
+        `UPDATE contacts SET approval_status = 'approved', reviewed_by_user_id = ?, reviewed_at = NOW(), rejection_reason = NULL WHERE id = ?`,
+        [session.user.id, id]
+      );
+      logAudit(session, { action: "contact.pending.approve", entityType: "contact", entityId: Number(id), details: { person_name: row.person_name, submitted_by_user_id: row.created_by_user_id || null, was: row.approval_status } });
       return NextResponse.json({ ok: true, status: "approved" }, { headers: NO_STORE });
     }
     if (action === "reject") {
-      // A rejected submission is discarded (it was never a live contact), which also
-      // FREES its phone number — keeping a 'rejected' row would reserve the number
-      // forever via the unique phone index. The rejection is kept in the audit log.
-      await query("DELETE FROM contact_designations WHERE contact_id = ?", [id]).catch(() => {});
-      await query("DELETE FROM contacts WHERE id = ?", [id]);
-      logAudit(session, { action: "contact.pending.reject", entityType: "contact", entityId: Number(id), details: { person_name: row.person_name, phone_number: row.phone_number, reason: String(d?.reason || "").slice(0, 300) || null } });
+      const reason = String(d?.reason || "").trim().slice(0, 300) || null;
+      await query(
+        `UPDATE contacts SET approval_status = 'rejected', reviewed_by_user_id = ?, reviewed_at = NOW(), rejection_reason = ?,
+                             assigned_to_user_id = NULL, locked_by_user_id = NULL, locked_at = NULL
+          WHERE id = ?`,
+        [session.user.id, reason, id]
+      );
+      logAudit(session, { action: "contact.pending.reject", entityType: "contact", entityId: Number(id), details: { person_name: row.person_name, phone_number: row.phone_number, submitted_by_user_id: row.created_by_user_id || null, reason } });
       return NextResponse.json({ ok: true, status: "rejected" }, { headers: NO_STORE });
     }
     return NextResponse.json({ message: "Invalid action." }, { status: 400, headers: NO_STORE });

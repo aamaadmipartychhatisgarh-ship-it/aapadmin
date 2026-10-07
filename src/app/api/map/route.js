@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
-import { notWrongNumberClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 import { districtWorkerStats } from "@/lib/districtStats";
 
 // District-level map data: strength score + drill-down details per district,
@@ -32,7 +32,7 @@ export async function GET() {
     // keyed by district_id — the legacy `workers` table (Worker Management was
     // removed) is intentionally NOT used here, so the Map, the Workers-by-
     // District treemap, Strength and Area Ranking all agree.
-    const notWrong = await notWrongNumberClause("ct");
+    const notWrong = (await notWrongNumberClause("ct")) + (await notPendingClause("ct"));
     const [rows, stats] = await Promise.all([
       query(
       `SELECT ld.id, ld.name,

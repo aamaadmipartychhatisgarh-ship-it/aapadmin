@@ -6,8 +6,9 @@ import Avatar from "@/components/Avatar";
 
 // Assembly-wise "Area Ranking": ALL assemblies (from the locations master) ranked by
 // their live worker/contact count, from /api/rankings/assemblies. Assemblies with
-// zero workers still appear. Each row also shows the assembly's CURRENT MEMBER (MLA)
-// — name + existing photo — resolved server-side from the Leader Assessment
+// zero workers still appear. Each row also shows the assembly's CURRENT MEMBER (the
+// Vidhansabha Prabhari) — name + their own profile photo — resolved server-side from
+// the designation relationships
 // relationship by id; assemblies without one show "Not Assigned" and stay visible.
 // Responsive — the table scrolls horizontally on small screens so nothing is cut off.
 export default function AssemblyRankingView() {
@@ -70,7 +71,10 @@ export default function AssemblyRankingView() {
                     {a.current_member_name ? (
                       <span className="flex items-center gap-2 min-w-0">
                         <Avatar name={a.current_member_name} src={a.current_member_photo} size={28} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
-                        <span className="font-medium text-gray-800 truncate">{a.current_member_name}</span>
+                        <span className="min-w-0">
+                          <span className="block font-medium text-gray-800 truncate">{a.current_member_name}</span>
+                          <span className="block text-[11px] text-gray-400 truncate">{a.current_member_role || "Vidhansabha Prabhari"}</span>
+                        </span>
                       </span>
                     ) : (
                       <span className="text-gray-400 italic">Not Assigned</span>
