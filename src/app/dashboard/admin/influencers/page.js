@@ -383,11 +383,16 @@ export default function InfluencersPage() {
                       <div className="flex items-center gap-2.5 min-w-[180px]">
                         <Thumb src={r.joined_by_photo} name={r.joined_by_name || "?"} size={38} />
                         <div className="min-w-0">
-                          <div className="font-medium text-gray-900 text-sm truncate">{r.joined_by_name || "—"}</div>
-                          <div className="text-xs text-gray-500 truncate">{r.joined_by_designation || "—"}</div>
-                          <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">
-                            {r.joined_by_mobile ? <><Phone size={10} /> {r.joined_by_mobile}</> : "—"}
+                          {/* Required format: "Name – Designation" (designation is the
+                              contact's CURRENT saved designation, resolved live). */}
+                          <div className="font-medium text-gray-900 text-sm">
+                            {r.joined_by_name || "—"}{r.joined_by_designation ? ` – ${r.joined_by_designation}` : ""}
                           </div>
+                          {r.joined_by_mobile && (
+                            <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">
+                              <Phone size={10} /> {r.joined_by_mobile}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : r.created_by_name ? (
@@ -827,7 +832,7 @@ function ViewModal({ row, meta, onClose, onEdit }) {
               <ViewInline label="Added By" value={row.created_by_name} />
               <ViewInline label="Age" value={row.age != null ? String(row.age) : ""} />
               <ViewInline label="Caste" value={row.caste} />
-              <ViewInline label="Joined By" value={row.joined_by_name || row.joined_by_phone} />
+              <ViewInline label="Joined By" value={[row.joined_by_name, row.joined_by_designation].filter(Boolean).join(" – ") || row.joined_by_phone} />
             </div>
             {row.current_party && (
               <div className="mt-1"><span className="text-gray-400">Current Party: </span><span className="inline-flex align-middle"><PartyLogo name={row.current_party} byName={partyByName} /></span></div>
