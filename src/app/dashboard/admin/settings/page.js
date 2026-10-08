@@ -7,29 +7,19 @@ import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable, s
 import { CSS } from "@dnd-kit/utilities";
 import { DESIGNATION_LEVELS, designationLevelLabel } from "@/lib/designationLevels";
 import { deriveDesignationBase } from "@/lib/designationName";
+import WingMultiSelect from "@/components/WingMultiSelect";
 
 // The Designation Chain levels (State → Lok Sabha → District → Assembly → Block).
 const DESIG_LEVELS = DESIGNATION_LEVELS.filter((l) => l.key !== "zone");
-// Wings — label shown to the admin, value is the stored wing name in `designations.wing`.
-const DESIG_WINGS = [
-  { label: "Main", value: "Main Organisation" },
-  { label: "SC", value: "SC Wing" },
-  { label: "ST", value: "ST Wing" },
-  { label: "Youth", value: "Youth Wing" },
-  { label: "Mahila", value: "Mahila Wing" },
-  { label: "RTI", value: "RTI Wing" },
-  { label: "Legal", value: "Legal Wing" },
-  { label: "Transport", value: "Transport Wing" },
-  { label: "RWA", value: "RWA Wing" },
-  { label: "OBC", value: "OBC Wing" },
-  { label: "Social Media", value: "Social Media Wing" },
-  { label: "Ex-Employee", value: "Ex-Employee Wing" },
-  { label: "ASAP", value: "ASAP Wing" },
-  { label: "Minority", value: "Minority Wing" },
-  { label: "Labour", value: "Labour Wing" },
-  { label: "Trade", value: "Trade Wing" },
-];
-const DESIG_WING_LABEL = (v) => DESIG_WINGS.find((w) => w.value === v)?.label || v;
+// Short display label for a stored wing name — a PURE transform, never a hardcoded
+// wing list ("SC Wing" -> "SC", "Main Organisation" -> "Main"). The wings
+// themselves always come from Master Data (/api/wings), the single source of truth.
+function wingShortLabel(name) {
+  const s = String(name || "").trim();
+  if (/^main organisation$/i.test(s)) return "Main";
+  return s.replace(/\s+wing$/i, "");
+}
+const DESIG_WING_LABEL = (v) => wingShortLabel(v);
 
 // `embedded` hides the standalone page header so this same component can render
 // as the "Master Data" tab inside Administration (native tab look) while the
@@ -451,7 +441,20 @@ function DesignationsCard({ designations, onChanged }) {
 
   const toggle = (setFn, val) => setFn((prev) => { const n = new Set(prev); if (n.has(val)) n.delete(val); else n.add(val); return n; });
 
-  const WING_VALUES = DESIG_WINGS.map((w) => w.value);
+  // Wings come from Master Data → Designation (/api/wings) — the single source of
+  // truth, so adding/editing/removing a Wing there updates this dropdown
+  // automatically. Each option's `value` is the stored wing name; `label` is its
+  // short display form.
+  const [wingOptions, setWingOptions] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/wings", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { wings: [] }))
+      .then((d) => { if (alive) setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) }))); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const WING_VALUES = wingOptions.map((w) => w.value);
 
   // Rank = the designation's GLOBAL rank, returned by the API as `rank` (the single
   // source of truth for designation order across the whole app). Rows arrive already
@@ -568,11 +571,7 @@ function DesignationsCard({ designations, onChanged }) {
           </div>
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Wing <span className="text-gray-400 normal-case font-normal">(optional — one or more)</span></label>
-            <div className="flex flex-wrap gap-1.5">
-              {DESIG_WINGS.map((w) => (
-                <button type="button" key={w.value} onClick={() => toggle(setWings, w.value)} className={pill(wings.has(w.value))}>{w.label}</button>
-              ))}
-            </div>
+            <WingMultiSelect options={wingOptions} value={wings} onChange={setWings} placeholder="Select wings…" />
           </div>
           <div className="flex gap-3">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Designation name…"
@@ -608,11 +607,7 @@ function DesignationsCard({ designations, onChanged }) {
                   </div>
                   <div>
                     <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Wings <span className="text-gray-400 normal-case font-normal">(select one or more — add/remove)</span></div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {DESIG_WINGS.map((w) => (
-                        <button type="button" key={w.value} onClick={() => toggle(setEditWings, w.value)} className={pill(editWings.has(w.value))}>{w.label}</button>
-                      ))}
-                    </div>
+                    <WingMultiSelect options={wingOptions} value={editWings} onChange={setEditWings} placeholder="Select wings…" />
                   </div>
                 </>
               ) : (
