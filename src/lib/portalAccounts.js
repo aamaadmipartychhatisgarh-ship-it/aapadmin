@@ -56,6 +56,23 @@ export function portalUserId(name, phone) {
   return letters.slice(0, 2).join("").toUpperCase() + digits.slice(-6);
 }
 
+// The Member Account DEFAULT PASSWORD (spec):
+//   LAST 2 letters of the Name (CAPITAL) + '@' + MIDDLE 4 digits of the Phone + '#'
+// Example: Neha + 9876543210 -> "HA@6543#".
+// Letters are taken Unicode-aware (so Hindi names work); the phone is normalised to
+// its 10-digit number first (country code / separators stripped) and the middle 4
+// are the four centre digits. Generated from the ACTUAL saved name + phone at
+// creation time; never stored or returned in plaintext (only its bcrypt hash is).
+export function portalDefaultPassword(name, phone) {
+  const letters = String(name || "").match(/\p{L}/gu) || [];
+  const last2 = letters.slice(-2).join("").toUpperCase();
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length >= 10) digits = digits.slice(-10); // normalise to the 10-digit number
+  const start = Math.max(0, Math.floor((digits.length - 4) / 2));
+  const mid4 = digits.slice(start, start + 4);
+  return `${last2}@${mid4}#`;
+}
+
 // Every eligible designation-holder (one row per contact), with their highest-level
 // designations and whether they already have a provisioned account.
 export async function listEligiblePeople() {
@@ -116,15 +133,20 @@ export async function provisionPortalAccounts(session) {
 
 // The single place a portal login row is written (used by BOTH the bulk
 // provisioning above and the one-person creation form below), so the username
-// collision rule, the fixed '#' password, the non-admin role, the territory scope
-// and the exact page grants can never drift apart.
+// collision rule, the default-password format (portalDefaultPassword), the
+// non-admin role, the territory scope and the exact page grants can never drift
+// apart.
 //
 // Collision-safe: BASE, BASE1, BASE2 … so two people with the same User ID never
 // overwrite each other; the final id is returned to the admin. The DB's UNIQUE
 // username index is the race-safe backstop: a lost race is retried with the next
 // suffix instead of touching the existing row.
 async function insertPortalUser(base, person, session) {
-  const hash = await bcrypt.hash("#", 10); // spec password; never returned in plaintext
+  // Default password is derived from the person's actual name + phone (spec format:
+  // last 2 name letters CAPITAL + '@' + middle 4 phone digits + '#'). Both callers
+  // pass person.person_name + person.phone_number. Only the bcrypt hash is stored;
+  // the plaintext is never logged or returned.
+  const hash = await bcrypt.hash(portalDefaultPassword(person.person_name, person.phone_number), 10);
   let n = 1;
   let username = base;
   while (true) {
@@ -183,8 +205,9 @@ export class PortalAccountError extends Error {
 //   2. reuse the person's existing contact record (matched on mobile) or create one;
 //   3. refuse if that contact already owns a login — an existing user's credentials
 //      are NEVER overwritten (admin is told the existing User ID instead);
-//   4. write the user row via insertPortalUser (auto User ID, '#' password, role
-//      'worker', territory scope, EXACTLY the three portal pages).
+//   4. write the user row via insertPortalUser (auto User ID, default password in
+//      the portalDefaultPassword format, role 'worker', territory scope, EXACTLY
+//      the three portal pages).
 // Returns { user_id, username, contact_id, reused_contact } — no password, ever.
 export async function createPortalAccount(input, session) {
   await ensurePortalSchema();
@@ -256,8 +279,9 @@ export async function createPortalAccount(input, session) {
     await syncContactDesignations(contactId, designationIds);
   }
 
-  // 4. The login row.
-  const { user_id, username } = await insertPortalUser(base, { contact_id: contactId, ...geo }, session);
+  // 4. The login row. Pass the actual name + phone so the default password is
+  // generated from them (spec format), not a fixed value.
+  const { user_id, username } = await insertPortalUser(base, { contact_id: contactId, person_name: name, phone_number: phoneRaw, ...geo }, session);
   await logAudit(session, {
     action: "user.create",
     entityType: "user",

@@ -94,7 +94,7 @@ export default function PortalAccountsPage() {
       {err && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm">{err}</div>}
       {result && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm">
-          <div className="font-semibold text-emerald-800 mb-1">Created {result.created.length} account(s). Default password is <span className="font-mono">#</span>.</div>
+          <div className="font-semibold text-emerald-800 mb-1">Created {result.created.length} account(s). Each default password = <span className="font-mono">last 2 letters of the name (CAPITAL) + @ + middle 4 phone digits + #</span> (e.g. <span className="font-mono">HA@6543#</span>).</div>
           {result.created.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">
               {result.created.map((c) => (
@@ -163,10 +163,25 @@ function previewUserId(name, phone) {
   return letters.slice(0, 2).join("").toUpperCase() + digits.slice(-6);
 }
 
+// Mirrors the server's portalDefaultPassword so the admin can see the exact
+// default password (to hand to the member) as they type. The server remains the
+// source of truth; this is a display-only convenience and the password is never
+// returned by the API. Format: last 2 name letters (CAPITAL) + @ + middle 4 phone
+// digits + # (e.g. "HA@6543#").
+function previewPassword(name, phone) {
+  const letters = String(name || "").match(/\p{L}/gu) || [];
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (letters.length < 2 || digits.length < 6) return "";
+  if (digits.length >= 10) digits = digits.slice(-10);
+  const start = Math.max(0, Math.floor((digits.length - 4) / 2));
+  return `${letters.slice(-2).join("").toUpperCase()}@${digits.slice(start, start + 4)}#`;
+}
+
 // User Creation / Access Form: creates ONE member login for a designation-holder
 // up to Vidhansabha. Designation choices come from the API (eligible levels only,
 // so Member/Block never appear); the User ID is generated, never typed; the
-// password is the fixed '#' (set server-side, never echoed back as data).
+// default password is generated server-side from the name + phone (last 2 name
+// letters CAPITAL + @ + middle 4 phone digits + #) and never returned by the API.
 function CreateMemberAccount({ onCreated }) {
   const blank = { name: "", phone: "", designation_id: "", zone_id: "", lok_sabha_id: "", district_id: "", assembly_id: "" };
   const [form, setForm] = useState(blank);
@@ -289,7 +304,7 @@ function CreateMemberAccount({ onCreated }) {
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm">
           <div><span className="text-gray-500">User ID:</span> <span className="font-mono font-semibold text-gray-900">{preview || "— (needs name + phone)"}</span></div>
-          <div><span className="text-gray-500">Password:</span> <span className="font-mono font-semibold text-gray-900">#</span></div>
+          <div><span className="text-gray-500">Password:</span> <span className="font-mono font-semibold text-gray-900">{previewPassword(form.name, form.phone) || "— (needs name + phone)"}</span></div>
           <div className="text-gray-500">Access: <span className="text-gray-700 font-medium">Dashboard · Announcements · Worker Approval</span></div>
           <div className="text-xs text-gray-400 w-full">The User ID is generated automatically (first two letters of the name + last six digits of the mobile). If it is already taken a number is appended, and existing accounts are never changed.</div>
         </div>
@@ -299,7 +314,7 @@ function CreateMemberAccount({ onCreated }) {
           <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800 flex flex-wrap items-center gap-2">
             <Check size={14} />
             <span>Account created for <strong>{done.name}</strong>{done.reused_contact ? " (linked to their existing contact record)" : ""}.</span>
-            <span>User ID <span className="font-mono font-bold">{done.username}</span>, password <span className="font-mono font-bold">#</span>.</span>
+            <span>User ID <span className="font-mono font-bold">{done.username}</span>, password <span className="font-mono font-bold">{previewPassword(done.name, form.phone) || "(last 2 name letters + @ + middle 4 phone digits + #)"}</span>.</span>
             <span className="text-xs text-emerald-700">Pages: {(done.pages || pages).join(", ")}</span>
           </div>
         )}
