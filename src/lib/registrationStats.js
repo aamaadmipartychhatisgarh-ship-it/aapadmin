@@ -24,9 +24,14 @@ const BLOCK_EXPR = "NULLIF(TRIM(COALESCE(NULLIF(TRIM(p.area_booth),''), w.area_b
 const PEOPLE_FROM = "FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worker_id";
 
 // WHERE fragment shared by every people-side query.
-function peopleFilters({ campaignId, from, to, ward, workerId, personType, status, search, source }) {
+function peopleFilters({ campaignId, from, to, ward, workerId, personType, status, search, source, scope }) {
   const cond = ["p.status = ?"];
   const params = [status || "active"];
+  // Zone-wise access control: a caller is restricted to their territory's
+  // assemblies (scope.cond); admins/supervisors pass an empty cond. Applied here so
+  // EVERY people-side query (summary, list, ward/block/assembly rankings) is scoped
+  // at the database — it can't be bypassed from the client.
+  if (scope && scope.cond) { cond.push(scope.cond); params.push(...(scope.params || [])); }
   if (campaignId) { cond.push("p.campaign_id = ?"); params.push(campaignId); }
   if (from) { cond.push("p.registered_at >= ?"); params.push(`${from} 00:00:00`); }
   if (to) { cond.push("p.registered_at < DATE_ADD(?, INTERVAL 1 DAY)"); params.push(`${to} 00:00:00`); }
@@ -47,10 +52,10 @@ function peopleFilters({ campaignId, from, to, ward, workerId, personType, statu
 // ---------------------------------------------------------------- SUMMARY
 // The dashboard header: lifetime/period totals, worker counts, the top worker and
 // the best ward, plus the four fixed period buckets shown as tiles.
-export async function getRegSummary({ campaignId, from, to, ward } = {}) {
+export async function getRegSummary({ campaignId, from, to, ward, scope } = {}) {
   await ensureRegistrationSchema();
 
-  const scoped = (extra = {}) => peopleFilters({ campaignId, ward, ...extra });
+  const scoped = (extra = {}) => peopleFilters({ campaignId, ward, scope, ...extra });
 
   const countsFor = async (range) => {
     const f = scoped(range);
@@ -110,7 +115,7 @@ export async function getRegSummary({ campaignId, from, to, ward } = {}) {
 // Rank | Worker | Mobile | Voters Added | Workers Added | Total.
 // LEFT JOIN from the worker side so a worker with zero registrations still
 // appears (ranked last) — the roster is the denominator of the drive.
-export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10, offset = 0, search } = {}) {
+export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10, offset = 0, search, workerScope } = {}) {
   await ensureRegistrationSchema();
 
   // People-side conditions live in the JOIN (not WHERE) to preserve the LEFT JOIN.
@@ -123,6 +128,8 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
   if (campaignId) { where.push("w.campaign_id = ?"); params.push(campaignId); }
   if (ward) { where.push("w.ward_number = ?"); params.push(ward); }
   if (search) { where.push("(w.name LIKE ? OR w.mobile LIKE ? OR w.worker_code LIKE ?)"); const l = `%${search}%`; params.push(l, l, l); }
+  // Zone-wise access control: a caller sees only workers active in their territory.
+  if (workerScope && workerScope.cond) { where.push(workerScope.cond); params.push(...(workerScope.params || [])); }
 
   const lim = Math.min(500, Math.max(1, Number(limit) || 10));
   const off = Math.max(0, Number(offset) || 0);
@@ -156,13 +163,16 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
   }));
 }
 
-export async function countWorkers({ campaignId, ward, search } = {}) {
+export async function countWorkers({ campaignId, ward, search, workerScope } = {}) {
   await ensureRegistrationSchema();
   const where = ["1 = 1"];
   const params = [];
   if (campaignId) { where.push("campaign_id = ?"); params.push(campaignId); }
   if (ward) { where.push("ward_number = ?"); params.push(ward); }
   if (search) { where.push("(name LIKE ? OR mobile LIKE ? OR worker_code LIKE ?)"); const l = `%${search}%`; params.push(l, l, l); }
+  // Zone-wise access control (same rule as getWorkerRanking). Alias is reg_workers
+  // itself here (no table alias), so scope on the bare row via a correlated EXISTS.
+  if (workerScope && workerScope.cond) { where.push(workerScope.cond.replace(/\bw\./g, "reg_workers.")); params.push(...(workerScope.params || [])); }
   const [row] = await query(`SELECT COUNT(*) AS total FROM reg_workers WHERE ${where.join(" AND ")}`, params);
   return Number(row?.total || 0);
 }
@@ -170,9 +180,9 @@ export async function countWorkers({ campaignId, ward, search } = {}) {
 // --------------------------------------------------------- WARD RANKING
 // Rank | Ward No. | Voters Added | Workers Added | Total. Rows with no resolvable
 // ward at all are grouped out (they'd be a meaningless "" bucket).
-export async function getWardRanking({ campaignId, from, to, limit = 20, offset = 0 } = {}) {
+export async function getWardRanking({ campaignId, from, to, limit = 20, offset = 0, scope } = {}) {
   await ensureRegistrationSchema();
-  const f = peopleFilters({ campaignId, from, to });
+  const f = peopleFilters({ campaignId, from, to, scope });
   const lim = Math.min(500, Math.max(1, Number(limit) || 20));
   const off = Math.max(0, Number(offset) || 0);
   const rows = await query(
@@ -198,9 +208,9 @@ export async function getWardRanking({ campaignId, from, to, limit = 20, offset 
 // BLOCK (area_booth) — NOT the ward — using the existing registration metric, sorted
 // highest→lowest with a deterministic tie-break (block name) so the order is stable
 // across refreshes. Rows with no resolvable block are excluded (a meaningless "").
-export async function getBlockRanking({ campaignId, from, to, limit = 100, offset = 0 } = {}) {
+export async function getBlockRanking({ campaignId, from, to, limit = 100, offset = 0, scope } = {}) {
   await ensureRegistrationSchema();
-  const f = peopleFilters({ campaignId, from, to });
+  const f = peopleFilters({ campaignId, from, to, scope });
   const lim = Math.min(500, Math.max(1, Number(limit) || 100));
   const off = Math.max(0, Number(offset) || 0);
   const rows = await query(
@@ -262,8 +272,20 @@ export async function getPeoplePage(filters = {}) {
 }
 
 // Distinct ward values in use — powers the ward filter dropdown.
-export async function getWardOptions(campaignId) {
+export async function getWardOptions(campaignId, scope) {
   await ensureRegistrationSchema();
+  // Scoped caller: the dropdown must only offer wards inside their territory, so it
+  // is built from the in-scope people alone (never other zones' ward numbers).
+  if (scope && scope.cond) {
+    const cond = ["TRIM(p.ward_number) <> ''", "p.ward_number IS NOT NULL", scope.cond];
+    const params = [...(scope.params || [])];
+    if (campaignId) { cond.unshift("p.campaign_id = ?"); params.unshift(campaignId); }
+    const rows = await query(
+      `SELECT DISTINCT p.ward_number FROM reg_people p WHERE ${cond.join(" AND ")} ORDER BY p.ward_number ASC`,
+      params
+    );
+    return rows.map((r) => r.ward_number);
+  }
   const params = [];
   let where = "";
   if (campaignId) { where = "WHERE campaign_id = ?"; params.push(campaignId); }
@@ -286,9 +308,9 @@ export async function getWardOptions(campaignId) {
 // full assembly master (locations type='assembly') so an assembly with no
 // registrations still appears with 0/0 — never dropped, never hardcoded. Honors
 // the drive/date filters so the graph matches the rest of the dashboard.
-export async function getAssemblyRegistrationCounts({ campaignId, from, to } = {}) {
+export async function getAssemblyRegistrationCounts({ campaignId, from, to, scope } = {}) {
   await ensureRegistrationSchema();
-  const { where, params } = peopleFilters({ campaignId, from, to });
+  const { where, params } = peopleFilters({ campaignId, from, to, scope });
   const counts = await query(
     `SELECT p.assembly_id AS id,
             SUM(p.person_type = 'voter')  AS voters,

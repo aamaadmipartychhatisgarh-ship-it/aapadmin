@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
 import { getPeoplePage, getWorkerRanking, getBlockRanking } from "@/lib/registrationStats";
+import { peopleScopeCond, workerScopeCond } from "@/lib/registrationScope";
 
 // CSV export of whatever the dashboard is currently showing:
 //   ?report=registrations  every person + the worker who added them (default)
@@ -34,17 +35,21 @@ function fmtDateTime(v) {
 
 export async function GET(req) {
   try {
-    const { error } = await requireRegistrationAccess();
+    const { session, error } = await requireRegistrationAccess();
     if (error) return error;
     const { searchParams } = new URL(req.url);
     const f = parseRegFilters(searchParams);
+    // Zone-wise access control: an export is scoped to the caller's territory too,
+    // so a CSV can never be used to pull other zones' records.
+    const scope = peopleScopeCond(session);
+    const workerScope = workerScopeCond(session, "w");
     const report = searchParams.get("report") || "registrations";
     const stamp = new Date().toISOString().slice(0, 10);
 
     let csv;
     let filename;
     if (report === "workers") {
-      const rows = await getWorkerRanking({ ...f, limit: 500 });
+      const rows = await getWorkerRanking({ ...f, limit: 500, workerScope });
       csv = toCsv(
         ["Rank", "Worker Name", "Mobile", "Worker ID", "Ward", "Area/Booth", "Voters Added", "Workers Added", "Total", "Link Status"],
         rows.map((r) => [r.rank, r.name, r.mobile, r.worker_code, r.ward_number, r.area_booth, r.voters, r.new_workers, r.total, r.status])
@@ -53,7 +58,7 @@ export async function GET(req) {
     } else if (report === "blocks" || report === "wards") {
       // Block-wise (Area / Booth) performance — §9B. `wards` kept as an alias so any
       // old link still resolves to the same Block report.
-      const rows = await getBlockRanking({ ...f, limit: 500 });
+      const rows = await getBlockRanking({ ...f, limit: 500, scope });
       csv = toCsv(
         ["Rank", "Block (Area/Booth)", "Voters Added", "Workers Added", "Total"],
         rows.map((r) => [r.rank, r.block, r.voters, r.new_workers, r.total])
@@ -65,7 +70,7 @@ export async function GET(req) {
       const all = [];
       let page = 1;
       for (;;) {
-        const d = await getPeoplePage({ ...f, sort: searchParams.get("sort") || "newest", page, pageSize: 500 });
+        const d = await getPeoplePage({ ...f, sort: searchParams.get("sort") || "newest", page, pageSize: 500, scope });
         all.push(...d.people);
         if (page >= d.pages || all.length >= 50000) break;
         page += 1;

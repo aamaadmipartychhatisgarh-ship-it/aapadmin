@@ -5,6 +5,7 @@ import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/regi
 import { newLinkToken, workerCodeFor, normalizeMobile } from "@/lib/registrationSchema";
 import { phoneKey, last10Sql } from "@/lib/phone";
 import { getWorkerRanking, countWorkers } from "@/lib/registrationStats";
+import { workerScopeCond } from "@/lib/registrationScope";
 import { buildRegCredentials } from "@/lib/regCredentials";
 
 // A worker link is an OTP-gated login (the karyakarta signs in with THIS mobile
@@ -30,15 +31,17 @@ export const revalidate = 0;
 
 export async function GET(req) {
   try {
-    const { error } = await requireRegistrationAccess();
+    const { session, error } = await requireRegistrationAccess();
     if (error) return error;
     const { searchParams } = new URL(req.url);
     const f = parseRegFilters(searchParams);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
     const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get("pageSize") || "25", 10) || 25));
+    // Zone-wise access control: a caller sees only workers active in their territory.
+    const workerScope = workerScopeCond(session, "w");
     const [workers, total] = await Promise.all([
-      getWorkerRanking({ ...f, limit: pageSize, offset: (page - 1) * pageSize }),
-      countWorkers(f),
+      getWorkerRanking({ ...f, limit: pageSize, offset: (page - 1) * pageSize, workerScope }),
+      countWorkers({ ...f, workerScope }),
     ]);
     return NextResponse.json(
       { workers, total, page, pageSize, pages: Math.max(1, Math.ceil(total / pageSize)) },

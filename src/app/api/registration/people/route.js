@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
 import { getPeoplePage } from "@/lib/registrationStats";
+import { peopleScopeCond } from "@/lib/registrationScope";
 
 // The full registration list — "complete details of which worker added which
 // person". Every row carries its collecting worker's name and User ID, so
@@ -11,7 +12,7 @@ export const revalidate = 0;
 
 export async function GET(req) {
   try {
-    const { error } = await requireRegistrationAccess();
+    const { session, error } = await requireRegistrationAccess();
     if (error) return error;
     const { searchParams } = new URL(req.url);
     const data = await getPeoplePage({
@@ -19,6 +20,8 @@ export async function GET(req) {
       sort: searchParams.get("sort") || "newest",
       page: parseInt(searchParams.get("page") || "1", 10) || 1,
       pageSize: parseInt(searchParams.get("pageSize") || "25", 10) || 25,
+      // Zone-wise access control: a caller only sees records in their territory.
+      scope: peopleScopeCond(session),
     });
     return NextResponse.json(data, { headers: NO_STORE });
   } catch (e) {

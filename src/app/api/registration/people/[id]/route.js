@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
 import { canManageRegistration } from "@/lib/permissions";
+import { assemblyInCallerScope } from "@/lib/registrationScope";
 import { ensureRegistrationSchema, normalizeMobile, PERSON_TYPES, PERSON_STATUSES } from "@/lib/registrationSchema";
 import { isAssembly, blockBelongsToAssembly } from "@/lib/politicalLocation";
 
@@ -22,6 +23,15 @@ export async function PATCH(req, { params }) {
     // was not added yet — the same missing-column class of bug seen elsewhere.
     await ensureRegistrationSchema().catch((e) => console.error("[registration] ensure (person PATCH):", e?.sqlMessage || e?.message || e));
     const { id } = await params;
+    // Zone-wise access control: a caller may only edit a record inside their
+    // assigned territory. Check the record's assembly BEFORE any mutation; a
+    // cross-zone (or out-of-scope) record is reported as not found so its existence
+    // isn't revealed and the restriction can't be bypassed by posting an id.
+    const [own] = await query("SELECT assembly_id FROM reg_people WHERE id = ?", [id]);
+    if (!own) return NextResponse.json({ message: "Not found." }, { status: 404, headers: NO_STORE });
+    if (!(await assemblyInCallerScope(session, own.assembly_id))) {
+      return NextResponse.json({ message: "Not found." }, { status: 404, headers: NO_STORE });
+    }
     const d = await req.json().catch(() => null);
     if (!d || typeof d !== "object") return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
 

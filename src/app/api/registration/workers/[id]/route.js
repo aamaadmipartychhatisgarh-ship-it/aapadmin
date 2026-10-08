@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
+import { workerInCallerScope } from "@/lib/registrationScope";
 import { ensureRegistrationSchema, newLinkToken, normalizeMobile } from "@/lib/registrationSchema";
 import { phoneKey } from "@/lib/phone";
 
@@ -26,12 +27,17 @@ export const revalidate = 0;
 
 export async function PATCH(req, { params }) {
   try {
-    const { error } = await requireRegistrationAccess();
+    const { session, error } = await requireRegistrationAccess();
     if (error) return error;
     // Self-heal the schema first (idempotent, cached) so editing never 500s on a
     // deployment missing a newer reg_workers column.
     await ensureRegistrationSchema().catch((e) => console.error("[registration] ensure (worker PATCH):", e?.sqlMessage || e?.message || e));
     const { id } = await params;
+    // Zone-wise access control: a caller may only edit a worker active in their
+    // territory (one who has collected a person there). Out-of-scope → not found.
+    if (!(await workerInCallerScope(session, id))) {
+      return NextResponse.json({ message: "Not found." }, { status: 404, headers: NO_STORE });
+    }
     const d = await req.json().catch(() => null);
     if (!d || typeof d !== "object") return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
 
