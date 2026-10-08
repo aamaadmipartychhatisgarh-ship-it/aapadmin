@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { isAdmin, isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
@@ -29,10 +29,11 @@ export async function GET(_req, { params }) {
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
 
-    // Admin role OR a "contacts" Page-Access grant (managed override) gives full
-    // Contact-Details access; otherwise a caller may only read a contact they hold
-    // or that is assigned to them.
-    const canManage = await pageAllowed(session, "contacts", session && isAdmin(session));
+    // Admins AND Supervisors (oversight) — or a "contacts" Page-Access grant —
+    // get full Contact-Details access; otherwise a caller may only read a contact
+    // they hold or that is assigned to them. (isOversight covers the Supervisor
+    // role explicitly, so a supervisor can open any contact to edit it.)
+    const canManage = await pageAllowed(session, "contacts", session && isOversight(session));
     if (!canManage) {
       const { userId } = await resolveActingUserId(session);
       const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
@@ -87,17 +88,21 @@ export async function PUT(req, { params }) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
-    // Admin role OR a "contacts" Page-Access grant → full edit rights on any
-    // contact (the Contacts page is admin-tier; granting it confers the same
-    // Contact-Details management). Consistent with /api/contacts list & add.
-    const admin = await pageAllowed(session, "contacts", session && isAdmin(session));
-    if (!admin) {
+    // Admins + Supervisors (oversight) OR a "contacts" Page-Access grant → full
+    // management of any contact, INCLUDING removing the Address. isOversight covers
+    // the Supervisor role explicitly (the Address spec: only Caller + Supervisor
+    // edit; a Supervisor may also REMOVE the Address).
+    const canManage = await pageAllowed(session, "contacts", session && isOversight(session));
+    // Queue assignment + completion state stay strictly admin-tier (not supervisors).
+    const isAdminTier = isAdmin(session);
+    if (!canManage) {
       // Callers may edit a contact they currently hold (locked mid-call) OR one
       // that is assigned to them — so editing from My Calls works even after the
       // contact was completed / the lock expired, matching the caller/workspace
       // relationship. They can change every detail (name, phone, address,
       // designation and the full geography) but never its queue assignment or
-      // completion state, and never delete it. resolveActingUserId keeps
+      // completion state, and never delete it. A caller may UPDATE the Address but
+      // cannot REMOVE it (see the address guard below). resolveActingUserId keeps
       // Super-Admin "view as caller" working.
       const { userId } = await resolveActingUserId(session);
       const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
@@ -107,6 +112,17 @@ export async function PUT(req, { params }) {
       }
     }
     const data = await req.json();
+
+    // ADDRESS PERSISTENCE RULE (spec): a Caller may update the Address to a new
+    // value but must NOT be able to remove it — only a Supervisor/Admin may clear
+    // it, and it stays saved until they do. So if a non-managing editor (a caller)
+    // sends a blank/empty address, drop it from the payload: the stored address is
+    // preserved instead of being wiped by an empty save, a page that didn't load
+    // it, or an unrelated field edit. Managers (Supervisor/Admin) keep the ability
+    // to clear it.
+    if (!canManage && "address" in data && !String(data.address ?? "").trim()) {
+      delete data.address;
+    }
 
     // A Not-Interested contact cannot be (re)assigned to a User/Worker — the
     // restriction is enforced here, server-side, not just by hiding it in lists.
@@ -147,7 +163,7 @@ export async function PUT(req, { params }) {
     // even when only another field changed (e.g. designation). Drop it when it's
     // unchanged so an unrelated edit doesn't needlessly restamp assigned_at /
     // assigned_by — keeping behavior identical to the supervisor route.
-    if (admin && "assigned_to_user_id" in data) {
+    if (isAdminTier && "assigned_to_user_id" in data) {
       const [cur] = await query("SELECT assigned_to_user_id FROM contacts WHERE id = ?", [id]);
       const current = cur?.assigned_to_user_id ?? null;
       const incoming = data.assigned_to_user_id || null;
@@ -185,7 +201,7 @@ export async function PUT(req, { params }) {
     ];
     // Queue assignment + completion state stay admin-only (not "contact details").
     const ADMIN_ONLY_FIELDS = ["assigned_to_user_id", "is_completed"];
-    const fields = admin ? [...DETAIL_FIELDS, ...ADMIN_ONLY_FIELDS] : DETAIL_FIELDS;
+    const fields = isAdminTier ? [...DETAIL_FIELDS, ...ADMIN_ONLY_FIELDS] : DETAIL_FIELDS;
     // Only touch columns this deployment's schema actually has.
     const existingColumns = await getContactColumns();
     const sets = [];
@@ -203,12 +219,12 @@ export async function PUT(req, { params }) {
     }
     // Stamp assigned_at whenever the owner changes, so stale-reclaim can tell how
     // long a contact has been held (cleared when it returns to the pool).
-    if (admin && "assigned_to_user_id" in data && existingColumns.has("assigned_at")) {
+    if (isAdminTier && "assigned_to_user_id" in data && existingColumns.has("assigned_at")) {
       sets.push(data.assigned_to_user_id ? "assigned_at = NOW()" : "assigned_at = NULL");
     }
     // Record WHO assigned it (for the caller's "Assigned by" line); cleared when
     // the contact returns to the pool.
-    if (admin && "assigned_to_user_id" in data && existingColumns.has("assigned_by_user_id")) {
+    if (isAdminTier && "assigned_to_user_id" in data && existingColumns.has("assigned_by_user_id")) {
       if (data.assigned_to_user_id) { sets.push("assigned_by_user_id = ?"); vals.push(session.user.id); }
       else { sets.push("assigned_by_user_id = NULL"); }
     }
@@ -245,7 +261,7 @@ export async function PUT(req, { params }) {
     // Sync the full designation set (add/remove keeps the rest; empty clears).
     if (designationIds !== null) await syncContactDesignations(id, designationIds);
 
-    if (admin && "assigned_to_user_id" in data && data.assigned_to_user_id) {
+    if (isAdminTier && "assigned_to_user_id" in data && data.assigned_to_user_id) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
     }
     // Return the FULLY-RESOLVED record (all *_name display fields, assigned-to
