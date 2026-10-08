@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
-import { normalizeMobile, PERSON_TYPES, PERSON_STATUSES } from "@/lib/registrationSchema";
+import { ensureRegistrationSchema, normalizeMobile, PERSON_TYPES, PERSON_STATUSES } from "@/lib/registrationSchema";
 import { isAssembly, blockBelongsToAssembly } from "@/lib/politicalLocation";
 
 // Correct or triage one registration. Marking a row 'duplicate' / 'rejected'
@@ -16,6 +16,10 @@ export async function PATCH(req, { params }) {
   try {
     const { error } = await requireRegistrationAccess();
     if (error) return error;
+    // Self-heal the schema first (idempotent, cached) so editing never 500s on a
+    // deployment where a newer column (block_id / ward_name / worker_rating / …)
+    // was not added yet — the same missing-column class of bug seen elsewhere.
+    await ensureRegistrationSchema().catch((e) => console.error("[registration] ensure (person PATCH):", e?.sqlMessage || e?.message || e));
     const { id } = await params;
     const d = await req.json().catch(() => null);
     if (!d || typeof d !== "object") return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
