@@ -15,18 +15,6 @@ import { RatingScale, RatingBadge } from "@/components/KaryakartaRating";
 // Colour used across the dashboard.
 const BRAND = "#164FA3";
 
-// From a (possibly multi-role, comma-separated) designation, keep ONLY the
-// Vidhansabha-level role(s) — the part(s) mentioning "Vidhansabha" (or "Vidhan
-// Sabha") — e.g. "State General Secretary Media, Vidhansabha Prabhari" →
-// "Vidhansabha Prabhari". Returns "" when there's no Vidhansabha role.
-function vidhansabhaRole(designation) {
-  return String(designation || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter((p) => p && /vidhan\s*sabha/i.test(p))
-    .join(", ");
-}
-
 // A blank form matching the restructured profile: Profile Details, Political
 // Journey, Social Activity, Economic Status, Influence Assessment + participation.
 const BLANK = {
@@ -373,18 +361,13 @@ export default function InfluencersPage() {
                 </td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  {/* Influencer name + ONLY the Vidhansabha-level role from the Joined
-                      By person's designation (no assembly, no other designation
-                      parts). Blank when the Joined By person has no Vidhansabha role. */}
+                  {/* Influencer name + ONLY the influencer's own assembly underneath. */}
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Thumb src={r.photo_url} name={r.name} />
                       <div className="min-w-0">
                         <div className="font-medium text-gray-900">{r.name}</div>
-                        {(() => {
-                          const v = vidhansabhaRole(r.joined_by_designation);
-                          return v ? <div className="text-xs text-gray-500">{v}</div> : null;
-                        })()}
+                        {r.assembly_name ? <div className="text-xs text-gray-500">{r.assembly_name}</div> : null}
                       </div>
                     </div>
                   </td>
