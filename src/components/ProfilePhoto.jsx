@@ -67,6 +67,10 @@ export default function ProfilePhoto({
   size = 96,
   square = false,
   editable = true,
+  // Whether the "Remove Photo" action is offered. Callers may upload/replace/view
+  // but not remove — only supervisors/admins can (enforced server-side too). Pass
+  // canRemove={false} on caller surfaces so the Remove option isn't even shown.
+  canRemove = true,
   persist,
   onChange,
   className = "bg-[#164FA3]/10",
@@ -158,7 +162,7 @@ export default function ProfilePhoto({
             <MenuItem icon={Camera} label="Take Photo" onClick={() => { setMenuOpen(false); cameraRef.current?.click(); }} />
             {/* View / Remove only when a real, retrievable photo exists (§6). */}
             {hasValidPhoto && <MenuItem icon={Eye} label="View Current Photo" onClick={() => { setMenuOpen(false); setViewing(true); }} />}
-            {hasValidPhoto && <MenuItem icon={Trash2} label="Remove Photo" danger onClick={handleRemove} />}
+            {hasValidPhoto && canRemove && <MenuItem icon={Trash2} label="Remove Photo" danger onClick={handleRemove} />}
             <MenuItem icon={X} label="Cancel" onClick={() => setMenuOpen(false)} />
           </div>
         </>

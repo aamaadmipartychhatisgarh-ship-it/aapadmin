@@ -946,6 +946,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                         square
                         className="bg-white/15 border-2 border-white/25"
                         textClassName="text-white"
+                        canRemove={isOversight(session)}
                         persist={saveActivePhoto}
                         onChange={(url) => {
                           // Update every on-page surface that shows this person's

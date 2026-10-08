@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { isAdmin, isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
@@ -28,8 +28,12 @@ export async function POST(req, { params }) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
-    const admin = await pageAllowed(session, "contacts", session && isAdmin(session));
-    if (!admin) {
+    // Admins + Supervisors (oversight) OR a "contacts" grant may manage any
+    // contact's photo, INCLUDING removing it. isOversight covers the Supervisor
+    // role explicitly (the Photo spec: a Caller may upload/replace but only a
+    // Supervisor may remove).
+    const canManage = await pageAllowed(session, "contacts", session && isOversight(session));
+    if (!canManage) {
       const { userId } = await resolveActingUserId(session);
       const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
       const mine = row && (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId));
@@ -41,6 +45,20 @@ export async function POST(req, { params }) {
       return NextResponse.json({ message: "Contact photos are not enabled on this deployment yet." }, { status: 400 });
     }
     const { photo_url } = await req.json();
+
+    // PHOTO PERSISTENCE RULE (spec): a Caller may upload/replace a photo but must
+    // NOT be able to remove it — only a Supervisor/Admin may delete it, and it
+    // stays available until they do. An empty photo_url from a non-managing editor
+    // (a caller) is a removal attempt: reject it server-side so the restriction
+    // can't be bypassed by calling this API directly. A caller replacing the photo
+    // (a new, non-empty photo_url) is still allowed.
+    const removing = !photo_url || !String(photo_url).trim();
+    if (removing && !canManage) {
+      return NextResponse.json(
+        { message: "Only a supervisor can remove a photo. You can upload a new photo to replace it." },
+        { status: 403 }
+      );
+    }
 
     const [prev] = await query("SELECT photo_url FROM contacts WHERE id = ?", [id]);
     const oldPhoto = prev?.photo_url || null;

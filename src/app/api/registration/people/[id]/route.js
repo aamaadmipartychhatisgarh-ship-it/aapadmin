@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
+import { canManageRegistration } from "@/lib/permissions";
 import { ensureRegistrationSchema, normalizeMobile, PERSON_TYPES, PERSON_STATUSES } from "@/lib/registrationSchema";
 import { isAssembly, blockBelongsToAssembly } from "@/lib/politicalLocation";
 
@@ -14,7 +15,7 @@ export const revalidate = 0;
 
 export async function PATCH(req, { params }) {
   try {
-    const { error } = await requireRegistrationAccess();
+    const { error, session } = await requireRegistrationAccess();
     if (error) return error;
     // Self-heal the schema first (idempotent, cached) so editing never 500s on a
     // deployment where a newer column (block_id / ward_name / worker_rating / …)
@@ -91,6 +92,17 @@ export async function PATCH(req, { params }) {
       const p = String(d.photo_url || "").trim();
       if (p && !/^\/uploads\/[A-Za-z0-9._-]+$/.test(p)) {
         return NextResponse.json({ message: "Invalid photo reference." }, { status: 400, headers: NO_STORE });
+      }
+      // Photo spec: a Caller may upload/replace a Worker/Voter photo but must NOT
+      // remove it — only a manager (Supervisor/Admin) may clear it. An empty
+      // photo_url from a non-manager is a removal attempt; reject it server-side so
+      // it can't be bypassed by calling this API directly. A new (non-empty) photo
+      // is always allowed.
+      if (!p && !canManageRegistration(session)) {
+        return NextResponse.json(
+          { message: "Only a supervisor can remove a photo. You can upload a new photo to replace it." },
+          { status: 403, headers: NO_STORE }
+        );
       }
       sets.push("photo_url = ?"); vals.push(p || null);
     }
