@@ -16,7 +16,7 @@ import FloatingPopover from "@/components/FloatingPopover";
 import { isAdmin, isSupervisorRole, roleLabel, normalizeRole, ROLES } from "@/lib/permissions";
 import { primaryItems } from "@/lib/navGroups";
 import { PAGES, pageKeyForPath } from "@/lib/pages";
-import { usePageAccess } from "@/components/usePageAccess";
+import { usePageAccess, refreshPageAccess } from "@/components/usePageAccess";
 import { VIEW_AS_KEY, getDashboardViewAs, getViewAsUser, setViewAsUser } from "@/lib/dashboardView";
 
 async function handleSignOut() {
@@ -142,7 +142,8 @@ export default function DashboardLayout({ children }) {
   // Effective page access for the signed-in user (baseline role pages ∪ any
   // Super-Admin-granted pages) — the same source the backend and page guards
   // use, so a GRANTED page shows up in this user's sidebar (BUG 14).
-  const { pages: allowedPageKeys, restricted: pageRestricted } = usePageAccess();
+  const { pages: allowedPageKeys, restricted: pageRestricted, error: pageError } = usePageAccess();
+  const pageRetryRef = useRef(0);
   useEffect(() => {
     setViewAsState(getDashboardViewAs());
     setVAUser(getViewAsUser());
@@ -209,6 +210,26 @@ export default function DashboardLayout({ children }) {
       if (first?.href && first.href !== "/dashboard") router.replace(first.href);
     }
   }, [status, session, viewAs, pageRestricted, allowedPageKeys, pathname, router]);
+
+  // PERMISSION-FETCH RECOVERY — a transient /api/my-pages failure (most often a
+  // 401 in the brief window right after login, before the session cookie is
+  // established server-side; or a one-off DB hiccup → 500) must NOT settle into
+  // the "no page allotted" screen. While the fetch is in an ERROR state and the
+  // user is authenticated, re-fetch it (bounded, with backoff) so the real page
+  // set loads on its own — no manual refresh. This is tied to the auth-ready
+  // state and retries the actual failed request; it is not an arbitrary delay,
+  // and the UI shows a loading spinner (below) until the check genuinely
+  // succeeds, never a wrong access-denied state. On success the counter resets.
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    if (Array.isArray(allowedPageKeys) && !pageError) { pageRetryRef.current = 0; return; } // resolved OK
+    if (allowedPageKeys === null && !pageError) return; // still loading — wait
+    if (!pageError) return; // neither loading, errored, nor resolved — nothing to do
+    if (pageRetryRef.current >= 8) return; // bounded; focus-revalidation still recovers later
+    const n = pageRetryRef.current++;
+    const t = setTimeout(() => { refreshPageAccess(); }, Math.min(3000, 400 * (n + 1)));
+    return () => clearTimeout(t);
+  }, [status, pageError, allowedPageKeys]);
 
   if (status === "loading" || status === "unauthenticated") {
     return <div className="min-h-screen bg-[#0B3A82] flex items-center justify-center text-white">Loading...</div>;
@@ -475,8 +496,14 @@ export default function DashboardLayout({ children }) {
   // only Social Command would briefly see their old Caller nav. usePageAccess is
   // fail-closed (it retries and never yields role defaults), so `allowedPageKeys`
   // is null ONLY while genuinely loading — we show a spinner, never stale pages.
+  // An ERROR state (the fetch failed and hasn't yet recovered) is treated as
+  // "still resolving" — we show the SAME loading spinner and let the recovery
+  // effect above retry, rather than rendering the "no page" screen. The page
+  // content stays unrendered meanwhile, so fail-closed security is preserved. The
+  // "no page" screen is reached ONLY after a SUCCESSFUL fetch confirms an empty
+  // set (see noAccess below), never on a transient failure or while loading.
   const isSuperUser = canonical === ROLES.SUPER_ADMIN;
-  if (!isSuperUser && !previewing && allowedPageKeys === null) {
+  if (!isSuperUser && !previewing && (allowedPageKeys === null || pageError)) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-[#f4f6f8]">
         <Loader2 className="animate-spin text-[#164FA3]" size={28} />
@@ -491,7 +518,7 @@ export default function DashboardLayout({ children }) {
   // on allowedPageKeys being a loaded array (null while loading) so it never
   // flashes during the permission fetch. A previewing Super Admin is exempt.
   const noAccess =
-    !previewing && pageRestricted && Array.isArray(allowedPageKeys) && allowedPageKeys.length === 0;
+    !previewing && !pageError && pageRestricted && Array.isArray(allowedPageKeys) && allowedPageKeys.length === 0;
   if (noAccess) {
     return (
       <div className="min-h-screen w-full flex flex-col items-center justify-center bg-[#f4f6f8] px-6 text-center">

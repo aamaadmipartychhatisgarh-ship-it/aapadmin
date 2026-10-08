@@ -176,7 +176,7 @@ export async function markManaged(userId, by) {
 // deny an oversight user (Supervisor/Admin) a write that their role allows —
 // Super Admins never hit this path (isPageRestricted returns before the query),
 // which is exactly why such a failure would look Supervisor-specific.
-export async function isUserManaged(userId) {
+export async function isUserManaged(userId, { strict = false } = {}) {
   if (!userId) return false;
   try {
     await ensurePagePermissionsSchema();
@@ -184,6 +184,12 @@ export async function isUserManaged(userId) {
     return rows.length > 0;
   } catch (e) {
     console.error("[pageAccess] isUserManaged:", e?.message || e);
+    // STRICT callers (the /api/my-pages list) must distinguish a DB failure from a
+    // genuine "unmanaged" result — rethrow so the API returns an error the client
+    // retries, instead of silently reporting role-baseline access. GUARDS keep the
+    // fail-safe (treat as unmanaged) so a transient hiccup never denies an
+    // oversight user a write their role allows.
+    if (strict) throw e;
     return false;
   }
 }
@@ -216,7 +222,7 @@ export function fixedPagesForRole() {
 
 // All explicit grants for one user, as a Set of page keys (validated against the
 // registry so a stale key for a since-removed page is ignored).
-export async function getUserGrantKeys(userId) {
+export async function getUserGrantKeys(userId, { strict = false } = {}) {
   if (!userId) return new Set();
   try {
     await ensurePagePermissionsSchema();
@@ -224,7 +230,13 @@ export async function getUserGrantKeys(userId) {
     return new Set(rows.map((r) => r.page_key).filter(isValidPageKey));
   } catch (e) {
     console.error("[pageAccess] getUserGrantKeys:", e?.message || e);
-    return new Set(); // fail-safe: no grants rather than throwing through a guard
+    // STRICT (the /api/my-pages list): rethrow so a DB failure becomes an API
+    // error the client retries, instead of a deceptive "no grants" set that would
+    // render the "no page allotted" screen for a user who actually has pages.
+    // GUARDS keep the fail-safe (deny on error) so a specific page check fails
+    // closed rather than throwing.
+    if (strict) throw e;
+    return new Set();
   }
 }
 
@@ -240,10 +252,10 @@ export async function getUserGrantKeys(userId) {
 // This managed/unmanaged split is the correct discriminator between "new user"
 // (created managed-empty) and "existing user" (unmanaged, role baseline) — it is
 // the DB lifecycle state, never a fragile "grants.length === 0" guess.
-export async function isPageRestricted(session) {
+export async function isPageRestricted(session, { strict = false } = {}) {
   if (!session?.user) return false;
   if (isSuper(roleOf(session))) return false;
-  return isUserManaged(session.user.id);
+  return isUserManaged(session.user.id, { strict });
 }
 
 // Effective accessible page keys for a user.
@@ -253,11 +265,11 @@ export async function isPageRestricted(session) {
 //   Unmanaged    → the role's baseline pages (existing behaviour preserved).
 // expandPageKeys adds implied parent/child keys (a module grant covers its
 // sub-sections; a sub-section grant unlocks the module page + nav).
-export async function getEffectivePageKeys(userId, role) {
+export async function getEffectivePageKeys(userId, role, { strict = false } = {}) {
   const canonical = normalizeRole(role);
   if (isSuper(canonical)) return new Set(PAGE_KEYS);
-  if (await isUserManaged(userId)) {
-    return expandPageKeys([...(await getUserGrantKeys(userId))]); // managed → grants only
+  if (await isUserManaged(userId, { strict })) {
+    return expandPageKeys([...(await getUserGrantKeys(userId, { strict }))]); // managed → grants only
   }
   return expandPageKeys(baselinePagesForRole(canonical));        // unmanaged → role baseline
 }

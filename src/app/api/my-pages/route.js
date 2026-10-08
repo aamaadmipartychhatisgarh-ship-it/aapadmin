@@ -17,8 +17,11 @@ export async function GET() {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) return NextResponse.json({ pages: [] }, { status: 401 });
-    const keys = await getEffectivePageKeys(session.user.id, session.user.role);
-    const restricted = await isPageRestricted(session);
+    // STRICT: a transient DB failure here must surface as a 500 (which the client
+    // retries) — NOT a deceptive empty/role-baseline set that would flash the
+    // "no page allotted" screen for a user who actually has pages.
+    const keys = await getEffectivePageKeys(session.user.id, session.user.role, { strict: true });
+    const restricted = await isPageRestricted(session, { strict: true });
     // Permission-trace log (per ticket): the EXACT page set this API returns for
     // this user. If the sidebar/route shows more than this, the divergence is on
     // the client; if this shows more than the admin assigned, it is server-side.
