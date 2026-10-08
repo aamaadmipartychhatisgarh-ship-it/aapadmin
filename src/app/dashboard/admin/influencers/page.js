@@ -349,14 +349,15 @@ export default function InfluencersPage() {
                 <th className="px-4 py-3 font-semibold">Mobile Number</th>
                 <th className="px-4 py-3 font-semibold">Party</th>
                 <th className="px-4 py-3 font-semibold">Joined By</th>
+                <th className="px-4 py-3 font-semibold">Designation</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400">
                   <Users size={30} className="mx-auto mb-2 opacity-40" />
                   No influencers found.
                 </td></tr>
@@ -383,10 +384,10 @@ export default function InfluencersPage() {
                       <div className="flex items-center gap-2.5 min-w-[180px]">
                         <Thumb src={r.joined_by_photo} name={r.joined_by_name || "?"} size={38} />
                         <div className="min-w-0">
-                          {/* Required format: "Name – Designation" (designation is the
-                              contact's CURRENT saved designation, resolved live). */}
+                          {/* Joined By = the linked person's NAME only; their
+                              designation is shown in the separate column alongside. */}
                           <div className="font-medium text-gray-900 text-sm">
-                            {r.joined_by_name || "—"}{r.joined_by_designation ? ` – ${r.joined_by_designation}` : ""}
+                            {r.joined_by_name || "—"}
                           </div>
                           {r.joined_by_mobile && (
                             <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">
@@ -404,6 +405,12 @@ export default function InfluencersPage() {
                         </div>
                       </div>
                     ) : <span className="text-gray-400">—</span>}
+                  </td>
+                  {/* Designation of the Joined By person (their CURRENT saved
+                      designation, resolved live). Only meaningful for a linked
+                      contact — the "Added by" creator fallback has no designation. */}
+                  <td className="px-4 py-3 text-gray-600">
+                    {(r.joined_by_name || r.joined_by_mobile) && r.joined_by_designation ? r.joined_by_designation : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
