@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Network, MapPin, FileText, Download, CheckCircle2, Circle } from "lucide-react";
 import Avatar from "@/components/Avatar";
+import { MultiSelect } from "@/components/MultiSelect";
+import { wingShortLabel } from "@/lib/wingLabel";
 
 // CONTACTS → INCOMPLETE DESIGNATION — Level & Designation-wise assignment.
 //
@@ -28,6 +30,8 @@ const PERSONS_PAGE_SIZE = 50;
 export default function IncompleteDesignationView() {
   const [level, setLevel] = useState("state");
   const [designationId, setDesignationId] = useState("");
+  const [wingF, setWingF] = useState([]); // selected wing names ([] = All)
+  const [wingOptions, setWingOptions] = useState([]); // [{ id: wingName, name: shortLabel }]
   const [locationId, setLocationId] = useState("");
   const [status, setStatus] = useState("all"); // all | filled | blank
   // "matrix" = the location × designation table; "persons" = the flattened Total
@@ -43,10 +47,11 @@ export default function IncompleteDesignationView() {
   const qs = useCallback(() => {
     const p = new URLSearchParams({ level });
     if (designationId) p.set("designation_id", designationId);
+    if (wingF.length) p.set("wings", wingF.join(","));
     if (locationId) p.set("location_id", locationId);
     if (status !== "all") p.set("status", status);
     return p.toString();
-  }, [level, designationId, locationId, status]);
+  }, [level, designationId, wingF, locationId, status]);
 
   // The list query adds the persons view + pagination on top of the shared filters.
   const listQs = useCallback(() => {
@@ -70,10 +75,21 @@ export default function IncompleteDesignationView() {
 
   useEffect(() => { load(); }, [load]);
   // Changing the level clears the level-specific designation & location filters.
+  // Wing is cross-level (a global grouping), so it is NOT reset here.
   useEffect(() => { setDesignationId(""); setLocationId(""); }, [level]);
   // Any filter change resets the persons page so the count and the list stay in
   // step (page 1 of the freshly-filtered set).
-  useEffect(() => { setPpage(1); }, [level, designationId, locationId, view]);
+  useEffect(() => { setPpage(1); }, [level, designationId, wingF, locationId, view]);
+
+  // Wing options come from Master Data (/api/wings) — the single source of truth.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/wings")
+      .then((r) => (r.ok ? r.json() : { wings: [] }))
+      .then((d) => { if (alive) setWingOptions((d.wings || []).map((w) => ({ id: w.name, name: wingShortLabel(w.name) }))); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   const rows = data.rows || [];
   const persons = data.persons || [];
@@ -134,6 +150,10 @@ export default function IncompleteDesignationView() {
             <option value="">All {levelLabel} designations</option>
             {levelDesignations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Wing</label>
+          <MultiSelect options={wingOptions} value={wingF} onChange={setWingF} allLabel="All Wings" className="h-10 min-w-[160px]" />
         </div>
         {!isState && (
           <div>

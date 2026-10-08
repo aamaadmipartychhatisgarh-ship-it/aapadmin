@@ -63,18 +63,35 @@ function workerDesignationPart(designation_ids) {
 
 // Build the person-aware WHERE fragment for contacts (alias c). Returns an
 // " AND (…)" string + params, and whether a workers join is required.
-export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids } = {}) {
+export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids, wings } = {}) {
   const geo = { zone_id, lok_sabha_id, district_id, assembly_ids };
+  const wingList = Array.isArray(wings) ? wings.filter(Boolean) : [];
 
-  // A contact matches a designation filter if ANY of its OWN designations
-  // (the multi-value contact_designations join, PROMPT 5) is selected — this
-  // covers both legacy single-designation contacts (backfilled into the join)
-  // and new multi-designation ones, on either the worker or the own branch.
-  const desExists = designation_ids?.length
-    ? {
-        clause: `EXISTS (SELECT 1 FROM contact_designations cd WHERE cd.contact_id = c.id AND cd.designation_id IN (${designation_ids.map(() => "?").join(",")}))`,
-        params: [...designation_ids],
-      }
+  // A contact matches the designation/wing filter if ANY of its OWN designations
+  // (the multi-value contact_designations join, PROMPT 5) is a selected designation
+  // OR belongs to a selected wing — this covers both legacy single-designation
+  // contacts (backfilled into the join) and new multi-designation ones, on either
+  // the worker or the own branch. Wings resolve to their member designations via
+  // designations.wing (the Master Data mapping), so a wing with no designations
+  // correctly matches nothing (never "all").
+  const desExists = (designation_ids?.length || wingList.length)
+    ? (() => {
+        const subs = [];
+        const params = [];
+        if (designation_ids?.length) {
+          subs.push(`cd.designation_id IN (${designation_ids.map(() => "?").join(",")})`);
+          params.push(...designation_ids);
+        }
+        if (wingList.length) {
+          subs.push(`dw.wing IN (${wingList.map(() => "?").join(",")})`);
+          params.push(...wingList);
+        }
+        const join = wingList.length ? "JOIN designations dw ON dw.id = cd.designation_id" : "";
+        return {
+          clause: `EXISTS (SELECT 1 FROM contact_designations cd ${join} WHERE cd.contact_id = c.id AND (${subs.join(" OR ")}))`,
+          params,
+        };
+      })()
     : null;
 
   // Worker-side (person truth).
@@ -100,13 +117,20 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
     workerConds.push(`(${parts.join(" OR ")})`);
   }
 
-  // Contact-own fallback (for contacts with no worker link).
+  // Contact-own fallback (for contacts with no worker link). A wings-only filter
+  // (no explicit designation ids) still applies here via the shared EXISTS.
   const cGeo = geoParts("c", geo);
   const ownConds = [...cGeo.parts];
   const ownParams = [...cGeo.params];
-  if (designation_ids?.length) {
-    ownConds.push(`(c.designation_id IN (${designation_ids.map(() => "?").join(",")}) OR ${desExists.clause})`);
-    ownParams.push(...designation_ids, ...desExists.params);
+  if (desExists) {
+    const parts = [];
+    if (designation_ids?.length) {
+      parts.push(`c.designation_id IN (${designation_ids.map(() => "?").join(",")})`);
+      ownParams.push(...designation_ids);
+    }
+    parts.push(desExists.clause);
+    ownParams.push(...desExists.params);
+    ownConds.push(`(${parts.join(" OR ")})`);
   }
 
   if (workerConds.length === 0) return { where: "", params: [], needsWorkerJoin: false };

@@ -78,10 +78,21 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   // so this stays safe where the `enabled` column doesn't exist yet.
   const hasEnabled = (await query("SHOW COLUMNS FROM designations LIKE 'enabled'")).length > 0;
   const enabledClause = hasEnabled ? "AND (enabled = 1 OR enabled IS NULL)" : "";
+  // Wing is an optional column (feature-detected) so every query here stays safe on
+  // a DB where the Wings feature hasn't been provisioned yet.
+  const hasWing = (await query("SHOW COLUMNS FROM designations LIKE 'wing'")).length > 0;
+  const wingSelect = hasWing ? "wing" : "NULL AS wing";
   const levelDesignations = await query(
-    `SELECT id, name FROM designations WHERE level = ? ${enabledClause} ORDER BY (sort_order IS NULL), sort_order, name`,
+    `SELECT id, name, ${wingSelect} FROM designations WHERE level = ? ${enabledClause} ORDER BY (sort_order IS NULL), sort_order, name`,
     [level]
   );
+  // Optional wing filter: a set of stored wing names. When present, only
+  // designations belonging to one of those wings are kept (empty set of matches →
+  // no rows, never "all"). The wing list itself always comes from Master Data.
+  const wingFilter = Array.isArray(opts.wings)
+    ? opts.wings.map((w) => String(w || "").trim()).filter(Boolean)
+    : [];
+  const wingSet = wingFilter.length ? new Set(wingFilter) : null;
   // Collapse designations that render to the SAME name at this level into a single
   // vacancy column (case/whitespace-insensitive) so a location never shows the same
   // designation twice (e.g. a stray duplicate row in the master). The representative
@@ -89,17 +100,18 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   // and EVERY underlying id maps to its name so a position counts as occupied no
   // matter which duplicate designation id a person was actually assigned to.
   const normName = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
-  const repByNorm = new Map(); // normName -> representative { id, name } (first wins = best order)
+  const repByNorm = new Map(); // normName -> representative { id, name, wing } (first wins = best order)
   const idToNorm = new Map();  // every level designation id -> its normalized name
   for (const d of levelDesignations) {
     const nm = normName(d.name);
     idToNorm.set(d.id, nm);
-    if (!repByNorm.has(nm)) repByNorm.set(nm, { id: d.id, name: d.name });
+    if (!repByNorm.has(nm)) repByNorm.set(nm, { id: d.id, name: d.name, wing: d.wing || null });
   }
   const uniqueLevelDesignations = [...repByNorm.values()];
-  const designations = designationId
-    ? uniqueLevelDesignations.filter((d) => idToNorm.get(designationId) === normName(d.name))
-    : uniqueLevelDesignations;
+  const designations = uniqueLevelDesignations.filter((d) =>
+    (!designationId || idToNorm.get(designationId) === normName(d.name)) &&
+    (!wingSet || (d.wing && wingSet.has(d.wing)))
+  );
   const allowedNorms = new Set(designations.map((d) => normName(d.name)));
 
   // Every location of this level (State is a single pseudo-location). New master
@@ -173,6 +185,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
         location_name: loc.name,
         designation_id: d.id,
         designation_name: d.name,
+        designation_wing: d.wing || null,
         people,
         person_names: people.map((p) => p.person_name).join(", "),
         filled: people.length > 0,
@@ -197,6 +210,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
         photo_url: p.photo_url,
         designation_id: row.designation_id,
         designation_name: row.designation_name,
+        designation_wing: row.designation_wing || null,
         location_id: row.location_id,
         location_name: row.location_name,
       });

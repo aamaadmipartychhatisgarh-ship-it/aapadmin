@@ -28,6 +28,10 @@ export async function buildVacancyDataset(session, filters = {}) {
     assemblyId: asId(filters.assemblyId),
     blockId: asId(filters.blockId),
     designationId: asId(filters.designationId),
+    // Wing filter: a set of stored wing names (from Master Data / the wing dropdown).
+    wings: Array.isArray(filters.wings)
+      ? filters.wings.map((w) => String(w || "").trim()).filter(Boolean)
+      : String(filters.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
     status: ["filled", "vacant"].includes(filters.status) ? filters.status : "all",
     reminderStatus: ["sent", "pending", "failed"].includes(filters.reminderStatus) ? filters.reminderStatus : "all",
     responsibleId: asId(filters.responsibleId),
@@ -48,7 +52,7 @@ export async function buildVacancyDataset(session, filters = {}) {
     const data = await fetchIncompleteDesignation(session, { level, status: "all" });
     for (const d of data.level_designations) {
       const k = `${level}:${d.id}`;
-      if (!seenDes.has(k)) { seenDes.add(k); designationOptions.push({ id: d.id, name: d.name, level, level_label: LEVEL_LABEL[level] }); }
+      if (!seenDes.has(k)) { seenDes.add(k); designationOptions.push({ id: d.id, name: d.name, wing: d.wing || null, level, level_label: LEVEL_LABEL[level] }); }
     }
     for (const r of data.rows) {
       const anc = ancestryOf(index, level, r.location_id);
@@ -59,6 +63,7 @@ export async function buildVacancyDataset(session, filters = {}) {
         location_name: r.location_name,
         designation_id: r.designation_id,
         designation_name: r.designation_name,
+        designation_wing: r.designation_wing || null,
         filled: r.filled,
         person_names: r.person_names,
         ...anc,
@@ -73,6 +78,7 @@ export async function buildVacancyDataset(session, filters = {}) {
     if (f.assemblyId && r.assembly_id !== f.assemblyId) return false;
     if (f.blockId && r.block_id !== f.blockId) return false;
     if (f.designationId && r.designation_id !== f.designationId) return false;
+    if (f.wings.length && !(r.designation_wing && f.wings.includes(r.designation_wing))) return false;
     return true;
   });
 

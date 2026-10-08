@@ -46,6 +46,7 @@ export async function GET(req) {
     const district_id = searchParams.get("district_id");
     const assembly_ids = idList(searchParams.get("assembly_ids") || searchParams.get("assembly_id"));
     const designation_ids = idList(searchParams.get("designation_ids") || searchParams.get("designation_id"));
+    const wings = (searchParams.get("wings") || "").split(",").map((w) => w.trim()).filter(Boolean);
     const assigned_to = searchParams.get("assigned_to");
     const search = searchParams.get("search");
     const page = Math.max(1, parseInt(searchParams.get("page"), 10) || 1);
@@ -64,7 +65,7 @@ export async function GET(req) {
       where += await repeatOffExclusion("c");
       where += await notPendingClause("c");
     }
-    const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });
+    const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids, wings });
     where += person.where;
     params.push(...person.params);
     if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }

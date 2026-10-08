@@ -30,6 +30,7 @@ export async function GET(req) {
       assemblyId: searchParams.get("assembly_id"),
       blockId: searchParams.get("block_id"),
       designationId: searchParams.get("designation_id"),
+      wings: searchParams.get("wings"),
       status: searchParams.get("status"),
       reminderStatus: searchParams.get("reminder_status"),
       responsibleId: searchParams.get("responsible_id"),

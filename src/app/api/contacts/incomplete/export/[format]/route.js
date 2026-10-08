@@ -32,6 +32,7 @@ export async function GET(req, { params }) {
       level,
       designationId: parseInt(searchParams.get("designation_id"), 10),
       locationId: parseInt(searchParams.get("location_id"), 10),
+      wings: (searchParams.get("wings") || "").split(",").map((w) => w.trim()).filter(Boolean),
       status: searchParams.get("status"),
     });
 

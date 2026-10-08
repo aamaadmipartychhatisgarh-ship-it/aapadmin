@@ -29,6 +29,7 @@ export async function GET(req) {
       level,
       designationId: parseInt(searchParams.get("designation_id"), 10),
       locationId: parseInt(searchParams.get("location_id"), 10),
+      wings: (searchParams.get("wings") || "").split(",").map((w) => w.trim()).filter(Boolean),
       status: searchParams.get("status"),
       // Total-Assigned-Person drill-down (flattened, server-side paginated).
       view: searchParams.get("view"),

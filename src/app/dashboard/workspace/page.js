@@ -12,6 +12,7 @@ import ProfilePhoto from "@/components/ProfilePhoto";
 import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { AddContactModal } from "@/components/contacts/ContactsModule";
 import { MultiSelect } from "@/components/MultiSelect";
+import { wingShortLabel } from "@/lib/wingLabel";
 import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
 
@@ -102,6 +103,10 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [qDistrict, setQDistrict] = useState([]);
   const [qAssembly, setQAssembly] = useState([]);
   const [qDesignation, setQDesignation] = useState([]);
+  // Wing filter (multi-select, [] = All). Narrows the queue to contacts whose
+  // designation belongs to one of the selected wings — the wing list itself comes
+  // from Master Data (/api/wings), the single source of truth.
+  const [qWing, setQWing] = useState([]);
   // Call History filter (single-select): "" | blank | picked | not_picked | busy.
   // Filters the assigned list by the contact's COMPLETE past-call history.
   const [qCallHistory, setQCallHistory] = useState("");
@@ -125,6 +130,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [districts, setDistricts] = useState([]);
   const [assemblies, setAssemblies] = useState([]);
   const [designations, setDesignations] = useState([]);
+  const [wingOptions, setWingOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -199,6 +205,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     // /api/designations already returns rows in the Designation Master order
     // (sort_order); use it as-is — never re-sort by name/keyword on the client.
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    // Wing list comes from Master Data (/api/wings) — single source of truth.
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ id: w.name, name: wingShortLabel(w.name) })))).catch(() => {});
   }, []);
 
   // When a call is opened (Log Outcome becomes visible for a contact), pull the
@@ -306,6 +314,21 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     wantEditOnOpen.current = false;
   }, [active?.id]);
 
+  // Merge the explicit Designation filter with the Wing filter into one
+  // designation_id list: wings resolve to their member designations (via the
+  // Master Data mapping), unioned with any directly-picked designations. When a
+  // wing is selected but no designation belongs to it, return the "0" sentinel so
+  // the queue shows nothing (never fall back to "All"). "" = no designation/wing
+  // filter active.
+  function effectiveDesignationParam() {
+    const picked = qDesignation.map(String);
+    if (!qWing.length) return picked.length ? picked.join(",") : "";
+    const wingSet = new Set(qWing);
+    const wingIds = designations.filter((d) => d.wing && wingSet.has(d.wing)).map((d) => String(d.id));
+    const merged = [...new Set([...picked, ...wingIds])];
+    return merged.length ? merged.join(",") : "0";
+  }
+
   // `silent` skips the loading spinner — used by the background auto-refresh so
   // a supervisor/super-admin assignment appears (at the top, newest first)
   // without flicker or a manual reload.
@@ -316,7 +339,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     if (qLokSabha.length) params.set("lok_sabha_id", qLokSabha.join(","));
     if (qDistrict.length) params.set("district_id", qDistrict.join(","));
     if (qAssembly.length) params.set("assembly_id", qAssembly.join(","));
-    if (qDesignation.length) params.set("designation_id", qDesignation.join(","));
+    const desigParam = effectiveDesignationParam();
+    if (desigParam) params.set("designation_id", desigParam);
     if (qCallHistory) params.set("call_history", qCallHistory);
     const qs = params.toString();
     const r = await fetch(`/api/workspace/queue${qs ? `?${qs}` : ""}`);
@@ -343,7 +367,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     const t = setTimeout(() => loadQueue(), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qSearch, qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(","), qCallHistory]);
+  }, [qSearch, qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(","), qWing.join(","), qCallHistory]);
 
   // Cascade pruning: when a parent's selection changes, drop any child selection
   // that no longer belongs to a selected parent ([] parent = "All" → no pruning).
@@ -379,6 +403,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     if (Array.isArray(s.district) && s.district.length) setQDistrict(s.district);
     if (Array.isArray(s.assembly) && s.assembly.length) setQAssembly(s.assembly);
     if (Array.isArray(s.designation) && s.designation.length) setQDesignation(s.designation);
+    if (Array.isArray(s.wing) && s.wing.length) setQWing(s.wing);
     if (s.call_history) setQCallHistory(s.call_history);
     filtersHydrated.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -390,11 +415,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     try {
       window.localStorage.setItem(WS_FILTER_KEY, JSON.stringify({
         lok_sabha: qLokSabha, district: qDistrict, assembly: qAssembly,
-        designation: qDesignation, call_history: qCallHistory,
+        designation: qDesignation, wing: qWing, call_history: qCallHistory,
       }));
     } catch { /* ignore quota/private-mode */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(","), qCallHistory]);
+  }, [qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(","), qWing.join(","), qCallHistory]);
 
   function startActive(contact, startedAtMs = Date.now()) {
     setActive({ ...contact, started_at: startedAtMs });
@@ -412,7 +437,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       lok_sabha_id: qLokSabha.length ? qLokSabha.join(",") : undefined,
       district_id: qDistrict.length ? qDistrict.join(",") : undefined,
       assembly_id: qAssembly.length ? qAssembly.join(",") : undefined,
-      designation_id: qDesignation.length ? qDesignation.join(",") : undefined,
+      designation_id: effectiveDesignationParam() || undefined,
       call_history: qCallHistory || undefined,
     };
   }
@@ -798,6 +823,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               <MultiSelect options={districtOptions} value={qDistrict} onChange={setQDistrict} allLabel="All Districts" />
               <MultiSelect options={assemblyOptions} value={qAssembly} onChange={setQAssembly} allLabel="All Assemblies" />
               <MultiSelect options={designationOptions} value={qDesignation} onChange={setQDesignation} allLabel="All Designations" />
+              <MultiSelect options={wingOptions} value={qWing} onChange={setQWing} allLabel="All Wings" />
             </div>
             {/* Call History — filters the assigned list by the contact's complete
                 past-call history. "" shows all; Blank = never called. */}
@@ -818,7 +844,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
             <div className="text-gray-400 text-sm">Loading…</div>
           ) : queue.assigned.length === 0 ? (
             <div className="text-gray-400 text-sm">
-              {qSearch || qLokSabha.length || qDistrict.length || qAssembly.length || qDesignation.length || qCallHistory ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
+              {qSearch || qLokSabha.length || qDistrict.length || qAssembly.length || qDesignation.length || qWing.length || qCallHistory ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
             </div>
           ) : (
             <>

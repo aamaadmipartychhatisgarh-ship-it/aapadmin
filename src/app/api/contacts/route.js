@@ -74,6 +74,9 @@ export async function GET(req) {
     // list (assembly_ids / designation_ids) so several can be picked at once.
     const assembly_ids = idList(searchParams.get("assembly_ids") || searchParams.get("assembly_id"));
     const designation_ids = idList(searchParams.get("designation_ids") || searchParams.get("designation_id"));
+    // Wings filter — a comma-separated list of stored wing names (from Master Data).
+    // Resolved to their member designations in buildContactPersonFilter.
+    const wings = (searchParams.get("wings") || "").split(",").map((w) => w.trim()).filter(Boolean);
     const assigned_to = searchParams.get("assigned_to");
     const search = searchParams.get("search");
     // Pagination — bounded so a huge table returns one page, not everything.
@@ -109,7 +112,7 @@ export async function GET(req) {
     // Zone / Lok Sabha / District / Assembly / Designation — filter by the PERSON
     // (their linked worker) via the shared helper, so the same selection returns
     // the same people as the Add Workers page and the Distribution panel.
-    const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids });
+    const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids, wings });
     where += person.where;
     params.push(...person.params);
     if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }

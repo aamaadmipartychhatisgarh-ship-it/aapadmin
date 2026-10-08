@@ -8,6 +8,8 @@ import {
 } from "lucide-react";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
+import { MultiSelect } from "@/components/MultiSelect";
+import { wingShortLabel } from "@/lib/wingLabel";
 
 const BRAND = "#164FA3";
 
@@ -63,6 +65,8 @@ export default function VacanciesPage() {
   const [assemblyId, setAssemblyId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [designationId, setDesignationId] = useState("");
+  const [wingF, setWingF] = useState([]); // selected wing names ([] = All)
+  const [wingOptions, setWingOptions] = useState([]); // [{ id: wingName, name: shortLabel }]
   const [statusF, setStatusF] = useState(""); // '', filled, vacant
   const [reminderF, setReminderF] = useState("");
   const [responsibleF, setResponsibleF] = useState("");
@@ -80,6 +84,7 @@ export default function VacanciesPage() {
       if (assemblyId) p.set("assembly_id", assemblyId);
       if (blockId) p.set("block_id", blockId);
       if (designationId) p.set("designation_id", designationId);
+      if (wingF.length) p.set("wings", wingF.join(","));
       if (statusF) p.set("status", statusF);
       if (reminderF) p.set("reminder_status", reminderF);
       if (responsibleF) p.set("responsible_id", responsibleF);
@@ -92,9 +97,19 @@ export default function VacanciesPage() {
     } finally {
       setLoading(false);
     }
-  }, [canAccess, level, lokSabhaId, districtId, assemblyId, blockId, designationId, statusF, reminderF, responsibleF]);
+  }, [canAccess, level, lokSabhaId, districtId, assemblyId, blockId, designationId, wingF, statusF, reminderF, responsibleF]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Wing options come from Master Data (/api/wings) — the single source of truth.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/wings")
+      .then((r) => (r.ok ? r.json() : { wings: [] }))
+      .then((d) => { if (alive) setWingOptions((d.wings || []).map((w) => ({ id: w.name, name: wingShortLabel(w.name) }))); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // Cascading location option lists (filtered by the chosen parent).
   const locs = data?.filters?.locations || { lok_sabha: [], district: [], assembly: [], block: [] };
@@ -126,10 +141,10 @@ export default function VacanciesPage() {
     }
   }
 
-  const anyFilter = level || lokSabhaId || districtId || assemblyId || blockId || designationId || statusF || reminderF || responsibleF;
+  const anyFilter = level || lokSabhaId || districtId || assemblyId || blockId || designationId || wingF.length || statusF || reminderF || responsibleF;
   const clearFilters = () => {
     setLevel(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setBlockId("");
-    setDesignationId(""); setStatusF(""); setReminderF(""); setResponsibleF("");
+    setDesignationId(""); setWingF([]); setStatusF(""); setReminderF(""); setResponsibleF("");
   };
 
   if (authStatus === "loading" || (!isSuper && pagesLoading)) {
@@ -205,6 +220,7 @@ export default function VacanciesPage() {
             <option value="">All Designations</option>
             {(data?.filters?.designations || []).map((d) => <option key={d.level + d.id} value={d.id}>{d.name} · {d.level_label}</option>)}
           </select>
+          <MultiSelect options={wingOptions} value={wingF} onChange={setWingF} allLabel="All Wings" className="h-10" />
           <select className={selCls} value={statusF} onChange={(e) => setStatusF(e.target.value)}>
             <option value="">Filled &amp; Vacant</option>
             <option value="vacant">Vacant only</option>

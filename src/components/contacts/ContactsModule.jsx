@@ -7,6 +7,8 @@ import DesignationMultiSelect, { parseDesignationIdList } from "@/components/con
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
+import WingMultiSelect from "@/components/WingMultiSelect";
+import { wingShortLabel } from "@/lib/wingLabel";
 import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
 import { CONTACT_EXPORT_COLUMNS } from "@/lib/contactExportColumns";
 import PersonDetailModal from "@/components/PersonDetailModal";
@@ -93,6 +95,10 @@ export default function ContactsModule({ session, mode }) {
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [designationIds, setDesignationIds] = useState([]);
+  // Wings filter — options come from Master Data (/api/wings); selecting wing(s)
+  // narrows the list to contacts whose designation belongs to those wings.
+  const [wingOptions, setWingOptions] = useState([]); // [{value,label}]
+  const [wingSel, setWingSel] = useState(() => new Set());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE); // configurable (20/25/50/100)
   const [search, setSearch] = useState("");
@@ -202,11 +208,11 @@ export default function ContactsModule({ session, mode }) {
   }, []);
 
   // Reload the page of results whenever a filter or the page number changes.
-  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, page, pageSize, flagFilter, sortKey, sortDir]);
+  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, page, pageSize, flagFilter, sortKey, sortDir]);
   // Any filter change (not a page change) jumps back to page 1 and drops any
   // bulk selection — a selection made under one filter view shouldn't silently
   // carry over and get acted on under a different one.
-  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, assignedTo, search, flagFilter]);
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, search, flagFilter]);
   // A SORT change re-orders the whole set, so jump to page 1 — but KEEP the
   // selection (it's tracked by id and stays valid regardless of order/page).
   useEffect(() => { setPage(1); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sortKey, sortDir]);
@@ -223,6 +229,7 @@ export default function ContactsModule({ session, mode }) {
     // Super Admin Contacts page uses (reuses the identical /api/locations loader).
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) })))).catch(() => {});
     fetch(cfg.teamsUrl).then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -489,6 +496,10 @@ export default function ContactsModule({ session, mode }) {
     if (districtId) params.set("district_id", districtId);
     if (assemblyIds.length) params.set("assembly_ids", assemblyIds.join(","));
     if (designationIds.length) params.set("designation_ids", designationIds.join(","));
+    // Wings filter → the server resolves the selected wing NAMES to their member
+    // designations (designations.wing), unioned with any explicitly-picked
+    // designations above. A wing with no designations correctly matches nothing.
+    if (wingSel.size) params.set("wings", [...wingSel].join(","));
     if (assignedTo) params.set("assigned_to", assignedTo);
     // Count-card filter — the SAME flag the card's count is computed from, so the
     // filtered list matches the card total exactly (record-for-record).
@@ -882,6 +893,7 @@ export default function ContactsModule({ session, mode }) {
         <FilterMultiSelect
           label="designations" items={designations} selected={designationIds} onChange={setDesignationIds}
         />
+        <WingMultiSelect options={wingOptions} value={wingSel} onChange={setWingSel} placeholder="All wings" className="min-w-[160px]" />
         <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">Any caller</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
@@ -1703,6 +1715,9 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
   const [assemblies, setAssemblies] = useState([]);
   const [blocks, setBlocks] = useState([]);
   const [designations, setDesignations] = useState([]);
+  // Wings (from Master Data) narrow the Designation choices below.
+  const [wingOptions, setWingOptions] = useState([]);
+  const [wingSel, setWingSel] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   // Highlights the mobile field when the server rejects a duplicate number.
@@ -1722,6 +1737,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
 
   useEffect(() => {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) })))).catch(() => {});
   }, []);
 
   // ----- Location cascade (Zone → Lok Sabha → District → Assembly → Block) ----
@@ -1801,8 +1817,12 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
         <input className={`w-full border rounded-lg px-3 py-2 text-sm ${phoneDup ? "border-red-400 ring-1 ring-red-300 bg-red-50" : "border-gray-200"}`} placeholder="Phone number *" value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Wing <span className="text-gray-400 font-normal">(optional — narrows the designations)</span></label>
+          <WingMultiSelect options={wingOptions} value={wingSel} onChange={setWingSel} placeholder="All wings" />
+        </div>
+        <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">Designation(s)</label>
-          <DesignationMultiSelect options={designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
+          <DesignationMultiSelect options={wingSel.size ? designations.filter((d) => d.wing && wingSel.has(d.wing)) : designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
         </div>
         {/* Location hierarchy: Zone → Lok Sabha → District → Assembly → Block.
             Admin picks freely; a supervisor's territory-fixed levels are shown
