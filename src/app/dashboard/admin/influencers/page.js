@@ -344,30 +344,37 @@ export default function InfluencersPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
-                <th className="px-4 py-3 font-semibold">Assembly</th>
                 <th className="px-4 py-3 font-semibold">Influencer Name</th>
                 <th className="px-4 py-3 font-semibold">Mobile Number</th>
                 <th className="px-4 py-3 font-semibold">Party</th>
                 <th className="px-4 py-3 font-semibold">Joined By</th>
-                <th className="px-4 py-3 font-semibold">Designation</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400">
+                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400">
                   <Users size={30} className="mx-auto mb-2 opacity-40" />
                   No influencers found.
                 </td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-600">{r.assembly_name || "—"}</td>
+                  {/* Name + the influencer's OWN designation (organisational post,
+                      else political post) + assembly, shown together in one column —
+                      no separate Designation/Assembly columns. All read live from the
+                      influencer record, so an edit updates this immediately. */}
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Thumb src={r.photo_url} name={r.name} />
-                      <span>{r.name}</span>
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900">{r.name}</div>
+                        {(() => {
+                          const sub = [r.org_position || r.political_position, r.assembly_name].filter(Boolean).join(" – ");
+                          return sub ? <div className="text-xs text-gray-500">{sub}</div> : null;
+                        })()}
+                      </div>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{r.phone || "—"}</td>
@@ -384,10 +391,10 @@ export default function InfluencersPage() {
                       <div className="flex items-center gap-2.5 min-w-[180px]">
                         <Thumb src={r.joined_by_photo} name={r.joined_by_name || "?"} size={38} />
                         <div className="min-w-0">
-                          {/* Joined By = the linked person's NAME only; their
-                              designation is shown in the separate column alongside. */}
+                          {/* Joined By = the linked person's Name – Designation
+                              (their CURRENT saved designation, resolved live). */}
                           <div className="font-medium text-gray-900 text-sm">
-                            {r.joined_by_name || "—"}
+                            {r.joined_by_name || "—"}{r.joined_by_designation ? ` – ${r.joined_by_designation}` : ""}
                           </div>
                           {r.joined_by_mobile && (
                             <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">
@@ -405,12 +412,6 @@ export default function InfluencersPage() {
                         </div>
                       </div>
                     ) : <span className="text-gray-400">—</span>}
-                  </td>
-                  {/* Designation of the Joined By person (their CURRENT saved
-                      designation, resolved live). Only meaningful for a linked
-                      contact — the "Added by" creator fallback has no designation. */}
-                  <td className="px-4 py-3 text-gray-600">
-                    {(r.joined_by_name || r.joined_by_mobile) && r.joined_by_designation ? r.joined_by_designation : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
