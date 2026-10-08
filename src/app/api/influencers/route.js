@@ -206,7 +206,32 @@ export async function GET(req) {
       const photoExpr = workerMatch ? "COALESCE(jc.photo_url, jcw.photo_url, jw2.photo_url)" : "COALESCE(jc.photo_url, jcw.photo_url)";
       const mobileExpr = workerMatch ? "COALESCE(jc.phone_number, jw2.mobile, base.joined_by_phone)"
         : hasJbPhone ? "COALESCE(jc.phone_number, base.joined_by_phone)" : "jc.phone_number";
-      const desigExtra = workerMatch ? ", NULLIF(TRIM(jw2.position), '')" : "";
+      // Joined-By DESIGNATION — resolved LIVE with the SAME precedence the edit
+      // card uses (contact's own multi-designation set → linked worker's position
+      // → legacy single designation), computed for a given contact-id expression.
+      // We resolve it from BOTH the effective linked contact AND the phone-matched
+      // contact/worker, so an existing record whose stored contact link is bare
+      // (no designation) still shows the person's live designation found via the
+      // Joined-By phone — no recreation needed, and it tracks designation edits.
+      const desigFromContact = (idExpr) => `COALESCE(
+                  (SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
+                     FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
+                    WHERE cd.contact_id = ${idExpr}),
+                  (SELECT NULLIF(TRIM(w.position), '') FROM workers w
+                    WHERE w.id = (SELECT c.worker_id FROM contacts c WHERE c.id = ${idExpr})),
+                  (SELECT d.name FROM designations d
+                    WHERE d.id = (SELECT c.designation_id FROM contacts c WHERE c.id = ${idExpr})))`;
+      const workerPosByPhone = hasJbPhone
+        ? `(SELECT NULLIF(TRIM(w2.position), '') FROM workers w2
+              WHERE base.joined_by_phone IS NOT NULL
+                AND LENGTH(${digits("base.joined_by_phone")}) >= 10
+                AND RIGHT(${digits("w2.mobile")}, 10) = RIGHT(${digits("base.joined_by_phone")}, 10)
+              LIMIT 1)`
+        : "NULL";
+      const desigExpr = `COALESCE(
+                  ${desigFromContact(effId)},
+                  ${phoneMatch ? desigFromContact(phoneMatch) : "NULL"},
+                  ${workerPosByPhone})`;
       try {
       rows = await query(
         `SELECT base.*,
@@ -214,18 +239,12 @@ export async function GET(req) {
                 ${nameExpr} AS joined_by_name,
                 ${photoExpr} AS joined_by_photo,
                 ${mobileExpr} AS joined_by_mobile,
-                COALESCE(
-                  (SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
-                     FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
-                    WHERE cd.contact_id = jc.id),
-                  NULLIF(TRIM(jcw.position), ''),
-                  jdsg.name${desigExtra}) AS joined_by_designation
+                ${desigExpr} AS joined_by_designation
            FROM (
              SELECT influencers.* FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}
            ) base
            LEFT JOIN contacts jc ON jc.id = ${effId}
            LEFT JOIN workers jcw ON jcw.id = jc.worker_id
-           LEFT JOIN designations jdsg ON jdsg.id = jc.designation_id
            ${workerJoin}
           ORDER BY base.${orderBy}`,
         params
