@@ -166,94 +166,59 @@ export async function GET(req) {
          FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
-    let rows;
-    if (hasJbId || hasJbPhone) {
-      // Joined By resolves the EFFECTIVE contact: the stored link id, else a match
-      // on the saved phone number (last-10-digits, same normalization as the
-      // Contacts lookup) — so existing records that only stored the phone (or were
-      // saved before the link resolved) still show the person. The mobile always
-      // falls back to the saved joined_by_phone, so the number shows even when the
-      // person isn't in Contacts. Resolution runs only on the paged slice (a
-      // derived table LIMITed first), and the phone match runs only for rows with
-      // no link (COALESCE short-circuits) — never the influencer's own details.
-      const digits = (col) => `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},' ',''),'-',''),'+',''),'(',''),')',''),'.','')`;
-      const hasJbName = cols.has("joined_by_name");
-      // Resolve the Joined-By ids ONCE inside the paged derived table (flat scalar
-      // subqueries correlated to the influencers row), then join to them below with
-      // plain LEFT JOINs. This avoids deeply-nested correlated subqueries (which
-      // some MariaDB versions reject — the whole enrichment then fell back to the
-      // plain list and the designation came back blank). phone_cid / phone_wid match
-      // the saved Joined-By phone (last-10 digits) to a Contact / Worker.
-      const phoneCid = hasJbPhone
-        ? `(SELECT c2.id FROM contacts c2
-              WHERE influencers.joined_by_phone IS NOT NULL
-                AND LENGTH(${digits("influencers.joined_by_phone")}) >= 10
-                AND RIGHT(${digits("c2.phone_number")}, 10) = RIGHT(${digits("influencers.joined_by_phone")}, 10)
-              ORDER BY c2.id ASC LIMIT 1)`
-        : "NULL";
-      const phoneWid = hasJbPhone
-        ? `(SELECT w2.id FROM workers w2
-              WHERE influencers.joined_by_phone IS NOT NULL
-                AND LENGTH(${digits("influencers.joined_by_phone")}) >= 10
-                AND RIGHT(${digits("w2.mobile")}, 10) = RIGHT(${digits("influencers.joined_by_phone")}, 10)
-              LIMIT 1)`
-        : "NULL";
-      // Effective linked contact = the stored link id, else the phone-matched one.
-      const effCid = (hasJbId && hasJbPhone) ? `COALESCE(influencers.joined_by_contact_id, ${phoneCid})`
-        : hasJbId ? "influencers.joined_by_contact_id"
-        : phoneCid;
-      // Designation of one joined contact alias (its own multi-designation set →
-      // linked worker's position → legacy single designation) — one level of
-      // subquery, correlated to a concrete join alias (never nested).
-      const desigOf = (cAlias, wAlias) => `COALESCE(
-                  (SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
-                     FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
-                    WHERE cd.contact_id = ${cAlias}.id),
-                  NULLIF(TRIM(${wAlias}.position), ''),
-                  (SELECT d.name FROM designations d WHERE d.id = ${cAlias}.designation_id))`;
-      const nameExpr = `COALESCE(jc.person_name, jpc.person_name${hasJbPhone ? ", jw2.name" : ""}${hasJbName ? ", base.joined_by_name" : ""})`;
-      const photoExpr = `COALESCE(jc.photo_url, jcw.photo_url, jpc.photo_url, jpcw.photo_url${hasJbPhone ? ", jw2.photo_url" : ""})`;
-      const mobileExpr = `COALESCE(jc.phone_number, jpc.phone_number${hasJbPhone ? ", jw2.mobile" : ""}${hasJbPhone ? ", base.joined_by_phone" : ""})`;
-      // Designation from the effective linked contact, else the phone-matched
-      // contact, else the phone-matched worker's position — so a record whose
-      // stored contact link is bare still shows the person's live designation.
-      const desigExpr = `COALESCE(
-                  ${desigOf("jc", "jcw")},
-                  ${desigOf("jpc", "jpcw")}${hasJbPhone ? `,
-                  NULLIF(TRIM(jw2.position), '')` : ""})`;
-      try {
-      rows = await query(
-        `SELECT base.*,
-                (SELECT username FROM users u WHERE u.id = base.created_by) AS created_by_name,
-                ${nameExpr} AS joined_by_name,
-                ${photoExpr} AS joined_by_photo,
-                ${mobileExpr} AS joined_by_mobile,
-                ${desigExpr} AS joined_by_designation
-           FROM (
-             SELECT influencers.*,
-                    ${effCid} AS eff_cid,
-                    ${phoneCid} AS phone_cid,
-                    ${phoneWid} AS phone_wid
-               FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}
-           ) base
-           LEFT JOIN contacts jc ON jc.id = base.eff_cid
-           LEFT JOIN workers jcw ON jcw.id = jc.worker_id
-           LEFT JOIN contacts jpc ON jpc.id = base.phone_cid
-           LEFT JOIN workers jpcw ON jpcw.id = jpc.worker_id
-           ${hasJbPhone ? "LEFT JOIN workers jw2 ON jw2.id = base.phone_wid" : ""}
-          ORDER BY base.${orderBy}`,
-        params
-      );
-      } catch (e) {
-        // The enrichment query touches several other tables/columns (contacts,
-        // workers, contact_designations, designations). If any is missing or
-        // incompatible on this deployment, fall back to the plain list so the page
-        // still loads — the real cause is logged for a proper fix.
-        console.error("[influencer] Joined-By enrichment failed, falling back to plain list:", e?.sqlMessage || e?.message || e);
-        rows = await simpleList();
+    const rows = await simpleList();
+    // Resolve Joined By LIVE in JS using the SAME proven resolvers the edit card
+    // uses (resolveContactCard by the stored link id, else resolveContactByPhone by
+    // the saved number) — both return designation_name = the contact's own
+    // designations → linked worker's position → legacy single designation, exactly
+    // what the edit form shows. The earlier SQL-join version was fragile across
+    // MariaDB versions and silently fell back to the plain list, leaving the
+    // designation blank. Only the paged slice is resolved, and only rows that have
+    // a Joined By link/phone hit the DB (one or two small lookups each).
+    const digitsJs = (v) => String(v ?? "").replace(/\D/g, "");
+    for (const r of rows) {
+      let card = null;
+      // 1) The stored contact link (authoritative when present).
+      if (r.joined_by_contact_id) {
+        try { card = await resolveContactCard(r.joined_by_contact_id); } catch { card = null; }
       }
-    } else {
-      rows = await simpleList();
+      // 2) The saved phone (last-10 match) — used when there is no link, or the
+      //    linked contact is bare (no designation) but the phone resolves a richer
+      //    Contact. This is exactly what the edit card does.
+      if ((!card || !card.designation_name) && digitsJs(r.joined_by_phone).length >= 10) {
+        let byPhone = null;
+        try { byPhone = await resolveContactByPhone(r.joined_by_phone); } catch { byPhone = null; }
+        if (byPhone && (byPhone.designation_name || !card)) card = byPhone;
+      }
+      // 3) Worker-only people (no Contact row) — resolve name/position by phone.
+      let worker = null;
+      if ((!card || !card.designation_name) && digitsJs(r.joined_by_phone).length >= 10) {
+        const ten = digitsJs(r.joined_by_phone).slice(-10);
+        try {
+          const [w] = await query(
+            `SELECT name, mobile, photo_url, position FROM workers
+              WHERE RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,' ',''),'-',''),'+',''),'(',''),')',''),'.','') , 10) = ? LIMIT 1`,
+            [ten]
+          );
+          worker = w || null;
+        } catch { worker = null; }
+      }
+      if (card) {
+        r.joined_by_name = card.person_name || r.joined_by_name || null;
+        r.joined_by_photo = card.photo_url || null;
+        r.joined_by_mobile = card.phone_number || r.joined_by_phone || null;
+        r.joined_by_designation = card.designation_name || (worker ? (String(worker.position || "").trim() || null) : null);
+        r.joined_by_assembly = card.assembly_name || null;
+      } else if (worker) {
+        r.joined_by_name = worker.name || r.joined_by_name || null;
+        r.joined_by_photo = worker.photo_url || null;
+        r.joined_by_mobile = worker.mobile || r.joined_by_phone || null;
+        r.joined_by_designation = String(worker.position || "").trim() || null;
+      } else {
+        // No linked person resolved — keep the stored name, show the saved phone.
+        r.joined_by_mobile = r.joined_by_phone || null;
+        r.joined_by_designation = null;
+      }
     }
     const influencers = rows.map(shape);
 

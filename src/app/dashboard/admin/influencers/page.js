@@ -361,17 +361,18 @@ export default function InfluencersPage() {
                 </td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  {/* Name + the Joined By person's designation (resolved live from
-                      their Contact/Worker) + the influencer's assembly, shown together
-                      in one column — no separate Designation/Assembly columns. Read
-                      live each load, so edits update it immediately. */}
+                  {/* Name + the Joined By person's designation and assembly (resolved
+                      live from their Contact/Worker), shown together in one column —
+                      no separate Designation/Assembly columns. Falls back to the
+                      influencer's own assembly when the Joined By person has none.
+                      Read live each load, so edits update it immediately. */}
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Thumb src={r.photo_url} name={r.name} />
                       <div className="min-w-0">
                         <div className="font-medium text-gray-900">{r.name}</div>
                         {(() => {
-                          const sub = [r.joined_by_designation, r.assembly_name].filter(Boolean).join(" – ");
+                          const sub = [r.joined_by_designation, r.joined_by_assembly || r.assembly_name].filter(Boolean).join(" – ");
                           return sub ? <div className="text-xs text-gray-500">{sub}</div> : null;
                         })()}
                       </div>
