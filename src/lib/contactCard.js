@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { WINGS_SQL, ensureContactWingsSchema } from "@/lib/contactWings";
 
 // Resolve ONE contact into the exact shape the Contacts list renders — every
 // derived display field (zone / lok sabha / district / assembly / block names,
@@ -9,9 +10,11 @@ import { DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesigna
 // This is the SINGLE source of truth every role reads, so Super Admin /
 // Supervisor / Caller all see the identical updated data (no per-role copies).
 export async function resolveContactCard(id) {
+  await ensureContactWingsSchema();
   const rows = await query(
     `SELECT c.*,
             u.username AS assigned_to_username,
+            ${WINGS_SQL} AS wings,
             ld.name AS district_name,
             lw.name AS ward_name,
             COALESCE(cz.name, lz.name) AS zone_name,

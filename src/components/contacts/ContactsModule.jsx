@@ -1066,6 +1066,7 @@ export default function ContactsModule({ session, mode }) {
                 {sortTh("Name", "name")}
                 {sortTh("Phone Number", "phone")}
                 {sortTh("Designation", "designation")}
+                <th className="px-4 py-3 font-semibold text-gray-600">Wings</th>
                 {sortTh("Zone", "zone")}
                 {sortTh("Lok Sabha", "lok_sabha")}
                 {sortTh("District", "district")}
@@ -1111,6 +1112,16 @@ export default function ContactsModule({ session, mode }) {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{c.designation_name || "—"}</td>
+                  {/* Wings — the contact's saved wing tags, shown as short-label chips. */}
+                  <td className="px-4 py-3 text-gray-600">
+                    {c.wings ? (
+                      <div className="flex flex-wrap gap-1 min-w-[90px]">
+                        {String(c.wings).split(",").map((w) => w.trim()).filter(Boolean).map((w) => (
+                          <span key={w} className="inline-block bg-[#164FA3]/10 text-[#164FA3] rounded-full px-2 py-0.5 text-[11px] font-semibold">{wingShortLabel(w)}</span>
+                        ))}
+                      </div>
+                    ) : "—"}
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{c.zone_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.lok_sabha_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.district_name || "—"}</td>
@@ -1447,6 +1458,10 @@ function contactToForm(contact, canEditGeo) {
     address: contact.address || "",
     // Multi-designation (PROMPT 5): preload every currently-assigned designation.
     designation_ids: parseDesignationIdList(contact.designation_ids ?? contact.designation_id),
+    // Wings (saved tags) — preload the contact's currently-saved wings so they load
+    // automatically and stay checked until the user changes them. Stored as an array
+    // of Master-Data wing names (the CSV the API returns, split back out).
+    wings: String(contact.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
     photo_url: contact.photo_url || "",
   };
   if (!canEditGeo) return base;
@@ -1473,6 +1488,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
   const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
+  const [wingOptions, setWingOptions] = useState([]); // [{value,label}] from Master Data
   const [assemblies, setAssemblies] = useState([]);
   const [wards, setWards] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -1537,6 +1553,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
   // value shows; changing an upper level refetches and clears the lower ones.
   useEffect(() => {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) })))).catch(() => {});
     if (!canEditGeo) return;
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1567,6 +1584,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
       phone_number: form.phone_number,
       address: form.address,
       designation_ids: form.designation_ids || [], // full multi-designation set
+      wings: form.wings || [], // full wing-tag set (add/remove keeps the rest)
       photo_url: form.photo_url || null,
       ...(canEditGeo ? {
         zone_id: form.zone_id || null,
@@ -1628,9 +1646,19 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
         <input className={inp} placeholder="Person name *" value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} />
         <input className={inp} placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
         <input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+        {/* Wings — saved tags from Master Data → Designation → Wing. Placed BEFORE
+            the Designation field; pre-loaded from the contact and editable. */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Wings</label>
+          <WingMultiSelect options={wingOptions} value={form.wings} onChange={(set) => setForm({ ...form, wings: [...set] })} placeholder="Select wings…" />
+        </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">Designation(s)</label>
-          <DesignationMultiSelect options={designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
+          <DesignationMultiSelect
+            options={(form.wings?.length
+              ? designations.filter((d) => (d.wing && form.wings.includes(d.wing)) || (form.designation_ids || []).map(String).includes(String(d.id)))
+              : designations)}
+            value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
         </div>
         {/* Location hierarchy — same field set, order and dependent cascade as
             Add Contact (Zone → Lok Sabha → District → Assembly → Block). Admins
@@ -1778,7 +1806,8 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
     const r = await fetch(addUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      // Save the selected Wings (Master-Data names) alongside the contact fields.
+      body: JSON.stringify({ ...form, wings: [...wingSel] }),
     });
     const data = await r.json().catch(() => ({}));
     // On any error the modal stays open with every field intact so the user can

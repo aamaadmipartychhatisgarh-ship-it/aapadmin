@@ -11,6 +11,7 @@ import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, 
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { ensureContactWingsSchema, syncContactWings, WINGS_SQL } from "@/lib/contactWings";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 
@@ -62,6 +63,7 @@ export async function GET(req) {
     }
     // The multi-designation join table must exist before the list query reads it.
     await ensureContactDesignationsSchema();
+    await ensureContactWingsSchema();
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
@@ -257,6 +259,9 @@ export async function GET(req) {
               -- legacy designation. designation_ids (CSV) preloads the edit form.
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
+              -- The contact's Wings (saved tags, Master-Data names) as a CSV, for
+              -- the list display and to preload the edit form's Wings dropdown.
+              ${WINGS_SQL} AS wings,
               ${submittedBySql}
               -- Resolve the photo EXACTLY like the has_photo count condition:
               -- NULLIF(TRIM(...)) so an empty-string c.photo_url falls back to the
@@ -365,6 +370,8 @@ export async function POST(req) {
     }
     // Save the full designation set against the new contact.
     await syncContactDesignations(newId, designationIds);
+    // Save the selected Wings (Master-Data names) against the new contact.
+    await syncContactWings(newId, data.wings);
     return NextResponse.json({ id: newId }, { status: 201 });
   } catch (err) {
     return contactWriteError(err, "contacts POST");

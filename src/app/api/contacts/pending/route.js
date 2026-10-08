@@ -7,6 +7,7 @@ import { pendingContactScope } from "@/lib/pendingContactScope";
 import { query } from "@/lib/db";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds } from "@/lib/contactDesignations";
+import { syncContactWings } from "@/lib/contactWings";
 import { ensureContactApprovalColumns, findRejectedContactByPhone } from "@/lib/contactExtras";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { logAudit } from "@/lib/audit";
@@ -84,6 +85,7 @@ export async function POST(req) {
       id = res.insertId;
     }
     await syncContactDesignations(id, designationIds);
+    await syncContactWings(id, data.wings);
     logAudit(session, { action: "contact.pending.create", entityType: "contact", entityId: id, details: { person_name: desired.person_name, phone_number: desired.phone_number, revived_rejected: !!rejectedId } });
     return NextResponse.json({ id, status: "pending", revived: !!rejectedId }, { status: 201, headers: NO_STORE });
   } catch (err) {

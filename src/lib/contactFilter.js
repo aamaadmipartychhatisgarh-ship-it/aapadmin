@@ -69,28 +69,36 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
 
   // A contact matches the designation/wing filter if ANY of its OWN designations
   // (the multi-value contact_designations join, PROMPT 5) is a selected designation
-  // OR belongs to a selected wing — this covers both legacy single-designation
-  // contacts (backfilled into the join) and new multi-designation ones, on either
-  // the worker or the own branch. Wings resolve to their member designations via
-  // designations.wing (the Master Data mapping), so a wing with no designations
-  // correctly matches nothing (never "all").
+  // OR belongs to a selected wing, OR the contact carries the selected wing as a
+  // SAVED tag (contact_wings). This covers legacy single-designation contacts
+  // (backfilled into the join), new multi-designation ones, and contacts tagged
+  // with a wing directly — on either the worker or the own branch. A wing with no
+  // matching designations/tags correctly matches nothing (never "all").
   const desExists = (designation_ids?.length || wingList.length)
     ? (() => {
-        const subs = [];
+        const clauses = [];
         const params = [];
+        // Designation-based match (explicit ids and/or wing-of-designation).
+        const subs = [];
+        const subParams = [];
         if (designation_ids?.length) {
           subs.push(`cd.designation_id IN (${designation_ids.map(() => "?").join(",")})`);
-          params.push(...designation_ids);
+          subParams.push(...designation_ids);
         }
         if (wingList.length) {
           subs.push(`dw.wing IN (${wingList.map(() => "?").join(",")})`);
-          params.push(...wingList);
+          subParams.push(...wingList);
         }
         const join = wingList.length ? "JOIN designations dw ON dw.id = cd.designation_id" : "";
-        return {
-          clause: `EXISTS (SELECT 1 FROM contact_designations cd ${join} WHERE cd.contact_id = c.id AND (${subs.join(" OR ")}))`,
-          params,
-        };
+        clauses.push(`EXISTS (SELECT 1 FROM contact_designations cd ${join} WHERE cd.contact_id = c.id AND (${subs.join(" OR ")}))`);
+        params.push(...subParams);
+        // Saved wing-tag match (contact_wings), so a contact tagged with the wing
+        // is found even if none of its designations belong to that wing.
+        if (wingList.length) {
+          clauses.push(`EXISTS (SELECT 1 FROM contact_wings cwf WHERE cwf.contact_id = c.id AND cwf.wing IN (${wingList.map(() => "?").join(",")}))`);
+          params.push(...wingList);
+        }
+        return { clause: `(${clauses.join(" OR ")})`, params };
       })()
     : null;
 

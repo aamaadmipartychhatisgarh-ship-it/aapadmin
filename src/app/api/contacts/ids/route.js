@@ -5,6 +5,7 @@ import { scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
+import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
@@ -43,6 +44,7 @@ export async function GET(req) {
     const assigned_to = searchParams.get("assigned_to");
     const search = searchParams.get("search");
 
+    if (wings.length) await ensureContactWingsSchema();
     let where = " WHERE 1=1";
     const params = [];
     const statusCond = statusWhere(status);

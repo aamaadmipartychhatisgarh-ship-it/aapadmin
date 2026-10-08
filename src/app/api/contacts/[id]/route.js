@@ -13,6 +13,7 @@ import { isContactNotInterested } from "@/lib/contactExtras";
 import { isContactRepeatOff } from "@/lib/repeatOff";
 import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
+import { syncContactWings } from "@/lib/contactWings";
 
 // GET /api/contacts/[id] — fetch ONE contact by its unique database id, with the
 // same resolved fields the workspace edit form needs (ward/district names +
@@ -260,6 +261,9 @@ export async function PUT(req, { params }) {
 
     // Sync the full designation set (add/remove keeps the rest; empty clears).
     if (designationIds !== null) await syncContactDesignations(id, designationIds);
+    // Sync the selected Wings (Master-Data names). Present → full replace (add or
+    // remove keeps the rest; empty array clears). Absent → wings left untouched.
+    if ("wings" in data) await syncContactWings(id, data.wings);
 
     if (isAdminTier && "assigned_to_user_id" in data && data.assigned_to_user_id) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });

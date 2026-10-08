@@ -12,6 +12,7 @@ import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, 
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { ensureContactWingsSchema, syncContactWings, WINGS_SQL } from "@/lib/contactWings";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 
@@ -36,6 +37,7 @@ export async function GET(req) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     await ensureContactDesignationsSchema();
+    await ensureContactWingsSchema();
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
@@ -174,6 +176,7 @@ export async function GET(req) {
               la.name AS assembly_name,
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
+              ${WINGS_SQL} AS wings,
               -- Resolve the photo EXACTLY like the has_photo count condition
               -- (NULLIF(TRIM(...))), so an empty-string c.photo_url falls back to
               -- the worker photo instead of returning '' — otherwise a contact
@@ -339,6 +342,7 @@ export async function POST(req) {
       vals
     );
     await syncContactDesignations(res.insertId, designationIds);
+    await syncContactWings(res.insertId, data.wings);
     await logAudit(session, { action: "contact.create", entityType: "contact", entityId: res.insertId, details: { supervisor: true, territory: territory?.level || null } });
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {

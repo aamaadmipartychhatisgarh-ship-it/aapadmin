@@ -5,6 +5,8 @@ import { X, Phone, MapPin, Activity, Users as UsersIcon, User, Pencil, Loader2, 
 import { initialsOf } from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
+import WingMultiSelect from "@/components/WingMultiSelect";
+import { wingShortLabel } from "@/lib/wingLabel";
 
 // Popup shown when a user clicks a person's name or photo in a list/table.
 //   type="contact" data={rowObject}  — a Contacts row. This mode is a full
@@ -150,6 +152,11 @@ function ContactView({ contact: c }) {
     <div className="p-5 grid grid-cols-2 gap-x-4 gap-y-3.5">
       <MiniDetail icon={Phone} label="Phone">{c?.phone_number || "—"}</MiniDetail>
       <MiniDetail icon={Award} label="Designation">{c?.designation_name || "—"}</MiniDetail>
+      <MiniDetail icon={Award} label="Wings">
+        {c?.wings
+          ? String(c.wings).split(",").map((w) => w.trim()).filter(Boolean).map((w) => wingShortLabel(w)).join(", ")
+          : "—"}
+      </MiniDetail>
       <MiniDetail icon={MapPin} label="Zone">{c?.zone_name || "—"}</MiniDetail>
       <MiniDetail icon={MapPin} label="Lok Sabha">{c?.lok_sabha_name || "—"}</MiniDetail>
       <MiniDetail icon={MapPin} label="Assembly">{c?.assembly_name || "—"}</MiniDetail>
@@ -175,6 +182,8 @@ const emptyForm = (c, canEditGeo) => ({
   person_name: c?.person_name || "",
   phone_number: c?.phone_number || "",
   designation_ids: parseDesignationIdList(c?.designation_ids ?? c?.designation_id),
+  // Saved wing tags (Master-Data names) — preloaded so they load automatically.
+  wings: String(c?.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
   address: c?.address || "",
   remarks: c?.remarks || "",
   assigned_to_user_id: c?.assigned_to_user_id || "",
@@ -200,7 +209,11 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
   const [districts, setDistricts] = useState([]);
   const [assemblies, setAssemblies] = useState([]);
   const [blocks, setBlocks] = useState([]);
+  const [wingOptions, setWingOptions] = useState([]); // [{value,label}] from Master Data
 
+  useEffect(() => {
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) })))).catch(() => {});
+  }, []);
   useEffect(() => {
     if (!canEditGeo) return;
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
@@ -238,6 +251,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       person_name: form.person_name.trim(),
       phone_number: form.phone_number.trim(),
       designation_ids: form.designation_ids || [],
+      wings: form.wings || [],
       address: form.address,
       remarks: form.remarks,
       assigned_to_user_id: form.assigned_to_user_id || null,
@@ -272,6 +286,8 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       const asm = assemblies.find((x) => String(x.id) === String(form.assembly_id));
       const merged = {
         ...contact, ...body,
+        // Keep wings in the CSV shape the view/list read (body carries an array).
+        wings: (form.wings || []).join(", "),
         designation_name: desigNames || null,
         assigned_to_username: caller?.username || null,
         ...(canEditGeo ? {
@@ -302,8 +318,16 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         <Field label="Mobile Number *"><input className={phoneDup ? `${inp} border-red-400 ring-1 ring-red-300 bg-red-50` : inp} value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} /></Field>
         {/* Address follows Phone, matching the Add Contact field order. */}
         <Field label="Address" full><input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
+        {/* Wings — saved tags from Master Data, placed BEFORE Designation. */}
+        <Field label="Wings" full>
+          <WingMultiSelect options={wingOptions} value={form.wings} onChange={(set) => setForm({ ...form, wings: [...set] })} placeholder="Select wings…" />
+        </Field>
         <Field label="Designation(s)" full>
-          <DesignationMultiSelect options={designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
+          <DesignationMultiSelect
+            options={(form.wings?.length
+              ? designations.filter((d) => (d.wing && form.wings.includes(d.wing)) || (form.designation_ids || []).map(String).includes(String(d.id)))
+              : designations)}
+            value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
         </Field>
         {canEditGeo && (
           <>
