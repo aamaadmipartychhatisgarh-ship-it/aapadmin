@@ -177,61 +177,50 @@ export async function GET(req) {
       // derived table LIMITed first), and the phone match runs only for rows with
       // no link (COALESCE short-circuits) — never the influencer's own details.
       const digits = (col) => `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},' ',''),'-',''),'+',''),'(',''),')',''),'.','')`;
-      const phoneMatch = hasJbPhone
-        ? `(SELECT c2.id FROM contacts c2
-              WHERE base.joined_by_phone IS NOT NULL
-                AND LENGTH(${digits("base.joined_by_phone")}) >= 10
-                AND RIGHT(${digits("c2.phone_number")}, 10) = RIGHT(${digits("base.joined_by_phone")}, 10)
-              ORDER BY c2.id ASC
-              LIMIT 1)`
-        : null;
-      const effId = hasJbId && phoneMatch ? `COALESCE(base.joined_by_contact_id, ${phoneMatch})`
-        : hasJbId ? "base.joined_by_contact_id"
-        : phoneMatch;
-      // Secondary profile source: if the linked number matches no Contact, resolve it
-      // against a Worker (name / mobile / photo / position). The subquery is guarded
-      // by `jc.id IS NULL` so it only runs for rows without a contact match, and
-      // returns a single id so it can never duplicate a row. Contact stays the
-      // authoritative primary; Worker is the fallback.
-      const workerMatch = hasJbPhone
-        ? `(SELECT w2.id FROM workers w2
-              WHERE base.joined_by_phone IS NOT NULL
-                AND LENGTH(${digits("base.joined_by_phone")}) >= 10
-                AND RIGHT(${digits("w2.mobile")}, 10) = RIGHT(${digits("base.joined_by_phone")}, 10)
-              LIMIT 1)`
-        : null;
-      const workerJoin = workerMatch ? `LEFT JOIN workers jw2 ON jc.id IS NULL AND jw2.id = ${workerMatch}` : "";
       const hasJbName = cols.has("joined_by_name");
-      const nameExpr = `COALESCE(jc.person_name${workerMatch ? ", jw2.name" : ""}${hasJbName ? ", base.joined_by_name" : ""})`;
-      const photoExpr = workerMatch ? "COALESCE(jc.photo_url, jcw.photo_url, jw2.photo_url)" : "COALESCE(jc.photo_url, jcw.photo_url)";
-      const mobileExpr = workerMatch ? "COALESCE(jc.phone_number, jw2.mobile, base.joined_by_phone)"
-        : hasJbPhone ? "COALESCE(jc.phone_number, base.joined_by_phone)" : "jc.phone_number";
-      // Joined-By DESIGNATION — resolved LIVE with the SAME precedence the edit
-      // card uses (contact's own multi-designation set → linked worker's position
-      // → legacy single designation), computed for a given contact-id expression.
-      // We resolve it from BOTH the effective linked contact AND the phone-matched
-      // contact/worker, so an existing record whose stored contact link is bare
-      // (no designation) still shows the person's live designation found via the
-      // Joined-By phone — no recreation needed, and it tracks designation edits.
-      const desigFromContact = (idExpr) => `COALESCE(
-                  (SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
-                     FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
-                    WHERE cd.contact_id = ${idExpr}),
-                  (SELECT NULLIF(TRIM(w.position), '') FROM workers w
-                    WHERE w.id = (SELECT c.worker_id FROM contacts c WHERE c.id = ${idExpr})),
-                  (SELECT d.name FROM designations d
-                    WHERE d.id = (SELECT c.designation_id FROM contacts c WHERE c.id = ${idExpr})))`;
-      const workerPosByPhone = hasJbPhone
-        ? `(SELECT NULLIF(TRIM(w2.position), '') FROM workers w2
-              WHERE base.joined_by_phone IS NOT NULL
-                AND LENGTH(${digits("base.joined_by_phone")}) >= 10
-                AND RIGHT(${digits("w2.mobile")}, 10) = RIGHT(${digits("base.joined_by_phone")}, 10)
+      // Resolve the Joined-By ids ONCE inside the paged derived table (flat scalar
+      // subqueries correlated to the influencers row), then join to them below with
+      // plain LEFT JOINs. This avoids deeply-nested correlated subqueries (which
+      // some MariaDB versions reject — the whole enrichment then fell back to the
+      // plain list and the designation came back blank). phone_cid / phone_wid match
+      // the saved Joined-By phone (last-10 digits) to a Contact / Worker.
+      const phoneCid = hasJbPhone
+        ? `(SELECT c2.id FROM contacts c2
+              WHERE influencers.joined_by_phone IS NOT NULL
+                AND LENGTH(${digits("influencers.joined_by_phone")}) >= 10
+                AND RIGHT(${digits("c2.phone_number")}, 10) = RIGHT(${digits("influencers.joined_by_phone")}, 10)
+              ORDER BY c2.id ASC LIMIT 1)`
+        : "NULL";
+      const phoneWid = hasJbPhone
+        ? `(SELECT w2.id FROM workers w2
+              WHERE influencers.joined_by_phone IS NOT NULL
+                AND LENGTH(${digits("influencers.joined_by_phone")}) >= 10
+                AND RIGHT(${digits("w2.mobile")}, 10) = RIGHT(${digits("influencers.joined_by_phone")}, 10)
               LIMIT 1)`
         : "NULL";
+      // Effective linked contact = the stored link id, else the phone-matched one.
+      const effCid = (hasJbId && hasJbPhone) ? `COALESCE(influencers.joined_by_contact_id, ${phoneCid})`
+        : hasJbId ? "influencers.joined_by_contact_id"
+        : phoneCid;
+      // Designation of one joined contact alias (its own multi-designation set →
+      // linked worker's position → legacy single designation) — one level of
+      // subquery, correlated to a concrete join alias (never nested).
+      const desigOf = (cAlias, wAlias) => `COALESCE(
+                  (SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
+                     FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
+                    WHERE cd.contact_id = ${cAlias}.id),
+                  NULLIF(TRIM(${wAlias}.position), ''),
+                  (SELECT d.name FROM designations d WHERE d.id = ${cAlias}.designation_id))`;
+      const nameExpr = `COALESCE(jc.person_name, jpc.person_name${hasJbPhone ? ", jw2.name" : ""}${hasJbName ? ", base.joined_by_name" : ""})`;
+      const photoExpr = `COALESCE(jc.photo_url, jcw.photo_url, jpc.photo_url, jpcw.photo_url${hasJbPhone ? ", jw2.photo_url" : ""})`;
+      const mobileExpr = `COALESCE(jc.phone_number, jpc.phone_number${hasJbPhone ? ", jw2.mobile" : ""}${hasJbPhone ? ", base.joined_by_phone" : ""})`;
+      // Designation from the effective linked contact, else the phone-matched
+      // contact, else the phone-matched worker's position — so a record whose
+      // stored contact link is bare still shows the person's live designation.
       const desigExpr = `COALESCE(
-                  ${desigFromContact(effId)},
-                  ${phoneMatch ? desigFromContact(phoneMatch) : "NULL"},
-                  ${workerPosByPhone})`;
+                  ${desigOf("jc", "jcw")},
+                  ${desigOf("jpc", "jpcw")}${hasJbPhone ? `,
+                  NULLIF(TRIM(jw2.position), '')` : ""})`;
       try {
       rows = await query(
         `SELECT base.*,
@@ -241,11 +230,17 @@ export async function GET(req) {
                 ${mobileExpr} AS joined_by_mobile,
                 ${desigExpr} AS joined_by_designation
            FROM (
-             SELECT influencers.* FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}
+             SELECT influencers.*,
+                    ${effCid} AS eff_cid,
+                    ${phoneCid} AS phone_cid,
+                    ${phoneWid} AS phone_wid
+               FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}
            ) base
-           LEFT JOIN contacts jc ON jc.id = ${effId}
+           LEFT JOIN contacts jc ON jc.id = base.eff_cid
            LEFT JOIN workers jcw ON jcw.id = jc.worker_id
-           ${workerJoin}
+           LEFT JOIN contacts jpc ON jpc.id = base.phone_cid
+           LEFT JOIN workers jpcw ON jpcw.id = jpc.worker_id
+           ${hasJbPhone ? "LEFT JOIN workers jw2 ON jw2.id = base.phone_wid" : ""}
           ORDER BY base.${orderBy}`,
         params
       );
