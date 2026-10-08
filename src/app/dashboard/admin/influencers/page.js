@@ -361,21 +361,13 @@ export default function InfluencersPage() {
                 </td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
-                  {/* Name + the Joined By person's designation and assembly (resolved
-                      live from their Contact/Worker), shown together in one column —
-                      no separate Designation/Assembly columns. Falls back to the
-                      influencer's own assembly when the Joined By person has none.
-                      Read live each load, so edits update it immediately. */}
+                  {/* Just the influencer's name. The designation + assembly belong to
+                      the JOINED BY person and are shown only in the Joined By column,
+                      never under the influencer's own name. */}
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Thumb src={r.photo_url} name={r.name} />
-                      <div className="min-w-0">
-                        <div className="font-medium text-gray-900">{r.name}</div>
-                        {(() => {
-                          const sub = [r.joined_by_designation, r.joined_by_assembly || r.assembly_name].filter(Boolean).join(" – ");
-                          return sub ? <div className="text-xs text-gray-500">{sub}</div> : null;
-                        })()}
-                      </div>
+                      <span>{r.name}</span>
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{r.phone || "—"}</td>
@@ -392,10 +384,10 @@ export default function InfluencersPage() {
                       <div className="flex items-center gap-2.5 min-w-[180px]">
                         <Thumb src={r.joined_by_photo} name={r.joined_by_name || "?"} size={38} />
                         <div className="min-w-0">
-                          {/* Joined By = the linked person's Name – Designation
-                              (their CURRENT saved designation, resolved live). */}
+                          {/* Joined By = the linked person's Name – Designation –
+                              Assembly (all resolved live from their Contact/Worker). */}
                           <div className="font-medium text-gray-900 text-sm">
-                            {r.joined_by_name || "—"}{r.joined_by_designation ? ` – ${r.joined_by_designation}` : ""}
+                            {[r.joined_by_name, r.joined_by_designation, r.joined_by_assembly].filter(Boolean).join(" – ") || "—"}
                           </div>
                           {r.joined_by_mobile && (
                             <div className="text-[11px] text-gray-400 inline-flex items-center gap-1">
