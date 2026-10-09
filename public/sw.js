@@ -4,7 +4,7 @@
 // (e.g. a 504) into a hard-stuck screen. Navigations and /api/ always go
 // straight to the network, uncached.
 
-const CACHE = "aap-admin-v2";
+const CACHE = "aap-admin-v3";
 
 self.addEventListener("install", () => {
   // Activate immediately on first install / update.

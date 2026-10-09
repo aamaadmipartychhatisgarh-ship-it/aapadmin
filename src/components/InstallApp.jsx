@@ -21,7 +21,30 @@ export default function InstallApp({ variant = "sidebar", className = "" }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      // Drop any Cache Storage left behind by an OLDER service worker version
+      // that used to cache page navigations — otherwise a laptop that installed
+      // the app back then can keep serving a stale/broken HTML shell ("This page
+      // couldn't load"). The current SW caches nothing, so clearing is always safe.
+      if (window.caches?.keys) {
+        caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).catch(() => {});
+      }
+      // When an EXISTING controller is REPLACED by a freshly-activated SW (e.g.
+      // the inert v3 taking over from an old nav-caching one), reload ONCE so the
+      // page is served fresh from the network — this un-sticks a laptop showing a
+      // cached "couldn't load" screen. Only fires when a SW already controlled the
+      // page (a genuine update), never on a first-visit claim, and guarded so it
+      // can never loop.
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener?.("controllerchange", () => {
+        if (reloaded || !hadController) return;
+        reloaded = true;
+        window.location.reload();
+      });
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((reg) => { reg.update?.().catch(() => {}); })
+        .catch(() => {});
     }
     // Already running as an installed app?
     const standalone =
