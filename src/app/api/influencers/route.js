@@ -7,7 +7,7 @@ import {
   ensureInfluencerSchema, getInfluencerColumns, normalizeStatus, resolveAssemblyHierarchy,
   POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES, JOINED_BY_COLUMNS } from "@/lib/influencerSchema";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
-import { resolveContactCard, resolveContactByPhone } from "@/lib/contactCard";
+import { resolveContactCard, resolveContactByPhone, resolveContactCardsBatch, resolveWorkersByPhones } from "@/lib/contactCard";
 
 // Access to the Influencer module is governed by the "influencers" page key
 // (Super Admin + Supervisor by baseline, plus anyone granted it in Page Access).
@@ -167,42 +167,45 @@ export async function GET(req) {
       params
     );
     const rows = await simpleList();
-    // Resolve Joined By LIVE in JS using the SAME proven resolvers the edit card
-    // uses (resolveContactCard by the stored link id, else resolveContactByPhone by
-    // the saved number) — both return designation_name = the contact's own
-    // designations → linked worker's position → legacy single designation, exactly
-    // what the edit form shows. The earlier SQL-join version was fragile across
-    // MariaDB versions and silently fell back to the plain list, leaving the
-    // designation blank. Only the paged slice is resolved, and only rows that have
-    // a Joined By link/phone hit the DB (one or two small lookups each).
-    const digitsJs = (v) => String(v ?? "").replace(/\D/g, "");
+    // Resolve Joined By for the WHOLE page in a couple of BATCHED, set-based
+    // queries (contacts by id+phone, workers by phone) instead of N sequential
+    // per-row lookups — the per-row version held a DB connection for the length
+    // of the page and, under load on shared hosting, could exhaust the pool and
+    // stall the whole app. The resolution precedence is unchanged (and matches the
+    // edit card): the linked contact's designation → else the phone-matched
+    // contact → else the phone-matched worker's position. Non-fatal: a failure
+    // leaves the stored name in place rather than erroring the list.
+    const ten = (v) => { const d = String(v ?? "").replace(/\D/g, ""); return d.length >= 10 ? d.slice(-10) : null; };
+    const jbIds = [];
+    const jbPhones = [];
     for (const r of rows) {
-      let card = null;
-      // 1) The stored contact link (authoritative when present).
-      if (r.joined_by_contact_id) {
-        try { card = await resolveContactCard(r.joined_by_contact_id); } catch { card = null; }
+      if (r.joined_by_contact_id) jbIds.push(Number(r.joined_by_contact_id));
+      const t = ten(r.joined_by_phone);
+      if (t) jbPhones.push(t);
+    }
+    let byId = new Map();
+    let byPhone = new Map();
+    let workerByPhone = new Map();
+    if (jbIds.length || jbPhones.length) {
+      try {
+        const res = await resolveContactCardsBatch({ ids: jbIds, phones10: jbPhones });
+        byId = res.byId;
+        byPhone = res.byPhone;
+        workerByPhone = await resolveWorkersByPhones(jbPhones);
+      } catch (e) {
+        console.error("[influencer] batched Joined-By resolve failed:", e?.sqlMessage || e?.message || e);
       }
-      // 2) The saved phone (last-10 match) — used when there is no link, or the
-      //    linked contact is bare (no designation) but the phone resolves a richer
-      //    Contact. This is exactly what the edit card does.
-      if ((!card || !card.designation_name) && digitsJs(r.joined_by_phone).length >= 10) {
-        let byPhone = null;
-        try { byPhone = await resolveContactByPhone(r.joined_by_phone); } catch { byPhone = null; }
-        if (byPhone && (byPhone.designation_name || !card)) card = byPhone;
+    }
+    for (const r of rows) {
+      const t = ten(r.joined_by_phone);
+      // 1) stored contact link (authoritative), 2) phone-matched contact when the
+      // link is bare or absent, 3) phone-matched worker for Worker-only people.
+      let card = r.joined_by_contact_id ? byId.get(Number(r.joined_by_contact_id)) : null;
+      if ((!card || !card.designation_name) && t) {
+        const bp = byPhone.get(t);
+        if (bp && (bp.designation_name || !card)) card = bp;
       }
-      // 3) Worker-only people (no Contact row) — resolve name/position by phone.
-      let worker = null;
-      if ((!card || !card.designation_name) && digitsJs(r.joined_by_phone).length >= 10) {
-        const ten = digitsJs(r.joined_by_phone).slice(-10);
-        try {
-          const [w] = await query(
-            `SELECT name, mobile, photo_url, position FROM workers
-              WHERE RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mobile,' ',''),'-',''),'+',''),'(',''),')',''),'.','') , 10) = ? LIMIT 1`,
-            [ten]
-          );
-          worker = w || null;
-        } catch { worker = null; }
-      }
+      const worker = (!card || !card.designation_name) && t ? workerByPhone.get(t) : null;
       if (card) {
         r.joined_by_name = card.person_name || r.joined_by_name || null;
         r.joined_by_photo = card.photo_url || null;

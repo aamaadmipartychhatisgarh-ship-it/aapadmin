@@ -61,6 +61,61 @@ export async function resolveContactByPhone(phone) {
   return resolveContactCard(hit.id);
 }
 
+// Last-10-digit normalization of a phone column, matching resolveContactByPhone.
+const PHONE10 = (col) =>
+  `RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${col},' ',''),'-',''),'+',''),'(',''),')',''),'.',''), 10)`;
+
+// BATCHED Joined-By resolver for the influencer LIST. Given a set of contact ids
+// and/or last-10 phone keys, return each matched contact's display card in ONE
+// query — keyed by id AND by phone10 — so a page of N influencers costs a couple
+// of set-based lookups instead of N sequential per-row queries (which, under load
+// on shared hosting, held DB connections long enough to stall the whole app).
+// Same designation precedence as resolveContactCard (own designations → linked
+// worker position → legacy single designation).
+export async function resolveContactCardsBatch({ ids = [], phones10 = [] } = {}) {
+  const idList = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const phoneList = [...new Set(phones10.filter(Boolean))];
+  if (!idList.length && !phoneList.length) return { byId: new Map(), byPhone: new Map() };
+  const conds = [];
+  const params = [];
+  if (idList.length) { conds.push(`c.id IN (${idList.map(() => "?").join(",")})`); params.push(...idList); }
+  if (phoneList.length) { conds.push(`${PHONE10("c.phone_number")} IN (${phoneList.map(() => "?").join(",")})`); params.push(...phoneList); }
+  const rows = await query(
+    `SELECT c.id, c.person_name, c.phone_number, ${PHONE10("c.phone_number")} AS phone10,
+            la.name AS assembly_name,
+            COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+            COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
+       FROM contacts c
+       LEFT JOIN workers w ON w.id = c.worker_id
+       LEFT JOIN locations la ON la.id = c.assembly_id
+       LEFT JOIN designations dsg ON dsg.id = c.designation_id
+      WHERE ${conds.join(" OR ")}`,
+    params
+  );
+  const byId = new Map();
+  const byPhone = new Map();
+  for (const r of rows) {
+    byId.set(Number(r.id), r);
+    if (r.phone10 && !byPhone.has(r.phone10)) byPhone.set(r.phone10, r); // lowest-id wins per phone
+  }
+  return { byId, byPhone };
+}
+
+// Workers matching any of the given last-10 phone keys, in ONE query (the
+// Joined-By fallback for people who exist only as a Worker, not a Contact).
+export async function resolveWorkersByPhones(phones10 = []) {
+  const phoneList = [...new Set(phones10.filter(Boolean))];
+  if (!phoneList.length) return new Map();
+  const rows = await query(
+    `SELECT name, mobile, photo_url, position, ${PHONE10("mobile")} AS phone10
+       FROM workers WHERE ${PHONE10("mobile")} IN (${phoneList.map(() => "?").join(",")})`,
+    phoneList
+  );
+  const m = new Map();
+  for (const r of rows) if (r.phone10 && !m.has(r.phone10)) m.set(r.phone10, r);
+  return m;
+}
+
 // The compact "Joined By" contact snapshot the Influencer form/list/view uses. The
 // LINK is the id (details are always read live from Contacts — never copied), and
 // these fields are just the currently-resolved values for display.
