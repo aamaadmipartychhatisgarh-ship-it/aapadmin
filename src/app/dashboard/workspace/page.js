@@ -83,6 +83,11 @@ export default function WorkspacePage() {
 }
 
 function WorkspaceBody({ previewingCaller, viewAsCaller }) {
+  // The signed-in session — needed for role checks in this body (e.g. whether a
+  // caller may remove a contact photo). Without this, `isOversight(session)`
+  // below referenced an undefined `session` and threw a ReferenceError at render,
+  // blanking the whole caller workspace page.
+  const { data: session } = useSession();
   const [queue, setQueue] = useState({ assigned: [], assigned_total: 0, scheduled: [], pool_count: 0, home_district: null, active_lock: null });
   // Queue search / hierarchical geography + designation filters. Zone is not a
   // dropdown — it's the caller's own zone (shown in Your Queue) and auto-scopes
