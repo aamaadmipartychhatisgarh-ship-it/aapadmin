@@ -95,7 +95,10 @@ export async function GET(req) {
     // Headline metrics (BUG 4) — all-time across the scoped pages, independent of
     // the yesterday window above. Refresh-safe (all from the DB), and they move as
     // posts are added/edited and their status changes.
-    const [[postAgg]] = await query(
+    // query() returns the ROWS array directly, so the first row is one level of
+    // destructuring — `[[postAgg]]` tried to iterate the row object itself and
+    // threw "object is not iterable", 500-ing this endpoint on every call.
+    const [postAgg] = await query(
       `SELECT COUNT(*) AS total_posts,
               COALESCE(SUM(p.publish_status = 'scheduled'), 0) AS scheduled_posts
          FROM social_posts p JOIN social_pages sp ON sp.id = p.page_id
