@@ -40,23 +40,40 @@ export default function PendingContactsPage() {
 
   useEffect(() => { if (allowed) load(); }, [allowed, load]);
 
-  async function act(id, action) {
-    setBusyId(id); setErr(""); setMsg("");
+  async function act(id, action, name) {
+    // Hard guard against repeat clicks: while ANY request is in flight nothing else
+    // can start (the API also refuses a second update of the same contact).
+    if (busyId != null) return;
+    setErr(""); setMsg("");
+    const body = { action };
+    if (action === "approve") {
+      if (!window.confirm(`Approve ${name || "this contact"}? It will go live in the Contact List.`)) return;
+    } else {
+      const reason = window.prompt(`Reason for rejecting ${name || "this contact"} (optional):`, "");
+      if (reason === null) return; // cancelled
+      body.reason = reason;
+    }
+    setBusyId(id);
     try {
-      const body = { action };
-      if (action === "reject") {
-        const reason = window.prompt("Reason for rejecting this contact (optional):", "");
-        if (reason === null) { setBusyId(null); return; } // cancelled
-        body.reason = reason;
-      }
       const r = await fetch(`/api/contacts/pending/${id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setErr([d.message, d.detail].filter(Boolean).join(" — ") || "Action failed."); return; }
+      if (!r.ok) {
+        setErr([d.message, d.detail].filter(Boolean).join(" — ") || "Action failed.");
+        // A conflict (already processed elsewhere) or an out-of-scope id means this
+        // row is stale — refresh so the list shows the real state.
+        if (r.status === 409 || r.status === 403 || r.status === 404) load();
+        return;
+      }
+      // The processed contact leaves the Pending list immediately (the list is
+      // re-read from the database right after, so what shows is what was saved).
+      setRows((cur) => cur.filter((c) => c.id !== id));
       setMsg(action === "approve" ? "Contact approved — it is now in the Contact List." : "Contact rejected — kept under the Rejected tab; the caller can resubmit.");
-      setTimeout(() => setMsg(""), 2500);
+      setTimeout(() => setMsg(""), 3500);
       load();
+    } catch {
+      setErr("Network error — the action may not have been saved. Refresh to check.");
     } finally { setBusyId(null); }
   }
 
@@ -68,7 +85,7 @@ export default function PendingContactsPage() {
     <div className="space-y-6 animate-in fade-in duration-500">
       <PageHeader
         icon={UserCheck}
-        title="Pending Contacts"
+        title="Pending Approval"
         description="Contacts your callers submitted. Review the details, then approve (goes live in the Contact List) or reject (kept here with your reason)."
         breadcrumb={[{ label: "Dashboard", href: "/dashboard/supervisor" }, { label: "Contacts", href: "/dashboard/supervisor/contacts" }, { label: "Pending Approval" }]}
       />
@@ -97,7 +114,12 @@ export default function PendingContactsPage() {
               <li key={c.id} className="p-4 flex items-center gap-4 hover:bg-gray-50/60">
                 <Avatar name={c.person_name} src={c.photo_url} size={44} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-sm" />
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-gray-900 truncate">{c.person_name}</div>
+                  <div className="font-semibold text-gray-900 truncate flex items-center gap-2">
+                    {c.person_name}
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${c.approval_status === "rejected" ? "bg-red-50 text-red-700 border-red-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
+                      {c.approval_status === "rejected" ? "Rejected" : "Pending"}
+                    </span>
+                  </div>
                   <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
                     <span className="inline-flex items-center gap-1"><Phone size={11} /> {c.phone_number || "—"}</span>
                     {(c.designation_names || c.designation_name) && <span>{c.designation_names || c.designation_name}</span>}
@@ -112,11 +134,11 @@ export default function PendingContactsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={() => act(c.id, "approve")} disabled={busyId === c.id}
+                  <button onClick={() => act(c.id, "approve", c.person_name)} disabled={busyId != null}
                     className="inline-flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50">
                     {busyId === c.id ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Approve
                   </button>
-                  {tab !== "rejected" && <button onClick={() => act(c.id, "reject")} disabled={busyId === c.id}
+                  {tab !== "rejected" && <button onClick={() => act(c.id, "reject", c.person_name)} disabled={busyId != null}
                     className="inline-flex items-center gap-1.5 bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-gray-50 disabled:opacity-50">
                     <X size={15} /> Reject
                   </button>}

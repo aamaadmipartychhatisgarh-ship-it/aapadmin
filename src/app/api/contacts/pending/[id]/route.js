@@ -53,7 +53,11 @@ export async function PUT(req, { params }) {
     // outside their own area.
     const scope = pendingContactScope(session, "c");
     if (scope.where) {
-      const [inScope] = await query(`SELECT c.id FROM contacts c WHERE c.id = ?${scope.where} LIMIT 1`, [id, ...scope.params]);
+      // NOTE the space before the scope fragment: a Supervisor's fragment starts with
+      // "AND ..." and, glued straight onto "c.id = ?", produced "?AND" — a SQL syntax
+      // error that made EVERY in-scope Supervisor approve/reject return a 500
+      // (admins were unaffected because their fragment is empty).
+      const [inScope] = await query(`SELECT c.id FROM contacts c WHERE c.id = ? ${scope.where} LIMIT 1`, [id, ...scope.params]);
       if (!inScope) return NextResponse.json({ message: "This contact is outside your area." }, { status: 403, headers: NO_STORE });
     }
 
@@ -63,21 +67,36 @@ export async function PUT(req, { params }) {
       if (await phoneAlreadyRegistered(row.phone_number, id)) {
         return NextResponse.json({ message: "Another live contact already uses this mobile number." }, { status: 409, headers: NO_STORE });
       }
-      await query(
-        `UPDATE contacts SET approval_status = 'approved', reviewed_by_user_id = ?, reviewed_at = NOW(), rejection_reason = NULL WHERE id = ?`,
+      // Conditional update: only a contact that is STILL pending/rejected may be
+      // approved, so two simultaneous approvals (or a double click) cannot both
+      // "succeed" — the loser updates 0 rows and is told it was already processed.
+      const approved = await query(
+        `UPDATE contacts SET approval_status = 'approved', reviewed_by_user_id = ?, reviewed_at = NOW(), rejection_reason = NULL
+          WHERE id = ? AND approval_status IN ('pending','rejected')`,
         [session.user.id, id]
       );
+      if (!approved.affectedRows) {
+        return NextResponse.json({ message: "This contact was already processed by someone else. Refresh the list." }, { status: 409, headers: NO_STORE });
+      }
       logAudit(session, { action: "contact.pending.approve", entityType: "contact", entityId: Number(id), details: { person_name: row.person_name, submitted_by_user_id: row.created_by_user_id || null, was: row.approval_status } });
       return NextResponse.json({ ok: true, status: "approved" }, { headers: NO_STORE });
     }
     if (action === "reject") {
+      // A contact that is already rejected is not rejected again (that would only
+      // overwrite the first reviewer's reason) — it is a conflicting update.
+      if (row.approval_status === "rejected") {
+        return NextResponse.json({ message: "This contact is already rejected." }, { status: 409, headers: NO_STORE });
+      }
       const reason = String(d?.reason || "").trim().slice(0, 300) || null;
-      await query(
+      const rejected = await query(
         `UPDATE contacts SET approval_status = 'rejected', reviewed_by_user_id = ?, reviewed_at = NOW(), rejection_reason = ?,
                              assigned_to_user_id = NULL, locked_by_user_id = NULL, locked_at = NULL
-          WHERE id = ?`,
+          WHERE id = ? AND approval_status = 'pending'`,
         [session.user.id, reason, id]
       );
+      if (!rejected.affectedRows) {
+        return NextResponse.json({ message: "This contact was already processed by someone else. Refresh the list." }, { status: 409, headers: NO_STORE });
+      }
       logAudit(session, { action: "contact.pending.reject", entityType: "contact", entityId: Number(id), details: { person_name: row.person_name, phone_number: row.phone_number, submitted_by_user_id: row.created_by_user_id || null, reason } });
       return NextResponse.json({ ok: true, status: "rejected" }, { headers: NO_STORE });
     }

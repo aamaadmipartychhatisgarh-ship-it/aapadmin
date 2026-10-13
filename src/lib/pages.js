@@ -117,7 +117,7 @@ export const PAGES = [
     roles: [...OVERSIGHT] },
   // Pending Approval — caller-submitted contacts a Supervisor reviews before they go
   // live. Oversight + Supervisor by role (the API enforces the same).
-  { key: "pending_contacts", label: "Pending Contacts", href: "/dashboard/supervisor/pending-contacts", prefixes: ["/dashboard/supervisor/pending-contacts"], icon: "Check",
+  { key: "pending_contacts", label: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", prefixes: ["/dashboard/supervisor/pending-contacts"], icon: "Check",
     roles: [...OVERSIGHT] },
   // Member Portal — for designation-holders up to Vidhansabha (auto-provisioned
   // accounts, managed via Page Access). The admin provisioning console is oversight.

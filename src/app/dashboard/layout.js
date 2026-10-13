@@ -49,12 +49,16 @@ const SUPERVISOR_NAV = [
     href: "/dashboard/supervisor/contacts",
     icon: UserCheck,
     children: [
-      { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
       { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
       { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
     ],
   },
+  // Pending Approval — caller-submitted contacts the Supervisor reviews (approve /
+  // reject). A top-level row (not buried in the collapsed Contacts group) so it is
+  // visible the moment a Supervisor logs in. Same route and "pending_contacts"
+  // Page-Access key as before; Admin menus are unchanged.
+  { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
   // Influencers — a STANDALONE page directly below Contacts (its own route and
   // "influencers" page-access key, baseline for Supervisors), NOT a Contacts child.
   { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
