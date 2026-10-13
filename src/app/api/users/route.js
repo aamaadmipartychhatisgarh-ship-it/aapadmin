@@ -32,6 +32,11 @@ export async function POST(req) {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    // Worker (Member) accounts are created ONLY from Member Accounts, which links
+    // them to their contact/designation record and prevents duplicates.
+    if (String(role || "").toLowerCase() === "worker") {
+      return Response.json({ message: "Worker accounts are created from Member Accounts, not the User Page." }, { status: 400 });
+    }
     const userRole = ASSIGNABLE_ROLES.includes(role) ? role : "caller";
 
     const ins = await query(
@@ -73,7 +78,8 @@ export async function GET() {
               u.home_district_id, l.name AS home_district_name,
               u.scope_zone_id, u.scope_assembly_id, u.photo_url
          FROM users u
-         LEFT JOIN locations l ON l.id = u.home_district_id`
+         LEFT JOIN locations l ON l.id = u.home_district_id
+        WHERE u.role <> 'worker'`  // Worker accounts are listed in Member Accounts only
     );
     return Response.json({ users }, { status: 200 });
   } catch (error) {

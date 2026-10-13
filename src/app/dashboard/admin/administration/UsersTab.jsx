@@ -3,7 +3,10 @@
 import { useState, useEffect } from "react";
 import { ShieldAlert, Zap, Pencil, Trash2, Loader2 } from "lucide-react";
 import PersonDetailModal from "@/components/PersonDetailModal";
-import { isTopAdmin, ASSIGNABLE_ROLES, roleLabel, normalizeRole } from "@/lib/permissions";
+import { isTopAdmin, ASSIGNABLE_ROLES as ALL_ASSIGNABLE_ROLES, roleLabel, normalizeRole } from "@/lib/permissions";
+
+// Worker accounts are created/managed only in Member Accounts.
+const ASSIGNABLE_ROLES = ALL_ASSIGNABLE_ROLES.filter((r) => r !== "worker");
 
 // Administration's "Users" tab (Super Admin only) — the former standalone
 // Users page (src/app/dashboard/admin/users/page.js), relocated as-is.

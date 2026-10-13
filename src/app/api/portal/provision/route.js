@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isTopAdmin } from "@/lib/permissions";
-import { listEligiblePeople, provisionPortalAccounts, portalUserId } from "@/lib/portalAccounts";
+import { listEligiblePeople, listWorkerAccounts, provisionPortalAccounts, portalUserId } from "@/lib/portalAccounts";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
@@ -16,6 +16,7 @@ export async function GET() {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     }
     const people = await listEligiblePeople();
+    const accounts = await listWorkerAccounts();
     const rows = people.map((p) => ({
       contact_id: p.contact_id,
       name: p.person_name,
@@ -28,6 +29,7 @@ export async function GET() {
       eligible: rows.length,
       with_account: rows.filter((r) => r.username).length,
       people: rows,
+      accounts,
     }, { headers: NO_STORE });
   } catch (err) {
     console.error("[portal] eligible GET:", err?.message || err);

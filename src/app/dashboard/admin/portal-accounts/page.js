@@ -138,6 +138,80 @@ export default function PortalAccountsPage() {
           </div>
         )}
       </div>
+
+      <WorkerAccounts accounts={data?.accounts || []} q={q} onChanged={load} />
+    </div>
+  );
+}
+
+// All Worker accounts (the only place they are listed). Edits/status changes are
+// saved to the existing account + linked contact record.
+function WorkerAccounts({ accounts, q, onChanged }) {
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const needle = q.trim().toLowerCase();
+  const rows = accounts.filter((a) => !needle || [a.person_name, a.phone_number, a.username].some((v) => String(v || "").toLowerCase().includes(needle)));
+
+  async function save(id, patch) {
+    if (busy) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch(`/api/portal/accounts/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(d.message || "Could not save."); return; }
+      setEditing(null); onChanged?.();
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2 text-[#164FA3]">
+        <UserCog size={18} /><h2 className="font-bold text-base">Worker Accounts</h2>
+        <span className="ml-auto text-xs text-gray-500">{rows.length} account(s)</span>
+      </div>
+      {err && <div className="m-4 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm">{err}</div>}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-xs text-gray-500 bg-gray-50">
+            {["Name", "Phone", "Designation", "Assembly", "User ID", "Status", ""].map((h) => <th key={h} className="px-4 py-2 font-semibold whitespace-nowrap">{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={7} className="py-10 text-center text-gray-400">No worker accounts.</td></tr>}
+            {rows.map((a) => (
+              <tr key={a.id} className="border-t border-gray-100">
+                <td className="px-4 py-2.5 font-semibold text-gray-900">{a.person_name || "—"}{a.possible_duplicate && <span title="Another worker account shares this contact or phone — review manually" className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">Possible duplicate</span>}</td>
+                <td className="px-4 py-2.5 font-mono text-xs text-gray-600">{a.phone_number || "—"}</td>
+                <td className="px-4 py-2.5 text-gray-600 max-w-[240px]"><span className="line-clamp-2">{a.designations || "—"}</span></td>
+                <td className="px-4 py-2.5 text-gray-600">{a.assembly_name || a.district_name || "—"}</td>
+                <td className="px-4 py-2.5 font-mono text-xs">{a.username}</td>
+                <td className="px-4 py-2.5">
+                  <button disabled={busy} onClick={() => save(a.id, { is_active: !a.is_active })}
+                    className={`text-[11px] font-semibold px-2 py-1 rounded-md border ${a.is_active ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-gray-100 text-gray-500 border-gray-200"}`}>
+                    {a.is_active ? "Active" : "Inactive"}
+                  </button>
+                </td>
+                <td className="px-4 py-2.5 text-right"><button onClick={() => setEditing({ id: a.id, name: a.person_name || "", phone: a.phone_number || "", linked: !!a.contact_id })} className="text-[#164FA3] text-xs font-semibold hover:underline">Edit</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editing && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+            <h2 className="text-lg font-bold text-gray-900">Edit Worker</h2>
+            {editing.linked ? (<>
+              <div><label className={lbl}>Name</label><input className={inp} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></div>
+              <div><label className={lbl}>Mobile</label><input className={inp} value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} /></div>
+            </>) : <p className="text-sm text-gray-500">This account has no linked contact record; only its status can be changed.</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+              {editing.linked && <button disabled={busy} onClick={() => save(editing.id, { name: editing.name, phone: editing.phone })} className="px-4 py-2 text-sm bg-[#164FA3] text-white rounded-lg font-semibold disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

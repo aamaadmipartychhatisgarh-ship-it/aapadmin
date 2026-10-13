@@ -15,6 +15,15 @@ export async function PUT(req, { params }) {
     const { id } = await params;
     const data = await req.json();
 
+    // Worker (Member) accounts live in Member Accounts only.
+    if (String(data?.role || "").toLowerCase() === "worker") {
+      return NextResponse.json({ message: "Worker accounts are managed from Member Accounts." }, { status: 400 });
+    }
+    const [target] = await query("SELECT role FROM users WHERE id = ?", [id]);
+    if (target && target.role === "worker") {
+      return NextResponse.json({ message: "Worker accounts are managed from Member Accounts." }, { status: 409 });
+    }
+
     const sets = [];
     const vals = [];
 
@@ -74,6 +83,9 @@ export async function DELETE(req, { params }) {
     const [victim] = await query("SELECT id, username, role FROM users WHERE id = ?", [id]);
     if (!victim) {
       return NextResponse.json({ message: "User not found." }, { status: 404 });
+    }
+    if (victim.role === "worker") {
+      return NextResponse.json({ message: "Worker accounts are managed from Member Accounts." }, { status: 409 });
     }
     // System protection: never remove the last Super Admin (avoids locking
     // everyone out of the admin console).

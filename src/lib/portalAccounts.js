@@ -290,3 +290,75 @@ export async function createPortalAccount(input, session) {
   });
   return { user_id, username, contact_id: contactId, reused_contact: reusedContact, name };
 }
+
+// ---------------------------------------------------------------------------
+// Member Accounts = the ONLY place Worker (role='worker') accounts are listed and
+// managed. These rows are the same `users` records the portal engine creates,
+// linked to `contacts` by users.contact_id — no second account system.
+// ---------------------------------------------------------------------------
+
+// Every worker account (including legacy ones with no linked contact), with the
+// linked contact's details, designations and assembly/district names.
+export async function listWorkerAccounts() {
+  await ensurePortalSchema();
+  const rows = await query(
+    `SELECT u.id, u.username, u.is_active, u.created_at, u.last_seen_at, u.contact_id,
+            u.home_district_id, u.scope_zone_id, u.scope_lok_sabha_id, u.scope_assembly_id,
+            c.person_name, c.phone_number,
+            (SELECT GROUP_CONCAT(DISTINCT d.name ORDER BY (d.sort_order IS NULL), d.sort_order, d.name SEPARATOR ', ')
+               FROM contact_designations cd JOIN designations d ON d.id = cd.designation_id
+              WHERE cd.contact_id = c.id) AS designations,
+            la.name AS assembly_name, ld.name AS district_name
+       FROM users u
+       LEFT JOIN contacts c ON c.id = u.contact_id
+       LEFT JOIN locations la ON la.id = COALESCE(u.scope_assembly_id, c.assembly_id)
+       LEFT JOIN locations ld ON ld.id = COALESCE(u.home_district_id, c.district_id)
+      WHERE u.role = 'worker'
+      ORDER BY COALESCE(c.person_name, u.username) ASC
+      LIMIT 5000`
+  );
+  // Report (never auto-merge/delete) worker accounts that share a contact or phone.
+  const byKey = new Map();
+  for (const r of rows) {
+    const keys = [];
+    if (r.contact_id) keys.push(`c:${r.contact_id}`);
+    const pk = phoneKey(r.phone_number);
+    if (pk) keys.push(`p:${pk}`);
+    for (const k of keys) { if (!byKey.has(k)) byKey.set(k, new Set()); byKey.get(k).add(r.id); }
+  }
+  const dup = new Set();
+  for (const ids of byKey.values()) if (ids.size > 1) ids.forEach((i) => dup.add(i));
+  return rows.map((r) => ({ ...r, is_active: r.is_active === 0 ? 0 : 1, possible_duplicate: dup.has(r.id) }));
+}
+
+// Update an existing worker account in place: contact name/phone, status and
+// territory. Only users with role='worker' are touched; User ID, password,
+// registration links and page grants are preserved.
+export async function updateWorkerAccount(id, input, session) {
+  await ensurePortalSchema();
+  const [u] = await query("SELECT id, username, role, contact_id FROM users WHERE id = ?", [id]);
+  if (!u || u.role !== "worker") throw new PortalAccountError("Worker account not found.", 404);
+
+  const sets = [], vals = [];
+  const nullable = (v) => (v === "" || v == null ? null : Number(v));
+  if ("is_active" in input) { sets.push("is_active = ?"); vals.push(input.is_active ? 1 : 0); }
+  for (const [k, col] of [["district_id", "home_district_id"], ["zone_id", "scope_zone_id"], ["lok_sabha_id", "scope_lok_sabha_id"], ["assembly_id", "scope_assembly_id"]]) {
+    if (k in input) { sets.push(`${col} = ?`); vals.push(nullable(input[k])); }
+  }
+  if (sets.length) await query(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);
+
+  if (u.contact_id) {
+    const cs = [], cv = [];
+    if (typeof input.name === "string" && input.name.trim()) { cs.push("person_name = ?"); cv.push(input.name.trim()); }
+    if (typeof input.phone === "string" && input.phone.trim()) {
+      const key = phoneKey(input.phone);
+      if (!key) throw new PortalAccountError("Enter a valid mobile number.", 400);
+      const clash = await query(`SELECT id FROM contacts WHERE ${last10Sql("phone_number")} = ? AND id <> ? LIMIT 1`, [key, u.contact_id]);
+      if (clash.length) throw new PortalAccountError("Another contact already uses this mobile number.", 409);
+      cs.push("phone_number = ?"); cv.push(input.phone.trim());
+    }
+    if (cs.length) await query(`UPDATE contacts SET ${cs.join(", ")} WHERE id = ?`, [...cv, u.contact_id]);
+  }
+  logAudit(session, { action: "portal.worker.update", entityType: "user", entityId: Number(id), details: { username: u.username, fields: Object.keys(input) } });
+  return { ok: true };
+}
