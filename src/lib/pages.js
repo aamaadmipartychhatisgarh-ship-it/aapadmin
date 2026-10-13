@@ -180,7 +180,7 @@ export const PAGES = [
   // role (dashboard cards + nav + page + API), alongside the central admins.
   { key: "voter_registration", label: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", prefixes: ["/dashboard/admin/voter-registration"], icon: "Vote",
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.CALLER] },
-  // Designation Approvals — the 7-level sequential approval chain. The page itself
+  // Designation Approval — the 8-stage sequential approval chain. The page itself
   // is visible to oversight (they also get the "All Requests" view). The initiate
   // capability and the 8 per-stage approver grants are CAPABILITY keys: roles: []
   // so no one gets them by baseline — a Super Admin grants each approver exactly
