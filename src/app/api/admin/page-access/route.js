@@ -28,9 +28,24 @@ export async function GET() {
     // Grantable users = everyone except Super Admins (who already hold every
     // page and must never be managed through this system, §12). Distinct rows
     // by id (no duplicates). username doubles as the display name in this app.
+    // Worker (Member) accounts only have a generated User ID as username, so also
+    // pull their linked contact's name / phone / designations / assembly to show.
     const users = await query(
-      `SELECT id, username, role, photo_url, is_active FROM users ORDER BY username`
+      `SELECT u.id, u.username, u.role, u.photo_url, u.is_active,
+              c.person_name AS worker_name, c.phone_number AS worker_phone,
+              (SELECT GROUP_CONCAT(DISTINCT d.name ORDER BY d.name SEPARATOR ', ')
+                 FROM contact_designations cd JOIN designations d ON d.id = cd.designation_id
+                WHERE cd.contact_id = c.id) AS worker_designations,
+              la.name AS worker_assembly
+         FROM users u
+         LEFT JOIN contacts c ON c.id = u.contact_id AND u.role = 'worker'
+         LEFT JOIN locations la ON la.id = COALESCE(u.scope_assembly_id, c.assembly_id)
+        ORDER BY u.username`
     );
+    const detailOf = (u) => u.worker_name
+      ? [u.worker_name, u.worker_phone, u.worker_designations, u.worker_assembly].filter(Boolean).join(" · ")
+      : null;
+    const detailById = new Map(users.map((u) => [u.id, { name: u.worker_name || null, detail: detailOf(u) }]));
     // Which users are Page-Access managed (their access = exactly their grants,
     // even if empty). Used so the UI shows the true DB state, not role defaults.
     const managedRows = await query(`SELECT user_id FROM page_access_config`);
@@ -40,6 +55,8 @@ export async function GET() {
       .map((u) => ({
         id: u.id,
         username: u.username,
+        person_name: u.worker_name || null,
+        person_detail: detailOf(u),
         role: normalizeRole(u.role),
         role_label: roleLabel(u.role),
         photo_url: u.photo_url ?? null,
@@ -66,6 +83,8 @@ export async function GET() {
         id: g.id,
         user_id: g.user_id,
         username: g.username,
+        person_name: detailById.get(g.user_id)?.name || null,
+        person_detail: detailById.get(g.user_id)?.detail || null,
         role: normalizeRole(g.role),
         role_label: roleLabel(g.role),
         page_key: g.page_key,

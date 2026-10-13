@@ -219,7 +219,7 @@ export default function PageAccessManager() {
           <select className={inp} value={selUser} onChange={(e) => chooseUser(e.target.value)}>
             <option value="">— Choose a user —</option>
             {data.users.map((u) => (
-              <option key={u.id} value={u.id}>{u.username} — {u.role_label}</option>
+              <option key={u.id} value={u.id}>{u.person_name ? `${u.person_name} (${u.username})` : u.username} — {u.role_label}</option>
             ))}
           </select>
         </div>
@@ -405,7 +405,7 @@ function GrantsTable({ data, pageByKey, onRevoke }) {
   const roles = useMemo(() => [...new Set(data.grants.map((g) => g.role))], [data.grants]);
 
   const rows = data.grants.filter((g) => {
-    if (qUser && !g.username.toLowerCase().includes(qUser.toLowerCase())) return false;
+    if (qUser && !`${g.username} ${g.person_name || ""}`.toLowerCase().includes(qUser.toLowerCase())) return false;
     if (qPage && !(g.page_label || "").toLowerCase().includes(qPage.toLowerCase())) return false;
     if (role && g.role !== role) return false;
     return true;
@@ -444,7 +444,7 @@ function GrantsTable({ data, pageByKey, onRevoke }) {
               <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No explicit grants yet. Use “Grant Page Access” above to add one.</td></tr>
             ) : rows.map((g) => (
               <tr key={g.id} className="border-b border-gray-50 hover:bg-gray-50/60">
-                <td className="px-4 py-2.5 font-medium text-gray-900">{g.username}</td>
+                <td className="px-4 py-2.5 font-medium text-gray-900">{g.person_name ? <><span className="block">{g.person_name}</span><span className="block text-[11px] font-normal text-gray-500" title={g.person_detail || ""}>{g.username}{g.person_detail ? ` · ${g.person_detail.split(" · ").slice(1).join(" · ")}` : ""}</span></> : g.username}</td>
                 <td className="px-4 py-2.5 text-gray-600">{g.role_label}</td>
                 <td className="px-4 py-2.5 text-gray-700">{g.page_label}</td>
                 <td className="px-4 py-2.5">
@@ -477,7 +477,7 @@ function ByUser({ data, userHasPage, isGranted, onRevoke }) {
         <label className="block text-xs font-semibold text-gray-500 mb-1">Select User</label>
         <select className={`${inp} max-w-md`} value={userId} onChange={(e) => setUserId(e.target.value)}>
           <option value="">— Choose a user —</option>
-          {data.users.map((x) => <option key={x.id} value={x.id}>{x.username} · {x.role_label}</option>)}
+          {data.users.map((x) => <option key={x.id} value={x.id}>{x.person_name ? `${x.person_name} (${x.username})` : x.username} · {x.role_label}</option>)}
         </select>
       </div>
       {u && (
@@ -485,8 +485,9 @@ function ByUser({ data, userHasPage, isGranted, onRevoke }) {
           <div className="flex items-center gap-3 mb-4">
             <Avatar name={u.username} src={u.photo_url} size={40} className="bg-blue-50 border border-blue-100" textClassName="text-[#0B3A82]" />
             <div>
-              <div className="font-bold text-gray-900">{u.username}</div>
-              <div className="text-xs text-gray-500">Role: {u.role_label}</div>
+              <div className="font-bold text-gray-900">{u.person_name || u.username}</div>
+              <div className="text-xs text-gray-500">Role: {u.role_label}{u.person_name ? ` · User ID ${u.username}` : ""}</div>
+              {u.person_detail && <div className="text-xs text-gray-500">{u.person_detail}</div>}
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -541,8 +542,8 @@ function ByPage({ data, userHasPage, isGranted, onRevoke }) {
                     <span className="flex items-center gap-2 min-w-0">
                       <Avatar name={u.username} src={u.photo_url} size={26} className="bg-white border border-gray-200" textClassName="text-[#0B3A82]" />
                       <span className="min-w-0">
-                        <span className="block text-sm text-gray-900 truncate">{u.username}</span>
-                        <span className="block text-[11px] text-gray-500">{u.role_label}</span>
+                        <span className="block text-sm text-gray-900 truncate">{u.person_name || u.username}</span>
+                        <span className="block text-[11px] text-gray-500">{u.role_label}{u.person_name ? ` · ${u.username}` : ""}</span>
                       </span>
                     </span>
                     {granted
