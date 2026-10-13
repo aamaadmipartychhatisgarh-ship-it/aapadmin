@@ -72,6 +72,13 @@ export async function ensurePagePermissionsSchema() {
     // used to cover every sub-tab — by materialising all of that parent's current
     // children as explicit grants. After this, sub-tabs are assigned one-by-one.
     await runOnce("expand_parent_grants_v2", expandExistingParentGrants);
+    // ONE-TIME: Pending Approval (caller-submitted contacts) was added to the
+    // Supervisor menu, but Supervisors already managed by Page Access hold EXACTLY
+    // their explicit grants, so the new page never showed for them. Give the page
+    // to managed Supervisors who already hold Contacts (the module it reviews),
+    // copying that grant's real admin as granted_by. INSERT IGNORE never changes an
+    // existing row; later revocations are respected (this runs once only).
+    await runOnce("supervisor_pending_approval_v1", grantPendingApprovalToContactSupervisors);
     ensured = true;
   } catch (e) {
     console.error("[pageAccess] ensure schema:", e?.message || e);
@@ -88,6 +95,18 @@ async function runOnce(name, fn) {
   } catch (e) {
     console.error(`[pageAccess] migration ${name}:`, e?.message || e);
   }
+}
+
+async function grantPendingApprovalToContactSupervisors() {
+  const res = await query(
+    `INSERT IGNORE INTO page_permissions (user_id, page_key, granted_by)
+     SELECT pp.user_id, 'pending_contacts', pp.granted_by
+       FROM page_permissions pp
+       JOIN users u ON u.id = pp.user_id
+       JOIN page_access_config c ON c.user_id = pp.user_id
+      WHERE pp.page_key = 'contacts' AND u.role = 'supervisor' AND pp.granted_by > 0`
+  );
+  if (res?.affectedRows) console.log(`[pageAccess] granted Pending Approval to ${res.affectedRows} managed Supervisor(s)`);
 }
 
 // Parents whose old "grant = whole module" behaviour must be preserved as
