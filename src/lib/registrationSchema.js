@@ -156,6 +156,10 @@ export async function ensureRegistrationSchema() {
     // in the schema so any historical values are preserved, though the form and UI
     // no longer read or write it.
     await ensureColumn("reg_people", "worker_rating", "INT NULL");
+    // The designation a Block President / Vidhansabha Prabhari attached to this
+    // registration (Designation Master id). It is only the PROPOSED designation — the
+    // approval workflow (designation_assignments) owns its approval state.
+    await ensureColumn("reg_people", "designation_id", "INT NULL");
     // --- Mobile OTP verification -------------------------------------------
     // One row per OTP request. The CODE IS NEVER STORED: 2Factor generates and
     // checks it, and we keep only their opaque session id, so a dump of this

@@ -182,7 +182,7 @@ export const PAGES = [
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.CALLER] },
   // Designation Approvals — the 7-level sequential approval chain. The page itself
   // is visible to oversight (they also get the "All Requests" view). The initiate
-  // capability and the 7 per-level approver grants are CAPABILITY keys: roles: []
+  // capability and the 8 per-stage approver grants are CAPABILITY keys: roles: []
   // so no one gets them by baseline — a Super Admin grants each approver exactly
   // their level in Page Access, and every approval API re-checks the key
   // server-side. They are `tab: true` (never resolved as a route by pageKeyForPath)
@@ -191,13 +191,17 @@ export const PAGES = [
   { key: "approvals", label: "Designation Approvals", href: "/dashboard/admin/approvals", prefixes: ["/dashboard/admin/approvals"], icon: "ShieldCheck",
     roles: [...OVERSIGHT] },
   { key: "approval_initiate", label: "Approvals · Initiate Designation", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Plus", roles: [] },
-  { key: "approve_l1_district_president", label: "Approvals · L1 District President", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l2_loksabha_adhyaksh", label: "Approvals · L2 Lok Sabha Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l3_loksabha_prabhari", label: "Approvals · L3 Lok Sabha Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l4_sangathan_mantri", label: "Approvals · L4 Pradesh Sangathan Mantri", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l5_karyakari_adhyaksh", label: "Approvals · L5 Pradesh Karyakari Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l6_sah_prabhari", label: "Approvals · L6 Sah Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l7_prabhari_ji", label: "Approvals · L7 Prabhari Ji", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  // Stage 1 (new in the 8-stage chain). The other approver keys keep their original
+  // names so existing grants stay valid; their LABELS show the current stage number.
+  { key: "approve_s1_vidhansabha_prabhari", label: "Approvals · Stage 1 Vidhansabha Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l1_district_president", label: "Approvals · Stage 2 District President", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l2_loksabha_adhyaksh", label: "Approvals · Stage 3 Lok Sabha President / Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l3_loksabha_prabhari", label: "Approvals · Stage 4 Lok Sabha Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l4_sangathan_mantri", label: "Approvals · Stage 5 Pradesh Sangathan Mantri", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l5_karyakari_adhyaksh", label: "Approvals · Stage 6 Pradesh Karyakari Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l6_sah_prabhari", label: "Approvals · Stage 7 Sah Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  // Stage 8 is Prabhari Ji = the Super Admin ROLE itself; this grant has no effect on the final approval.
+  { key: "approve_l7_prabhari_ji", label: "Approvals · Stage 8 Prabhari Ji (Super Admin only)", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
 ];
 
 // Pages that are NEVER gated by this system — every signed-in user reaches them
