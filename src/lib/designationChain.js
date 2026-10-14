@@ -65,7 +65,6 @@ export function chainDesignationName(chainKey, level) {
 }
 
 let ensured = false;
-const desigIdCache = new Map(); // `${chainKey}:${level}` → designation id
 
 export async function ensureDesignationChainSchema() {
   if (ensured) return;
@@ -101,48 +100,57 @@ export async function ensureDesignationChainSchema() {
   }
 }
 
-// Ensure the Designation-Master row for every (role × level) exists and is mapped
-// to the right level, REUSING any existing same-named row (so its id and any
-// assignments are preserved — never a duplicate). Idempotent.
+// Map any EXISTING Designation-Master row named "<Level> <Role>" to its level when
+// that level is blank. This NEVER inserts: merely opening the Designation Chain
+// (page or API) must not (re)create designations the admin cleared or never made.
+// A designation row is created only when an appointment actually needs it — see
+// resolveChainDesignation(). Idempotent.
 async function ensureAllChainDesignations() {
-  const hasSortOrder = (await query("SHOW COLUMNS FROM designations LIKE 'sort_order'")).length > 0;
-  const hasEnabled = (await query("SHOW COLUMNS FROM designations LIKE 'enabled'")).length > 0;
   for (let li = 0; li < CHAIN_LEVELS.length; li++) {
     const level = CHAIN_LEVELS[li];
     for (let ri = 0; ri < CHAINS.length; ri++) {
-      const chainKey = CHAINS[ri].key;
-      const name = chainDesignationName(chainKey, level);
-      // eslint-disable-next-line no-await-in-loop
+      const name = chainDesignationName(CHAINS[ri].key, level);
       const [existing] = await query("SELECT id, level FROM designations WHERE name = ? LIMIT 1", [name]);
-      let id;
-      if (existing) {
-        id = existing.id;
-        // Map an existing stray row (NULL/blank level) to its correct level; never
-        // overwrite a level that is already set (e.g. the seeded State rows).
-        if (!existing.level) {
-          // eslint-disable-next-line no-await-in-loop
-          await query("UPDATE designations SET level = ? WHERE id = ?", [level, id]);
-        }
-      } else {
-        const cols = ["name", "level"];
-        const vals = [name, level];
-        if (hasSortOrder) { cols.push("sort_order"); vals.push(ri); }
-        if (hasEnabled) { cols.push("enabled"); vals.push(1); }
-        // eslint-disable-next-line no-await-in-loop
-        const res = await query(
-          `INSERT INTO designations (${cols.map((c) => `\`${c}\``).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
-          vals
-        );
-        id = res.insertId;
+      // Map an existing stray row (NULL/blank level) to its correct level; never
+      // overwrite a level that is already set (e.g. the seeded State rows).
+      if (existing && !existing.level) {
+        await query("UPDATE designations SET level = ? WHERE id = ?", [level, existing.id]);
       }
-      desigIdCache.set(`${chainKey}:${level}`, id);
     }
   }
 }
 
+// Read-only lookup of the Designation-Master id for a role at a level (null when
+// the designation does not exist). Always read live — a cached id could point at a
+// designation that has since been deleted.
 export async function chainDesignationId(chainKey, level) {
   await ensureDesignationChainSchema();
-  return desigIdCache.get(`${chainKey}:${level}`) ?? null;
+  const [row] = await query("SELECT id FROM designations WHERE name = ? LIMIT 1", [chainDesignationName(chainKey, level)]);
+  return row?.id ?? null;
+}
+
+// Used ONLY when making an actual appointment: reuse the existing designation row
+// (same id, so assignments are preserved — never a duplicate) or create it now.
+async function resolveChainDesignation(chainKey, level) {
+  const existingId = await chainDesignationId(chainKey, level);
+  if (existingId) return existingId;
+  const name = chainDesignationName(chainKey, level);
+  const hasSortOrder = (await query("SHOW COLUMNS FROM designations LIKE 'sort_order'")).length > 0;
+  const hasEnabled = (await query("SHOW COLUMNS FROM designations LIKE 'enabled'")).length > 0;
+  const cols = ["name", "level"];
+  const vals = [name, level];
+  if (hasSortOrder) { cols.push("sort_order"); vals.push(CHAINS.findIndex((c) => c.key === chainKey)); }
+  if (hasEnabled) { cols.push("enabled"); vals.push(1); }
+  try {
+    const res = await query(
+      `INSERT INTO designations (${cols.map((c) => `\`${c}\``).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
+      vals
+    );
+    return res.insertId;
+  } catch (e) {
+    if (e?.code === "ER_DUP_ENTRY") return chainDesignationId(chainKey, level); // created concurrently
+    throw e;
+  }
 }
 
 // --- location helpers -------------------------------------------------------
@@ -307,7 +315,7 @@ export async function appointChain(session, { chainKey, level, locationId, conta
     }
   }
 
-  const designationId = await chainDesignationId(chainKey, level);
+  const designationId = await resolveChainDesignation(chainKey, level);
   const parentUnit = await parentUnitOf(level, locId); // null for state
   let parentId = null;
   let parentLocationId = null;
