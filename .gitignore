@@ -48,3 +48,4 @@ next-env.d.ts
 # briefly. Restore one into the local Docker MariaDB instead (docker-compose.yml).
 *.sql
 *.sql.gz
+designations-backup-*.sql
