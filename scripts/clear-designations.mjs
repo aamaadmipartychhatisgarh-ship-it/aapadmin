@@ -12,6 +12,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 //   node scripts/clear-designations.mjs            → DRY RUN (default): changes nothing,
 //                                                     prints every relationship + row count
 //   node scripts/clear-designations.mjs --apply    → backs up, then clears (one transaction)
+//   add --minimal to leave every link table alone (see below)
 //
 // Handling of everything that points at a designation (found dynamically from
 // information_schema, so nothing is missed):
@@ -27,6 +28,10 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 // AUTO_INCREMENT counter is left alone. A mysqldump backup is mandatory with --apply.
 
 const APPLY = process.argv.includes('--apply');
+// --minimal: touch NOTHING but the designations table itself (plus contacts.designation_id,
+// which the app's own Delete button also clears, and calls.designation_id which the
+// database nulls by its own ON DELETE SET NULL rule). Link tables are left as they are.
+const MINIMAL = process.argv.includes('--minimal');
 const REPORT_ONLY = new Set(['designation_assignments', 'designation_approvals', 'designation_approval_history', 'designation_appointments']);
 const DELETE_ROWS = new Set(['contact_designations', 'wing_designations']);
 
@@ -50,13 +55,14 @@ async function run() {
     for (const { t, c, nullable } of cols) {
       const [[{ n }]] = await conn.query(`SELECT COUNT(*) n FROM \`${t}\` WHERE \`${c}\` IS NOT NULL`);
       let action = 'set NULL (row kept)';
-      if (REPORT_ONLY.has(t)) action = 'LEFT UNTOUCHED (reported only)';
+      if (MINIMAL && t !== 'contacts') action = 'LEFT UNTOUCHED (minimal mode)';
+      else if (REPORT_ONLY.has(t)) action = 'LEFT UNTOUCHED (reported only)';
       else if (DELETE_ROWS.has(t)) action = 'delete link rows';
       else if (nullable !== 'YES') action = 'NOT NULLABLE — will ABORT';
       plan.push({ t, c, n, action });
     }
     const [[{ n: wd }]] = await conn.query("SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wing_designations'");
-    if (wd) {
+    if (wd && !MINIMAL) {
       const [[{ n }]] = await conn.query('SELECT COUNT(*) n FROM wing_designations');
       plan.push({ t: 'wing_designations', c: '(wing templates)', n, action: 'delete link rows' });
     }
@@ -78,11 +84,11 @@ async function run() {
     await conn.beginTransaction();
     try {
       for (const p of plan) {
-        if (REPORT_ONLY.has(p.t) || p.t === 'wing_designations') continue;
+        if (REPORT_ONLY.has(p.t) || p.t === 'wing_designations' || (MINIMAL && p.t !== 'contacts')) continue;
         if (DELETE_ROWS.has(p.t)) await conn.query(`DELETE FROM \`${p.t}\``);
         else await conn.query(`UPDATE \`${p.t}\` SET \`${p.c}\` = NULL WHERE \`${p.c}\` IS NOT NULL`);
       }
-      if (wd) await conn.query('DELETE FROM wing_designations');
+      if (wd && !MINIMAL) await conn.query('DELETE FROM wing_designations');
       await conn.query('DELETE FROM designations');
       // The 14 default State designations are re-seeded at app start unless this
       // ledger row exists. It normally already does; make sure, so the cleared
