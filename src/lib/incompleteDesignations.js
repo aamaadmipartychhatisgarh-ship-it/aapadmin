@@ -3,6 +3,7 @@ import { scopeFilterSync } from "@/lib/permissions";
 import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
+import { wingsMapFor } from "@/lib/designationWings";
 
 // CONTACTS → INCOMPLETE DESIGNATION — shared data layer.
 //
@@ -86,6 +87,9 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     `SELECT id, name, ${wingSelect} FROM designations WHERE level = ? ${enabledClause} ORDER BY (sort_order IS NULL), sort_order, name`,
     [level]
   );
+  // Every wing of each designation (one entry can carry many); `wing` stays the first.
+  const wingsMap = await wingsMapFor(levelDesignations);
+  for (const d of levelDesignations) d.wings = wingsMap.get(d.id) || [];
   // Optional wing filter: a set of stored wing names. When present, only
   // designations belonging to one of those wings are kept (empty set of matches →
   // no rows, never "all"). The wing list itself always comes from Master Data.
@@ -105,12 +109,12 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   for (const d of levelDesignations) {
     const nm = normName(d.name);
     idToNorm.set(d.id, nm);
-    if (!repByNorm.has(nm)) repByNorm.set(nm, { id: d.id, name: d.name, wing: d.wing || null });
+    if (!repByNorm.has(nm)) repByNorm.set(nm, { id: d.id, name: d.name, wing: d.wing || null, wings: d.wings || [] });
   }
   const uniqueLevelDesignations = [...repByNorm.values()];
   const designations = uniqueLevelDesignations.filter((d) =>
     (!designationId || idToNorm.get(designationId) === normName(d.name)) &&
-    (!wingSet || (d.wing && wingSet.has(d.wing)))
+    (!wingSet || (d.wings || []).some((w) => wingSet.has(w)))
   );
   const allowedNorms = new Set(designations.map((d) => normName(d.name)));
 
@@ -186,6 +190,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
         designation_id: d.id,
         designation_name: d.name,
         designation_wing: d.wing || null,
+        designation_wings: d.wings || [],
         people,
         person_names: people.map((p) => p.person_name).join(", "),
         filled: people.length > 0,

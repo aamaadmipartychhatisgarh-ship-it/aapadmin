@@ -1656,7 +1656,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
           <label className="block text-xs font-semibold text-gray-500 mb-1">Designation(s)</label>
           <DesignationMultiSelect
             options={(form.wings?.length
-              ? designations.filter((d) => (d.wing && form.wings.includes(d.wing)) || (form.designation_ids || []).map(String).includes(String(d.id)))
+              ? designations.filter((d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).some((w) => form.wings.includes(w)) || (form.designation_ids || []).map(String).includes(String(d.id)))
               : designations)}
             value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
         </div>
@@ -1851,7 +1851,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">Designation(s)</label>
-          <DesignationMultiSelect options={wingSel.size ? designations.filter((d) => d.wing && wingSel.has(d.wing)) : designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
+          <DesignationMultiSelect options={wingSel.size ? designations.filter((d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).some((w) => wingSel.has(w))) : designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
         </div>
         {/* Location hierarchy: Zone → Lok Sabha → District → Assembly → Block.
             Admin picks freely; a supervisor's territory-fixed levels are shown

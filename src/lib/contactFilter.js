@@ -86,8 +86,11 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
           subParams.push(...designation_ids);
         }
         if (wingList.length) {
-          subs.push(`dw.wing IN (${wingList.map(() => "?").join(",")})`);
-          subParams.push(...wingList);
+          // A designation matches a wing by its own (first) wing OR any wing stored
+          // against it in designation_wings (one entry can carry many wings).
+          const wph = wingList.map(() => "?").join(",");
+          subs.push(`(dw.wing IN (${wph}) OR EXISTS (SELECT 1 FROM designation_wings dwx WHERE dwx.designation_id = dw.id AND dwx.wing IN (${wph})))`);
+          subParams.push(...wingList, ...wingList);
         }
         const join = wingList.length ? "JOIN designations dw ON dw.id = cd.designation_id" : "";
         clauses.push(`EXISTS (SELECT 1 FROM contact_designations cd ${join} WHERE cd.contact_id = c.id AND (${subs.join(" OR ")}))`);

@@ -5,7 +5,8 @@ import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
-import { ensureDesignationLevelColumn, isValidDesignationLevel, designationLevelLabel } from "@/lib/designationLevels";
+import { ensureDesignationLevelColumn, isValidDesignationLevel } from "@/lib/designationLevels";
+import { ensureDesignationWingsSchema, wingsMapFor, setDesignationWings } from "@/lib/designationWings";
 import { ensureWingSchema } from "@/lib/wingDesignations";
 import { logMasterDataChange } from "@/lib/audit";
 
@@ -70,6 +71,9 @@ export async function GET(req) {
             ORDER BY ${orderBy}`
         )
       : await query(`SELECT id, name, level, ${wingCol}, ${sortCol}, ${rankCol} FROM designations ORDER BY ${orderByPlain}`);
+    // Every wing of each designation (one entry can carry many); `wing` stays the first.
+    const wingsMap = await wingsMapFor(designations);
+    for (const d of designations) d.wings = wingsMap.get(d.id) || [];
     return Response.json({ designations }, { status: 200 });
   } catch (error) {
     console.error("Error fetching designations:", error);
@@ -90,21 +94,17 @@ export async function POST(req) {
       return Response.json({ message: "Designation name is required" }, { status: 400 });
     }
 
-    // Multi-select mode: `levels` (array) and/or `wings` (array of stored wing
-    // names). Falls back to the legacy single `level` field. For every selected
-    // Level × Wing combination one designation is created in the Master, with the
-    // configured order stored in sort_order (appended to that Level+Wing group).
+    // ONE designation entry per selected Level, named EXACTLY as typed (the Level is
+    // never merged into the name — it lives in its own `level` field). Every selected
+    // Wing is stored against that same entry (designation_wings); no per-wing rows.
     const levels = Array.isArray(body?.levels)
-      ? body.levels.map((l) => String(l || "").trim()).filter(isValidDesignationLevel)
+      ? [...new Set(body.levels.map((l) => String(l || "").trim()).filter(isValidDesignationLevel))]
       : (body?.level && isValidDesignationLevel(String(body.level).trim()) ? [String(body.level).trim()] : []);
     if (!levels.length) {
       return Response.json({ message: "Select at least one valid Level" }, { status: 400 });
     }
-    const rawWings = Array.isArray(body?.wings) ? body.wings.map((w) => String(w || "").trim()).filter(Boolean) : [];
-    const wings = rawWings.length ? rawWings : [null]; // no wing selected → a plain designation
-    // Prefix the level / append the wing only in multi mode, so legacy single-level
-    // adds keep storing the name exactly as typed.
-    const multi = levels.length > 1 || rawWings.length > 0;
+    const wings = Array.isArray(body?.wings) ? [...new Set(body.wings.map((w) => String(w || "").trim()).filter(Boolean))] : [];
+    await ensureDesignationWingsSchema();
 
     await ensureDesignationLevelColumn(query);
 
@@ -122,7 +122,7 @@ export async function POST(req) {
     };
     let cols = await detectCols();
     const WANT = [
-      ["wing", "VARCHAR(120) NULL"],
+      ["wing", "VARCHAR(120) NULL"], // first selected wing (all wings: designation_wings)
       ["sort_order", "INT NULL"],
       ["enabled", "TINYINT NOT NULL DEFAULT 1"],
       ["rank", "INT NULL"], // GLOBAL designation order (the ALTER back-quotes the name)
@@ -140,7 +140,6 @@ export async function POST(req) {
     }
     if (altered) cols = await detectCols();
     const hasLevelCol = cols.has("level");
-    const hasWingCol = cols.has("wing");
     const hasSortCol = cols.has("sort_order");
     const hasEnabledCol = cols.has("enabled");
     const hasRankCol = cols.has("rank");
@@ -158,56 +157,48 @@ export async function POST(req) {
       nextRank = n == null ? null : Number(n);
     }
     for (const level of levels) {
-      const levelLabel = designationLevelLabel(level) || level;
-      for (const wing of wings) {
-        let composed = name;
-        if (multi && !composed.toLowerCase().startsWith(levelLabel.toLowerCase())) composed = `${levelLabel} ${composed}`;
-        if (wing && wing !== "Main Organisation" && !composed.toLowerCase().includes(wing.toLowerCase())) composed = `${composed}, ${wing}`;
-        // The name is globally UNIQUE: reuse any existing row (never a duplicate),
-        // just (re)tagging its level + wing; otherwise insert appended to the group.
+      // Same exact name + same Level is the SAME entry: reuse it (never a duplicate),
+      // just refreshing its wings.
+      // eslint-disable-next-line no-await-in-loop
+      const [existing] = await query(
+        hasLevelCol ? "SELECT id FROM designations WHERE name = ? AND level <=> ? LIMIT 1" : "SELECT id FROM designations WHERE name = ? LIMIT 1",
+        hasLevelCol ? [name, level] : [name]
+      );
+      if (existing) {
         // eslint-disable-next-line no-await-in-loop
-        const [existing] = await query("SELECT id FROM designations WHERE name = ? LIMIT 1", [composed]);
-        if (existing) {
-          const sets = [];
-          const args = [];
-          if (hasLevelCol) { sets.push("level = ?"); args.push(level); }
-          if (hasWingCol) { sets.push("wing = ?"); args.push(wing); }
-          if (sets.length) {
-            // eslint-disable-next-line no-await-in-loop
-            await query(`UPDATE designations SET ${sets.join(", ")} WHERE id = ?`, [...args, existing.id]);
-          }
-          reused++;
-          continue;
-        }
-        // Next order value in this (level, wing) group, when the column exists.
-        let nextSort = null;
-        if (hasSortCol) {
-          // eslint-disable-next-line no-await-in-loop
-          const [{ n }] = await query(
-            `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM designations WHERE ${hasLevelCol ? "level = ?" : "1=1"}${hasWingCol ? " AND (wing <=> ?)" : ""}`,
-            [...(hasLevelCol ? [level] : []), ...(hasWingCol ? [wing] : [])]
-          );
-          nextSort = n;
-        }
-        const insCols = ["name"];
-        const insArgs = [composed];
-        if (hasLevelCol) { insCols.push("level"); insArgs.push(level); }
-        if (hasWingCol) { insCols.push("wing"); insArgs.push(wing); }
-        if (hasSortCol) { insCols.push("sort_order"); insArgs.push(nextSort); }
-        if (hasEnabledCol) { insCols.push("enabled"); insArgs.push(1); }
-        if (hasRankCol && nextRank != null) { insCols.push("rank"); insArgs.push(nextRank); nextRank++; }
-        // eslint-disable-next-line no-await-in-loop
-        const res = await query(
-          `INSERT INTO designations (${insCols.map((c) => `\`${c}\``).join(", ")}) VALUES (${insCols.map(() => "?").join(", ")})`,
-          insArgs
-        );
-        created.push({ id: res.insertId, name: composed, level, wing });
+        await setDesignationWings(existing.id, wings);
+        reused++;
+        continue;
       }
+      // Next order value in this Level group, when the column exists.
+      let nextSort = null;
+      if (hasSortCol) {
+        // eslint-disable-next-line no-await-in-loop
+        const [{ n }] = await query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM designations WHERE ${hasLevelCol ? "level = ?" : "1=1"}`,
+          hasLevelCol ? [level] : []
+        );
+        nextSort = n;
+      }
+      const insCols = ["name"];
+      const insArgs = [name];
+      if (hasLevelCol) { insCols.push("level"); insArgs.push(level); }
+      if (hasSortCol) { insCols.push("sort_order"); insArgs.push(nextSort); }
+      if (hasEnabledCol) { insCols.push("enabled"); insArgs.push(1); }
+      if (hasRankCol && nextRank != null) { insCols.push("rank"); insArgs.push(nextRank); nextRank++; }
+      // eslint-disable-next-line no-await-in-loop
+      const res = await query(
+        `INSERT INTO designations (${insCols.map((c) => `\`${c}\``).join(", ")}) VALUES (${insCols.map(() => "?").join(", ")})`,
+        insArgs
+      );
+      // eslint-disable-next-line no-await-in-loop
+      await setDesignationWings(res.insertId, wings);
+      created.push({ id: res.insertId, name, level, wing: wings[0] ?? null, wings });
     }
 
     await logMasterDataChange(session, {
       req, master: "designation", action: "Created", recordName: name,
-      after: { levels, wings: rawWings, created: created.length, reused },
+      after: { levels, wings, created: created.length, reused },
     });
     const first = created[0];
     return Response.json(

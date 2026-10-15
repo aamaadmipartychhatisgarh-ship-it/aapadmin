@@ -7,6 +7,7 @@ import { query } from "@/lib/db";
 import { logAudit, logMasterDataChange } from "@/lib/audit";
 import { ensureDesignationLevelColumn, isValidDesignationLevel } from "@/lib/designationLevels";
 import { ensureWingSchema } from "@/lib/wingDesignations";
+import { ensureDesignationWingsSchema, setDesignationWings } from "@/lib/designationWings";
 
 export async function PUT(req, { params }) {
   try {
@@ -36,6 +37,8 @@ export async function PUT(req, { params }) {
     if (hasWing) { await ensureWingSchema(); sets.push("wing = ?"); args.push(wing); }
     const res = await query(`UPDATE designations SET ${sets.join(", ")} WHERE id = ?`, [...args, id]);
     if (res.affectedRows === 0) return Response.json({ message: "Not found" }, { status: 404 });
+    if (Array.isArray(body?.wings)) { await ensureDesignationWingsSchema(); await setDesignationWings(id, body.wings); }
+    else if (hasWing) { await ensureDesignationWingsSchema(); await setDesignationWings(id, wing ? [wing] : []); }
     await logMasterDataChange(session, {
       req, master: "designation", action: "Updated", recordId: id, recordName: name,
       before: { name: prev?.name ?? null, ...(hasLevel ? { level: prev?.level ?? null } : {}) },
@@ -63,6 +66,7 @@ export async function DELETE(req, { params }) {
     await query("UPDATE contacts SET designation_id = NULL WHERE designation_id = ?", [id]);
     const res = await query("DELETE FROM designations WHERE id = ?", [id]);
     if (res.affectedRows === 0) return Response.json({ message: "Not found" }, { status: 404 });
+    await query("DELETE FROM designation_wings WHERE designation_id = ?", [id]).catch(() => {});
     logAudit(session, { action: "designation.delete", entityType: "designation", entityId: id, details: existing || null });
     await logMasterDataChange(session, {
       req, master: "designation", action: "Deleted", recordId: id, recordName: existing?.name ?? null,

@@ -325,7 +325,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         <Field label="Designation(s)" full>
           <DesignationMultiSelect
             options={(form.wings?.length
-              ? designations.filter((d) => (d.wing && form.wings.includes(d.wing)) || (form.designation_ids || []).map(String).includes(String(d.id)))
+              ? designations.filter((d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).some((w) => form.wings.includes(w)) || (form.designation_ids || []).map(String).includes(String(d.id)))
               : designations)}
             value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
         </Field>

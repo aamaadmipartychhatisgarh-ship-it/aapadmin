@@ -6,7 +6,6 @@ import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, us
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { DESIGNATION_LEVELS, designationLevelLabel } from "@/lib/designationLevels";
-import { deriveDesignationBase } from "@/lib/designationName";
 import WingMultiSelect from "@/components/WingMultiSelect";
 
 // The Designation Chain levels (State → Lok Sabha → District → Assembly → Block).
@@ -468,16 +467,10 @@ function DesignationsCard({ designations, onChanged }) {
   // field multi-select with the current selection already ticked.
   function openEdit(item) {
     const level = item.level || "";
-    const base = deriveDesignationBase(item.name, level, WING_VALUES);
-    const selected = new Set();
-    for (const d of designations) {
-      if ((d.level || "") !== level) continue;
-      if (deriveDesignationBase(d.name, level, WING_VALUES).toLowerCase() !== base.toLowerCase()) continue;
-      if (d.wing) selected.add(d.wing);
-    }
-    if (item.wing) selected.add(item.wing);
+    // ONE entry: its exact name and every wing stored against it.
+    const selected = new Set(item.wings && item.wings.length ? item.wings : item.wing ? [item.wing] : []);
     setEditingId(item.id);
-    setEditName(base);
+    setEditName(item.name);
     setEditLevel(level);
     setEditWings(selected);
     setEditRank(item.rank != null ? String(item.rank) : "");
@@ -617,7 +610,7 @@ function DesignationsCard({ designations, onChanged }) {
                   {s.level
                     ? <span className="text-[10px] uppercase font-bold tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-1 rounded-full whitespace-nowrap">{designationLevelLabel(s.level) || s.level}</span>
                     : <span className="text-[10px] uppercase font-bold tracking-wide text-amber-700 bg-amber-100 px-2 py-1 rounded-full">No level</span>}
-                  {s.wing && <span className="text-[10px] uppercase font-bold tracking-wide text-purple-700 bg-purple-100 px-2 py-1 rounded-full whitespace-nowrap">{DESIG_WING_LABEL(s.wing)}</span>}
+                  {(s.wings && s.wings.length ? s.wings : s.wing ? [s.wing] : []).map((w) => <span key={w} className="text-[10px] uppercase font-bold tracking-wide text-purple-700 bg-purple-100 px-2 py-1 rounded-full whitespace-nowrap">{DESIG_WING_LABEL(w)}</span>)}
                   <button onClick={() => openEdit(s)} title="Edit (name, level & wings)" className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-50 rounded-lg"><Pencil size={14} /></button>
                   <button onClick={() => remove(s)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={14} /></button>
                 </>
@@ -652,7 +645,7 @@ function SortableDesignationRow({ item, index, count, onDelete, onMove, busy, di
         className="w-12 text-center text-xs font-bold text-gray-600 border border-gray-200 rounded-md py-1 outline-none focus:ring-2 focus:ring-[#164FA3] shrink-0" />
       <span className="flex-1 min-w-0 truncate text-sm font-medium text-gray-700">{item.name}</span>
       {item.level && <span className="hidden sm:inline text-[10px] uppercase font-bold tracking-wide text-[#164FA3] bg-[#164FA3]/10 px-2 py-1 rounded-full whitespace-nowrap shrink-0">{designationLevelLabel(item.level) || item.level}</span>}
-      {item.wing && <span className="hidden md:inline text-[10px] uppercase font-bold tracking-wide text-purple-700 bg-purple-100 px-2 py-1 rounded-full whitespace-nowrap shrink-0">{DESIG_WING_LABEL(item.wing)}</span>}
+      {(item.wings && item.wings.length ? item.wings : item.wing ? [item.wing] : []).map((w) => <span key={w} className="hidden md:inline text-[10px] uppercase font-bold tracking-wide text-purple-700 bg-purple-100 px-2 py-1 rounded-full whitespace-nowrap shrink-0">{DESIG_WING_LABEL(w)}</span>)}
       <button type="button" onClick={() => onDelete(item)} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 shrink-0"><Trash2 size={14} /></button>
     </li>
   );

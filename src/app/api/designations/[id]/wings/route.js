@@ -5,22 +5,15 @@ import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureDesignationLevelColumn, isValidDesignationLevel } from "@/lib/designationLevels";
-import { ensureWingSchema, designationHasAssignments } from "@/lib/wingDesignations";
-import { composeDesignationName, deriveDesignationBase } from "@/lib/designationName";
+import { ensureWingSchema } from "@/lib/wingDesignations";
+import { ensureDesignationWingsSchema, setDesignationWings } from "@/lib/designationWings";
 import { logMasterDataChange } from "@/lib/audit";
 
 // POST /api/designations/[id]/wings  { name?, level?, wings: [wingName, ...] }
 //
-// Sets the full set of Wings a designation is configured for, at one level. The
-// designation is stored as one row per (level, wing); this call makes those
-// sibling rows (same base name + level) match the selected wings exactly:
-//  - a row is created for each selected wing that has none (appended to that
-//    (level, wing) group's order), reusing an identically-named row if present;
-//  - a sibling row for a DESELECTED wing is deleted ONLY when it has no people
-//    assigned — an occupied position is kept (existing worker data is never lost)
-//    and reported back so the UI can explain why it stayed.
-// This reuses the existing `designations.wing` column and row model — no parallel
-// junction table — so every wing-aware query keeps working unchanged.
+// Saves ONE designation entry: its exact name, its Level (separate field) and the
+// full set of Wings it belongs to (designation_wings). No sibling per-wing rows are
+// created or deleted — the entry keeps its id, rank and assignments.
 export async function POST(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
@@ -30,6 +23,7 @@ export async function POST(req, { params }) {
     const { id } = await params;
     await ensureDesignationLevelColumn(query);
     await ensureWingSchema();
+    await ensureDesignationWingsSchema();
 
     const body = await req.json().catch(() => ({}));
     const [current] = await query("SELECT id, name, level, wing FROM designations WHERE id = ?", [id]);
@@ -39,99 +33,23 @@ export async function POST(req, { params }) {
     if (!level || !isValidDesignationLevel(level)) {
       return Response.json({ message: "A valid Level is required" }, { status: 400 });
     }
+    const name = (typeof body?.name === "string" && body.name.trim()) ? body.name.trim() : current.name;
+    if (!name) return Response.json({ message: "Designation name is required" }, { status: 400 });
 
-    // Authoritative wing names (admin may have added wings) for base derivation.
-    const wingRows = await query("SELECT name FROM wings");
-    const wingNames = wingRows.map((w) => w.name);
+    const wings = Array.isArray(body?.wings) ? [...new Set(body.wings.map((w) => String(w || "").trim()).filter(Boolean))] : [];
 
-    const selected = Array.isArray(body?.wings)
-      ? [...new Set(body.wings.map((w) => String(w || "").trim()).filter(Boolean))]
-      : [];
+    const [clash] = await query("SELECT id FROM designations WHERE name = ? AND level <=> ? AND id <> ? LIMIT 1", [name, level, id]);
+    if (clash) return Response.json({ message: "A designation with this name already exists at this Level" }, { status: 409 });
 
-    // The group is identified by the CURRENT row's base (so a rename renames the
-    // existing rows in place and never orphans them), while newBase is what every
-    // row in the group is renamed to.
-    const oldBase = deriveDesignationBase(current.name, current.level || level, wingNames);
-    const newBase = (typeof body?.name === "string" && body.name.trim())
-      ? deriveDesignationBase(body.name.trim(), level, wingNames)
-      : oldBase;
-    if (!newBase) return Response.json({ message: "Designation name is required" }, { status: 400 });
-
-    // Sibling rows = same (current) base + same level, across any wing.
-    const levelRows = await query("SELECT id, name, wing FROM designations WHERE level = ?", [level]);
-    const siblings = levelRows.filter(
-      (r) => deriveDesignationBase(r.name, level, wingNames).toLowerCase() === oldBase.toLowerCase()
-    );
-    const siblingByWing = new Map(siblings.map((s) => [s.wing == null ? "" : String(s.wing), s]));
-
-    // No wing selected → a single plain (no-wing) designation.
-    const wantWings = selected.length ? selected : [null];
-
-    const created = [];
-    // M2 — new sibling rows get the next GLOBAL `rank` (appended to the sequence) so
-    // they are never left with rank = NULL, which would sort them to the bottom of
-    // rank-ordered screens while sort_order placed them in-hierarchy elsewhere.
-    let [{ nr: nextRank } = { nr: null }] = await query("SELECT COALESCE(MAX(`rank`), 0) + 1 AS nr FROM designations").catch(() => [{ nr: null }]);
-    nextRank = nextRank == null ? null : Number(nextRank);
-    for (const wing of wantWings) {
-      const wkey = wing == null ? "" : String(wing);
-      const composed = composeDesignationName(level, newBase, wing);
-      const sib = siblingByWing.get(wkey);
-      if (sib) {
-        // Rename/retag the EXISTING row in place — keeps its id, order & assignments.
-        // eslint-disable-next-line no-await-in-loop
-        await query("UPDATE designations SET name = ?, level = ?, wing = ? WHERE id = ?", [composed, level, wing, sib.id]);
-        continue;
-      }
-      // eslint-disable-next-line no-await-in-loop
-      const [exists] = await query("SELECT id FROM designations WHERE name = ? LIMIT 1", [composed]);
-      if (exists) {
-        // eslint-disable-next-line no-await-in-loop
-        await query("UPDATE designations SET level = ?, wing = ? WHERE id = ?", [level, wing, exists.id]);
-      } else {
-        // eslint-disable-next-line no-await-in-loop
-        const [{ n }] = await query(
-          "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM designations WHERE level = ? AND (wing <=> ?)",
-          [level, wing]
-        );
-        // eslint-disable-next-line no-await-in-loop
-        const res = nextRank == null
-          ? await query(
-              "INSERT INTO designations (name, level, wing, sort_order, enabled) VALUES (?, ?, ?, ?, 1)",
-              [composed, level, wing, n]
-            )
-          : await query(
-              "INSERT INTO designations (name, level, wing, sort_order, `rank`, enabled) VALUES (?, ?, ?, ?, ?, 1)",
-              [composed, level, wing, n, nextRank++]
-            );
-        created.push(res.insertId);
-      }
-    }
-
-    const wantSet = new Set(wantWings.map((w) => (w == null ? "" : String(w))));
-    const removed = [];
-    const keptAssigned = [];
-    for (const sib of siblings) {
-      const wkey = sib.wing == null ? "" : String(sib.wing);
-      if (wantSet.has(wkey)) continue; // still selected
-      // eslint-disable-next-line no-await-in-loop
-      if (await designationHasAssignments(sib.id)) { keptAssigned.push(sib.name); continue; }
-      // eslint-disable-next-line no-await-in-loop
-      await query("UPDATE contacts SET designation_id = NULL WHERE designation_id = ?", [sib.id]);
-      // eslint-disable-next-line no-await-in-loop
-      await query("DELETE FROM designations WHERE id = ?", [sib.id]);
-      removed.push(sib.id);
-    }
+    await query("UPDATE designations SET name = ?, level = ? WHERE id = ?", [name, level, id]);
+    await setDesignationWings(id, wings);
 
     await logMasterDataChange(session, {
-      req, master: "designation", action: "Updated Wings", recordId: id, recordName: newBase,
-      after: { level, wings: selected, created: created.length, removed: removed.length, keptAssigned: keptAssigned.length },
+      req, master: "designation", action: "Updated Wings", recordId: id, recordName: name,
+      before: { name: current.name, level: current.level },
+      after: { name, level, wings },
     });
-
-    const message = keptAssigned.length
-      ? `Wings updated. ${keptAssigned.length} wing(s) could not be removed because people are assigned: ${keptAssigned.join(", ")}.`
-      : "Wings updated.";
-    return Response.json({ ok: true, base: newBase, level, created, removed, keptAssigned, message });
+    return Response.json({ ok: true, base: name, level, wings, created: [], removed: [], keptAssigned: [], message: "Wings updated." });
   } catch (error) {
     if (error.code === "ER_DUP_ENTRY") {
       return Response.json({ message: "A designation with this name already exists" }, { status: 409 });

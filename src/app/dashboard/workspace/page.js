@@ -329,7 +329,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     const picked = qDesignation.map(String);
     if (!qWing.length) return picked.length ? picked.join(",") : "";
     const wingSet = new Set(qWing);
-    const wingIds = designations.filter((d) => d.wing && wingSet.has(d.wing)).map((d) => String(d.id));
+    const wingIds = designations.filter((d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).some((w) => wingSet.has(w))).map((d) => String(d.id));
     const merged = [...new Set([...picked, ...wingIds])];
     return merged.length ? merged.join(",") : "0";
   }

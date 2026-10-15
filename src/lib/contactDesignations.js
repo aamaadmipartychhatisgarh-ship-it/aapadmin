@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { ensureDesignationWingsSchema } from "@/lib/designationWings";
 
 // PROMPT 5 — a contact can hold MANY designations. The relationship lives in
 // contact_designations(contact_id, designation_id) with UNIQUE(contact_id,
@@ -10,6 +11,8 @@ let ensured = false;
 export async function ensureContactDesignationsSchema() {
   if (ensured) return;
   try {
+    // designation_wings is read by the wing filter that joins contact_designations.
+    await ensureDesignationWingsSchema();
     await query(
       `CREATE TABLE IF NOT EXISTS contact_designations (
          id INT AUTO_INCREMENT PRIMARY KEY,
