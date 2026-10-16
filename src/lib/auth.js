@@ -1,6 +1,7 @@
 import CredentialsProvider from "next-auth/providers/credentials";
 import { query } from "@/lib/db";
 import bcrypt from "bcryptjs";
+import { ensureWorkerDefaultPasswords } from "@/lib/workerCredentials";
 import { isOversight, isAdmin as isAdminRole, OVERSIGHT_ROLES } from "@/lib/permissions";
 
 export const authOptions = {
@@ -21,7 +22,13 @@ export const authOptions = {
         const username = String(credentials.username).trim();
 
         try {
-          const users = await query("SELECT * FROM users WHERE username = ?", [username]);
+          let users = await query("SELECT * FROM users WHERE username = ?", [username]);
+          // Worker logins created under the old fixed default password are moved to
+          // the documented default once (see workerCredentials); re-read afterwards.
+          if (users[0]?.role === "worker") {
+            await ensureWorkerDefaultPasswords();
+            users = await query("SELECT * FROM users WHERE username = ?", [username]);
+          }
           const user = users[0];
 
           // Log the EXACT reason a sign-in is refused so a 401 is diagnosable in

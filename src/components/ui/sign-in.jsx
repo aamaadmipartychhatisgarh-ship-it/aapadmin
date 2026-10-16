@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { signIn } from "next-auth/react";
+import { signIn, getSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import InstallApp from "@/components/InstallApp";
 
@@ -29,7 +29,10 @@ export const LightLogin = () => {
         setError("Invalid credentials");
         setLoading(false);
       } else {
-        router.push("/dashboard/admin");
+        // Workers have no Admin dashboard — send them to their own (Page Access
+        // limits them to Dashboard, Announcements and Designation Approval).
+        const s = await getSession().catch(() => null);
+        router.push(s?.user?.role === "worker" ? "/dashboard/portal" : "/dashboard/admin");
         router.refresh();
       }
     } catch (err) {
