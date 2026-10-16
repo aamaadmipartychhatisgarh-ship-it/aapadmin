@@ -16,8 +16,6 @@ import MasterDataSettings from "../settings/page";
 // no duplicate implementation.
 import { CasteMaster, PollingMaster } from "@/app/dashboard/leader-assessment/page";
 import PartyMaster from "@/components/PartyMaster";
-import DesignationMaster from "@/components/DesignationMaster";
-import DesignationChain from "@/components/DesignationChain";
 import MasterDataAudit from "@/components/MasterDataAudit";
 import PageAccessManager from "@/components/PageAccessManager";
 
@@ -25,8 +23,6 @@ const TABS = [
   { key: "teams", label: "Teams" },
   { key: "users", label: "Users" },
   { key: "master", label: "Master Data" },
-  { key: "designations", label: "Designation Master" },
-  { key: "chain", label: "Designation Chain" },
   { key: "castes", label: "Caste Master" },
   { key: "polling", label: "Polling Station Master" },
   { key: "parties", label: "Party Master" },
@@ -39,8 +35,6 @@ const TABS = [
 // removed user can neither see the tab nor load its data.
 const TAB_PAGE_KEY = {
   master: "master_data",
-  designations: "master_data",
-  chain: "master_data",
   audit: "master_data",
   castes: "caste_master",
   polling: "polling_master",
@@ -168,8 +162,6 @@ function Body({ session }) {
       {tab === "teams" && canTab("teams") && <TeamsTab session={session} />}
       {tab === "users" && canTab("users") && <UsersTab session={session} />}
       {tab === "master" && canPage("master_data") && <MasterDataSettings embedded />}
-      {tab === "designations" && canPage("master_data") && <DesignationMaster />}
-      {tab === "chain" && canPage("master_data") && <DesignationChain />}
       {tab === "audit" && canPage("master_data") && <MasterDataAudit />}
       {tab === "castes" && canPage("caste_master") && <CasteMaster flash={flash} fail={fail} />}
       {tab === "polling" && canPage("polling_master") && <PollingMaster flash={flash} fail={fail} />}
