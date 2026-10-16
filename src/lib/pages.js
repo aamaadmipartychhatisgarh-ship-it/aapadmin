@@ -178,7 +178,9 @@ export const PAGES = [
   // unauthenticated by design and gated only by the worker's link token.
   // Callers run the registration drive on the ground, so they get this module by
   // role (dashboard cards + nav + page + API), alongside the central admins.
-  { key: "voter_registration", label: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", prefixes: ["/dashboard/admin/voter-registration"], icon: "Vote",
+  // hideFromAccess: not offered in the Page Access console (no manual assignment);
+  // the page, its route/API guards and every existing grant keep working unchanged.
+  { key: "voter_registration", label: "Worker & Voter Registration", href: "/dashboard/admin/voter-registration", prefixes: ["/dashboard/admin/voter-registration"], icon: "Vote", hideFromAccess: true,
     roles: [ROLES.SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.CALLER] },
   // Designation Approval — the 8-stage sequential approval chain. The page itself
   // is visible to oversight (they also get the "All Requests" view). The initiate

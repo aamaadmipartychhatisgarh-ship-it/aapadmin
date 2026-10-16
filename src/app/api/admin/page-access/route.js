@@ -7,6 +7,10 @@ import { logAudit } from "@/lib/audit";
 import { ensurePagePermissionsSchema, setUserPages, markManaged, clearManaged, fixedPagesForRole } from "@/lib/pageAccess";
 import { PAGES, PAGE_KEYS, isValidPageKey, getPage } from "@/lib/pages";
 
+// Pages hidden from this console (PAGES[].hideFromAccess): never listed or assignable
+// here, but existing grants are left exactly as they are.
+const HIDDEN = new Set(PAGES.filter((p) => p.hideFromAccess).map((p) => p.key));
+
 // BUG 14 — Page Access Management (Super Admin only).
 //   GET    → registry of pages, grantable users, and all current grants
 //   POST   → grant a page to a user  { user_id, page_key }
@@ -78,7 +82,7 @@ export async function GET() {
     );
     // Only surface grants for pages still present in the registry.
     const grants = grantRows
-      .filter((g) => isValidPageKey(g.page_key))
+      .filter((g) => isValidPageKey(g.page_key) && !HIDDEN.has(g.page_key))
       .map((g) => ({
         id: g.id,
         user_id: g.user_id,
@@ -98,7 +102,7 @@ export async function GET() {
     // already hold it by baseline (so the UI can show baseline vs granted).
     // Include parent/tab so the console can render the hierarchical (parent →
     // sub-page) permission tree. `parent` null = a top-level page.
-    const pages = PAGES.map((p) => ({
+    const pages = PAGES.filter((p) => !HIDDEN.has(p.key)).map((p) => ({
       key: p.key,
       label: p.label,
       href: p.href,
@@ -128,7 +132,7 @@ export async function POST(req) {
     if (!Number.isInteger(userId) || userId <= 0 || !pageKey) {
       return NextResponse.json({ message: "user_id and page_key are required." }, { status: 400 });
     }
-    if (!isValidPageKey(pageKey)) {
+    if (!isValidPageKey(pageKey) || HIDDEN.has(pageKey)) {
       return NextResponse.json({ message: "Unknown page." }, { status: 400 });
     }
 
@@ -209,7 +213,12 @@ export async function PUT(req) {
       return NextResponse.json({ message: `${target.username} reverted to role-based access.`, pages: [], reset: true });
     }
 
-    const final = await setUserPages(userId, pageKeys, session.user.id);
+    // The console never shows hidden pages, so its save must not silently drop a
+    // hidden grant the user already holds — carry those over unchanged.
+    const keep = HIDDEN.size
+      ? (await query(`SELECT page_key FROM page_permissions WHERE user_id = ? AND page_key IN (${[...HIDDEN].map(() => "?").join(",")})`, [userId, ...HIDDEN])).map((r) => r.page_key)
+      : [];
+    const final = await setUserPages(userId, [...new Set([...pageKeys.filter((k) => !HIDDEN.has(k)), ...keep])], session.user.id);
     await logAudit(session, {
       action: "page_access.set", entityType: "page_permission", entityId: userId,
       details: { user_id: userId, username: target.username, pages: final },
