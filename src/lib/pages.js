@@ -24,6 +24,11 @@ const ADMIN = [
 ];
 const OVERSIGHT = [...ADMIN, ROLES.SUPERVISOR];
 
+// The pages EVERY Worker (Member Account) is given by default: Dashboard,
+// Announcements and Designation Approval. Used by Member Accounts creation and the
+// one-time pass that brings existing Worker accounts in line.
+export const WORKER_DEFAULT_PAGES = ["portal_home", "portal_announcements", "approvals"];
+
 // Ordered so the dropdown / tables read top-down like the product's own nav.
 export const PAGES = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", prefixes: ["/dashboard"], exact: true, icon: "LayoutDashboard",

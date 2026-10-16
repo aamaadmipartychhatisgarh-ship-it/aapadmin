@@ -11,7 +11,7 @@ import { usePageGuard } from "@/components/usePageGuard";
 
 // Member Portal home — the landing for auto-provisioned designation-holder accounts.
 // Managed accounts see exactly their granted pages; this is their dashboard with
-// quick links to Announcements and Worker Approval.
+// quick links to Announcements and Designation Approval.
 export default function PortalHomePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -28,7 +28,7 @@ export default function PortalHomePage() {
 
   const cards = [
     { href: "/dashboard/portal/announcements", icon: MessageSquare, title: "Announcements", desc: "Latest updates and notices from the party", color: "text-[#164FA3] bg-[#164FA3]/10" },
-    { href: "/dashboard/supervisor/pending-contacts", icon: Check, title: "Worker Approval", desc: "Review and approve members submitted in your area", color: "text-emerald-600 bg-emerald-50" },
+    { href: "/dashboard/admin/approvals", icon: Check, title: "Designation Approval", desc: "Designation requests assigned to you for review", color: "text-emerald-600 bg-emerald-50" },
   ];
 
   return (

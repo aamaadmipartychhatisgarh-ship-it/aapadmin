@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { query } from "@/lib/db";
 import { setUserPages } from "@/lib/pageAccess";
+import { WORKER_DEFAULT_PAGES } from "@/lib/pages";
 import { logAudit } from "@/lib/audit";
 import { phoneKey, last10Sql } from "@/lib/phone";
 import { ensureWingSchema } from "@/lib/wingDesignations";
@@ -17,8 +18,8 @@ export const PORTAL_LEVELS = ["state", "lok_sabha", "district", "assembly"];
 const NOT_GENERIC_MEMBER = "LOWER(TRIM(%A.name)) <> 'member'";
 function notGenericMember(alias) { return NOT_GENERIC_MEMBER.replace("%A", alias); }
 // A portal account is "managed" and gets EXACTLY these pages (role is secondary):
-// its Dashboard, Announcements, and the Worker Approval (pending contacts) queue.
-export const PORTAL_PAGES = ["portal_home", "portal_announcements", "pending_contacts"];
+// its Dashboard, Announcements and Designation Approval (see WORKER_DEFAULT_PAGES).
+export const PORTAL_PAGES = WORKER_DEFAULT_PAGES;
 
 let _ensured = false;
 export async function ensurePortalSchema() {

@@ -1,6 +1,6 @@
 import { query } from "@/lib/db";
 import { normalizeRole, ROLES, roleOf } from "@/lib/permissions";
-import { PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath, expandPageKeys, grantSetAllows, descendantKeysOf } from "@/lib/pages";
+import { WORKER_DEFAULT_PAGES, PAGES, PAGE_KEYS, baselinePagesForRole, isValidPageKey, pageKeyForPath, expandPageKeys, grantSetAllows, descendantKeysOf } from "@/lib/pages";
 
 // Page Access Management backend — the SINGLE source of truth for navigation,
 // client route guards and backend/API authorization.
@@ -79,6 +79,9 @@ export async function ensurePagePermissionsSchema() {
     // copying that grant's real admin as granted_by. INSERT IGNORE never changes an
     // existing row; later revocations are respected (this runs once only).
     await runOnce("supervisor_pending_approval_v1", grantPendingApprovalToContactSupervisors);
+    // ONE-TIME: every Worker account gets the default pages (Dashboard,
+    // Announcements, Designation Approval).
+    await runOnce("worker_default_pages_v1", applyWorkerDefaultPages);
     ensured = true;
   } catch (e) {
     console.error("[pageAccess] ensure schema:", e?.message || e);
@@ -95,6 +98,42 @@ async function runOnce(name, fn) {
   } catch (e) {
     console.error(`[pageAccess] migration ${name}:`, e?.message || e);
   }
+}
+
+// Existing Worker accounts → the default three pages. A Worker still on the old
+// default set (or with no grants / not Page-Access managed) is set to EXACTLY the
+// defaults; a Worker an admin gave extra pages keeps them and gains the defaults.
+// Uses raw SQL (not setUserPages) because this runs inside the schema ensure.
+async function applyWorkerDefaultPages() {
+  const OLD_DEFAULT = new Set(["portal_home", "portal_announcements", "pending_contacts"]);
+  const [admin] = await query(`SELECT id FROM users WHERE role = 'super_admin' ORDER BY id LIMIT 1`);
+  const by = admin?.id ?? null;
+  const workers = await query(`SELECT id FROM users WHERE role = 'worker'`);
+  let changed = 0;
+  for (const w of workers) {
+    // eslint-disable-next-line no-await-in-loop
+    const have = (await query(`SELECT page_key FROM page_permissions WHERE user_id = ?`, [w.id])).map((r) => r.page_key);
+    // eslint-disable-next-line no-await-in-loop
+    const managed = (await query(`SELECT 1 FROM page_access_config WHERE user_id = ? LIMIT 1`, [w.id])).length > 0;
+    const onlyDefault = have.every((k) => OLD_DEFAULT.has(k));
+    const target = (!managed || onlyDefault) ? [...WORKER_DEFAULT_PAGES] : [...new Set([...have, ...WORKER_DEFAULT_PAGES])];
+    const remove = have.filter((k) => !target.includes(k));
+    const add = target.filter((k) => !have.includes(k));
+    if (!managed) {
+      // eslint-disable-next-line no-await-in-loop
+      await query(`INSERT IGNORE INTO page_access_config (user_id, updated_by) VALUES (?, ?)`, [w.id, by]);
+    }
+    if (remove.length) {
+      // eslint-disable-next-line no-await-in-loop
+      await query(`DELETE FROM page_permissions WHERE user_id = ? AND page_key IN (${remove.map(() => "?").join(",")})`, [w.id, ...remove]);
+    }
+    for (const k of add) {
+      // eslint-disable-next-line no-await-in-loop
+      await query(`INSERT IGNORE INTO page_permissions (user_id, page_key, granted_by) VALUES (?, ?, ?)`, [w.id, k, by]);
+    }
+    if (remove.length || add.length || !managed) changed++;
+  }
+  if (changed) console.log(`[pageAccess] applied default Worker pages to ${changed} account(s)`);
 }
 
 async function grantPendingApprovalToContactSupervisors() {
