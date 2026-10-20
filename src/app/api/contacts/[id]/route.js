@@ -12,7 +12,7 @@ import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDup
 import { isContactNotInterested } from "@/lib/contactExtras";
 import { isContactRepeatOff } from "@/lib/repeatOff";
 import { resolveContactCard } from "@/lib/contactCard";
-import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
+import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
@@ -26,6 +26,19 @@ import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 // can show every existing detail instead of failing. Authorization mirrors the
 // PUT: admins may read any contact; a caller may read a contact they hold the
 // lock on OR that is assigned to them (the correct caller/workspace relationship).
+// A caller owns a contact they hold, are assigned, or have already called — so a
+// designation fix still works after the lock expires and the contact is returned
+// to the pool. No admin permission is granted by this.
+async function callerOwnsContact(id, userId) {
+  const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
+  if (!row) return false;
+  if (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId)) return true;
+  try {
+    const called = await query("SELECT 1 FROM calls WHERE contact_id = ? AND user_id = ? LIMIT 1", [id, userId]);
+    return called.length > 0;
+  } catch { return false; }
+}
+
 export async function GET(_req, { params }) {
   try {
     const session = await getServerSession(authOptions);
@@ -39,8 +52,7 @@ export async function GET(_req, { params }) {
     const canManage = await pageAllowed(session, "contacts", session && isOversight(session));
     if (!canManage) {
       const { userId } = await resolveActingUserId(session);
-      const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
-      const mine = row && (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId));
+      const mine = await callerOwnsContact(id, userId);
       if (!mine) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
@@ -108,8 +120,7 @@ export async function PUT(req, { params }) {
       // cannot REMOVE it (see the address guard below). resolveActingUserId keeps
       // Super-Admin "view as caller" working.
       const { userId } = await resolveActingUserId(session);
-      const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
-      const mine = row && (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId));
+      const mine = await callerOwnsContact(id, userId);
       if (!mine) {
         return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
       }
@@ -153,6 +164,9 @@ export async function PUT(req, { params }) {
     if ("designation_ids" in data) {
       designationIds = parseDesignationIds(data.designation_ids);
       data.designation_id = designationIds[0] || null; // primary mirrors first
+    } else if ("designation_id" in data) {
+      // Caller workspace sends one designation_id — keep the join table in step.
+      designationIds = await designationIdsFromSingle(id, data);
     }
 
     // Editing may keep the contact's OWN mobile (same row) but must not collide

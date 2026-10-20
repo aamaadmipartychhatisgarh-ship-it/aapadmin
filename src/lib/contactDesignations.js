@@ -78,3 +78,17 @@ export const DESIGNATION_NAMES_SQL =
   `(SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
       FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
      WHERE cd.contact_id = c.id)`;
+
+// A bare `designation_id` (the Caller workspace's single dropdown) must behave
+// like the Supervisor/Admin multi-select: it updates the join table, which the
+// Contact List reads FIRST. Returns the new full id set when the primary really
+// changed (replace-with-one, as the single dropdown shows one), or null when
+// nothing changed so other designations a Supervisor added are left untouched.
+export async function designationIdsFromSingle(contactId, data) {
+  if (!("designation_id" in data) || "designation_ids" in data) return null;
+  const next = parseDesignationIds([data.designation_id]);
+  const [cur] = await query("SELECT designation_id FROM contacts WHERE id = ?", [contactId]);
+  const curId = cur?.designation_id ?? null;
+  if (String(curId ?? "") === String(next[0] ?? "")) return null;
+  return next;
+}

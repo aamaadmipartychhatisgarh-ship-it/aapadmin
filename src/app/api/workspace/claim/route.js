@@ -190,6 +190,11 @@ export async function POST(req) {
                 (SELECT photo_url FROM workers WHERE id = ?) AS photo_url`,
         [row.ward_id ?? null, row.district_id ?? null, row.worker_id ?? null]
       );
+      let dsgIds = null;
+      try {
+        const [dr] = await conn.execute("SELECT GROUP_CONCAT(designation_id ORDER BY id) AS ids FROM contact_designations WHERE contact_id = ?", [row.id]);
+        dsgIds = dr[0]?.ids ?? null;
+      } catch {}
       await conn.commit();
       return NextResponse.json({
         contact: {
@@ -200,6 +205,7 @@ export async function POST(req) {
           // photo so an existing image never disappears from the workspace unless
           // its data is actually deleted (same resolution the Contacts list uses).
           photo_url: row.photo_url ?? nameRows[0]?.photo_url ?? null,
+          designation_ids: dsgIds || (row.designation_id ? String(row.designation_id) : ""),
           locked_by_user_id: userId,
         },
       });

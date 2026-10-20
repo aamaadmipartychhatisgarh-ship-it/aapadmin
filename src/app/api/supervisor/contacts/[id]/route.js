@@ -10,7 +10,7 @@ import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { resolveContactCard } from "@/lib/contactCard";
-import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
+import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
 
 // Supervisor-scoped mirror of PUT /api/contacts/[id] — assign/reassign a
@@ -59,6 +59,8 @@ export async function PUT(req, { params }) {
     if ("designation_ids" in data) {
       designationIds = parseDesignationIds(data.designation_ids);
       data.designation_id = designationIds[0] || null;
+    } else if ("designation_id" in data) {
+      designationIds = await designationIdsFromSingle(id, data);
     }
 
     // Editing may keep the contact's OWN mobile but must not collide with a
