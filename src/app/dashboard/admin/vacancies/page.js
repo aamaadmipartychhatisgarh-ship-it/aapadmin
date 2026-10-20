@@ -11,6 +11,7 @@ import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
 import { MultiSelect } from "@/components/MultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
+import WingVacancies from "./WingVacancies";
 
 const BRAND = "#164FA3";
 
@@ -90,6 +91,21 @@ export default function VacanciesPage() {
   const { has, loading: pagesLoading } = usePageAccess();
   const canAccess = isSuper || has("vacancies");
 
+  // "main" = Main Organisation designations (below); "wings" = Wing vacancies.
+  // Kept in the URL (?tab=wings) so a refresh / shared link reopens the same view.
+  const [tab, setTab] = useState("main");
+  useEffect(() => {
+    try { if (new URLSearchParams(window.location.search).get("tab") === "wings") setTab("wings"); } catch {}
+  }, []);
+  const switchTab = (t) => {
+    setTab(t);
+    try {
+      const u = new URL(window.location.href);
+      if (t === "wings") u.searchParams.set("tab", "wings"); else u.searchParams.delete("tab");
+      window.history.replaceState(null, "", u.toString());
+    } catch {}
+  };
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -139,7 +155,7 @@ export default function VacanciesPage() {
     }
   }, [canAccess, level, lokSabhaId, districtId, assemblyId, blockId, designationId, wingF, statusF, reminderF, responsibleF]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (tab === "main") load(); }, [load, tab]);
 
   // Wing options come from Master Data (/api/wings) — the single source of truth.
   useEffect(() => {
@@ -224,11 +240,23 @@ export default function VacanciesPage() {
             <p className="text-sm text-gray-500">Live vacant posts across State → Lok Sabha → District → Assembly → Block, with WhatsApp reminders to the responsible person.</p>
           </div>
         </div>
-        <button onClick={load} className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-          <RefreshCw size={16} /> Refresh
-        </button>
+        {tab === "main" && (
+          <button onClick={load} className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            <RefreshCw size={16} /> Refresh
+          </button>
+        )}
       </div>
 
+      {/* View: Main Organisation designations | Wing designations */}
+      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 mb-4" role="tablist">
+        {[["main", "Main Organisation"], ["wings", "Wings"]].map(([k, label]) => (
+          <button key={k} role="tab" aria-selected={tab === k} data-testid={`tab-${k}`} onClick={() => switchTab(k)}
+            className={`h-8 px-4 rounded-md text-sm font-semibold ${tab === k ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
+            style={tab === k ? { background: BRAND } : undefined}>{label}</button>
+        ))}
+      </div>
+
+      {tab === "wings" ? <WingVacancies /> : (<>
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 mb-4">
         <StatCard label="Total Positions" value={c.total} tone="brand" />
@@ -451,6 +479,8 @@ export default function VacanciesPage() {
           </table>
         </div>
       </div>
+
+      </>)}
 
       {toast && (
         <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[140] px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 ${toast.type === "success" ? "bg-emerald-600 text-white" : "bg-red-600 text-white"}`}>
