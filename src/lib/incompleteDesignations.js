@@ -141,11 +141,13 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   if (level === "state") {
     peopleRows = await query(
       `SELECT 0 AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name,
-              COALESCE(c.photo_url, w.photo_url) AS photo_url
+              COALESCE(c.photo_url, w.photo_url) AS photo_url,
+              lac.name AS assembly_name
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
          JOIN designations d ON d.id = cd.designation_id AND d.level = 'state'
          LEFT JOIN workers w ON w.id = c.worker_id
+         LEFT JOIN locations lac ON lac.id = c.assembly_id
         WHERE 1=1 ${notWrong} ${scope.where}
         ORDER BY c.person_name
         LIMIT ${MAX_PEOPLE}`,
@@ -155,7 +157,8 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     const levelIdExpr = LEVEL_ID_EXPR[level];
     peopleRows = await query(
       `SELECT ${levelIdExpr} AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name,
-              COALESCE(c.photo_url, w.photo_url) AS photo_url
+              COALESCE(c.photo_url, w.photo_url) AS photo_url,
+              lac.name AS assembly_name
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
          JOIN designations d ON d.id = cd.designation_id AND d.level = ?
@@ -163,6 +166,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lls ON lls.id = ld.parent_id
          LEFT JOIN locations lz ON lz.id = lls.parent_id
+         LEFT JOIN locations lac ON lac.id = c.assembly_id
         WHERE 1=1 ${notWrong} ${scope.where}
         ORDER BY c.person_name
         LIMIT ${MAX_PEOPLE}`,
@@ -213,7 +217,8 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     const loc = r.loc_id ?? 0;
     const key = `${loc}:${nm}`;
     if (!bucket.has(key)) bucket.set(key, []);
-    bucket.get(key).push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url });
+    // assembly_name = the worker's OWN saved Assembly (contacts.assembly_id), or null.
+    bucket.get(key).push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url, assembly_name: r.assembly_name || null });
   }
 
   // Build one row per (location × level-designation). FILLED iff ≥1 person.
@@ -250,6 +255,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
         contact_id: p.id,
         person_name: p.person_name,
         photo_url: p.photo_url,
+        assembly_name: p.assembly_name || null,
         designation_id: row.designation_id,
         designation_name: row.designation_name,
         designation_wing: row.designation_wing || null,

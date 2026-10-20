@@ -217,7 +217,11 @@ export default function IncompleteDesignationView() {
                     <td className="px-4 py-2.5">
                       <span className="inline-flex items-center gap-2">
                         <Avatar name={p.person_name} src={p.photo_url} size={28} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[10px]" />
-                        <span className="text-gray-900 font-medium">{p.person_name}</span>
+                        <span className="leading-tight">
+                          <span className="block text-gray-900 font-medium">{p.person_name}</span>
+                          {/* The worker's own saved Assembly (from Contacts), shown under the name. */}
+                          <span className={`block text-[11px] ${p.assembly_name ? "text-gray-500" : "text-gray-300"}`}>{p.assembly_name || "Assembly not set"}</span>
+                        </span>
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-gray-700">{p.designation_name}</td>
@@ -279,7 +283,10 @@ export default function IncompleteDesignationView() {
                           {r.people.map((p) => (
                             <span key={p.id} className="inline-flex items-center gap-2">
                               <Avatar name={p.person_name} src={p.photo_url} size={28} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[10px]" />
-                              <span className="text-gray-900">{p.person_name}</span>
+                              <span className="leading-tight">
+                                <span className="block text-gray-900">{p.person_name}</span>
+                                <span className={`block text-[11px] ${p.assembly_name ? "text-gray-500" : "text-gray-300"}`}>{p.assembly_name || "Assembly not set"}</span>
+                              </span>
                             </span>
                           ))}
                         </div>
