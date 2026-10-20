@@ -7,6 +7,8 @@ import ProfilePhoto from "@/components/ProfilePhoto";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
 import WingMultiSelect from "@/components/WingMultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
+import QualificationField from "@/components/contacts/QualificationField";
+import { qualificationLabel } from "@/lib/qualificationOptions";
 
 // Popup shown when a user clicks a person's name or photo in a list/table.
 //   type="contact" data={rowObject}  — a Contacts row. This mode is a full
@@ -164,6 +166,7 @@ function ContactView({ contact: c }) {
       <MiniDetail icon={Home} label="Village / City">{c?.village || "—"}</MiniDetail>
       <MiniDetail icon={Hash} label="Pincode">{c?.pincode || "—"}</MiniDetail>
       <MiniDetail icon={Building2} label="Address" full>{c?.address || "—"}</MiniDetail>
+      <MiniDetail icon={Hash} label="Qualification">{qualificationLabel(c?.qualification, c?.education_level) || "—"}</MiniDetail>
       <MiniDetail icon={UsersIcon} label="Assigned to">{c?.assigned_to_username || "Pool"}</MiniDetail>
       <MiniDetail icon={Activity} label="Status">
         <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${c?.is_completed ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
@@ -185,6 +188,8 @@ const emptyForm = (c, canEditGeo) => ({
   // Saved wing tags (Master-Data names) — preloaded so they load automatically.
   wings: String(c?.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
   address: c?.address || "",
+  qualification: c?.qualification || "",
+  education_level: c?.qualification === "literate" ? (c?.education_level || "") : "",
   remarks: c?.remarks || "",
   assigned_to_user_id: c?.assigned_to_user_id || "",
   is_completed: c?.is_completed ? 1 : 0,
@@ -253,6 +258,8 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       designation_ids: form.designation_ids || [],
       wings: form.wings || [],
       address: form.address,
+      qualification: form.qualification || "",
+      education_level: form.qualification === "literate" ? (form.education_level || "") : "",
       remarks: form.remarks,
       assigned_to_user_id: form.assigned_to_user_id || null,
       ...(canEditStatus ? { is_completed: form.is_completed ? 1 : 0 } : {}),
@@ -318,6 +325,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         <Field label="Mobile Number *"><input className={phoneDup ? `${inp} border-red-400 ring-1 ring-red-300 bg-red-50` : inp} value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} /></Field>
         {/* Address follows Phone, matching the Add Contact field order. */}
         <Field label="Address" full><input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
+        <div className="col-span-2"><QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} /></div>
         {/* Wings — saved tags from Master Data, placed BEFORE Designation. */}
         <Field label="Wings" full>
           <WingMultiSelect options={wingOptions} value={form.wings} onChange={(set) => setForm({ ...form, wings: [...set] })} placeholder="Select wings…" />

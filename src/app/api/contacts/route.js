@@ -13,6 +13,7 @@ import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema, syncContactWings, WINGS_SQL } from "@/lib/contactWings";
+import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 
@@ -320,6 +321,9 @@ export async function POST(req) {
     if (!person_name?.trim() || !phone_number?.trim()) {
       return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
+    const qual = normalizeQualification(data);
+    if (qual.error) return NextResponse.json({ message: qual.error }, { status: 400 });
+    await ensureQualificationColumns();
     // Multi-designation (PROMPT 5): accept designation_ids[]; the legacy single
     // designation_id is treated as one entry. The primary column keeps the FIRST
     // (or null when none) — no default is ever assigned.
@@ -345,6 +349,7 @@ export async function POST(req) {
       booth_id: booth_id || null,
       photo_url: photo_url || null,
       assigned_to_user_id: assigned_to_user_id || null,
+      ...(qual.present ? { qualification: qual.qualification, education_level: qual.education_level } : {}),
     };
     const cols = [];
     const vals = [];

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { addedDateClause } from "@/lib/contactDateFilter";
 import { logAudit } from "@/lib/audit";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
@@ -326,10 +327,14 @@ export async function POST(req) {
       geo.ward_id = rows[0].id;
     }
 
+    const qual = normalizeQualification(data);
+    if (qual.error) return NextResponse.json({ message: qual.error }, { status: 400 });
+    await ensureQualificationColumns();
     const existingColumns = await getContactColumns();
     const cols = [];
     const vals = [];
     const add = (col, val) => { if (existingColumns.has(col)) { cols.push(col); vals.push(val); } };
+    if (qual.present) { add("qualification", qual.qualification); add("education_level", qual.education_level); }
     add("person_name", person_name.trim());
     add("phone_number", phone_number.trim());
     add("address", address || null);

@@ -1,3 +1,4 @@
+import { qualificationLabel } from "@/lib/qualificationOptions";
 import ExcelJS from "exceljs";
 import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
@@ -95,6 +96,7 @@ const COLUMNS = [
   { key: "address", header: "Address", width: 30, get: (c) => c.address || "" },
   { key: "village", header: "Village/City", width: 18, get: (c) => c.village || "" },
   { key: "pincode", header: "Pincode", width: 11, text: true, get: (c) => c.pincode || "" },
+  { key: "qualification", header: "Qualification", width: 22, get: (c) => qualificationLabel(c.qualification, c.education_level) },
   { key: "status", header: "Status", width: 12, get: (c) => statusLabel(c) },
   { key: "assigned_caller", header: "Assigned Caller", width: 18, get: (c) => c.assigned_caller_name || "" },
   { key: "assigned_supervisor", header: "Assigned Supervisor", width: 18, get: (c) => c.assigned_supervisor_name || "" },

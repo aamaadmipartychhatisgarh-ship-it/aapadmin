@@ -14,6 +14,7 @@ import { isContactRepeatOff } from "@/lib/repeatOff";
 import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
+import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 
 // GET /api/contacts/[id] — fetch ONE contact by its unique database id, with the
 // same resolved fields the workspace edit form needs (ward/district names +
@@ -195,8 +196,14 @@ export async function PUT(req, { params }) {
       }
     }
 
+    // Qualification (Illiterate / Literate + education level). Validated and normalised
+    // server-side: Illiterate always clears the education level.
+    const qual = normalizeQualification(data);
+    if (qual.error) return NextResponse.json({ message: qual.error }, { status: 400 });
+    if (qual.present) { await ensureQualificationColumns(); data.qualification = qual.qualification; data.education_level = qual.education_level; }
+
     // Descriptive + geographic details anyone with edit rights may change.
-    const DETAIL_FIELDS = [
+    const DETAIL_FIELDS = ["qualification", "education_level", 
       "person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id", "photo_url",
       "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id", "booth_id",
     ];

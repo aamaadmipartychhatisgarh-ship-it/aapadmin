@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
 import { query, getPool } from "@/lib/db";
+import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
@@ -92,7 +93,12 @@ export async function PUT(req, { params }) {
       }
     }
 
-    const fields = [...DETAIL_FIELDS, "assigned_to_user_id"];
+    // Qualification (validated + normalised: Illiterate clears the education level).
+    const qual = normalizeQualification(data);
+    if (qual.error) return NextResponse.json({ message: qual.error }, { status: 400 });
+    if (qual.present) { await ensureQualificationColumns(); data.qualification = qual.qualification; data.education_level = qual.education_level; }
+
+    const fields = [...DETAIL_FIELDS, "qualification", "education_level", "assigned_to_user_id"];
     const existingColumns = await getContactColumns();
     const sets = [];
     const vals = [];
