@@ -369,16 +369,11 @@ function DashboardTab({ filterQs, onWard, onError }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {/* Worker first, Voter second — the same order everywhere on this dashboard. */}
         <Stat icon={UserPlus} label="Total New Workers" value={p.new_workers.toLocaleString("en-IN")} sub={`${s.lifetime.new_workers.toLocaleString("en-IN")} all time`} tone="green" />
         <Stat icon={Vote} label="Total Voters Added" value={p.voters.toLocaleString("en-IN")} sub={`${s.lifetime.voters.toLocaleString("en-IN")} all time`} />
         <Stat icon={BarChart3} label="Total Registrations" value={p.total.toLocaleString("en-IN")} sub={`${s.lifetime.total.toLocaleString("en-IN")} all time`} tone="amber" />
-        {/* Where they came from: a karyakarta's generated link, or the general
-            /join link with nobody behind it. The split is the whole point of
-            generating links, so it belongs on the front page. */}
-        <Stat icon={Link2} label="Through worker links" value={(p.total - p.direct).toLocaleString("en-IN")}
-              sub={`${p.direct.toLocaleString("en-IN")} direct via /join · ${s.active_workers} links active`} tone="gray" />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
