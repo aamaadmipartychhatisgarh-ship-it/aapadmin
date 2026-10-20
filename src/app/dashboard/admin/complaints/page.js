@@ -9,6 +9,7 @@ import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCir
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import ComplaintWorkerAssembly from "@/components/ComplaintWorkerAssembly";
+import ComplaintDetailModal from "@/components/ComplaintDetailModal";
 import CommonPrintButton from "@/components/common/CommonPrintButton";
 import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
 
@@ -49,6 +50,7 @@ function Body() {
   const [districtId, setDistrictId] = useState("");
   const [districts, setDistricts] = useState([]);
   const [editing, setEditing] = useState(null);
+  const [detailId, setDetailId] = useState(null); // complaint opened from the name
 
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
@@ -185,7 +187,7 @@ function Body() {
                   <tr key={cm.id} className="border-t border-gray-100 hover:bg-gray-50 align-top">
                     <td className="px-4 py-3 text-gray-400 font-mono text-xs">#{cm.id}</td>
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{cm.citizen_name}</div>
+                      <button type="button" onClick={() => setDetailId(cm.id)} title="View full complaint" className="font-medium text-[#164FA3] hover:underline text-left">{cm.citizen_name}</button>
                       <div className="text-xs text-gray-400">{cm.citizen_phone || ""}</div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{cm.designation_name || <span className="text-gray-300">—</span>}</td>
@@ -215,6 +217,7 @@ function Body() {
         )}
       </div>
 
+      {detailId != null && <ComplaintDetailModal id={detailId} onClose={() => setDetailId(null)} />}
       {editing && <AddModal editing={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );
