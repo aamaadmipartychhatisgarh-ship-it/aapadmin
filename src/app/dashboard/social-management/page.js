@@ -377,22 +377,15 @@ function OverviewTab({ data }) {
                     <span className="w-[34px] h-[34px] rounded-lg flex items-center justify-center text-white shrink-0" style={{ background: meta.color }}><Icon size={15} /></span>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className={`font-semibold text-sm truncate flex items-center gap-1.5 ${noPostToday(p) ? "text-red-600" : "text-gray-900"}`}>
-                      {noPostToday(p) && <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Today's post not completed" />}
-                      <span className="truncate">{p.handle}</span>
-                    </div>
-                    <div className={`text-xs truncate ${noPostToday(p) ? "text-red-500 font-medium" : "text-gray-400"}`}>
-                      {noPostToday(p) ? "Today's post not completed" : (p.lok_sabha_name || "—")}
-                    </div>
+                    {/* Page-wise daily post status (done / not done, today's count) was
+                        removed from the dashboard — this list shows the page + followers. */}
+                    <div className="font-semibold text-sm truncate text-gray-900">{p.handle}</div>
+                    <div className="text-xs truncate text-gray-400">{p.lok_sabha_name || "—"}</div>
                   </div>
                   <div className="flex items-stretch gap-3 shrink-0 text-right">
                     <div>
                       <div className="text-sm font-bold text-gray-900">{fmt(p.followers)}</div>
                       <div className="text-[10px] text-gray-400 uppercase tracking-wide">Followers</div>
-                    </div>
-                    <div className="border-l border-gray-100 pl-3">
-                      <div className="text-sm font-bold text-gray-900">{p.today_posts ?? 0}</div>
-                      <div className="text-[10px] text-gray-400 uppercase tracking-wide whitespace-nowrap">Today's Posts</div>
                     </div>
                   </div>
                 </div>
