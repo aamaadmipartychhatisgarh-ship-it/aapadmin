@@ -1,6 +1,6 @@
 {
   "name": "tempapp",
-  "version": "0.1.378",
+  "version": "0.1.379",
   "private": true,
   "scripts": {
     "dev": "next dev",

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSupervisorRole } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { addedDateClause } from "@/lib/contactDateFilter";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { statusWhere } from "@/lib/contactStatus";
@@ -55,6 +56,10 @@ export async function GET(req) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);
     }
+    // Added-date filter (contacts.created_at; single date or range, IST calendar days).
+    const addedDate = await addedDateClause(searchParams, "c");
+    if (addedDate.error) return NextResponse.json({ message: addedDate.error }, { status: 400 });
+    where += addedDate.sql; params.push(...addedDate.params);
     if (duplicates === "1") {
       where += ` AND RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(c.phone_number, ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', ''), 10) IN (
         SELECT p FROM (

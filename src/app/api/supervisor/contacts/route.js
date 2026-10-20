@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { addedDateClause } from "@/lib/contactDateFilter";
 import { logAudit } from "@/lib/audit";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
@@ -75,6 +76,10 @@ export async function GET(req) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);
     }
+    // Added-date filter (contacts.created_at; single date or range, IST calendar days).
+    const addedDate = await addedDateClause(searchParams, "c");
+    if (addedDate.error) return NextResponse.json({ message: addedDate.error }, { status: 400 });
+    where += addedDate.sql; params.push(...addedDate.params);
     // Address / Photo count-card filters (PROMPT 2) — mirror of the admin route.
     if (searchParams.get("has_address") === "1") {
       where += " AND c.address IS NOT NULL AND TRIM(c.address) <> ''";

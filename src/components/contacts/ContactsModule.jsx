@@ -103,6 +103,11 @@ export default function ContactsModule({ session, mode }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE); // configurable (20/25/50/100)
   const [search, setSearch] = useState("");
+  // "Added date" filter — contacts.created_at, single IST calendar date or a range.
+  const [addedMode, setAddedMode] = useState("single"); // "single" | "range"
+  const [addedOn, setAddedOn] = useState("");
+  const [addedFrom, setAddedFrom] = useState("");
+  const [addedTo, setAddedTo] = useState("");
   // Active count-card filter: "" | "has_address" | "has_photo". Clicking the
   // Address / Photo Update count card filters the list to EXACTLY the records
   // that card counts (same backend flag), so the count and the list always match.
@@ -210,11 +215,11 @@ export default function ContactsModule({ session, mode }) {
   }, []);
 
   // Reload the page of results whenever a filter or the page number changes.
-  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, page, pageSize, flagFilter, sortKey, sortDir]);
+  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, addedMode, addedOn, addedFrom, addedTo, page, pageSize, flagFilter, sortKey, sortDir]);
   // Any filter change (not a page change) jumps back to page 1 and drops any
   // bulk selection — a selection made under one filter view shouldn't silently
   // carry over and get acted on under a different one.
-  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, search, flagFilter]);
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, search, flagFilter, addedMode, addedOn, addedFrom, addedTo]);
   // A SORT change re-orders the whole set, so jump to page 1 — but KEEP the
   // selection (it's tracked by id and stays valid regardless of order/page).
   useEffect(() => { setPage(1); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sortKey, sortDir]);
@@ -487,6 +492,11 @@ export default function ContactsModule({ session, mode }) {
   // Shared by the main table load AND the Edit modal's "jump to the next/prev
   // page's first/last contact" boundary crossing — both must query the exact
   // same filtered set so the sequence paged through stays consistent.
+  const addedRangeInvalid = addedMode === "range" && !!addedFrom && !!addedTo && addedFrom > addedTo;
+  const addedActive = addedMode === "single" ? !!addedOn : !!(addedFrom || addedTo);
+  const clearAdded = () => { setAddedOn(""); setAddedFrom(""); setAddedTo(""); };
+  const fmtDay = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  const addedLabel = addedMode === "single" ? (addedOn ? `on ${fmtDay(addedOn)}` : "") : addedFrom && addedTo ? (addedFrom === addedTo ? `on ${fmtDay(addedFrom)}` : `from ${fmtDay(addedFrom)} to ${fmtDay(addedTo)}`) : addedFrom ? `since ${fmtDay(addedFrom)}` : addedTo ? `up to ${fmtDay(addedTo)}` : "";
   function buildParams(pageNum) {
     const params = new URLSearchParams();
     if (filter === "duplicates") params.set("duplicates", "1");
@@ -503,6 +513,12 @@ export default function ContactsModule({ session, mode }) {
     // designations above. A wing with no designations correctly matches nothing.
     if (wingSel.size) params.set("wings", [...wingSel].join(","));
     if (assignedTo) params.set("assigned_to", assignedTo);
+    // Added-date filter (sent to the list, the select-all ids call and the exports alike).
+    if (addedMode === "single") { if (addedOn) params.set("added_on", addedOn); }
+    else if (!addedRangeInvalid) {
+      if (addedFrom) params.set("added_from", addedFrom);
+      if (addedTo) params.set("added_to", addedTo);
+    }
     // Count-card filter — the SAME flag the card's count is computed from, so the
     // filtered list matches the card total exactly (record-for-record).
     if (flagFilter) params.set(flagFilter, "1");
@@ -906,6 +922,23 @@ export default function ContactsModule({ session, mode }) {
           <option value="">Any caller</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
         </select>
+        {/* Added date — contacts.created_at: one date or a start–end range. */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <select value={addedMode} onChange={(e) => { setAddedMode(e.target.value); clearAdded(); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white" aria-label="Added date mode">
+            <option value="single">Added on</option>
+            <option value="range">Added between</option>
+          </select>
+          {addedMode === "single" ? (
+            <input type="date" value={addedOn} onChange={(e) => setAddedOn(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white" aria-label="Added on date" />
+          ) : (
+            <>
+              <input type="date" value={addedFrom} max={addedTo || undefined} onChange={(e) => setAddedFrom(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white" aria-label="Added from date" />
+              <span className="text-xs text-gray-400">to</span>
+              <input type="date" value={addedTo} min={addedFrom || undefined} onChange={(e) => setAddedTo(e.target.value)} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white" aria-label="Added to date" />
+            </>
+          )}
+          {addedActive && <button type="button" onClick={clearAdded} className="h-9 px-2.5 rounded-lg text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200">Clear dates</button>}
+        </div>
         <div className="flex gap-1 flex-wrap">
           {["all", "pending", "done", "assigned", "pool", "duplicates", "wrong"].map((f) => (
             <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase ${filter === f ? (f === "duplicates" ? "bg-amber-500 text-white" : f === "wrong" ? "bg-red-600 text-white" : "bg-[#164FA3] text-white") : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{f === "wrong" ? "Wrong #" : f}</button>
@@ -913,6 +946,20 @@ export default function ContactsModule({ session, mode }) {
         </div>
       </div>
       </CollapsibleSection>
+
+      {addedRangeInvalid && (
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl px-4 py-2.5 text-sm">The start date is after the end date — the date filter is not applied until it is fixed.</div>
+      )}
+      {addedActive && !addedRangeInvalid && (
+        <div className="bg-blue-50 border border-blue-100 text-[#164FA3] rounded-xl px-4 py-2.5 text-sm font-medium flex items-center gap-3 flex-wrap">
+          <span>
+            {loading ? <Loader2 size={14} className="inline animate-spin mr-1.5" /> : null}
+            <span className="font-bold text-base">{total}</span> contact{total === 1 ? "" : "s"} added {addedLabel}
+            <span className="text-blue-400 font-normal"> · with the filters above</span>
+          </span>
+          <button type="button" onClick={clearAdded} className="ml-auto text-xs font-semibold underline">Clear date filter</button>
+        </div>
+      )}
 
       {/* Distribute Contacts Across Callers — hidden in duplicates/wrong views,
           those aren't assignable scopes. */}
