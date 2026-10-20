@@ -242,8 +242,8 @@ export async function publicOwnList(req, token, type) {
     }
 
     const rows = await query(
-      `SELECT p.id, p.name, p.mobile, p.photo_url, p.address, p.assembly_name,
-              p.ward_number, p.ward_name, p.area_booth, p.registered_at
+      `SELECT p.id, p.person_type, p.name, p.mobile, p.photo_url, p.address, p.assembly_id, p.assembly_name,
+              p.ward_number, p.ward_name, p.block_id, p.area_booth, p.worker_rating, p.registered_at
          FROM reg_people p
         WHERE ${where.join(" AND ")}
         ORDER BY p.registered_at DESC, p.id DESC
@@ -264,6 +264,109 @@ export async function publicOwnList(req, token, type) {
   }
 }
 
+// The signed-in karyakarta for this link (OTP / username session), as a reg_workers
+// id — or null. A worker link must be used by its own owner; /join and drive links
+// accept any active karyakarta of that drive. Shared by create, list and edit so
+// all three apply the same rule.
+async function sessionWorkerId(req, token, link) {
+  if (link.mode === "worker") {
+    const s = readRegSession(req, token);
+    return s && String(s.rwid) === String(link.worker_id) ? link.worker_id : null;
+  }
+  const s = readRegSession(req, null);
+  if (!s || !s.rwid || String(s.cid) !== String(link.campaign_id)) return null;
+  const w = await resolveCampaignWorkerById(link.campaign_id, s.rwid);
+  return w ? w.worker_id : null;
+}
+
+// Validate + normalise the person fields of a registration — the SAME rules for a
+// new registration and for editing one. Returns { error: <response> } or { v }.
+async function validateRegistrationFields(d, link, { fixedType = null } = {}) {
+  const name = String(d.name || "").trim();
+  if (!name) return { error: NextResponse.json({ message: "Please enter the person's name." }, { status: 400, headers: NO_STORE }) };
+  if (name.length > 160) return { error: NextResponse.json({ message: "Name is too long." }, { status: 400, headers: NO_STORE }) };
+
+  // Accept any genuine 10-digit number: prefer the strict Indian-format
+  // normalizer, but fall back to the last-10-digit key so a valid worker/voter
+  // mobile is never dropped over a formatting technicality (§1, §5). Only a
+  // number without 10 digits is rejected.
+  let mobile = normalizeMobile(d.mobile);
+  if (!mobile) { const k = phoneKey(d.mobile); if (k && k.length === 10) mobile = k; }
+  if (!mobile) {
+    return { error: NextResponse.json({ message: "Please enter a valid 10-digit mobile number." }, { status: 400, headers: NO_STORE }) };
+  }
+
+  // On edit the record's type is fixed (fixedType); a new registration takes it from the form.
+  const personType = fixedType || (PERSON_TYPES.includes(d.person_type) ? d.person_type : "voter");
+  // "Wants to become a worker" is the person type itself; the explicit Yes/No
+  // and the role are only meaningful on that branch.
+  const wantsWorker = personType === "worker" ? 1 : 0;
+  // Karyakarta Rating (1–10) — worker branch only. Anything outside 1–10 (or a
+  // voter) stores NULL so a bad/absent value never becomes a fake rating.
+  const ratingNum = parseInt(d.worker_rating, 10);
+  const workerRating = wantsWorker && Number.isInteger(ratingNum) && ratingNum >= 1 && ratingNum <= 10 ? ratingNum : null;
+
+  const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
+  const ward = normalizeWard(d.ward_number) || normalizeWard(link.worker_ward || link.campaign_ward);
+  const areaBooth = clip(d.area_booth, 160) || link.worker_area || null;
+  // Block (formerly "Ward Name"): the worker branch now picks a Block from the
+  // Assembly→Block master, submitted as block_id. wardName holds the readable label
+  // (kept for backward-compat display); a legacy free-text ward_name is still
+  // accepted as a fallback for older clients. Both are finalised after the assembly
+  // is validated below, where the block↔assembly relationship is enforced.
+  let wardName = clip(d.ward_name, 160);
+  let blockId = null;
+  const rawBlockId = /^\d+$/.test(String(d.block_id || "")) ? Number(d.block_id) : null;
+  const address = String(d.address || "").trim().slice(0, 2000) || null;
+
+  // Photo (Worker Form): accept ONLY a path produced by our own upload endpoint
+  // (/uploads/<id>.<ext>) — never an arbitrary client-supplied URL — so the row
+  // can only reference an image actually stored in our photo store.
+  //
+  // A photo the form matched from Contacts arrives as the public read URL
+  // (/api/public/registration/media/<file>), because that is the only form the
+  // anonymous page can display; it points at the SAME stored file. Normalizing it
+  // back first is what lets "keep the existing Contacts photo" save that photo
+  // instead of silently storing none — the collector never re-uploads a photo the
+  // person already has. The regex below still has the final say.
+  const rawPhoto = fromPublicRegistrationPhoto(d.photo_url);
+  const photoUrl = /^\/uploads\/[A-Za-z0-9._-]+$/.test(rawPhoto) ? rawPhoto.slice(0, 512) : null;
+
+  // The constituency must be one from the master list. Resolving the id here
+  // rather than trusting a submitted name is what keeps the ward and
+  // constituency reports groupable — a free-text field would fill them with
+  // spelling variants of the same place.
+  let assemblyId = null;
+  let assemblyName = null;
+  const pickedId = /^\d+$/.test(String(d.assembly_id || "")) ? Number(d.assembly_id) : null;
+  if (pickedId) {
+    const [loc] = await query(`SELECT id, name FROM locations WHERE id = ? AND type = 'assembly' LIMIT 1`, [pickedId]);
+    if (loc) { assemblyId = loc.id; assemblyName = loc.name; }
+  }
+  if (!assemblyId) {
+    return { error: NextResponse.json({ message: "Please select your constituency." }, { status: 400, headers: NO_STORE }) };
+  }
+
+  // Block ↔ Assembly validation (single source of truth = the Political Location
+  // master). A submitted Block MUST belong to the selected Vidhan Sabha — enforced
+  // server-side, never trusting frontend filtering — so an invalid Assembly↔Block
+  // combination can never be saved. The Block's own name is read from the master
+  // and stored in ward_name, so a client cannot mislabel it.
+  if (rawBlockId) {
+    if (!(await blockBelongsToAssembly(rawBlockId, assemblyId))) {
+      return { error: NextResponse.json({ message: "The selected Block does not belong to the selected Vidhan Sabha." }, { status: 400, headers: NO_STORE }) };
+    }
+    const [b] = await query(`SELECT name FROM locations WHERE id = ? AND type = 'ward' LIMIT 1`, [rawBlockId]);
+    blockId = rawBlockId;
+    wardName = b?.name ? String(b.name).slice(0, 160) : wardName;
+  }
+  // A worker registration must have a Block (this replaced the mandatory Ward Name).
+  if (personType === "worker" && !blockId) {
+    return { error: NextResponse.json({ message: "Please select a Block." }, { status: 400, headers: NO_STORE }) };
+  }
+  return { v: { name, mobile, personType, wantsWorker, workerRating, ward, areaBooth, wardName, blockId, address, photoUrl, assemblyId, assemblyName } };
+}
+
 // POST — record one person. The registration timestamp is set server-side in IST
 // (see regNow), never supplied by the client.
 export async function submitPublicRegistration(req, token) {
@@ -281,25 +384,9 @@ export async function submitPublicRegistration(req, token) {
     //   • a worker link  → the session must be that link's owner.
     //   • /join or a drive link → the session must be a karyakarta of this drive;
     //     the registration is credited to whoever signed in.
-    let attributedWorkerId;
-    if (link.mode === "worker") {
-      const s = readRegSession(req, token);
-      if (!s || String(s.rwid) !== String(link.worker_id)) {
-        return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
-      }
-      attributedWorkerId = link.worker_id;
-    } else {
-      const s = readRegSession(req, null);
-      if (!s || !s.rwid || String(s.cid) !== String(link.campaign_id)) {
-        return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
-      }
-      // Confirm the signed-in karyakarta is still an active worker of this active
-      // drive before crediting them.
-      const w = await resolveCampaignWorkerById(link.campaign_id, s.rwid);
-      if (!w) {
-        return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
-      }
-      attributedWorkerId = w.worker_id;
+    const attributedWorkerId = await sessionWorkerId(req, token, link);
+    if (!attributedWorkerId) {
+      return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
     }
 
     const ip = clientIp(req);
@@ -319,87 +406,9 @@ export async function submitPublicRegistration(req, token) {
       return NextResponse.json({ message: "Submission rejected." }, { status: 400, headers: NO_STORE });
     }
 
-    const name = String(d.name || "").trim();
-    if (!name) return NextResponse.json({ message: "Please enter the person's name." }, { status: 400, headers: NO_STORE });
-    if (name.length > 160) return NextResponse.json({ message: "Name is too long." }, { status: 400, headers: NO_STORE });
-
-    // Accept any genuine 10-digit number: prefer the strict Indian-format
-    // normalizer, but fall back to the last-10-digit key so a valid worker/voter
-    // mobile is never dropped over a formatting technicality (§1, §5). Only a
-    // number without 10 digits is rejected.
-    let mobile = normalizeMobile(d.mobile);
-    if (!mobile) { const k = phoneKey(d.mobile); if (k && k.length === 10) mobile = k; }
-    if (!mobile) {
-      return NextResponse.json({ message: "Please enter a valid 10-digit mobile number." }, { status: 400, headers: NO_STORE });
-    }
-
-    const personType = PERSON_TYPES.includes(d.person_type) ? d.person_type : "voter";
-    // "Wants to become a worker" is the person type itself; the explicit Yes/No
-    // and the role are only meaningful on that branch.
-    const wantsWorker = personType === "worker" ? 1 : 0;
-    // Karyakarta Rating (1–10) — worker branch only. Anything outside 1–10 (or a
-    // voter) stores NULL so a bad/absent value never becomes a fake rating.
-    const ratingNum = parseInt(d.worker_rating, 10);
-    const workerRating = wantsWorker && Number.isInteger(ratingNum) && ratingNum >= 1 && ratingNum <= 10 ? ratingNum : null;
-
-    const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
-    const ward = normalizeWard(d.ward_number) || normalizeWard(link.worker_ward || link.campaign_ward);
-    const areaBooth = clip(d.area_booth, 160) || link.worker_area || null;
-    // Block (formerly "Ward Name"): the worker branch now picks a Block from the
-    // Assembly→Block master, submitted as block_id. wardName holds the readable label
-    // (kept for backward-compat display); a legacy free-text ward_name is still
-    // accepted as a fallback for older clients. Both are finalised after the assembly
-    // is validated below, where the block↔assembly relationship is enforced.
-    let wardName = clip(d.ward_name, 160);
-    let blockId = null;
-    const rawBlockId = /^\d+$/.test(String(d.block_id || "")) ? Number(d.block_id) : null;
-    const address = String(d.address || "").trim().slice(0, 2000) || null;
-
-    // Photo (Worker Form): accept ONLY a path produced by our own upload endpoint
-    // (/uploads/<id>.<ext>) — never an arbitrary client-supplied URL — so the row
-    // can only reference an image actually stored in our photo store.
-    //
-    // A photo the form matched from Contacts arrives as the public read URL
-    // (/api/public/registration/media/<file>), because that is the only form the
-    // anonymous page can display; it points at the SAME stored file. Normalizing it
-    // back first is what lets "keep the existing Contacts photo" save that photo
-    // instead of silently storing none — the collector never re-uploads a photo the
-    // person already has. The regex below still has the final say.
-    const rawPhoto = fromPublicRegistrationPhoto(d.photo_url);
-    const photoUrl = /^\/uploads\/[A-Za-z0-9._-]+$/.test(rawPhoto) ? rawPhoto.slice(0, 512) : null;
-
-    // The constituency must be one from the master list. Resolving the id here
-    // rather than trusting a submitted name is what keeps the ward and
-    // constituency reports groupable — a free-text field would fill them with
-    // spelling variants of the same place.
-    let assemblyId = null;
-    let assemblyName = null;
-    const pickedId = /^\d+$/.test(String(d.assembly_id || "")) ? Number(d.assembly_id) : null;
-    if (pickedId) {
-      const [loc] = await query(`SELECT id, name FROM locations WHERE id = ? AND type = 'assembly' LIMIT 1`, [pickedId]);
-      if (loc) { assemblyId = loc.id; assemblyName = loc.name; }
-    }
-    if (!assemblyId) {
-      return NextResponse.json({ message: "Please select your constituency." }, { status: 400, headers: NO_STORE });
-    }
-
-    // Block ↔ Assembly validation (single source of truth = the Political Location
-    // master). A submitted Block MUST belong to the selected Vidhan Sabha — enforced
-    // server-side, never trusting frontend filtering — so an invalid Assembly↔Block
-    // combination can never be saved. The Block's own name is read from the master
-    // and stored in ward_name, so a client cannot mislabel it.
-    if (rawBlockId) {
-      if (!(await blockBelongsToAssembly(rawBlockId, assemblyId))) {
-        return NextResponse.json({ message: "The selected Block does not belong to the selected Vidhan Sabha." }, { status: 400, headers: NO_STORE });
-      }
-      const [b] = await query(`SELECT name FROM locations WHERE id = ? AND type = 'ward' LIMIT 1`, [rawBlockId]);
-      blockId = rawBlockId;
-      wardName = b?.name ? String(b.name).slice(0, 160) : wardName;
-    }
-    // A worker registration must have a Block (this replaced the mandatory Ward Name).
-    if (personType === "worker" && !blockId) {
-      return NextResponse.json({ message: "Please select a Block." }, { status: 400, headers: NO_STORE });
-    }
+    const checked = await validateRegistrationFields(d, link);
+    if (checked.error) return checked.error;
+    const { name, mobile, personType, wantsWorker, workerRating, ward, areaBooth, wardName, blockId, address, photoUrl, assemblyId, assemblyName } = checked.v;
 
     // WHO gets the credit is the OTP-verified karyakarta from the session,
     // resolved above (a worker link's owner, or whoever signed in on /join / a
@@ -461,5 +470,95 @@ export async function submitPublicRegistration(req, token) {
   } catch (e) {
     console.error("[registration] public POST error:", e);
     return NextResponse.json({ message: "Could not save this registration. Please try again." }, { status: 500, headers: NO_STORE });
+  }
+}
+
+// PATCH — the signed-in karyakarta edits ONE registration they added. Same
+// ownership rule as their list (same drive, credited to them, still active) and
+// the same field validation as a new registration. The row is updated in place:
+// its id, type, karyakarta, drive and registration time never change.
+export async function updateOwnRegistration(req, token) {
+  try {
+    await ensureRegistrationSchema();
+    const link = await resolveLink(token);
+    if (!link) {
+      return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
+    }
+    const workerId = await sessionWorkerId(req, token, link);
+    if (!workerId) {
+      return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
+    }
+    const ip = clientIp(req);
+    if (rateLimited(`${ip}:${link.worker_id || link.campaign_id}`)) {
+      return NextResponse.json({ message: "Too many entries from this device just now. Please wait a few minutes and try again." }, { status: 429, headers: NO_STORE });
+    }
+    const d = await req.json().catch(() => null);
+    if (!d || typeof d !== "object") return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
+    const id = /^\d+$/.test(String(d.id || "")) ? Number(d.id) : null;
+    if (!id) return NextResponse.json({ message: "Invalid record." }, { status: 400, headers: NO_STORE });
+
+    const [rec] = await query(
+      `SELECT id, campaign_id, worker_id, person_type, status, name, mobile, address, assembly_id, ward_number,
+              ward_name, block_id, area_booth, worker_rating, photo_url, mobile_verified
+         FROM reg_people WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    if (!rec || String(rec.campaign_id) !== String(link.campaign_id) || rec.status !== "active") {
+      return NextResponse.json({ message: "Record not found." }, { status: 404, headers: NO_STORE });
+    }
+    if (String(rec.worker_id) !== String(workerId)) {
+      return NextResponse.json({ message: "You can only edit registrations you added." }, { status: 403, headers: NO_STORE });
+    }
+
+    // A field left out of the request keeps its saved value (only fields actually
+    // sent are changed); the result is then validated like a new registration.
+    const keep = (k) => (d[k] === undefined ? rec[k] : d[k]);
+    const merged = { ...d };
+    for (const k of ["name", "mobile", "address", "assembly_id", "ward_number", "ward_name", "block_id", "area_booth", "worker_rating"]) merged[k] = keep(k);
+    const checked = await validateRegistrationFields(merged, link, { fixedType: rec.person_type });
+    if (checked.error) return checked.error;
+    const v = checked.v;
+
+    const [dupe] = await query(
+      "SELECT id FROM reg_people WHERE campaign_id = ? AND mobile = ? AND status = 'active' AND id <> ? LIMIT 1",
+      [link.campaign_id, v.mobile, id]
+    );
+    if (dupe) return NextResponse.json({ message: "This mobile number is already registered.", duplicate: true }, { status: 409, headers: NO_STORE });
+
+    // A NEW mobile must be verified when the drive requires OTP (same rule as a new
+    // registration); an unchanged mobile keeps its existing verification.
+    const mobileChanged = String(v.mobile) !== String(rec.mobile);
+    let verificationId = null;
+    if (mobileChanged && link.otp_required && (await otpConfigured())) {
+      verificationId = await isMobileVerified(v.mobile);
+      if (!verificationId) {
+        return NextResponse.json({ message: "Please verify the mobile number first.", otp_required: true }, { status: 403, headers: NO_STORE });
+      }
+    }
+    // Photo: worker records only; omitted → keep the saved photo.
+    const photo = rec.person_type === "worker" && d.photo_url !== undefined ? v.photoUrl : rec.photo_url;
+
+    await query(
+      `UPDATE reg_people
+          SET name = ?, mobile = ?, address = ?, assembly_id = ?, assembly_name = ?, ward_number = ?, ward_name = ?,
+              block_id = ?, area_booth = ?, worker_rating = ?, photo_url = ?, mobile_verified = ?, updated_at = NOW()
+        WHERE id = ? AND worker_id = ? AND campaign_id = ?`,
+      [v.name, v.mobile, v.address, v.assemblyId, v.assemblyName, v.ward, v.wardName,
+       v.blockId, v.areaBooth, v.workerRating, photo, mobileChanged ? (verificationId ? 1 : 0) : rec.mobile_verified,
+       id, workerId, link.campaign_id]
+    );
+    if (verificationId) await consumeVerification(verificationId);
+
+    const [row] = await query(
+      `SELECT id, person_type, name, mobile, photo_url, address, assembly_id, assembly_name,
+              ward_number, ward_name, block_id, area_booth, worker_rating, registered_at
+         FROM reg_people WHERE id = ?`,
+      [id]
+    );
+    return NextResponse.json({ ok: true, person: { ...row, photo_url: toPublicRegistrationPhoto(row.photo_url) } }, { headers: NO_STORE });
+  } catch (e) {
+    if (e?.code === "ER_DUP_ENTRY") return NextResponse.json({ message: "This mobile number is already registered.", duplicate: true }, { status: 409, headers: NO_STORE });
+    console.error("[registration] public edit error:", e);
+    return NextResponse.json({ message: "Could not save the changes. Please try again." }, { status: 500, headers: NO_STORE });
   }
 }

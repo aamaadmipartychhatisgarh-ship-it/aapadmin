@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft, FileDown } from "lucide-react";
+import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft, FileDown, Pencil } from "lucide-react";
 import { RatingScale } from "@/components/KaryakartaRating";
 
 // The registration form. It is OTP-gated at EVERY entry — there is no anonymous
@@ -49,6 +49,7 @@ const STRINGS = {
     errBlockName: "कृपया ब्लॉक चुनें.",
     blocksLoadErr: "ब्लॉक लोड नहीं हो सके. कृपया दोबारा प्रयास करें.",
     list: "सूची", myVoters: "मेरे वोटर", myWorkers: "मेरे कार्यकर्ता", exportPdf: "PDF डाउनलोड करें",
+    edit: "संपादित करें", editTitle: "रिकॉर्ड संपादित करें", saveChanges: "बदलाव सहेजें", cancel: "रद्द करें", updated: "रिकॉर्ड अपडेट हो गया.", editFailed: "बदलाव सहेजे नहीं जा सके. कृपया दोबारा प्रयास करें.",
     backToForm: "फॉर्म पर वापस जाएँ", totalVoters: "कुल वोटर", totalWorkers: "कुल कार्यकर्ता",
     noRecords: "अभी तक कोई रिकॉर्ड नहीं.", listLoadErr: "सूची लोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
     handledBy: "पंजीयन कर रहे हैं", logout: "लॉगआउट",
@@ -119,6 +120,7 @@ const STRINGS = {
     errBlockName: "Please select a Block.",
     blocksLoadErr: "Could not load Blocks. Please try again.",
     list: "List", myVoters: "My Voters", myWorkers: "My Workers", exportPdf: "Export PDF",
+    edit: "Edit", editTitle: "Edit record", saveChanges: "Save changes", cancel: "Cancel", updated: "Record updated.", editFailed: "Could not save the changes. Please try again.",
     backToForm: "Back to form", totalVoters: "Total Voters", totalWorkers: "Total Workers",
     noRecords: "No records yet.", listLoadErr: "Could not load the list. Please try again.",
     handledBy: "Registration handled by", logout: "Logout",
@@ -649,7 +651,7 @@ export default function PublicRegistrationForm({ token }) {
   // "List" view — the karyakarta's own voters / workers for THIS link, scoped
   // server-side by the link token (§18–§23).
   if (listMode) {
-    return <PublicList token={token} t={t} initial={listMode} onBack={() => setListMode(null)} toggleLang={toggleLang} />;
+    return <PublicList token={token} t={t} lang={lang} constituencies={boot?.constituencies || []} initial={listMode} onBack={() => setListMode(null)} toggleLang={toggleLang} />;
   }
 
   // Still resolving the session from the server-verified cookie.
@@ -1017,12 +1019,14 @@ export default function PublicRegistrationForm({ token }) {
 // The link's own list, with two tabs (मेरे वोटर / मेरे कार्यकर्ता). The rows come
 // from a token-scoped endpoint: the server derives ownership from the link and
 // returns only this link's people, so no client-supplied id can widen the scope.
-function PublicList({ token, t, initial, onBack, toggleLang }) {
+function PublicList({ token, t, lang, constituencies, initial, onBack, toggleLang }) {
   const [type, setType] = useState(initial === "worker" ? "worker" : "voter");
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [editing, setEditing] = useState(null); // the record being edited, or null
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -1075,6 +1079,7 @@ function PublicList({ token, t, initial, onBack, toggleLang }) {
           <FileDown size={16} />{t.exportPdf}
         </a>
 
+        {notice ? <div className="rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-2.5">{notice}</div> : null}
         {loading ? (
           <div className="py-14 flex justify-center"><Loader2 className="animate-spin" size={26} style={{ color: ACCENT }} /></div>
         ) : err ? (
@@ -1091,12 +1096,151 @@ function PublicList({ token, t, initial, onBack, toggleLang }) {
                   <div className="font-semibold text-gray-900 truncate">{r.name}</div>
                   <div className="text-xs text-gray-500">{r.mobile || "—"}{r.assembly_name ? ` · ${r.assembly_name}` : ""}</div>
                 </div>
+                <button type="button" onClick={() => { setNotice(""); setEditing(r); }} data-testid="edit-record"
+                        className="shrink-0 h-9 px-3 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 inline-flex items-center gap-1.5">
+                  <Pencil size={14} />{t.edit}
+                </button>
               </div>
             ))}
           </div>
         )}
         <p className="text-center text-[11px] text-gray-400 pb-4">{t.footer}</p>
       </main>
+      {editing && (
+        <EditRegistration
+          record={editing} token={token} t={t} lang={lang} constituencies={constituencies}
+          onCancel={() => setEditing(null)}
+          onSaved={(person) => {
+            // Replace the row in place with the server's saved values.
+            setRows((rs) => rs.map((x) => (x.id === person.id ? { ...x, ...person } : x)));
+            setEditing(null);
+            setNotice(t.updated);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Edit one of the karyakarta's own registrations. Opens with the saved values; the
+// server re-checks ownership and validates exactly like a new registration, and
+// updates the same record (its type, karyakarta and registration time stay).
+function EditRegistration({ record, token, t, lang, constituencies, onCancel, onSaved }) {
+  const isWorker = record.person_type === "worker";
+  const [name, setName] = useState(record.name || "");
+  const [mobile, setMobile] = useState(record.mobile || "");
+  const [address, setAddress] = useState(record.address || "");
+  const [assemblyId, setAssemblyId] = useState(record.assembly_id ? String(record.assembly_id) : "");
+  const [blockId, setBlockId] = useState(record.block_id ? String(record.block_id) : "");
+  const [blocks, setBlocks] = useState([]);
+  const [rating, setRating] = useState(record.worker_rating != null ? String(record.worker_rating) : "");
+  const [photoUrl, setPhotoUrl] = useState(record.photo_url || "");
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  // Blocks of the chosen assembly (worker records only).
+  useEffect(() => {
+    if (!isWorker || !assemblyId) { setBlocks([]); return; }
+    let alive = true;
+    fetch(`/api/public/registration/assemblies/${encodeURIComponent(assemblyId)}/blocks`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { blocks: [] }))
+      .then((d) => { if (alive) setBlocks(d.blocks || []); })
+      .catch(() => { if (alive) setBlocks([]); });
+    return () => { alive = false; };
+  }, [isWorker, assemblyId]);
+
+  async function onPhoto(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setError(t.photoTooLarge); return; }
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type || "")) { setError(t.photoBadType); return; }
+    setPhotoBusy(true); setError("");
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch("/api/public/registration/photo", { method: "POST", body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d?.message || t.photoFailed); return; }
+      setPhotoUrl(d.url || "");
+    } catch { setError(t.photoFailed); }
+    finally { setPhotoBusy(false); }
+  }
+
+  async function save(e) {
+    e.preventDefault();
+    if (saving) return;
+    if (!name.trim()) { setError(t.errName); return; }
+    if (String(mobile).replace(/\D/g, "").length < 10) { setError(t.errMobile); return; }
+    if (isWorker && !blockId) { setError(t.errBlockName); return; }
+    setSaving(true); setError("");
+    try {
+      const url = token ? `/api/public/registration/${encodeURIComponent(token)}` : "/api/public/registration";
+      const body = { id: record.id, name, mobile, address, assembly_id: assemblyId };
+      if (isWorker) Object.assign(body, { block_id: blockId, worker_rating: rating ? Number(rating) : null, photo_url: photoUrl });
+      const r = await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d?.message || t.editFailed); return; }
+      onSaved(d.person);
+    } catch { setError(t.editFailed); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true">
+      <form onSubmit={save} className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto p-4 space-y-4" data-testid="edit-form">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-gray-900">{t.editTitle}</h2>
+          <span className="text-xs font-semibold px-2 py-1 rounded-lg bg-gray-100 text-gray-600">{isWorker ? t.myWorkers : t.myVoters}</span>
+        </div>
+        <Field label={t.name} required>
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePh} maxLength={160} />
+        </Field>
+        <Field label={t.mobile} required>
+          <input className={inputCls} value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder={t.mobilePh} inputMode="numeric" maxLength={14} />
+        </Field>
+        <Field label={t.address}>
+          <textarea className={`${inputCls} h-auto py-2.5`} rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder={t.addressPh} />
+        </Field>
+        <Field label={t.constituency} required>
+          <select className={inputCls} value={assemblyId} onChange={(e) => { setAssemblyId(e.target.value); setBlockId(""); }}>
+            <option value="">{t.selectConstituency}</option>
+            {constituencies.map((a) => (
+              <option key={a.id} value={a.id}>{lang === "hi" ? (a.name_hi || a.name_en || a.name) : (a.name_en || a.name)}</option>
+            ))}
+          </select>
+        </Field>
+        {isWorker && (
+          <>
+            <Field label={t.blockName} required>
+              <select className={inputCls} value={blockId} onChange={(e) => setBlockId(e.target.value)} disabled={!assemblyId}>
+                <option value="">{assemblyId ? t.selectBlock : t.selectAssemblyFirst}</option>
+                {blocks.map((b) => <option key={b.id} value={b.id}>{lang === "hi" ? (b.name_hi || b.name_en) : (b.name_en || b.name_hi)}</option>)}
+              </select>
+            </Field>
+            <div>
+              <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo}</span>
+              <div className="flex items-center gap-3">
+                <ContactPhotoThumb src={photoUrl} />
+                <label className="h-10 px-3 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 bg-white inline-flex items-center gap-1.5 cursor-pointer">
+                  {photoBusy ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}{photoUrl ? t.changePhoto : t.choosePhoto}
+                  <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onPhoto} />
+                </label>
+              </div>
+            </div>
+            <Field label={t.workerRating}>
+              <RatingScale value={rating} onChange={setRating} />
+            </Field>
+          </>
+        )}
+        {error ? <div className="rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2" data-testid="edit-error">{error}</div> : null}
+        <div className="flex gap-2 pt-1">
+          <button type="button" onClick={onCancel} className="flex-1 h-12 rounded-xl border-2 border-gray-300 bg-white text-gray-800 font-semibold">{t.cancel}</button>
+          <button type="submit" disabled={saving || photoBusy} className="flex-1 h-12 rounded-xl text-white font-semibold disabled:opacity-60" style={{ background: ACCENT }}>
+            {saving ? t.saving : t.saveChanges}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

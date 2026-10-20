@@ -1,4 +1,4 @@
-import { publicFormContext, submitPublicRegistration, publicOwnList } from "@/lib/publicRegistration";
+import { publicFormContext, submitPublicRegistration, publicOwnList, updateOwnRegistration } from "@/lib/publicRegistration";
 
 // The standing public form endpoint behind /join — no token at all. It resolves
 // to whichever drive is currently active, so the same URL can be printed,
@@ -16,4 +16,9 @@ export async function GET(req) {
 
 export async function POST(req) {
   return submitPublicRegistration(req, null);
+}
+
+// PATCH — edit one registration the signed-in karyakarta added.
+export async function PATCH(req) {
+  return updateOwnRegistration(req, null);
 }

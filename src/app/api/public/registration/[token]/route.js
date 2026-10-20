@@ -1,4 +1,4 @@
-import { publicFormContext, submitPublicRegistration, publicOwnList } from "@/lib/publicRegistration";
+import { publicFormContext, submitPublicRegistration, publicOwnList, updateOwnRegistration } from "@/lib/publicRegistration";
 
 // Token-addressed public form endpoints — a personal karyakarta link, or a link
 // pinned to one specific drive. The open /join link uses the sibling route with
@@ -17,4 +17,10 @@ export async function GET(req, { params }) {
 export async function POST(req, { params }) {
   const { token } = await params;
   return submitPublicRegistration(req, token);
+}
+
+// PATCH — edit one registration the signed-in karyakarta added (this link's owner).
+export async function PATCH(req, { params }) {
+  const { token } = await params;
+  return updateOwnRegistration(req, token);
 }
