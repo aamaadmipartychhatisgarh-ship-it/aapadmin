@@ -8,6 +8,7 @@ import { usePageGuard } from "@/components/usePageGuard";
 import { MessageSquare, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Pencil, Search, Trash2 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import CollapsibleSection from "@/components/CollapsibleSection";
+import ComplaintWorkerAssembly from "@/components/ComplaintWorkerAssembly";
 import CommonPrintButton from "@/components/common/CommonPrintButton";
 import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
 
@@ -109,6 +110,7 @@ function Body() {
                     { header: "Phone", flex: 1.2 },
                     { header: "Designation", flex: 1.3 },
                     { header: "District", flex: 1.3 },
+                    { header: "Assembly", flex: 1.3 },
                     { header: "Description", flex: 3 },
                     { header: "Status", flex: 1 },
                   ],
@@ -118,6 +120,7 @@ function Body() {
                     cm.citizen_phone || "—",
                     cm.designation_name || "—",
                     cm.district_name || "—",
+                    cm.assembly_name || "—",
                     cm.description || "—",
                     (cm.status || "").replace(/_/g, " "),
                   ]),
@@ -172,6 +175,7 @@ function Body() {
                 <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Description</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Update</th>
               </tr>
@@ -189,6 +193,7 @@ function Body() {
                         long text so the row layout never breaks. */}
                     <td className="px-4 py-3 text-gray-600 max-w-xs"><div className="line-clamp-2 whitespace-pre-wrap">{cm.description || <span className="text-gray-300">—</span>}</div></td>
                     <td className="px-4 py-3 text-gray-600">{cm.district_name || "—"}</td>
+                    <td className="px-4 py-3 text-gray-600">{cm.assembly_name || "—"}</td>
                     <td className="px-4 py-3">
                       <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span>
                       <div className="mt-1"><SlaBadge cm={cm} /></div>
@@ -249,13 +254,16 @@ function AddModal({ onClose, onSaved, editing }) {
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [workerId, setWorkerId] = useState(null); // the worker the phone number resolved to
+  const key10 = (v) => String(v || "").replace(/\D/g, "").slice(-10);
+  const phoneChanged = !editing || key10(form.citizen_phone) !== key10(editing.citizen_phone);
   useEffect(() => { fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || [])); }, []);
   useEffect(() => { fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || [])).catch(() => {}); }, []);
   async function save() {
     setSaving(true);
     const url = editing ? `/api/complaints/${editing.id}` : "/api/complaints";
     const method = editing ? "PUT" : "POST";
-    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    const r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(phoneChanged && workerId ? { ...form, contact_id: workerId } : form) });
     if (r.ok) onSaved(); else setSaving(false);
   }
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]";
@@ -265,6 +273,11 @@ function AddModal({ onClose, onSaved, editing }) {
         <div className="flex items-center justify-between"><h2 className="text-xl font-bold text-gray-900">{editing ? "Edit Complaint" : "Log Complaint"}</h2><button onClick={onClose} className="text-gray-400"><X size={20} /></button></div>
         <input className={inp} placeholder="Citizen name *" value={form.citizen_name} onChange={(e) => setForm({ ...form, citizen_name: e.target.value })} />
         <input className={inp} placeholder="Phone" value={form.citizen_phone} onChange={(e) => setForm({ ...form, citizen_phone: e.target.value })} />
+        {/* Assembly is fetched from the Worker record behind this mobile number; an
+            unchanged number on an existing complaint just shows the saved Assembly. */}
+        {phoneChanged
+          ? <ComplaintWorkerAssembly phone={form.citizen_phone} onResolved={({ contactId }) => setWorkerId(contactId)} />
+          : <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"><span className="text-xs text-gray-500">Assembly</span><div className="font-semibold">{editing.assembly_name || "Not recorded"}</div></div>}
         {/* Designation — stored independently from the name (references the existing
             designations master). */}
         <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>

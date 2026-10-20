@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureComplaintColumns } from "../route";
+import { resolveComplaintLocation } from "@/lib/complaintWorker";
+import { phoneKey } from "@/lib/phone";
 
 export async function PUT(req, { params }) {
   try {
@@ -17,6 +19,20 @@ export async function PUT(req, { params }) {
     const fields = ["citizen_name", "citizen_phone", "district_id", "status", "assigned_team_id", "resolution_notes", "type", "description", "designation_id"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
+    // The Assembly follows the Worker behind the complaint's mobile number. It is
+    // re-derived ONLY when the phone number actually changes (or a worker is chosen
+    // explicitly), so editing any other field never alters the saved Assembly, and a
+    // changed number can never keep the previous person's Assembly.
+    if ("citizen_phone" in d || "contact_id" in d) {
+      const [cur] = await query("SELECT citizen_phone FROM complaints WHERE id = ?", [id]);
+      const newPhone = "citizen_phone" in d ? d.citizen_phone : cur?.citizen_phone;
+      const changed = "contact_id" in d || phoneKey(newPhone) !== phoneKey(cur?.citizen_phone);
+      if (changed) {
+        const loc = await resolveComplaintLocation({ phone: newPhone, contactId: d.contact_id });
+        sets.push("assembly_id = ?"); vals.push(loc.assembly_id);
+        if (loc.district_id && !d.district_id) { sets.push("district_id = ?"); vals.push(loc.district_id); }
+      }
+    }
     if (d.status === "resolved" || d.status === "closed") sets.push("resolved_at = NOW()");
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
     vals.push(id);

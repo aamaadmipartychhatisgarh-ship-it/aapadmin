@@ -7,6 +7,7 @@ import { isOversight } from "@/lib/permissions";
 import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 import { MessageSquare, Plus, Loader2, X, Droplet, Construction, Zap, Package, HelpCircle, Search } from "lucide-react";
 import CollapsibleSection from "@/components/CollapsibleSection";
+import ComplaintWorkerAssembly from "@/components/ComplaintWorkerAssembly";
 import CommonPrintButton from "@/components/common/CommonPrintButton";
 import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
 
@@ -102,6 +103,7 @@ function Body({ previewingCaller, viewAsCaller }) {
                   { header: "Phone", flex: 1.2 },
                   { header: "Designation", flex: 1.3 },
                   { header: "District", flex: 1.3 },
+                  { header: "Assembly", flex: 1.3 },
                   { header: "Description", flex: 3 },
                   { header: "Status", flex: 1 },
                 ],
@@ -111,6 +113,7 @@ function Body({ previewingCaller, viewAsCaller }) {
                   cm.citizen_phone || "—",
                   cm.designation_name || "—",
                   cm.district_name || "—",
+                  cm.assembly_name || "—",
                   cm.description || "—",
                   (cm.status || "").replace(/_/g, " "),
                 ]),
@@ -165,6 +168,7 @@ function Body({ previewingCaller, viewAsCaller }) {
                   <th className="px-4 py-3 font-semibold text-gray-600">Citizen</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">District</th>
+                  <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Description</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 </tr>
@@ -179,6 +183,7 @@ function Body({ previewingCaller, viewAsCaller }) {
                       </td>
                       <td className="px-4 py-3 text-gray-600">{cm.designation_name || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600">{cm.district_name || "—"}</td>
+                      <td className="px-4 py-3 text-gray-600">{cm.assembly_name || "—"}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-xs"><div className="line-clamp-2 whitespace-pre-wrap">{cm.description || <span className="text-gray-300">—</span>}</div></td>
                       <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span></td>
                     </tr>
@@ -209,11 +214,12 @@ function AddModal({ onClose, onSaved }) {
   const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [workerId, setWorkerId] = useState(null); // the worker the phone number resolved to
   useEffect(() => { fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || [])); }, []);
   useEffect(() => { fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || [])).catch(() => {}); }, []);
   async function save() {
     setSaving(true); setError("");
-    const r = await fetch("/api/complaints", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    const r = await fetch("/api/complaints", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, contact_id: workerId || undefined }) });
     if (r.ok) onSaved();
     else {
       const d = await r.json().catch(() => ({}));
@@ -229,6 +235,8 @@ function AddModal({ onClose, onSaved }) {
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className={inp} placeholder="Citizen name *" value={form.citizen_name} onChange={(e) => setForm({ ...form, citizen_name: e.target.value })} />
         <input className={inp} placeholder="Phone" value={form.citizen_phone} onChange={(e) => setForm({ ...form, citizen_phone: e.target.value })} />
+        {/* Assembly is fetched from the Worker record behind this mobile number. */}
+        <ComplaintWorkerAssembly phone={form.citizen_phone} onResolved={({ contactId }) => setWorkerId(contactId)} />
         {/* Designation — a separate field, stored independently from the name
             (references the existing designations master). */}
         <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>

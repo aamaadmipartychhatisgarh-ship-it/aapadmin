@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
+import { resolveComplaintLocation } from "@/lib/complaintWorker";
 
 // Callers log complaints (heard live on calls); oversight roles review and
 // monitor them. Both can view (callers stay geo-scoped).
@@ -29,6 +30,12 @@ export async function ensureComplaintColumns() {
     if (Number(rows[0]?.n || 0) === 0) {
       await query("ALTER TABLE complaints ADD COLUMN designation_id INT NULL");
     }
+    // assembly_id is part of the original schema; add it only if a deployment lacks it.
+    const asm = await query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complaints' AND COLUMN_NAME = 'assembly_id'`
+    );
+    if (Number(asm[0]?.n || 0) === 0) await query("ALTER TABLE complaints ADD COLUMN assembly_id INT NULL");
     ensuredDesignation = true;
   } catch (e) {
     console.error("[complaints] ensureComplaintColumns:", e?.message || e);
@@ -56,10 +63,11 @@ export async function GET(req) {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const rows = await query(
-      `SELECT c.*, ld.name AS district_name, t.name AS team_name, dg.name AS designation_name,
+      `SELECT c.*, ld.name AS district_name, la.name AS assembly_name, t.name AS team_name, dg.name AS designation_name,
               TIMESTAMPDIFF(HOUR, c.created_at, NOW()) AS age_hours
          FROM complaints c
          LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN teams t ON t.id = c.assigned_team_id
          LEFT JOIN designations dg ON dg.id = c.designation_id
          ${whereSql}
@@ -108,12 +116,18 @@ export async function POST(req) {
     await ensureComplaintColumns();
     const d = await req.json();
     if (!d.citizen_name) return NextResponse.json({ message: "Citizen name required" }, { status: 400 });
+    // The Assembly is taken from the real Worker (contact) record for this mobile
+    // number — never from the client. If the form chose one of several matching
+    // workers it sends contact_id (verified to own the number); otherwise a single
+    // unambiguous match is used; no match / ambiguous → NULL, never a guess. The
+    // district is only filled from the worker when the form left it blank.
+    const loc = await resolveComplaintLocation({ phone: d.citizen_phone, contactId: d.contact_id });
     const res = await query(
-      `INSERT INTO complaints (citizen_name, citizen_phone, type, description, designation_id, district_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'open')`,
-      [d.citizen_name, d.citizen_phone || null, d.type || "other", d.description || null, d.designation_id || null, d.district_id || null]
+      `INSERT INTO complaints (citizen_name, citizen_phone, type, description, designation_id, district_id, assembly_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
+      [d.citizen_name, d.citizen_phone || null, d.type || "other", d.description || null, d.designation_id || null, d.district_id || loc.district_id || null, loc.assembly_id]
     );
-    return NextResponse.json({ id: res.insertId }, { status: 201 });
+    return NextResponse.json({ id: res.insertId, assembly_id: loc.assembly_id }, { status: 201 });
   } catch (err) {
     console.error("complaints POST error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
