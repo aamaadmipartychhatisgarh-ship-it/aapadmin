@@ -2,47 +2,90 @@ import { query } from "@/lib/db";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 import { ensureLocationSortOrder } from "@/lib/locationOrder";
+import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 
 // VACANCY RESPONSIBILITY — who must fill a vacant organizational designation.
 //
-// The responsible person is derived AUTOMATICALLY from the real State → Lok Sabha
-// → District → Assembly → Block hierarchy (locations.parent_id) and the actual
-// Designation Master assignments (contact_designations). Nothing here is
-// hardcoded per-vacancy: for a vacancy at a given team level we look up the person
-// holding a specific leadership designation at the PARENT area.
+// Derived AUTOMATICALLY from the real State → Lok Sabha → District → Assembly →
+// Block hierarchy (locations.parent_id) and the actual Designation Master
+// assignments (contact_designations). The rule depends on the vacancy's LEVEL and
+// on the ROLE of the vacant designation (Prabhari, President, or a Team post):
 //
-//   Team level (vacancy)  →  Responsible designation(s)         resolved at
-//   --------------------     -------------------------------    ------------------
-//   Lok Sabha             →  State Working President            State (single)
-//   District              →  Lok Sabha Prabhari + President     parent Lok Sabha
-//   Assembly              →  District President                 parent District
-//   Block                 →  Assembly Prabhari + President       parent Assembly
+//   Vacancy                     →  Responsible                                  at
+//   -------------------------      -------------------------------------------  -----------------
+//   State (any post)            →  State Prabhari                               State
+//   Lok Sabha Prabhari          →  State President + State Working President    State
+//   Lok Sabha President         →  State President + State Working President    State
+//   Lok Sabha Team              →  Lok Sabha Prabhari + Lok Sabha President     same Lok Sabha
+//   District Prabhari           →  Lok Sabha Prabhari                           parent Lok Sabha
+//   District President          →  Lok Sabha President                          parent Lok Sabha
+//   District Team               →  District Prabhari + District President       same District
+//   Assembly Prabhari           →  District Prabhari                            parent District
+//   Assembly President          →  District President                           parent District
+//   Assembly Team               →  Assembly Prabhari + Assembly President       same Assembly
+//   Block (Prabhari)            →  Assembly Prabhari                            parent Assembly
+//   Block (President)           →  Assembly President                           parent Assembly
+//   Block Team                  →  Assembly Prabhari + Assembly President       parent Assembly
 //
-// If nobody holds the responsible designation, the vacancy is surfaced as
-// "Responsible Person Not Assigned" (never silently dropped).
+// President and Prabhari lines are never mixed. Every responsible person is read
+// from Contacts (their real name + the designation they actually hold). A required
+// role nobody holds is reported as missing — never filled in with someone else.
 
 // The location-master `type` for each vacancy team level (block = ward).
 const LEVEL_TYPE = { lok_sabha: "lok_sabha", district: "district", assembly: "assembly", block: "ward" };
+const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
+const KIND_LABEL = { prabhari: "Prabhari", president: "President", working_president: "Working President" };
 
-// The responsibility mapping. `respLevel` is the hierarchy level the responsible
-// person sits at; `names` are the designation phrases (matched case-insensitively,
-// substring-tolerant) that identify them there.
-export const RESPONSIBILITY = {
-  lok_sabha: { respLevel: "state", names: ["state working president"] },
-  district: { respLevel: "lok_sabha", names: ["lok sabha prabhari", "lok sabha president"] },
-  assembly: { respLevel: "district", names: ["district president"] },
-  block: { respLevel: "assembly", names: ["assembly prabhari", "assembly president"] },
+// ---- Role of a designation -------------------------------------------------------
+// The designation's LEVEL comes from the Designation Master (`level` column); its
+// name only says which leadership role it is. The level words and honorifics are
+// stripped, and what remains must be EXACTLY the role — so "Vice President",
+// "Sah Prabhari", "Mahila Wing President" or "Secretary" are Team posts.
+const LEVEL_WORDS = /\b(state|pradesh|lok ?sabha|district|zila|jila|assembly|vidhan ?sabha|vidhansbha|vidhansbaha|block|ji)\b|प्रदेश|लोकसभा|लोक सभा|जिला|ज़िला|विधानसभा|विधान सभा|ब्लॉक|जी/g;
+const ROLE_NAMES = {
+  prabhari: ["prabhari", "प्रभारी"],
+  president: ["president", "adhyaksh", "adhyaksha", "president adhyaksh", "अध्यक्ष"],
+  working_president: ["working president", "karyakari adhyaksh", "karyakari adhyaksha", "karyakari president", "कार्यकारी अध्यक्ष"],
 };
 
-export const RESPONSIBILITY_LABEL = {
-  lok_sabha: "State Working President",
-  district: "Lok Sabha Prabhari + Lok Sabha President",
-  assembly: "District President",
-  block: "Assembly Prabhari + Assembly President",
+// "prabhari" | "president" | "working_president" | "team"
+export function designationRole(name) {
+  const rest = String(name || "").toLowerCase()
+    .replace(/[\/,.\-()]+/g, " ")
+    .replace(LEVEL_WORDS, " ")
+    .replace(/\s+/g, " ").trim();
+  for (const [kind, names] of Object.entries(ROLE_NAMES)) if (names.includes(rest)) return kind;
+  return "team";
+}
+
+// ---- Rules ------------------------------------------------------------------------
+// For a vacancy (level, role) → the responsible roles, each as [level, kind]. The
+// responsible area is the vacancy location itself (same level) or its ancestor of
+// that level; "state" is the single state-wide area.
+const BOTH = (lvl) => [[lvl, "prabhari"], [lvl, "president"]];
+const STATE_PRESIDENTS = [["state", "president"], ["state", "working_president"]];
+const RULES = {
+  state: { prabhari: [["state", "prabhari"]], president: [["state", "prabhari"]], team: [["state", "prabhari"]] },
+  lok_sabha: { prabhari: STATE_PRESIDENTS, president: STATE_PRESIDENTS, team: BOTH("lok_sabha") },
+  district: { prabhari: [["lok_sabha", "prabhari"]], president: [["lok_sabha", "president"]], team: BOTH("district") },
+  assembly: { prabhari: [["district", "prabhari"]], president: [["district", "president"]], team: BOTH("assembly") },
+  block: { prabhari: [["assembly", "prabhari"]], president: [["assembly", "president"]], team: BOTH("assembly") },
 };
 
-// The team levels that have a defined responsibility mapping (State designations
-// have no higher authority to chase, so they are excluded from reminders).
+const roleLabel = ([lvl, kind]) => `${LEVEL_LABEL[lvl]} ${KIND_LABEL[kind]}`;
+
+// The rule for one vacancy: { role, required: [[level, kind]...], label }.
+export function responsibilityRule(level, designationName) {
+  const levelRules = RULES[level];
+  if (!levelRules) return { role: null, required: [], label: "—" };
+  let role = designationRole(designationName);
+  // A Working President is only a leadership role at State; elsewhere it is a team post.
+  if (role === "working_president") role = level === "state" ? "president" : "team";
+  const required = levelRules[role];
+  return { role, required, label: required.map(roleLabel).join(" + ") };
+}
+
+// The levels scanned for vacancies that have a responsibility rule.
 export const TEAM_LEVELS = ["lok_sabha", "district", "assembly", "block"];
 
 // The person's location id AT a responsible level, derived up the district chain
@@ -97,91 +140,72 @@ export function ancestryOf(index, level, locId) {
   return out;
 }
 
-// Load every current holder of a responsibility designation, bucketed by
-// respLevel → locationId → [{ contact_id, person_name, mobile, role }]. Read live
-// from the actual assignments, so filling/removing a leader updates it at once.
+// Load every current holder of a leadership designation (Prabhari / President /
+// Working President) at State, Lok Sabha, District and Assembly, bucketed by
+// "level:kind" → locationId → [{ contact_id, person_name, mobile, role }]. `role`
+// is the designation the person ACTUALLY holds (Designation Master name). Read
+// live from the assignments, so filling/removing a leader updates it at once.
+// Wrong-number / unapproved contacts are skipped, as they are for vacancies.
 export async function loadResponsibleHolders() {
   // The assignment table + the designation `level` column must exist before we can
   // read holders (this runs before fetchIncompleteDesignation, which also ensures
   // them). Idempotent + cached, so it's a no-op once created.
   await ensureContactDesignationsSchema();
   await ensureDesignationLevelColumn(query);
-  const holders = { state: new Map(), lok_sabha: new Map(), district: new Map(), assembly: new Map() };
-  // The set of designation phrases we care about, by respLevel.
-  const wanted = {};
-  for (const lvl of TEAM_LEVELS) {
-    const { respLevel, names } = RESPONSIBILITY[lvl];
-    wanted[respLevel] = wanted[respLevel] || new Set();
-    for (const n of names) wanted[respLevel].add(n);
-  }
-
-  for (const respLevel of Object.keys(wanted)) {
-    const phrases = [...wanted[respLevel]];
-    let rows;
-    if (respLevel === "state") {
-      rows = await query(
-        `SELECT 0 AS loc_id, c.id AS contact_id, c.person_name, c.phone_number, LOWER(d.name) AS dname
-           FROM contacts c
-           JOIN contact_designations cd ON cd.contact_id = c.id
-           JOIN designations d ON d.id = cd.designation_id AND d.level = 'state'`
-      );
-    } else {
-      rows = await query(
-        `SELECT ${RESP_LOC_EXPR[respLevel]} AS loc_id, c.id AS contact_id, c.person_name, c.phone_number, LOWER(d.name) AS dname
-           FROM contacts c
-           JOIN contact_designations cd ON cd.contact_id = c.id
-           JOIN designations d ON d.id = cd.designation_id AND d.level = ?
-           LEFT JOIN locations ld ON ld.id = c.district_id
-           LEFT JOIN locations lls ON lls.id = ld.parent_id`,
-        [respLevel]
-      );
-    }
-    const byLoc = holders[respLevel];
+  const live = (await notWrongNumberClause("c")) + (await notPendingClause("c"));
+  const holders = new Map();
+  for (const level of ["state", "lok_sabha", "district", "assembly"]) {
+    // eslint-disable-next-line no-await-in-loop
+    const rows = await query(
+      `SELECT ${level === "state" ? "0" : RESP_LOC_EXPR[level]} AS loc_id, c.id AS contact_id, c.person_name, c.phone_number, d.name AS dname
+         FROM contacts c
+         JOIN contact_designations cd ON cd.contact_id = c.id
+         JOIN designations d ON d.id = cd.designation_id AND d.level = ?
+         LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations lls ON lls.id = ld.parent_id
+        WHERE 1=1 ${live}
+        ORDER BY c.person_name`,
+      [level]
+    );
     for (const r of rows) {
-      // Match the designation name to one of the wanted phrases (substring-tolerant).
-      const matched = phrases.find((p) => String(r.dname || "").includes(p));
-      if (!matched) continue;
-      const loc = r.loc_id ?? 0;
+      const kind = designationRole(r.dname);
+      if (kind === "team" || r.loc_id == null) continue;
+      const key = `${level}:${kind}`;
+      if (!holders.has(key)) holders.set(key, new Map());
+      const byLoc = holders.get(key);
+      const loc = Number(r.loc_id);
       if (!byLoc.has(loc)) byLoc.set(loc, []);
-      byLoc.get(loc).push({
-        contact_id: r.contact_id,
-        person_name: r.person_name,
-        mobile: r.phone_number || null,
-        role: titleCase(matched),
-      });
+      byLoc.get(loc).push({ contact_id: r.contact_id, person_name: r.person_name, mobile: r.phone_number || null, role: r.dname });
     }
   }
   return holders;
 }
 
-function titleCase(s) {
-  return String(s || "").replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
-// Resolve the responsible person(s) for a vacancy at (level, locationId).
-// Returns an array; empty means "Responsible Person Not Assigned". Each entry:
-//   { contact_id, person_name, mobile, role }
-export function resolveResponsible(level, locationId, index, holders) {
-  const cfg = RESPONSIBILITY[level];
-  if (!cfg) return [];
-  if (cfg.respLevel === "state") {
-    // State Working President — a single state-wide holder (location 0).
-    return dedupe(holders.state.get(0) || []);
-  }
-  // The responsible area is the parent location of the vacancy's own location.
-  const self = index.get(locationId);
-  const parentId = self?.parent_id ?? null;
-  if (parentId == null) return [];
-  return dedupe((holders[cfg.respLevel].get(parentId) || []));
-}
-
-function dedupe(list) {
+// Resolve the responsible person(s) for a vacancy of `designationName` at
+// (level, locationId). Returns:
+//   { people: [{ contact_id, person_name, mobile, role, area }], missing: [role labels], rule }
+// `missing` lists each required role nobody holds in the responsible area (or whose
+// area is missing from the hierarchy) — shown as "Not assigned", never guessed.
+export function resolveResponsible(level, locationId, designationName, index, holders) {
+  const rule = responsibilityRule(level, designationName);
+  const people = [];
+  const missing = [];
   const seen = new Set();
-  const out = [];
-  for (const h of list) {
-    if (seen.has(h.contact_id)) continue;
-    seen.add(h.contact_id);
-    out.push(h);
+  for (const req of rule.required) {
+    const [lvl, kind] = req;
+    let area = null;
+    if (lvl === "state") area = { id: 0, name: "State" };
+    else {
+      const a = ancestorOfType(index, locationId, LEVEL_TYPE[lvl]);
+      if (a) area = { id: a.id, name: a.name };
+    }
+    const found = area ? (holders.get(`${lvl}:${kind}`)?.get(area.id) || []) : [];
+    if (!found.length) { missing.push(roleLabel(req)); continue; }
+    for (const h of found) {
+      if (seen.has(h.contact_id)) continue;
+      seen.add(h.contact_id);
+      people.push({ ...h, area: area.name });
+    }
   }
-  return out;
+  return { people, missing, rule: rule.label };
 }

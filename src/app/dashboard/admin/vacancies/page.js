@@ -387,12 +387,13 @@ export default function VacanciesPage() {
                           <div key={p.contact_id}><span className="font-medium text-gray-900">{p.person_name}</span> holds this designation — {p.reason}</div>
                         ))}
                       </div>
-                    ) : r.responsibles?.length ? (
+                    ) : r.status === "vacant" ? (
                       <div className="space-y-1.5">
-                        {r.responsibles.map((rp) => (
-                          <div key={rp.contact_id} className="flex items-center gap-2 flex-wrap">
+                        {r.responsible_rule && <div className="text-[11px] text-gray-400">Responsible: {r.responsible_rule}</div>}
+                        {(r.responsibles || []).map((rp) => (
+                          <div key={rp.contact_id} className="flex items-center gap-2 flex-wrap" data-testid="responsible">
                             <span className="text-gray-900 font-medium">{rp.name}</span>
-                            {rp.role && <span className="text-[11px] text-gray-400">{rp.role}</span>}
+                            {rp.role && <span className="text-[11px] text-gray-500">{rp.role}{rp.area && rp.area !== "State" ? ` · ${rp.area}` : ""}</span>}
                             <span className="text-gray-500 font-mono text-[11px]">{rp.mobile || "—"}</span>
                             <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border capitalize ${reminderChip(rp.reminder_status)}`}>{rp.reminder_status}{rp.reminder_attempts ? ` · ${rp.reminder_attempts}` : ""}</span>
                             {rp.last_reminder_at && <span className="text-[11px] text-gray-400">{fmtDateTime(rp.last_reminder_at)}</span>}
@@ -402,9 +403,12 @@ export default function VacanciesPage() {
                             </button>
                           </div>
                         ))}
+                        {(r.responsible_missing || []).map((m) => (
+                          <div key={m} className="text-xs font-medium text-red-600" data-testid="responsible-missing">{m} — Not assigned</div>
+                        ))}
                       </div>
                     ) : (
-                      <span className={`text-xs font-medium ${r.level === "state" ? "text-gray-500" : "text-red-600"}`}>{r.responsible_note || "—"}</span>
+                      <span className="text-xs text-gray-400">—</span>
                     )}
                   </td>
                 </tr>

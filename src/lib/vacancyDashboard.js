@@ -1,14 +1,13 @@
 import { fetchIncompleteDesignation } from "@/lib/incompleteDesignations";
 import {
-  TEAM_LEVELS, RESPONSIBILITY_LABEL, loadLocationIndex, loadResponsibleHolders,
+  TEAM_LEVELS, loadLocationIndex, loadResponsibleHolders,
   ancestryOf, resolveResponsible,
 } from "@/lib/vacancyResponsibility";
 import { getReminderStates } from "@/lib/vacancyReminders";
 import { query } from "@/lib/db";
 
 const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
-// Levels scanned for vacancies. State has no higher authority, so its vacancies
-// carry no responsible person / reminder (TEAM_LEVELS are the ones that do).
+// Levels scanned for vacancies (State vacancies are the State Prabhari's).
 const VACANCY_LEVELS = ["state", ...TEAM_LEVELS];
 const MAX_ROWS = 2000;
 
@@ -105,21 +104,25 @@ export async function buildVacancyDataset(session, filters = {}) {
 
   // 3) ONE row per genuinely VACANT position (never duplicated per responsible
   //    person): the responsible people are listed on the row, each with their own
-  //    reminder group. State has no higher level, so no responsible person.
+  //    reminder group. Who is responsible depends on the level AND on whether the
+  //    vacant post is a Prabhari, a President or a Team post (vacancyResponsibility).
   const vacantRows = scoped.filter((r) => r.status === "vacant");
   const displayRows = [];
   const groupKeys = new Set();
   for (const r of vacantRows) {
-    const responsibles = r.level === "state" ? [] : resolveResponsible(r.level, r.location_id, index, holders).map((rp) => {
+    const res = resolveResponsible(r.level, r.location_id, r.designation_name, index, holders);
+    const responsibles = res.people.map((rp) => {
       const gk = groupKeyFor(rp.contact_id);
       groupKeys.add(gk);
-      return { contact_id: rp.contact_id, name: rp.person_name, role: rp.role || RESPONSIBILITY_LABEL[r.level] || null, mobile: rp.mobile, group_key: gk };
+      return { contact_id: rp.contact_id, name: rp.person_name, role: rp.role, area: rp.area, mobile: rp.mobile, group_key: gk };
     });
     displayRows.push({
       ...r,
       responsibles,
-      responsible_note: r.level === "state" ? "State level — no higher level to remind"
-        : responsibles.length ? null : `Responsible Person Not Assigned (${RESPONSIBILITY_LABEL[r.level] || "—"})`,
+      responsible_rule: res.rule,
+      // Required roles nobody holds — shown as "Not assigned", never replaced.
+      responsible_missing: res.missing,
+      responsible_note: res.missing.length ? `Not assigned: ${res.missing.join(", ")}` : null,
     });
   }
 
