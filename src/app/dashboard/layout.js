@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText, Info } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText, Info, BadgeCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -248,6 +248,15 @@ export default function DashboardLayout({ children }) {
   const isUserAdmin = isAdmin(session);
   const isSupervisor = isSupervisorRole(session);
 
+  // Designation section — one sidebar parent grouping the designation pages
+  // (same routes/pages/permissions as before; each child keeps its own guard).
+  // Its own link /dashboard/admin/designation redirects to the first child the
+  // user may open.
+  const DESIGNATION_SECTION = { name: "Designation", href: "/dashboard/admin/designation", icon: BadgeCheck, children: [
+    { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
+    { name: "Designation Vacancies", href: "/dashboard/admin/vacancies", icon: UserCog },
+  ] };
+
   // Per-admin-tier menu items. Higher tiers include more, lower tiers are
   // trimmed to operational tools relevant to their scope.
   const ADMIN_MENUS = {
@@ -266,7 +275,7 @@ export default function DashboardLayout({ children }) {
       // Influencers — a STANDALONE page directly below Contacts (its own route and
       // "influencers" page-access key), NOT a Contacts child/tab.
       { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
-      { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
+      DESIGNATION_SECTION,
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
@@ -303,7 +312,7 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
+      DESIGNATION_SECTION,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -328,7 +337,7 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
+      DESIGNATION_SECTION,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -350,7 +359,7 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
+      DESIGNATION_SECTION,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -372,7 +381,7 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
+      DESIGNATION_SECTION,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
@@ -442,6 +451,19 @@ export default function DashboardLayout({ children }) {
       .filter((pg) => pg && !pg.tab && !pg.hideFromNav)
       .filter((pg) => (seen.has(pg.href) ? false : (seen.add(pg.href), true)))
       .map((pg) => ({ name: pg.label, href: pg.href, icon: PAGE_ICONS[pg.icon] || FileText }));
+    // Put a page-restricted user's designation pages under the same Designation
+    // section, listing only the children their grants allow (Incomplete
+    // Designation rides on the Contacts grant; Vacancies has its own key).
+    const allowedChildren = DESIGNATION_SECTION.children.filter((c) =>
+      c.href === "/dashboard/admin/vacancies" ? allowedPageKeys.includes("vacancies") : allowedPageKeys.includes("contacts"));
+    if (allowedChildren.length) {
+      const at = navItems.findIndex((i) => i.href === "/dashboard/admin/vacancies");
+      navItems = navItems.filter((i) => i.href !== "/dashboard/admin/vacancies");
+      const section = { ...DESIGNATION_SECTION, children: allowedChildren };
+      const contactsAt = navItems.findIndex((i) => i.href === "/dashboard/admin/contacts");
+      const insertAt = contactsAt >= 0 ? contactsAt + 1 : (at >= 0 ? at : navItems.length);
+      navItems = [...navItems.slice(0, insertAt), section, ...navItems.slice(insertAt)];
+    }
   }
 
   // Every role gets a profile link — appended once here instead of in each
@@ -452,8 +474,10 @@ export default function DashboardLayout({ children }) {
   // Filter nav items for the header search bar. Search still covers every
   // page (not just the shortened sidebar list) so nothing becomes unreachable.
   const q = searchQuery.trim().toLowerCase();
+  // Child pages (e.g. Designation → Incomplete Designation) are searchable too.
   const searchResults = q
-    ? navItems.filter((item) => item.name.toLowerCase().includes(q))
+    ? navItems.flatMap((item) => [item, ...(item.children || [])])
+        .filter((item, i, all) => item.name.toLowerCase().includes(q) && all.findIndex((x) => x.href === item.href) === i)
     : [];
 
   // Admins get a short sidebar (one primary page per section); other roles
