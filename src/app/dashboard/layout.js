@@ -254,7 +254,6 @@ export default function DashboardLayout({ children }) {
     [ROLES.SUPER_ADMIN]: [
       { name: "Dashboard", href: "/dashboard/admin", icon: LayoutDashboard },
       { name: "Administration", href: "/dashboard/admin/administration", icon: UserCog },
-      { name: "Designation Approvals", href: "/dashboard/admin/approvals", icon: ShieldCheck },
       // Contacts is a collapsible parent — Active Workers is nested beneath it.
       // Wrong Number is NOT a side-panel item: it opens as a tab on the Contacts
       // page itself (with its Not Interested / 10+ Switched-Off / 10+ Incoming-Off

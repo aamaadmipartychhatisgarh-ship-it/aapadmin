@@ -66,20 +66,6 @@ export const PLUGIN_CATALOG = [
     pending: [],
   },
   {
-    key: "approvals", name: "Designation Approvals", icon: "ShieldCheck",
-    purpose: "Seven-level sequential sign-off chain.",
-    benchmark: "ServiceNow / SAP workflow", verdict: "exceed",
-    scores: { aap: [90, 95, 96, 95], best: [93, 55, 35, 94] },
-    features: [
-      f("7 ordered approval levels (District President → Prabhari Ji)"),
-      f("Per-level approver granted individually"),
-      f("Server-enforced step order"),
-      f("Full audit trail of every action"),
-      f("All-requests oversight view"),
-    ],
-    pending: [],
-  },
-  {
     key: "pending_contacts", name: "Pending Contact Approval", icon: "Check",
     purpose: "Supervisor gate for caller-added people.",
     benchmark: "CRM lead-approval queue", verdict: "meet",

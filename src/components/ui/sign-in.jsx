@@ -30,7 +30,7 @@ export const LightLogin = () => {
         setLoading(false);
       } else {
         // Workers have no Admin dashboard — send them to their own (Page Access
-        // limits them to Dashboard, Announcements and Designation Approval).
+        // limits them to their Dashboard and Announcements).
         const s = await getSession().catch(() => null);
         router.push(s?.user?.role === "worker" ? "/dashboard/portal" : "/dashboard/admin");
         router.refresh();

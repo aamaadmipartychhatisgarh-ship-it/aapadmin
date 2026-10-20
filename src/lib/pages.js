@@ -24,10 +24,10 @@ const ADMIN = [
 ];
 const OVERSIGHT = [...ADMIN, ROLES.SUPERVISOR];
 
-// The pages EVERY Worker (Member Account) is given by default: Dashboard,
-// Announcements and Designation Approval. Used by Member Accounts creation and the
-// one-time pass that brings existing Worker accounts in line.
-export const WORKER_DEFAULT_PAGES = ["portal_home", "portal_announcements", "approvals"];
+// The pages EVERY new Worker (Member Account) is given by default: Dashboard and
+// Announcements. Used by Member Accounts creation. (Designation Approval was a
+// default until its UI was removed.)
+export const WORKER_DEFAULT_PAGES = ["portal_home", "portal_announcements"];
 
 // Ordered so the dropdown / tables read top-down like the product's own nav.
 export const PAGES = [
@@ -198,20 +198,24 @@ export const PAGES = [
   // server-side. They are `tab: true` (never resolved as a route by pageKeyForPath)
   // and children of `approvals`, so granting one shows the Approvals page (ancestor)
   // in the nav without granting the other levels.
-  { key: "approvals", label: "Designation Approvals", href: "/dashboard/admin/approvals", prefixes: ["/dashboard/admin/approvals"], icon: "ShieldCheck",
+  // Designation Approval UI removed (UI FIX 34): the page and its stage tabs are
+  // hidden from navigation and the Page Access console. Keys stay registered so
+  // the kept approvals API / data (and Area Ranking, which reads final approvals)
+  // keep resolving; existing grants are left as they are.
+  { key: "approvals", label: "Designation Approvals", href: "/dashboard/admin/approvals", prefixes: ["/dashboard/admin/approvals"], hideFromNav: true, hideFromAccess: true, icon: "ShieldCheck",
     roles: [...OVERSIGHT] },
-  { key: "approval_initiate", label: "Approvals · Initiate Designation", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Plus", roles: [] },
+  { key: "approval_initiate", label: "Approvals · Initiate Designation", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Plus", roles: [] },
   // Stage 1 (new in the 8-stage chain). The other approver keys keep their original
   // names so existing grants stay valid; their LABELS show the current stage number.
-  { key: "approve_s1_vidhansabha_prabhari", label: "Approvals · Stage 1 Vidhansabha Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l1_district_president", label: "Approvals · Stage 2 District President", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l2_loksabha_adhyaksh", label: "Approvals · Stage 3 Lok Sabha President / Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l3_loksabha_prabhari", label: "Approvals · Stage 4 Lok Sabha Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l4_sangathan_mantri", label: "Approvals · Stage 5 Pradesh Sangathan Mantri", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l5_karyakari_adhyaksh", label: "Approvals · Stage 6 Pradesh Karyakari Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
-  { key: "approve_l6_sah_prabhari", label: "Approvals · Stage 7 Sah Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_s1_vidhansabha_prabhari", label: "Approvals · Stage 1 Vidhansabha Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Stamp", roles: [] },
+  { key: "approve_l1_district_president", label: "Approvals · Stage 2 District President", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Stamp", roles: [] },
+  { key: "approve_l2_loksabha_adhyaksh", label: "Approvals · Stage 3 Lok Sabha President / Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Stamp", roles: [] },
+  { key: "approve_l3_loksabha_prabhari", label: "Approvals · Stage 4 Lok Sabha Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Stamp", roles: [] },
+  { key: "approve_l4_sangathan_mantri", label: "Approvals · Stage 5 Pradesh Sangathan Mantri", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Stamp", roles: [] },
+  { key: "approve_l5_karyakari_adhyaksh", label: "Approvals · Stage 6 Pradesh Karyakari Adhyaksh", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Stamp", roles: [] },
+  { key: "approve_l6_sah_prabhari", label: "Approvals · Stage 7 Sah Prabhari", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Stamp", roles: [] },
   // Stage 8 is Prabhari Ji = the Super Admin ROLE itself; this grant has no effect on the final approval.
-  { key: "approve_l7_prabhari_ji", label: "Approvals · Stage 8 Prabhari Ji (Super Admin only)", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", icon: "Stamp", roles: [] },
+  { key: "approve_l7_prabhari_ji", label: "Approvals · Stage 8 Prabhari Ji (Super Admin only)", href: "/dashboard/admin/approvals", prefixes: [], tab: true, parent: "approvals", hideFromNav: true, hideFromAccess: true, icon: "Stamp", roles: [] },
 ];
 
 // Pages that are NEVER gated by this system — every signed-in user reaches them

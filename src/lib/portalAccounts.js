@@ -18,7 +18,7 @@ export const PORTAL_LEVELS = ["state", "lok_sabha", "district", "assembly"];
 const NOT_GENERIC_MEMBER = "LOWER(TRIM(%A.name)) <> 'member'";
 function notGenericMember(alias) { return NOT_GENERIC_MEMBER.replace("%A", alias); }
 // A portal account is "managed" and gets EXACTLY these pages (role is secondary):
-// its Dashboard, Announcements and Designation Approval (see WORKER_DEFAULT_PAGES).
+// its Dashboard and Announcements (see WORKER_DEFAULT_PAGES).
 export const PORTAL_PAGES = WORKER_DEFAULT_PAGES;
 
 let _ensured = false;

@@ -379,7 +379,7 @@ function CreateMemberAccount({ onCreated }) {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-sm">
           <div><span className="text-gray-500">User ID:</span> <span className="font-mono font-semibold text-gray-900">{preview || "— (needs name + phone)"}</span></div>
           <div><span className="text-gray-500">Password:</span> <span className="font-mono font-semibold text-gray-900">{previewPassword(form.name, form.phone) || "— (needs name + phone)"}</span></div>
-          <div className="text-gray-500">Access: <span className="text-gray-700 font-medium">Dashboard · Announcements · Designation Approval</span></div>
+          <div className="text-gray-500">Access: <span className="text-gray-700 font-medium">Dashboard · Announcements</span></div>
           <div className="text-xs text-gray-400 w-full">The User ID is generated automatically (first two letters of the name + last six digits of the mobile). If it is already taken a number is appended, and existing accounts are never changed.</div>
         </div>
 

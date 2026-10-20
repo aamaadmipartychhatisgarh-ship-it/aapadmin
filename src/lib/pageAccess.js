@@ -79,8 +79,9 @@ export async function ensurePagePermissionsSchema() {
     // copying that grant's real admin as granted_by. INSERT IGNORE never changes an
     // existing row; later revocations are respected (this runs once only).
     await runOnce("supervisor_pending_approval_v1", grantPendingApprovalToContactSupervisors);
-    // ONE-TIME: every Worker account gets the default pages (Dashboard,
-    // Announcements, Designation Approval).
+    // ONE-TIME (already applied): every Worker account got the default pages of
+    // the time (Dashboard, Announcements, Designation Approval). New accounts now
+    // get WORKER_DEFAULT_PAGES (Dashboard, Announcements).
     await runOnce("worker_default_pages_v1", applyWorkerDefaultPages);
     ensured = true;
   } catch (e) {
