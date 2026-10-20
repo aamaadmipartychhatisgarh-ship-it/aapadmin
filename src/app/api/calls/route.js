@@ -5,6 +5,7 @@ import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
+import { isDesignatedContact } from "@/lib/designatedContacts";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn, ensureNotInterestedColumns } from "@/lib/contactExtras";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { normalizeDurationSeconds } from "@/lib/callDuration";
@@ -336,7 +337,14 @@ export async function POST(req) {
       // change) can NEVER accidentally flag the contact Wrong. Wrong is only set when
       // the user explicitly chose the Wrong-Number outcome (status or picked-call
       // sentiment); every other outcome clears it.
-      isWrongNumber = statusName === "Wrong Number" || String(finalSentiment || "").toLowerCase() === "wrong_number";
+      // A DESIGNATED contact (State / Lok Sabha / District / Assembly / Block) is never
+      // moved to Wrong Number by a SENTIMENT — the sentiment is still saved on the call,
+      // the contact just stays in the main list. The explicit "Wrong Number" call
+      // STATUS is unchanged. Enforced here, server-side.
+      const sentimentWrong = String(finalSentiment || "").toLowerCase() === "wrong_number";
+      const protectedFromSentiment = sentimentWrong && statusName !== "Wrong Number" ? await isDesignatedContact(contact_id) : false;
+      isWrongNumber = statusName === "Wrong Number" || (sentimentWrong && !protectedFromSentiment);
+      if (sentimentWrong && protectedFromSentiment) console.info(`[designated] wrong-number SENTIMENT ignored for designated contact=${contact_id} call=${res.insertId}`);
       // If a follow-up was scheduled, keep the contact open and pin it to this caller.
       const wantsFollowUp = !!is_follow_up_required;
       // Re-logging a call always consumes the previous reminder: set the new
@@ -405,7 +413,11 @@ export async function POST(req) {
     // Main contacts list and from assignment until an authorized user EXPLICITLY
     // restores it. Set-only: a later non-negative call must never auto-restore it.
     if (contact_id && ["negative", "opponent", "not_supporter"].includes(String(sentiment || "").toLowerCase())) {
-      if (await ensureNotInterestedColumns()) {
+      // Designated contacts (State / Lok Sabha / District / Assembly / Block) are exempt:
+      // the sentiment is recorded on the call but the contact stays in the main list.
+      if (await isDesignatedContact(contact_id)) {
+        console.info(`[designated] not-interested move skipped for designated contact=${contact_id} call=${res.insertId} sentiment=${sentiment}`);
+      } else if (await ensureNotInterestedColumns()) {
         await query(
           `UPDATE contacts SET is_not_interested = 1, not_interested_reason = ?, not_interested_at = NOW() WHERE id = ?`,
           [String(sentiment).toLowerCase(), contact_id]

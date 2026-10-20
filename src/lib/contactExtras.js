@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { designatedExistsSql } from "@/lib/designatedContacts";
 
 // The "Wrong Number" feature relies on an optional `contacts.is_wrong_number`
 // column added by scripts/add-wrong-number-flag.mjs. So the app keeps working
@@ -197,6 +198,7 @@ export async function ensureNotInterestedColumns() {
         `UPDATE contacts c
             SET c.is_not_interested = 1, c.not_interested_reason = 'sentiment', c.not_interested_at = NOW()
           WHERE (c.is_not_interested = 0 OR c.is_not_interested IS NULL)
+            AND NOT ${designatedExistsSql("c")}
             AND EXISTS (SELECT 1 FROM calls cx WHERE cx.contact_id = c.id
                           AND cx.sentiment IN ('negative','opponent','not_supporter'))`
       ).catch((e) => console.error("[not-interested] backfill:", e?.message || e));

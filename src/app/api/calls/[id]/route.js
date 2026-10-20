@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { isDesignatedContact } from "@/lib/designatedContacts";
 import { hasWrongNumberColumn } from "@/lib/contactExtras";
 
 export async function DELETE(req, { params }) {
@@ -95,7 +96,11 @@ export async function PUT(req, { params }) {
       // Wrong Number list right away (same persistent flag the log flow sets).
       // Set-only — editing away from it does not auto-restore (restore is explicit) —
       // and only on a genuine Wrong outcome, never a stale sentiment on another status.
-      if (isWrongOutcome && (await hasWrongNumberColumn())) {
+      // A designated contact is never moved by the Wrong Number SENTIMENT (only by the
+      // explicit Wrong Number STATUS).
+      const wrongBySentimentOnly = isWrongOutcome && statusRow?.name !== "Wrong Number";
+      const exempt = wrongBySentimentOnly ? await isDesignatedContact(oldCall.contact_id) : false;
+      if (isWrongOutcome && !exempt && (await hasWrongNumberColumn())) {
         await query(`UPDATE contacts SET is_wrong_number = 1 WHERE id = ?`, [oldCall.contact_id]);
       }
     }
