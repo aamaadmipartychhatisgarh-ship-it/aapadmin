@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { guard, noStore } from "@/lib/leaderAssessmentGuard";
 import { syncAssemblies } from "@/lib/leaderAssessment";
-import { fetchComparisonDataset, comparisonSummary, fetchComparisonPartyTotals } from "@/lib/mlaComparison";
+import { fetchComparisonDataset, comparisonSummary, fetchComparisonPartyTotals, fetchComparisonPartyCounts } from "@/lib/mlaComparison";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/leader-assessment/comparison
 //   ?zone_id=&lok_sabha_id=&district_id=&assembly_id=  (each a comma list; §9)
+//   &party=                                            (Current MLA's saved party)
 //   &page=&pageSize=                                    (server-side pagination; §13)
 //
 // Current MLA vs AAP Candidate VOTE comparison, one row per master assembly.
@@ -28,6 +29,7 @@ export async function GET(req) {
       lok_sabha_id: searchParams.get("lok_sabha_id"),
       district_id: searchParams.get("district_id"),
       assembly_id: searchParams.get("assembly_id"),
+      party: searchParams.get("party"),
     };
 
     const all = await fetchComparisonDataset(filters);
@@ -35,6 +37,7 @@ export async function GET(req) {
     // the SAME filter scope, so the cards always agree with the filtered table.
     const partyTotals = await fetchComparisonPartyTotals(filters);
     const summary = { ...comparisonSummary(all), ...partyTotals };
+    const party_counts = await fetchComparisonPartyCounts(filters);
 
     const total = all.length;
     const pageSize = Math.min(Math.max(parseInt(searchParams.get("pageSize") || "20", 10) || 20, 1), 200);
@@ -44,7 +47,7 @@ export async function GET(req) {
     const data = all.slice(start, start + pageSize);
 
     return NextResponse.json(
-      { data, pagination: { page, pageSize, total, totalPages }, summary },
+      { data, pagination: { page, pageSize, total, totalPages }, summary, party_counts },
       { headers: noStore }
     );
   } catch (e) {

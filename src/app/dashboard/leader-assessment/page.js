@@ -3231,9 +3231,52 @@ function MarginCell({ stats }) {
   );
 }
 
+// Searchable single-select party picker for the Comparison filters. Options carry
+// each party's MLA count; picking one shows all of that party's MLAs at once.
+function PartyFilter({ options, value, onChange, partyByName }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const list = needle ? options.filter((o) => o.party.toLowerCase().includes(needle)) : options;
+  const current = options.find((o) => o.party.toLowerCase() === String(value).toLowerCase());
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => { setOpen((o) => !o); setQ(""); }} data-testid="party-filter"
+        className={`h-9 px-3 rounded-lg border text-sm bg-white flex items-center gap-2 ${value ? "border-[#164FA3] text-[#164FA3] font-semibold" : "border-gray-200 text-gray-700"}`}>
+        <Flag size={13} />
+        <span>{value ? `${value}${current ? ` (${current.count})` : ""}` : "All parties"}</span>
+        <span className="text-gray-400">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute z-30 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg">
+            <div className="p-2 border-b border-gray-100">
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search party…" className="w-full h-8 px-2 rounded-md border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
+            </div>
+            <div className="max-h-64 overflow-y-auto py-1">
+              <button type="button" onClick={() => { onChange(""); setOpen(false); }} className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 ${!value ? "font-semibold text-[#164FA3]" : "text-gray-700"}`}>All parties</button>
+              {list.length === 0 ? <div className="px-3 py-2 text-xs text-gray-400">No party matches “{q}”.</div> : list.map((o) => (
+                <button key={o.party} type="button" onClick={() => { onChange(o.party); setOpen(false); }}
+                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center justify-between gap-2 ${o.party.toLowerCase() === String(value).toLowerCase() ? "bg-blue-50/60 font-semibold text-[#164FA3]" : "text-gray-700"}`}>
+                  <PartyLogo name={o.party} byName={partyByName} size={16} />
+                  <span className={`text-[11px] shrink-0 ${o.count ? "text-gray-500" : "text-gray-300"}`}>{o.count} MLA{o.count === 1 ? "" : "s"}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function VoteComparisonTab({ flash, fail, onEditMla }) {
-  const { byName: partyByName } = usePartyMaster(); // live party logos by name
+  const { byName: partyByName, parties: partyMaster } = usePartyMaster(); // live party logos by name
   const [geo, setGeo] = useState(emptyGeo());
+  // Party filter: "" = all parties, else the Current MLA's saved party name.
+  const [party, setParty] = useState("");
+  const [partyCounts, setPartyCounts] = useState([]);
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
   const [districts, setDistricts] = useState([]);
@@ -3254,8 +3297,9 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
     for (const k of ["zone_id", "lok_sabha_id", "district_id", "assembly_id"]) {
       if (geo[k]?.length) p.set(k, geo[k].join(","));
     }
+    if (party) p.set("party", party);
     return p;
-  }, [geo]);
+  }, [geo, party]);
 
   // Zones bootstrap once; the lower levels cascade from the selected parents.
   useEffect(() => { fetchLocations("zone", []).then(setZones); }, []);
@@ -3279,7 +3323,7 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
   }, [geo.district_id]);
 
   // Any filter change resets to page 1 (so the count/list stay consistent, §9).
-  useEffect(() => { setPage(1); }, [geo]);
+  useEffect(() => { setPage(1); }, [geo, party]);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -3290,6 +3334,7 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
       const d = await api(`/api/leader-assessment/comparison?${p.toString()}`);
       setRows(d.data || []);
       setSummary(d.summary || null);
+      setPartyCounts(d.party_counts || []);
       setPagination(d.pagination || { page: 1, pageSize: 20, total: (d.data || []).length, totalPages: 1 });
     } catch (e) { setError(e.message); setRows([]); setSummary(null); }
     finally { setLoading(false); }
@@ -3317,8 +3362,20 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
     finally { setExporting(""); }
   }
 
-  const clearFilters = () => setGeo(emptyGeo());
-  const hasFilters = geo.zone_id.length || geo.lok_sabha_id.length || geo.district_id.length || geo.assembly_id.length;
+  const clearFilters = () => { setGeo(emptyGeo()); setParty(""); };
+  const hasFilters = geo.zone_id.length || geo.lok_sabha_id.length || geo.district_id.length || geo.assembly_id.length || party;
+  // Party options: every party that has MLAs in the current area (with its MLA
+  // count), plus the remaining Party Master parties (0 MLAs) so any party can be
+  // searched and picked.
+  const partyOptions = (() => {
+    // Label each counted party with its Party Master spelling when one matches
+    // (the filter itself is case-insensitive, so "Bjp" and "BJP" are one party).
+    const counted = partyCounts.map((c) => ({ ...c, party: partyByName.get(c.party.trim().toLowerCase())?.name || c.party }));
+    const seen = new Set(counted.map((c) => c.party.trim().toLowerCase()));
+    const extra = (partyMaster || []).map((p) => String(p.name || "").trim()).filter((n) => n && !seen.has(n.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b)).map((n) => ({ party: n, count: 0 }));
+    return [...counted, ...extra];
+  })();
 
   // Page-level select-all toggles only the visible rows' assemblies.
   const pageIds = rows.map((r) => r.assembly_id);
@@ -3386,12 +3443,13 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
           <FilterMultiSelect label="Lok Sabhas" items={lokSabhas.map((l) => ({ id: l.id, name: l.name }))} selected={geo.lok_sabha_id} onChange={(v) => setGeo((g) => ({ ...g, lok_sabha_id: v }))} />
           <FilterMultiSelect label="districts" items={districts.map((d) => ({ id: d.id, name: d.name }))} selected={geo.district_id} onChange={(v) => setGeo((g) => ({ ...g, district_id: v }))} />
           <FilterMultiSelect label="assemblies" items={assemblies.map((a) => ({ id: a.id, name: a.name }))} selected={geo.assembly_id} onChange={(v) => setGeo((g) => ({ ...g, assembly_id: v }))} />
+          <PartyFilter options={partyOptions} value={party} onChange={setParty} partyByName={partyByName} />
           {hasFilters ? <button onClick={clearFilters} className="text-xs font-semibold text-gray-500 hover:text-gray-700 px-2 py-1">Clear filters</button> : null}
           {selected.size > 0 ? <span className="text-xs font-semibold text-[#164FA3] ml-auto">{selected.size} selected for export · <button onClick={() => setSelected(new Set())} className="underline">clear</button></span> : null}
         </div>
 
         {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : rows.length === 0 ? (
-          <Empty msg="No assemblies match the current selection." />
+          <Empty msg={party ? `No MLAs from ${party} match the current selection.` : "No assemblies match the current selection."} />
         ) : (
           <>
             {/* Comparison LIST — ONE ROW per assembly (not cards). Columns: the

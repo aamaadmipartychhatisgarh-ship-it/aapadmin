@@ -31,6 +31,7 @@ export async function GET(req) {
       lok_sabha_id: searchParams.get("lok_sabha_id"),
       district_id: searchParams.get("district_id"),
       assembly_id: searchParams.get("assembly_id"),
+      party: searchParams.get("party"),
     };
     let rows = await fetchComparisonDataset(filters);
 

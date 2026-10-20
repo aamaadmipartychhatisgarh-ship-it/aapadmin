@@ -94,9 +94,13 @@ function toIdList(v) {
 // (the filter UI is multi-select) — each narrows the set with an IN clause. All
 // ids are the authoritative `locations` ids (zone/lok_sabha/district/assembly),
 // the same source the rest of the app filters by.
-function geoFilter({ zone_id, lok_sabha_id, district_id, assembly_id }) {
+function geoFilter({ zone_id, lok_sabha_id, district_id, assembly_id, party }) {
   const where = [];
   const params = [];
+  // Party filter — the Current MLA's SAVED party (mp.party), matched exactly but
+  // case/space-insensitively, so picking a party brings in every MLA of it.
+  const partyName = String(party ?? "").trim();
+  if (partyName) { where.push("LOWER(TRIM(mp.party)) = LOWER(?)"); params.push(partyName); }
   const add = (col, vals) => {
     const ids = toIdList(vals);
     if (ids.length) { where.push(`${col} IN (${ids.map(() => "?").join(",")})`); params.push(...ids); }
@@ -319,4 +323,26 @@ export async function fetchComparisonPartyTotals(filters = {}) {
   const margin = Math.abs(bjp - aap);
   const margin_leader = bjp > aap ? "BJP" : aap > bjp ? "AAP" : "Equal";
   return { bjp_total: bjp, inc_total: inc, aap_total: aap, aap_bjp_margin: margin, margin_leader };
+}
+
+// MLA count per saved party within the geo filters (the party filter itself is
+// ignored here), for the Party filter's options. Blank parties are left out.
+export async function fetchComparisonPartyCounts(filters = {}) {
+  const { where: geoWhere, params: geoParams } = geoFilter({ ...filters, party: null });
+  const whereSql = geoWhere.length ? `AND ${geoWhere.join(" AND ")}` : "";
+  const rows = await query(
+    `SELECT MIN(TRIM(mp.party)) AS party, COUNT(*) AS n
+       FROM la_mla_profiles mp
+       JOIN la_assemblies a  ON a.id = mp.assembly_id
+       JOIN locations al  ON al.id = a.location_id AND al.type = 'assembly'
+       LEFT JOIN locations dl  ON dl.id  = al.parent_id  AND dl.type  = 'district'
+       LEFT JOIN locations lsl ON lsl.id = dl.parent_id  AND lsl.type = 'lok_sabha'
+       LEFT JOIN locations zl  ON zl.id  = lsl.parent_id AND zl.type  = 'zone'
+      WHERE a.location_id IS NOT NULL AND TRIM(COALESCE(mp.party, '')) <> ''
+        ${whereSql}
+      GROUP BY LOWER(TRIM(mp.party))
+      ORDER BY n DESC, party ASC`,
+    geoParams
+  );
+  return rows.map((r) => ({ party: r.party, count: Number(r.n) || 0 }));
 }
