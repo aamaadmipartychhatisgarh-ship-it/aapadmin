@@ -23,6 +23,7 @@ import { Download, Loader2, FileText } from "lucide-react";
 // error text. No per-page PDF code and no separate export endpoints.
 export default function CommonPDFExportButton({
   getPayload,
+  fetchUrl,
   filename = "export.pdf",
   label = "Export PDF",
   className = "",
@@ -37,13 +38,18 @@ export default function CommonPDFExportButton({
     setBusy(true);
     setErr("");
     try {
-      const payload = (await (typeof getPayload === "function" ? getPayload() : getPayload)) || {};
+      // `fetchUrl` (optional): the server builds the PDF itself from the page's current
+      // filters (GET) — used where the content must come straight from the database
+      // (e.g. long complaint descriptions) rather than from rows posted by the browser.
+      const payload = fetchUrl ? {} : (await (typeof getPayload === "function" ? getPayload() : getPayload)) || {};
       const body = { filename, ...payload };
-      const res = await fetch("/api/pdf/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = fetchUrl
+        ? await fetch(typeof fetchUrl === "function" ? fetchUrl() : fetchUrl, { cache: "no-store" })
+        : await fetch("/api/pdf/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
       if (!res.ok) {
         let msg = "Export failed";
         try { msg = (await res.json()).message || msg; } catch { /* non-JSON */ }
