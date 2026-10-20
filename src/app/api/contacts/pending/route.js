@@ -6,6 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { pendingContactScope } from "@/lib/pendingContactScope";
 import { query } from "@/lib/db";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
+import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
@@ -45,6 +46,9 @@ export async function POST(req) {
     const qual = normalizeQualification(data);
     if (qual.error) return NextResponse.json({ message: qual.error }, { status: 400, headers: NO_STORE });
     await ensureQualificationColumns();
+    const veh = normalizeVehicle(data);
+    if (veh.error) return NextResponse.json({ message: veh.error }, { status: 400, headers: NO_STORE });
+    await ensureVehicleColumn();
     await ensureContactApprovalColumns(); // approval_status + created_by_user_id
     await ensureContactDesignationsSchema();
     const existing = await contactCols();
@@ -63,6 +67,7 @@ export async function POST(req) {
       booth_id: booth_id || null,
       photo_url: photo_url || null,
       ...(qual.present ? { qualification: qual.qualification, education_level: qual.education_level } : {}),
+      ...(veh.present ? { vehicle: veh.vehicle } : {}),
       // Pending until a Supervisor approves; recorded against the caller who added it.
       approval_status: "pending",
       created_by_user_id: session.user.id || null,

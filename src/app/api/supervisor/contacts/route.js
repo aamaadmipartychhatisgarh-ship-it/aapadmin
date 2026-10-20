@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
+import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { addedDateClause } from "@/lib/contactDateFilter";
 import { logAudit } from "@/lib/audit";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
@@ -330,11 +331,15 @@ export async function POST(req) {
     const qual = normalizeQualification(data);
     if (qual.error) return NextResponse.json({ message: qual.error }, { status: 400 });
     await ensureQualificationColumns();
+    const veh = normalizeVehicle(data);
+    if (veh.error) return NextResponse.json({ message: veh.error }, { status: 400 });
+    await ensureVehicleColumn();
     const existingColumns = await getContactColumns();
     const cols = [];
     const vals = [];
     const add = (col, val) => { if (existingColumns.has(col)) { cols.push(col); vals.push(val); } };
     if (qual.present) { add("qualification", qual.qualification); add("education_level", qual.education_level); }
+    if (veh.present) add("vehicle", veh.vehicle);
     add("person_name", person_name.trim());
     add("phone_number", phone_number.trim());
     add("address", address || null);

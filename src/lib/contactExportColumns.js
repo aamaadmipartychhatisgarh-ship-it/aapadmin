@@ -16,6 +16,7 @@ export const CONTACT_EXPORT_COLUMNS = [
   { key: "village", label: "Village/City" },
   { key: "pincode", label: "Pincode" },
   { key: "qualification", label: "Qualification" },
+  { key: "vehicle", label: "Vehicle" },
   { key: "status", label: "Status" },
   { key: "assigned_caller", label: "Assigned Caller" },
   { key: "assigned_supervisor", label: "Assigned Supervisor" },

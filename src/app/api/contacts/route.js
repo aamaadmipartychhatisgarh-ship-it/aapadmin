@@ -14,6 +14,7 @@ import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDup
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema, syncContactWings, WINGS_SQL } from "@/lib/contactWings";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
+import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 
@@ -324,6 +325,9 @@ export async function POST(req) {
     const qual = normalizeQualification(data);
     if (qual.error) return NextResponse.json({ message: qual.error }, { status: 400 });
     await ensureQualificationColumns();
+    const veh = normalizeVehicle(data);
+    if (veh.error) return NextResponse.json({ message: veh.error }, { status: 400 });
+    await ensureVehicleColumn();
     // Multi-designation (PROMPT 5): accept designation_ids[]; the legacy single
     // designation_id is treated as one entry. The primary column keeps the FIRST
     // (or null when none) — no default is ever assigned.
@@ -350,6 +354,7 @@ export async function POST(req) {
       photo_url: photo_url || null,
       assigned_to_user_id: assigned_to_user_id || null,
       ...(qual.present ? { qualification: qual.qualification, education_level: qual.education_level } : {}),
+      ...(veh.present ? { vehicle: veh.vehicle } : {}),
     };
     const cols = [];
     const vals = [];

@@ -7,6 +7,8 @@ import DesignationMultiSelect, { parseDesignationIdList } from "@/components/con
 import ImportEditModal from "@/components/contacts/ImportEditModal";
 import QualificationField from "@/components/contacts/QualificationField";
 import { qualificationLabel } from "@/lib/qualificationOptions";
+import VehicleField from "@/components/contacts/VehicleField";
+import { vehicleLabel } from "@/lib/vehicleOptions";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
@@ -1131,6 +1133,7 @@ export default function ContactsModule({ session, mode }) {
                 <th className="px-4 py-3 font-semibold text-gray-600">Block</th>
                 {sortTh("Address", "address")}
                 <th className="px-4 py-3 font-semibold text-gray-600">Qualification</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Vehicle</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
                 {isSuperAdmin(session) && <th className="px-4 py-3 font-semibold text-gray-600">Convert</th>}
@@ -1190,6 +1193,7 @@ export default function ContactsModule({ session, mode }) {
                       value comes straight from the DB record (c.address). */}
                   <td className="px-4 py-3 text-gray-600 min-w-[180px] max-w-[280px]"><div className="whitespace-normal break-words line-clamp-3" title={c.address || ""}>{c.address || "—"}</div></td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{qualificationLabel(c.qualification, c.education_level) || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{vehicleLabel(c.vehicle) || "—"}</td>
                   <td className="px-4 py-3">
                     {c.is_completed ? (
                       <span className="text-emerald-700 font-medium text-xs">Done</span>
@@ -1518,6 +1522,7 @@ function contactToForm(contact, canEditGeo) {
     // Qualification — preload the saved values (Illiterate never carries a level).
     qualification: contact.qualification || "",
     education_level: contact.qualification === "literate" ? (contact.education_level || "") : "",
+    vehicle: contact.vehicle || "",
     // Multi-designation (PROMPT 5): preload every currently-assigned designation.
     designation_ids: parseDesignationIdList(contact.designation_ids ?? contact.designation_id),
     // Wings (saved tags) — preload the contact's currently-saved wings so they load
@@ -1647,6 +1652,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
       address: form.address,
       qualification: form.qualification || "",
       education_level: form.qualification === "literate" ? (form.education_level || "") : "",
+      vehicle: form.vehicle || "",
       designation_ids: form.designation_ids || [], // full multi-designation set
       wings: form.wings || [], // full wing-tag set (add/remove keeps the rest)
       photo_url: form.photo_url || null,
@@ -1711,6 +1717,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
         <input className={inp} placeholder="Phone number *" value={form.phone_number} onChange={(e) => setForm({ ...form, phone_number: e.target.value })} />
         <input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
+        <VehicleField value={form.vehicle} onChange={(v) => setForm((f) => ({ ...f, vehicle: v }))} />
         {/* Wings — saved tags from Master Data → Designation → Wing. Placed BEFORE
             the Designation field; pre-loaded from the contact and editable. */}
         <div>
@@ -1793,7 +1800,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
   const zoneLevel = !!(territory && territory.level === "zone"); // may pick a district in-zone
   const [form, setForm] = useState({
     person_name: "", phone_number: "", address: "", designation_ids: [], photo_url: "",
-    qualification: "", education_level: "",
+    qualification: "", education_level: "", vehicle: "",
     // Full location hierarchy. For a supervisor the levels their territory fixes
     // are pre-filled (and shown locked); the rest cascade from what's chosen.
     zone_id: territory?.zone ? String(territory.zone.id) : "",
@@ -1912,6 +1919,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
         <input className={`w-full border rounded-lg px-3 py-2 text-sm ${phoneDup ? "border-red-400 ring-1 ring-red-300 bg-red-50" : "border-gray-200"}`} placeholder="Phone number *" value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} />
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
+        <VehicleField value={form.vehicle} onChange={(v) => setForm((f) => ({ ...f, vehicle: v }))} />
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">Wing <span className="text-gray-400 font-normal">(optional — narrows the designations)</span></label>
           <WingMultiSelect options={wingOptions} value={wingSel} onChange={setWingSel} placeholder="All wings" />
