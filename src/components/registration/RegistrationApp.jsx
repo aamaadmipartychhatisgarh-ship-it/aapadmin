@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  BarChart3, Check, ChevronLeft, ChevronRight, Copy, Download, Link2, Loader2,
+  BarChart3, Check, ChevronLeft, ChevronRight, Copy, Download, FileText, Link2, Loader2,
   MessageCircle, Pencil, Plus, RefreshCw, Search, Settings2, Shield, Trash2, Trophy,
   UserPlus, Users, Vote, X,
 } from "lucide-react";
@@ -1062,6 +1062,11 @@ function PeopleTab({ filterQs, onError, canDelete = false }) {
         {okMsg ? <span className="text-sm font-semibold text-green-700 inline-flex items-center gap-1"><Check size={15} />{okMsg}</span> : null}
         <a href={`/api/registration/export?${qs({ report: "registrations" })}`} className={`${btnCls} ml-auto border border-gray-300 text-gray-700 bg-white`}>
           <Download size={16} />Export CSV
+        </a>
+        {/* Same filters + same access scope as this list (enforced by the export API). */}
+        <a href={`/api/registration/export?${qs({ report: "registrations", format: "pdf" })}`} data-testid="registrations-pdf"
+           className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
+          <FileText size={16} />Export PDF
         </a>
       </div>
 

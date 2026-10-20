@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
 import { getPeoplePage, getWorkerRanking, getBlockRanking } from "@/lib/registrationStats";
 import { peopleScopeCond, workerScopeCond } from "@/lib/registrationScope";
+import { buildRegistrationPdf, registrationPdfFilename } from "@/lib/registrationPdf";
+import { isCaller } from "@/lib/permissions";
 
 // CSV export of whatever the dashboard is currently showing:
 //   ?report=registrations  every person + the worker who added them (default)
 //   ?report=workers        worker-wise performance (Top 200)
 //   ?report=blocks         block-wise (Area/Booth) performance (Top 100)
+//   &format=pdf            (registrations only) the same filtered, scoped list as a PDF
 // The SAME filters as the on-screen view are applied, so an export always matches
 // the numbers the admin just looked at.
 export const dynamic = "force-dynamic";
@@ -75,6 +78,17 @@ export async function GET(req) {
         if (page >= d.pages || all.length >= 50000) break;
         page += 1;
       }
+      if (searchParams.get("format") === "pdf") {
+        // A PDF is for reading/printing; very large lists stay in the CSV export.
+        const PDF_MAX = 5000;
+        const criteria = describeFilters(searchParams, session);
+        if (all.length > PDF_MAX) criteria.push(`First ${PDF_MAX.toLocaleString("en-IN")} of ${all.length.toLocaleString("en-IN")} records — use Export CSV for the full list`);
+        const buf = await buildRegistrationPdf(all.slice(0, PDF_MAX), { title: "Worker & Voter Registrations", criteria });
+        return new NextResponse(new Uint8Array(buf), {
+          status: 200,
+          headers: { ...NO_STORE, "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${registrationPdfFilename()}"` },
+        });
+      }
       csv = toCsv(
         ["Registration Date & Time", "Type", "Name", "Mobile", "Address", "Constituency", "Ward", "Area/Booth",
          "Wants to be Worker", "Karyakarta Rating", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"],
@@ -102,4 +116,23 @@ export async function GET(req) {
     console.error("[registration] export error:", e);
     return NextResponse.json({ message: "Could not generate the export. Please try again." }, { status: 500, headers: NO_STORE });
   }
+}
+
+// The list filters in words, for the PDF header (same params the list uses).
+function describeFilters(sp, session) {
+  const out = [];
+  const period = sp.get("period");
+  if (period) out.push(`Period: ${period}`);
+  if (sp.get("from") || sp.get("to")) out.push(`Dates: ${sp.get("from") || "…"} – ${sp.get("to") || "…"}`);
+  if (sp.get("ward")) out.push(`Ward: ${sp.get("ward")}`);
+  const type = sp.get("person_type");
+  if (type === "worker") out.push("Type: Workers"); else if (type === "voter") out.push("Type: Voters");
+  const source = sp.get("source");
+  if (source === "worker") out.push("Source: karyakarta link"); else if (source === "direct") out.push("Source: direct via /join");
+  const status = sp.get("status") || "active";
+  out.push(`Status: ${status === "active" ? "Counted" : status === "duplicate" ? "Duplicates" : "Rejected"}`);
+  if ((sp.get("search") || "").trim()) out.push(`Search: “${sp.get("search").trim()}”`);
+  if (sp.get("worker_id")) out.push(`Karyakarta id: ${sp.get("worker_id")}`);
+  if (isCaller(session)) out.push("Limited to your assigned area");
+  return out;
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { buildRegistrationPdf, registrationPdfFilename } from "@/lib/registrationPdf";
 import {
   ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
@@ -216,6 +217,29 @@ export async function publicOwnList(req, token, type) {
     const personType = type === "worker" ? "worker" : "voter";
     const where = ["p.campaign_id = ?", "p.status = 'active'", "p.person_type = ?", "p.worker_id = ?"];
     const params = [link.campaign_id, personType, listWorkerId];
+
+    // PDF of the SAME own-records list (same ownership rule as above — only the
+    // signed-in karyakarta's own registrations, never anyone else's).
+    if (new URL(req.url).searchParams.get("format") === "pdf") {
+      const all = await query(
+        `SELECT p.id, p.person_type, p.name, p.mobile, p.address, p.assembly_name, p.ward_number,
+                p.ward_name, p.area_booth, p.worker_rating, p.registered_at, w.name AS worker_name
+           FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worker_id
+          WHERE ${where.join(" AND ")}
+          ORDER BY p.registered_at DESC, p.id DESC
+          LIMIT 5000`,
+        params
+      );
+      const [me] = await query("SELECT name FROM reg_workers WHERE id = ?", [listWorkerId]);
+      const buf = await buildRegistrationPdf(all, {
+        title: personType === "worker" ? "My Workers" : "My Voters",
+        criteria: [`Added by: ${me?.name || "you"}`, personType === "worker" ? "Type: Workers" : "Type: Voters"],
+      });
+      return new NextResponse(new Uint8Array(buf), {
+        status: 200,
+        headers: { ...NO_STORE, "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${registrationPdfFilename(personType === "worker" ? "My_Workers" : "My_Voters")}"` },
+      });
+    }
 
     const rows = await query(
       `SELECT p.id, p.name, p.mobile, p.photo_url, p.address, p.assembly_name,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft } from "lucide-react";
+import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft, FileDown } from "lucide-react";
 import { RatingScale } from "@/components/KaryakartaRating";
 
 // The registration form. It is OTP-gated at EVERY entry — there is no anonymous
@@ -48,7 +48,7 @@ const STRINGS = {
     loadingBlocks: "ब्लॉक लोड हो रहे हैं…",
     errBlockName: "कृपया ब्लॉक चुनें.",
     blocksLoadErr: "ब्लॉक लोड नहीं हो सके. कृपया दोबारा प्रयास करें.",
-    list: "सूची", myVoters: "मेरे वोटर", myWorkers: "मेरे कार्यकर्ता",
+    list: "सूची", myVoters: "मेरे वोटर", myWorkers: "मेरे कार्यकर्ता", exportPdf: "PDF डाउनलोड करें",
     backToForm: "फॉर्म पर वापस जाएँ", totalVoters: "कुल वोटर", totalWorkers: "कुल कार्यकर्ता",
     noRecords: "अभी तक कोई रिकॉर्ड नहीं.", listLoadErr: "सूची लोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
     handledBy: "पंजीयन कर रहे हैं", logout: "लॉगआउट",
@@ -118,7 +118,7 @@ const STRINGS = {
     loadingBlocks: "Loading Blocks…",
     errBlockName: "Please select a Block.",
     blocksLoadErr: "Could not load Blocks. Please try again.",
-    list: "List", myVoters: "My Voters", myWorkers: "My Workers",
+    list: "List", myVoters: "My Voters", myWorkers: "My Workers", exportPdf: "Export PDF",
     backToForm: "Back to form", totalVoters: "Total Voters", totalWorkers: "Total Workers",
     noRecords: "No records yet.", listLoadErr: "Could not load the list. Please try again.",
     handledBy: "Registration handled by", logout: "Logout",
@@ -1067,6 +1067,13 @@ function PublicList({ token, t, initial, onBack, toggleLang }) {
           <span className="text-sm font-semibold text-gray-700">{type === "worker" ? t.totalWorkers : t.totalVoters}</span>
           <span className="text-2xl font-bold" style={{ color: BRAND }}>{total}</span>
         </div>
+
+        {/* PDF of this list — the server applies the same own-records rule. */}
+        <a href={`${token ? `/api/public/registration/${encodeURIComponent(token)}` : "/api/public/registration"}?list=${type}&format=pdf`}
+           data-testid="own-list-pdf"
+           className="w-full h-11 rounded-xl border-2 border-gray-300 bg-white text-gray-800 text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-gray-50">
+          <FileDown size={16} />{t.exportPdf}
+        </a>
 
         {loading ? (
           <div className="py-14 flex justify-center"><Loader2 className="animate-spin" size={26} style={{ color: ACCENT }} /></div>
