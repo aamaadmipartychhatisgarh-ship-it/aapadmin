@@ -9,6 +9,7 @@ import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/superv
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations } from "@/lib/contactDesignations";
+import { syncContactWings } from "@/lib/contactWings";
 
 // Supervisor-scoped mirror of PUT /api/contacts/[id] — assign/reassign a
 // contact and edit its details, but ONLY within the supervisor's own
@@ -147,6 +148,9 @@ export async function PUT(req, { params }) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
     }
     if (designationIds !== null) await syncContactDesignations(id, designationIds);
+    // Wings (Master-Data names): present → full replace, empty clears, absent → untouched.
+    // The contact was already confirmed to be inside this supervisor's territory above.
+    if ("wings" in data) await syncContactWings(id, data.wings);
     await logAudit(session, { action: "contact.update", entityType: "contact", entityId: id, details: { supervisor: true, fields: Object.keys(data) } });
     // Fully-resolved record (all display names) so the client shows fresh data.
     updated = await resolveContactCard(id);

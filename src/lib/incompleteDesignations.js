@@ -4,6 +4,7 @@ import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 import { wingsMapFor } from "@/lib/designationWings";
+import { ensureContactWingsSchema } from "@/lib/contactWings";
 
 // CONTACTS → INCOMPLETE DESIGNATION — shared data layer.
 //
@@ -112,11 +113,12 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     if (!repByNorm.has(nm)) repByNorm.set(nm, { id: d.id, name: d.name, wing: d.wing || null, wings: d.wings || [] });
   }
   const uniqueLevelDesignations = [...repByNorm.values()];
-  const designations = uniqueLevelDesignations.filter((d) =>
-    (!designationId || idToNorm.get(designationId) === normName(d.name)) &&
-    (!wingSet || (d.wings || []).some((w) => wingSet.has(w)))
+  // Designations narrowed by the designation filter only; the Wing filter is applied
+  // below, once we know which people are saved under which Wing (see "Wing mapping").
+  const baseDesignations = uniqueLevelDesignations.filter((d) =>
+    !designationId || idToNorm.get(designationId) === normName(d.name)
   );
-  const allowedNorms = new Set(designations.map((d) => normName(d.name)));
+  const wingsOfDesignationId = new Map(levelDesignations.map((d) => [d.id, d.wings || []]));
 
   // Every location of this level (State is a single pseudo-location). New master
   // locations appear here automatically.
@@ -168,11 +170,46 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     );
   }
 
+  // ---- Wing mapping ---------------------------------------------------------------
+  // Which Wing a person is listed under comes from THEIR saved Contact record
+  // (contact_wings — what the Contacts edit form's Wings field saves). Read live, so
+  // changing a contact's Wing there moves the same record (same contact id, no copy)
+  // to the new Wing section here and removes it from the old one.
+  // A contact with NO saved Wing keeps the existing workflow: it is listed under the
+  // Wing(s) of the designation it holds. With no Wing filter nothing changes.
+  let designations = baseDesignations;
+  let personMatchesWing = () => true;
+  if (wingSet) {
+    await ensureContactWingsSchema();
+    const cwMap = new Map(); // contact id -> saved wing names
+    const cids = [...new Set(peopleRows.map((r) => r.contact_id))];
+    for (let i = 0; i < cids.length; i += 1000) {
+      const chunk = cids.slice(i, i + 1000);
+      // eslint-disable-next-line no-await-in-loop
+      const rows = await query(`SELECT contact_id, wing FROM contact_wings WHERE contact_id IN (${chunk.map(() => "?").join(",")})`, chunk).catch(() => []);
+      for (const w of rows) { if (!cwMap.has(w.contact_id)) cwMap.set(w.contact_id, []); cwMap.get(w.contact_id).push(w.wing); }
+    }
+    const effectiveWings = (r) => {
+      const saved = cwMap.get(r.contact_id);
+      return saved && saved.length ? saved : (wingsOfDesignationId.get(r.designation_id) || []);
+    };
+    personMatchesWing = (r) => effectiveWings(r).some((w) => wingSet.has(w));
+    // A designation column is shown under a Wing when the designation belongs to it OR
+    // someone saved under that Wing holds it (so a worker saved under Wing X is visible
+    // even when their designation is a general one).
+    const shown = new Set();
+    for (const d of baseDesignations) if ((d.wings || []).some((w) => wingSet.has(w))) shown.add(normName(d.name));
+    for (const r of peopleRows) if (personMatchesWing(r)) shown.add(idToNorm.get(r.designation_id) || normName(r.designation_name));
+    designations = baseDesignations.filter((d) => shown.has(normName(d.name)));
+  }
+  const allowedNorms = new Set(designations.map((d) => normName(d.name)));
+
   // Bucket assigned people by EXACT (location id : designation id).
   const bucket = new Map();
   for (const r of peopleRows) {
     const nm = idToNorm.get(r.designation_id) || normName(r.designation_name);
     if (!allowedNorms.has(nm)) continue;
+    if (!personMatchesWing(r)) continue;
     const loc = r.loc_id ?? 0;
     const key = `${loc}:${nm}`;
     if (!bucket.has(key)) bucket.set(key, []);
