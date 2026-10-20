@@ -5,6 +5,7 @@ import { Loader2, Network, MapPin, FileText, Download, CheckCircle2, Circle } fr
 import Avatar from "@/components/Avatar";
 import { MultiSelect } from "@/components/MultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
+import { districtColor } from "@/lib/districtColor";
 
 // CONTACTS → INCOMPLETE DESIGNATION — Level & Designation-wise assignment.
 //
@@ -93,6 +94,18 @@ export default function IncompleteDesignationView() {
 
   const rows = data.rows || [];
   const persons = data.persons || [];
+  // District colour band: a subtle pastel background + darker left edge, one colour per
+  // district (stable by district id). Rows with no district stay plain white.
+  // Legend of the districts present in what is currently shown (only when more than one).
+  const legend = (() => {
+    const seen = new Map();
+    for (const x of view === "persons" ? persons : (data.rows || [])) if (x.district_id && !seen.has(x.district_id)) seen.set(x.district_id, x.district_name || "District");
+    return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  })();
+  const bandStyle = (districtId) => {
+    const c = districtColor(districtId);
+    return c ? { backgroundColor: c.bg, boxShadow: `inset 3px 0 0 ${c.accent}` } : undefined;
+  };
   const personsPagination = data.pagination || { page: 1, pageSize: PERSONS_PAGE_SIZE, total: 0, totalPages: 1 };
   const levelDesignations = data.level_designations || [];
   const allLocations = data.all_locations || [];
@@ -194,6 +207,16 @@ export default function IncompleteDesignationView() {
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-2.5 text-sm">{error}</div>}
 
+      {legend.length > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500" aria-label="District colour legend">
+          <span className="font-semibold uppercase tracking-wide text-gray-400 mr-1">Districts</span>
+          {legend.map((d) => {
+            const c = districtColor(d.id);
+            return <span key={d.id} className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-gray-700" style={{ backgroundColor: c.bg, boxShadow: `inset 0 0 0 1px ${c.accent}66` }}><span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.accent }} />{d.name}</span>;
+          })}
+        </div>
+      )}
+
       {/* PERSONS VIEW — the Total Assigned Person drill-down, server-side
           paginated. The count on the card equals personsPagination.total. */}
       {personsView ? (
@@ -213,14 +236,14 @@ export default function IncompleteDesignationView() {
                 ) : persons.length === 0 ? (
                   <tr><td colSpan={3} className="px-4 py-10 text-center text-gray-400">No assigned persons match the current filters.</td></tr>
                 ) : persons.map((p, i) => (
-                  <tr key={`${p.contact_id}:${p.designation_id}:${p.location_id}:${i}`} className="hover:bg-gray-50/60">
+                  <tr key={`${p.contact_id}:${p.designation_id}:${p.location_id}:${i}`} style={bandStyle(p.district_id)} className="hover:brightness-95">
                     <td className="px-4 py-2.5">
                       <span className="inline-flex items-center gap-2">
                         <Avatar name={p.person_name} src={p.photo_url} size={28} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[10px]" />
                         <span className="leading-tight">
                           <span className="block text-gray-900 font-medium">{p.person_name}</span>
                           {/* The worker's own saved Assembly (from Contacts), shown under the name. */}
-                          <span className={`block text-[11px] ${p.assembly_name ? "text-gray-500" : "text-gray-300"}`}>{p.assembly_name || "Assembly not set"}</span>
+                          <span className={`block text-[11px] ${p.assembly_name ? "text-gray-600" : "text-gray-600 italic"}`}>{p.assembly_name || "Assembly not set"}</span>
                         </span>
                       </span>
                     </td>
@@ -272,7 +295,7 @@ export default function IncompleteDesignationView() {
                 {rows.length === 0 ? (
                   <tr><td colSpan={4} className="px-4 py-10 text-center text-gray-400">No records match the current filters.</td></tr>
                 ) : rows.map((r) => (
-                  <tr key={`${r.location_id}:${r.designation_id}`} className="hover:bg-gray-50/60">
+                  <tr key={`${r.location_id}:${r.designation_id}`} style={bandStyle(r.district_id)} className="hover:brightness-95">
                     <td className="px-4 py-2.5">
                       <span className="inline-flex items-center gap-1.5 font-medium text-gray-900"><MapPin size={14} className="text-[#164FA3]" />{r.location_name}</span>
                     </td>
@@ -285,7 +308,7 @@ export default function IncompleteDesignationView() {
                               <Avatar name={p.person_name} src={p.photo_url} size={28} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[10px]" />
                               <span className="leading-tight">
                                 <span className="block text-gray-900">{p.person_name}</span>
-                                <span className={`block text-[11px] ${p.assembly_name ? "text-gray-500" : "text-gray-300"}`}>{p.assembly_name || "Assembly not set"}</span>
+                                <span className={`block text-[11px] ${p.assembly_name ? "text-gray-600" : "text-gray-600 italic"}`}>{p.assembly_name || "Assembly not set"}</span>
                               </span>
                             </span>
                           ))}

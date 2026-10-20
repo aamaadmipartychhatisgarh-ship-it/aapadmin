@@ -134,6 +134,21 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   }
   const locations = locationId != null ? allLocations.filter((l) => l.id === locationId) : allLocations;
 
+  // District each location belongs to (display colour grouping only): a district is
+  // its own; an assembly's parent is its district; a block (ward) sits under an
+  // assembly. State / Zone / Lok Sabha rows span districts, so they have none.
+  const districtOf = new Map(); // location id -> { id, name } | null
+  if (level === "district" || level === "assembly" || level === "block") {
+    const hier = await query("SELECT id, name, type, parent_id FROM locations WHERE type IN ('district','assembly','ward')");
+    const byId = new Map(hier.map((x) => [x.id, x]));
+    const resolve = (x) => {
+      let cur = x, guard = 0;
+      while (cur && guard++ < 4) { if (cur.type === "district") return { id: cur.id, name: cur.name }; cur = byId.get(cur.parent_id); }
+      return null;
+    };
+    for (const l of allLocations) districtOf.set(l.id, resolve(byId.get(l.id)));
+  }
+
   // People holding a designation OF THIS LEVEL, tagged with their location id at
   // this level. Strict join designations.level = ? — a person only ever appears
   // for a designation actually mapped to this level.
@@ -229,6 +244,8 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
       allRows.push({
         location_id: loc.id,
         location_name: loc.name,
+        district_id: districtOf.get(loc.id)?.id ?? null,
+        district_name: districtOf.get(loc.id)?.name ?? null,
         designation_id: d.id,
         designation_name: d.name,
         designation_wing: d.wing || null,
@@ -261,6 +278,8 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
         designation_wing: row.designation_wing || null,
         location_id: row.location_id,
         location_name: row.location_name,
+        district_id: row.district_id ?? null,
+        district_name: row.district_name ?? null,
       });
     }
   }
