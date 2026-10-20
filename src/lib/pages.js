@@ -130,7 +130,10 @@ export const PAGES = [
     roles: [...OVERSIGHT, ROLES.WORKER, ROLES.CALLER] },
   { key: "portal_announcements", label: "Announcements", href: "/dashboard/portal/announcements", prefixes: ["/dashboard/portal/announcements"], icon: "MessageSquare",
     roles: [...OVERSIGHT, ROLES.WORKER, ROLES.CALLER] },
-  { key: "portal_accounts", label: "Member Accounts", href: "/dashboard/admin/portal-accounts", prefixes: ["/dashboard/admin/portal-accounts"], icon: "UserCog",
+  // Member Accounts is removed from navigation (sidebar, mobile drawer, header
+  // search) via hideFromNav; its route, page guard, APIs and page-access key are
+  // kept, so records and access management are unaffected.
+  { key: "portal_accounts", label: "Member Accounts", href: "/dashboard/admin/portal-accounts", prefixes: ["/dashboard/admin/portal-accounts"], icon: "UserCog", hideFromNav: true,
     roles: [...OVERSIGHT] },
   { key: "number_corrections", label: "Number Corrections", href: "/dashboard/admin/number-corrections", prefixes: ["/dashboard/admin/number-corrections", "/dashboard/number-corrections"], icon: "Flag",
     roles: [ROLES.STATE_ADMIN, ROLES.ZONE_ADMIN, ROLES.DISTRICT_ADMIN, ROLES.ASSEMBLY_ADMIN] },
