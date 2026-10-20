@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
+import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 
 // Merge one designation into another: everything pointing at `from_id` is
 // repointed to `into_id`, then `from_id` is deleted. Use this to collapse
@@ -29,6 +30,7 @@ export async function POST(req) {
       return NextResponse.json({ message: "Cannot merge a designation into itself." }, { status: 400 });
     }
 
+    await ensureContactDesignationsSchema();
     const pool = getPool();
     const conn = await pool.getConnection();
     try {
@@ -54,6 +56,15 @@ export async function POST(req) {
         "UPDATE calls SET designation_id = ? WHERE designation_id = ?",
         [intoId, fromId]
       );
+      // The contact_designations join table is the contacts' real designation set
+      // (Contact List, Incomplete Designation, vacancies all read it). Move those
+      // assignments too — INSERT IGNORE keeps a contact that already holds `into_id`
+      // to one row — so merging never silently unassigns anyone.
+      await conn.execute(
+        "INSERT IGNORE INTO contact_designations (contact_id, designation_id) SELECT contact_id, ? FROM contact_designations WHERE designation_id = ?",
+        [intoId, fromId]
+      );
+      await conn.execute("DELETE FROM contact_designations WHERE designation_id = ?", [fromId]);
       await conn.execute("DELETE FROM designations WHERE id = ?", [fromId]);
 
       await conn.commit();

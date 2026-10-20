@@ -16,6 +16,9 @@ import { loadLocationIndex, ancestryOf } from "@/lib/vacancyResponsibility";
 //     wing_designations.base_name) and any multi-wing designation (designation_wings).
 //     Nothing is invented: a role the Wing master does not define is reported as
 //     NOT CONFIGURED (a data check), never as a vacancy.
+//   • Source of truth = the saved Contact records: Wings (contact_wings),
+//     Designations (contact_designations), Lok Sabha / District / Assembly
+//     (contacts.*_id). No vacancy list is stored; everything is derived live.
 //   • Filled / vacant comes from the SAME engine as the main dashboard
 //     (fetchIncompleteDesignation): real Contacts holding that designation at that
 //     exact location; wrong-number / unapproved contacts excluded; a holder with a
@@ -173,6 +176,24 @@ export async function buildWingVacancyDataset(session, filters = {}) {
       }
     }
 
+    // The holders' saved Contact fields (Lok Sabha / District / Assembly as stored),
+    // shown next to each holder so the match can be checked against the Contact List.
+    const contactInfo = new Map();
+    for (let i = 0; i < holderIds.length; i += 1000) {
+      const chunk = holderIds.slice(i, i + 1000);
+      // eslint-disable-next-line no-await-in-loop
+      const rows = await query(
+        `SELECT c.id, lls.name AS lok_sabha_name, ld.name AS district_name, la.name AS assembly_name
+           FROM contacts c
+           LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
+           LEFT JOIN locations ld ON ld.id = c.district_id
+           LEFT JOIN locations la ON la.id = c.assembly_id
+          WHERE c.id IN (${chunk.map(() => "?").join(",")})`,
+        chunk
+      );
+      for (const r of rows) contactInfo.set(r.id, { lok_sabha_name: r.lok_sabha_name || null, district_name: r.district_name || null, assembly_name: r.assembly_name || null });
+    }
+
     for (const r of data.rows) {
       const role = roleOfDes.get(r.designation_id);
       if (!role) continue;
@@ -195,7 +216,12 @@ export async function buildWingVacancyDataset(session, filters = {}) {
           const saved = savedWings.get(p.id) || [];
           const eff = saved.length ? saved : [...desNorms];
           if (eff.includes(norm(wing))) {
-            if (!pos.holders.some((h) => h.contact_id === p.id)) pos.holders.push({ contact_id: p.id, name: p.person_name, designation: r.designation_name });
+            if (!pos.holders.some((h) => h.contact_id === p.id)) {
+              pos.holders.push({
+                contact_id: p.id, name: p.person_name, designation: r.designation_name,
+                wings: savedLabels.get(p.id) || [], ...(contactInfo.get(p.id) || {}),
+              });
+            }
           } else if (!eff.some((w) => desNorms.has(w))) {
             // Saved Wings match NONE of the designation's Wings — a mapping problem.
             const shown = savedLabels.get(p.id) || [];
@@ -220,6 +246,11 @@ export async function buildWingVacancyDataset(session, filters = {}) {
     designation_name: p.designations.map((d) => d.name).join(" / "),
     status: p.holders.length ? "filled" : p.review_people.length ? "review" : "vacant",
   }));
+
+  // "Mahila Wing → Assembly XYZ → President → VACANT"
+  for (const p of all) {
+    p.path = `${p.wing} → ${p.level === "state" ? "State" : `${p.level_label} ${p.location_name}`} → ${p.role_label} → ${p.status === "vacant" ? "VACANT" : p.status === "filled" ? "FILLED" : "NEEDS REVIEW"}`;
+  }
 
   // Responsible person of each VACANT position: the holder(s) of the SAME role in
   // the SAME Wing at the immediately upper level, in the vacancy's own parent area
@@ -276,6 +307,18 @@ export async function buildWingVacancyDataset(session, filters = {}) {
   for (const loc of index.values()) if (locByType[loc.type]) locByType[loc.type].push({ id: loc.id, name: loc.name, parent_id: loc.parent_id });
   for (const k of Object.keys(locByType)) locByType[k].sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
+  // Assignments whose designation no longer exists in the master (e.g. left behind
+  // by an old merge/delete) can't fill any position — surfaced, never guessed.
+  const orphanAssignments = await query(
+    `SELECT cd.contact_id, c.person_name, cd.designation_id
+       FROM contact_designations cd
+       JOIN contacts c ON c.id = cd.contact_id
+       LEFT JOIN designations d ON d.id = cd.designation_id
+      WHERE d.id IS NULL
+      ORDER BY c.person_name
+      LIMIT 200`
+  );
+
   const nc = notConfigured.filter((n) => (!f.wing || norm(n.wing) === norm(f.wing)) && (!f.role || n.role === f.role));
   return {
     counts: {
@@ -293,6 +336,7 @@ export async function buildWingVacancyDataset(session, filters = {}) {
       unknown_wing_designations: unknownWingDesignations,
       wing_mismatch: wingMismatch.filter((m) => !f.wing || scoped.some((p) => norm(p.wing) === norm(f.wing) && p.designations.some((d) => d.id === m.designation_id))),
       unmapped_holders: unmapped,
+      orphan_assignments: orphanAssignments,
     },
     filters: {
       wings,

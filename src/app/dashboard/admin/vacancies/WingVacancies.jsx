@@ -31,7 +31,8 @@ function WingDataCheck({ dq }) {
   const mm = dq?.wing_mismatch || [];
   const unk = dq?.unknown_wing_designations || [];
   const um = dq?.unmapped_holders || [];
-  if (!nc.length && !mm.length && !unk.length && !um.length) return null;
+  const orph = dq?.orphan_assignments || [];
+  if (!nc.length && !mm.length && !unk.length && !um.length && !orph.length) return null;
   // Not-configured roles grouped by Wing → "Prabhari: State, District".
   const grouped = new Map();
   for (const n of nc) {
@@ -57,6 +58,12 @@ function WingDataCheck({ dq }) {
           <div>
             <div className="font-semibold text-gray-600 mb-1">{um.length} Wing designation holder{um.length === 1 ? "" : "s"} with a missing or invalid location</div>
             {um.map((u) => <div key={`${u.contact_id}:${u.designation_id}`}><span className="font-medium text-gray-900">{u.person_name}</span> · {u.designation_name} ({u.level_label}) — {u.reason}</div>)}
+          </div>
+        )}
+        {orph.length > 0 && (
+          <div>
+            <div className="font-semibold text-gray-600 mb-1">{orph.length} contact assignment{orph.length === 1 ? "" : "s"} point to a designation that no longer exists — they fill no position</div>
+            {orph.map((o) => <div key={`${o.contact_id}:${o.designation_id}`}><span className="font-medium text-gray-900">{o.person_name}</span> · designation id {o.designation_id}</div>)}
           </div>
         )}
         {unk.length > 0 && (
@@ -275,10 +282,23 @@ export default function WingVacancies() {
                   </td>
                   <td className="px-3 py-2.5 text-xs text-gray-600">
                     {r.status === "filled" ? (
-                      r.holders.map((h) => <div key={h.contact_id}>Held by <span className="font-medium text-gray-900">{h.name}</span></div>)
+                      r.holders.map((h) => (
+                        <div key={h.contact_id} data-testid="wing-holder">
+                          Held by <span className="font-medium text-gray-900">{h.name}</span>
+                          {/* The holder's saved Contact fields the match was made on. */}
+                          <span className="block text-[11px] text-gray-400">
+                            {[h.wings?.length ? `Wing: ${h.wings.join(", ")}` : "Wing: (from designation)", h.designation, h.lok_sabha_name && `LS: ${h.lok_sabha_name}`, h.district_name && `District: ${h.district_name}`, h.assembly_name && `Assembly: ${h.assembly_name}`].filter(Boolean).join(" · ")}
+                          </span>
+                        </div>
+                      ))
                     ) : r.status === "review" ? (
                       r.review_people.map((p) => <div key={p.contact_id}><span className="font-medium text-gray-900">{p.person_name}</span> — {p.reason}</div>)
-                    ) : <span className="text-gray-400">No saved contact holds this post</span>}
+                    ) : (
+                      <>
+                        <div className="font-medium text-gray-700" data-testid="wing-path">{r.path}</div>
+                        <span className="text-gray-400">No eligible saved contact holds this post</span>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
