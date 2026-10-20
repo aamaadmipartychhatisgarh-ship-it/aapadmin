@@ -78,6 +78,7 @@ export async function GET(req) {
       );
       const iBJP = bjpExpr("i.");
       const iINC = incExpr("i.");
+      // Highest influencer count first; equal counts fall back to A–Z by name.
       const assemblies = await query(
         `SELECT a.id AS assembly_id, a.name AS assembly_name,
                 COUNT(i.id) AS total,
@@ -91,7 +92,7 @@ export async function GET(req) {
            LEFT JOIN influencers i ON i.assembly_id = a.id
           WHERE a.type = 'assembly'
           GROUP BY a.id, a.name
-          ORDER BY a.name ASC`
+          ORDER BY total DESC, a.name ASC, a.id ASC`
       );
       const num = (r) => ({ ...r, total: Number(r.total) || 0, joined: Number(r.joined) || 0, pending: Number(r.pending) || 0, cancelled: Number(r.cancelled) || 0, bjp: Number(r.bjp) || 0, inc: Number(r.inc) || 0, others: Number(r.others) || 0 });
       return NextResponse.json(
