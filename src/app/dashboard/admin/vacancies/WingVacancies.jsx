@@ -32,7 +32,8 @@ function WingDataCheck({ dq }) {
   const unk = dq?.unknown_wing_designations || [];
   const um = dq?.unmapped_holders || [];
   const orph = dq?.orphan_assignments || [];
-  if (!nc.length && !mm.length && !unk.length && !um.length && !orph.length) return null;
+  const hc = dq?.hierarchy_conflicts || [];
+  if (!nc.length && !mm.length && !unk.length && !um.length && !orph.length && !hc.length) return null;
   // Not-configured roles grouped by Wing → "Prabhari: State, District".
   const grouped = new Map();
   for (const n of nc) {
@@ -52,6 +53,12 @@ function WingDataCheck({ dq }) {
           <div>
             <div className="font-semibold text-gray-600 mb-1">{mm.length} holder{mm.length === 1 ? "" : "s"} whose saved Wing does not match the designation&apos;s Wing — related positions show as &ldquo;Needs review&rdquo;</div>
             {mm.map((m) => <div key={`${m.contact_id}:${m.designation_id}`}><span className="font-medium text-gray-900">{m.person_name}</span> · {m.designation_name} ({m.level_label}, {m.location_name}) — saved Wings: {m.saved_wings.join(", ") || "—"}</div>)}
+          </div>
+        )}
+        {hc.length > 0 && (
+          <div>
+            <div className="font-semibold text-gray-600 mb-1">{hc.length} holder{hc.length === 1 ? "" : "s"} whose saved Lok Sabha / District / Assembly disagree — related positions show as &ldquo;Needs review&rdquo;</div>
+            {hc.map((m) => <div key={`${m.contact_id}:${m.designation_id}`}><span className="font-medium text-gray-900">{m.person_name}</span> · {m.designation_name} — {m.reason}</div>)}
           </div>
         )}
         {um.length > 0 && (
@@ -97,8 +104,10 @@ export default function WingVacancies() {
   const [assemblyId, setAssemblyId] = useState("");
   const [status, setStatus] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true); setErr("");
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
+    setErr("");
     try {
       const p = new URLSearchParams();
       if (wing) p.set("wing", wing);
@@ -112,6 +121,7 @@ export default function WingVacancies() {
       if (r.status === 403) { setData(null); setErr("You do not have access to this module."); return; }
       if (!r.ok) throw new Error("load failed");
       setData(await r.json());
+      setUpdatedAt(new Date());
     } catch {
       // Drop any earlier result: stale rows next to a failed load would be misread.
       setData(null);
@@ -121,6 +131,20 @@ export default function WingVacancies() {
     }
   }, [wing, level, role, lokSabhaId, districtId, assemblyId, status]);
   useEffect(() => { load(); }, [load]);
+  // Vacancies are computed live from Contacts on every request. When the user comes
+  // back to this tab (e.g. after editing a contact elsewhere) reload quietly, so the
+  // page never shows stale status without a manual refresh.
+  useEffect(() => {
+    let last = Date.now();
+    const revalidate = () => {
+      if (document.visibilityState !== "visible" || Date.now() - last < 3000) return;
+      last = Date.now();
+      load({ quiet: true });
+    };
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
+    return () => { window.removeEventListener("focus", revalidate); document.removeEventListener("visibilitychange", revalidate); };
+  }, [load]);
 
   const locs = data?.filters?.locations || { lok_sabha: [], district: [], assembly: [] };
   const districts = useMemo(() => (lokSabhaId ? locs.district.filter((d) => String(d.parent_id) === lokSabhaId) : locs.district), [locs, lokSabhaId]);
@@ -137,9 +161,12 @@ export default function WingVacancies() {
     <div data-testid="wing-vacancies">
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-sm text-gray-500">President, Prabhari and General Secretary of every Wing at State → Lok Sabha → District → Assembly, checked against saved Contacts.</p>
-        <button onClick={load} className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50 shrink-0">
-          <RefreshCw size={16} /> Refresh
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          {updatedAt && <span className="text-[11px] text-gray-400" data-testid="wing-updated-at">Updated {updatedAt.toLocaleTimeString("en-GB")}</span>}
+          <button onClick={() => load()} className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            <RefreshCw size={16} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">

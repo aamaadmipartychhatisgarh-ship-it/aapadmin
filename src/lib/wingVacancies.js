@@ -27,6 +27,12 @@ import { loadLocationIndex, ancestryOf } from "@/lib/vacancyResponsibility";
 //     whose saved Contact Wings include it (no saved Wing → the designation's own
 //     Wings). A holder whose saved Wings match none of the designation's Wings is a
 //     Wing mapping problem → NEEDS REVIEW + listed in the data check.
+//   • A holder whose saved Lok Sabha / District contradicts the master parent of
+//     their saved District / Assembly (a half-done mapping change) fills nothing:
+//     NEEDS REVIEW + data check.
+//   • Nothing is cached or stored, so any Contact edit (Wing, Designation, Lok
+//     Sabha, District, Assembly) is reflected — old and new places alike — on the
+//     next read.
 //   • One entry per (Wing, level, location, role) — never duplicated.
 //   • Responsible person of a vacancy: the same Wing's same role one level up, in
 //     the vacancy's parent area (President → upper President, Prabhari → upper
@@ -95,6 +101,19 @@ function responsibleFor(p, positions) {
   return { status: "not_assigned", label, level_label: LEVEL_LABEL[parent], area: areaName, people: [], note: `${label} (${areaName}) — Not assigned` };
 }
 
+// A holder's saved Lok Sabha / District that contradicts where the position's
+// location actually sits in the location master, or null when consistent (an
+// unset higher-level field is not a conflict).
+function conflictReason(level, info, anc) {
+  if (level === "assembly" && info.district_id != null && anc.district_id != null && Number(info.district_id) !== anc.district_id) {
+    return `Saved District (${info.district_name || `id ${info.district_id}`}) does not contain the saved Assembly (${anc.assembly_name})`;
+  }
+  if ((level === "assembly" || level === "district") && info.lok_sabha_id != null && anc.lok_sabha_id != null && Number(info.lok_sabha_id) !== anc.lok_sabha_id) {
+    return `Saved Lok Sabha (${info.lok_sabha_name || `id ${info.lok_sabha_id}`}) does not contain the saved ${LEVEL_LABEL[level]} (${level === "assembly" ? anc.assembly_name : anc.district_name})`;
+  }
+  return null;
+}
+
 const asId = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 0 ? n : null; };
 
 export async function buildWingVacancyDataset(session, filters = {}) {
@@ -135,6 +154,7 @@ export async function buildWingVacancyDataset(session, filters = {}) {
   const configured = new Set(); // wing|level|role with ≥1 designation
   const unknownWingDesignations = [];
   const wingMismatch = [];
+  const hierarchyConflicts = [];
   const unmapped = [];
 
   // Every level is always scanned (even with a level filter): a vacancy's
@@ -183,7 +203,7 @@ export async function buildWingVacancyDataset(session, filters = {}) {
       const chunk = holderIds.slice(i, i + 1000);
       // eslint-disable-next-line no-await-in-loop
       const rows = await query(
-        `SELECT c.id, lls.name AS lok_sabha_name, ld.name AS district_name, la.name AS assembly_name
+        `SELECT c.id, c.lok_sabha_id, c.district_id, lls.name AS lok_sabha_name, ld.name AS district_name, la.name AS assembly_name
            FROM contacts c
            LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
            LEFT JOIN locations ld ON ld.id = c.district_id
@@ -191,7 +211,12 @@ export async function buildWingVacancyDataset(session, filters = {}) {
           WHERE c.id IN (${chunk.map(() => "?").join(",")})`,
         chunk
       );
-      for (const r of rows) contactInfo.set(r.id, { lok_sabha_name: r.lok_sabha_name || null, district_name: r.district_name || null, assembly_name: r.assembly_name || null });
+      for (const r of rows) {
+        contactInfo.set(r.id, {
+          lok_sabha_id: r.lok_sabha_id ?? null, district_id: r.district_id ?? null,
+          lok_sabha_name: r.lok_sabha_name || null, district_name: r.district_name || null, assembly_name: r.assembly_name || null,
+        });
+      }
     }
 
     for (const r of data.rows) {
@@ -213,6 +238,18 @@ export async function buildWingVacancyDataset(session, filters = {}) {
         const pos = positions.get(key);
         if (!pos.designations.some((d) => d.id === r.designation_id)) pos.designations.push({ id: r.designation_id, name: r.designation_name });
         for (const p of r.people) {
+          // Saved higher-level location that contradicts the position's own parent
+          // (e.g. the District was changed but the Assembly was not) — the contact's
+          // mapping is inconsistent, so it can't be trusted to fill either place.
+          const info = contactInfo.get(p.id) || {};
+          const conflict = conflictReason(level, info, anc);
+          if (conflict) {
+            if (!pos.review_people.some((x) => x.contact_id === p.id)) pos.review_people.push({ contact_id: p.id, person_name: p.person_name, reason: conflict });
+            if (!hierarchyConflicts.some((x) => x.contact_id === p.id && x.designation_id === r.designation_id)) {
+              hierarchyConflicts.push({ contact_id: p.id, person_name: p.person_name, designation_id: r.designation_id, designation_name: r.designation_name, level_label: LEVEL_LABEL[level], location_name: r.location_name, reason: conflict });
+            }
+            continue;
+          }
           const saved = savedWings.get(p.id) || [];
           const eff = saved.length ? saved : [...desNorms];
           if (eff.includes(norm(wing))) {
@@ -337,6 +374,7 @@ export async function buildWingVacancyDataset(session, filters = {}) {
       wing_mismatch: wingMismatch.filter((m) => !f.wing || scoped.some((p) => norm(p.wing) === norm(f.wing) && p.designations.some((d) => d.id === m.designation_id))),
       unmapped_holders: unmapped,
       orphan_assignments: orphanAssignments,
+      hierarchy_conflicts: hierarchyConflicts,
     },
     filters: {
       wings,
