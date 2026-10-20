@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { fetchIncompleteDesignation } from "@/lib/incompleteDesignations";
 import { ensureWingSchema, listWings } from "@/lib/wingDesignations";
+import { wingsMapFor } from "@/lib/designationWings";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { loadLocationIndex, ancestryOf } from "@/lib/vacancyResponsibility";
 
@@ -95,7 +96,7 @@ function responsibleFor(p, positions) {
   if (!up) return { status: "not_configured", label, level_label: LEVEL_LABEL[parent], area: areaName, people: [], note: `${label} is not configured in the Wing master` };
   if (up.holders.length) {
     return { status: "assigned", label: up.designations.map((d) => d.name).join(" / ") || label, level_label: LEVEL_LABEL[parent], area: areaName,
-      people: up.holders.map((h) => ({ contact_id: h.contact_id, name: h.name, designation: h.designation })), note: null };
+      people: up.holders.map((h) => ({ contact_id: h.contact_id, name: h.name, designation: h.designation, mobile: h.mobile || null })), note: null };
   }
   if (up.review_people.length) return { status: "review", label, level_label: LEVEL_LABEL[parent], area: areaName, people: [], note: `${label} (${areaName}) needs review — holder's location or Wing is incomplete` };
   return { status: "not_assigned", label, level_label: LEVEL_LABEL[parent], area: areaName, people: [], note: `${label} (${areaName}) — Not assigned` };
@@ -115,6 +116,30 @@ function conflictReason(level, info, anc) {
 }
 
 const asId = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 0 ? n : null; };
+
+// Designation ids that ARE Wing positions — President / Prabhari / General
+// Secretary of an enabled Wing at State → Assembly. The Wings view owns them (with
+// the Wing responsibility hierarchy); the Main Organisation view skips them so the
+// same post is never shown twice with two different responsible people.
+export async function wingPositionDesignationIds() {
+  await ensureWingSchema();
+  const enabled = new Set((await listWings())
+    .filter((w) => Number(w.is_main) !== 1 && (w.enabled == null || Number(w.enabled) === 1))
+    .map((w) => norm(w.name)));
+  const rows = await query(
+    `SELECT d.id, d.name, d.wing, wd.base_name FROM designations d
+       LEFT JOIN wing_designations wd ON wd.id = d.wing_base_id
+      WHERE d.level IN (${WING_VACANCY_LEVELS.map(() => "?").join(",")})`,
+    WING_VACANCY_LEVELS
+  );
+  const wings = await wingsMapFor(rows);
+  const ids = new Set();
+  for (const r of rows) {
+    const ws = (wings.get(r.id) || []).filter((w) => enabled.has(norm(w)));
+    if (ws.length && wingRoleOf(r.base_name, r.name, ws)) ids.add(r.id);
+  }
+  return ids;
+}
 
 export async function buildWingVacancyDataset(session, filters = {}) {
   const f = {
@@ -203,7 +228,7 @@ export async function buildWingVacancyDataset(session, filters = {}) {
       const chunk = holderIds.slice(i, i + 1000);
       // eslint-disable-next-line no-await-in-loop
       const rows = await query(
-        `SELECT c.id, c.lok_sabha_id, c.district_id, lls.name AS lok_sabha_name, ld.name AS district_name, la.name AS assembly_name
+        `SELECT c.id, c.phone_number, c.lok_sabha_id, c.district_id, lls.name AS lok_sabha_name, ld.name AS district_name, la.name AS assembly_name
            FROM contacts c
            LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
            LEFT JOIN locations ld ON ld.id = c.district_id
@@ -213,7 +238,7 @@ export async function buildWingVacancyDataset(session, filters = {}) {
       );
       for (const r of rows) {
         contactInfo.set(r.id, {
-          lok_sabha_id: r.lok_sabha_id ?? null, district_id: r.district_id ?? null,
+          mobile: r.phone_number || null, lok_sabha_id: r.lok_sabha_id ?? null, district_id: r.district_id ?? null,
           lok_sabha_name: r.lok_sabha_name || null, district_name: r.district_name || null, assembly_name: r.assembly_name || null,
         });
       }

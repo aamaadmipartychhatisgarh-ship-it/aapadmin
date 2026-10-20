@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, Filter, X, CheckCircle2, ShieldAlert } from "lucide-react";
+import { Loader2, RefreshCw, Filter, X, ShieldAlert } from "lucide-react";
 import { wingShortLabel } from "@/lib/wingLabel";
+import VacancyTable, { fromWingRow } from "./VacancyTable";
 
 // Wing Designation Vacancies — President / Prabhari / General Secretary of each
 // Wing at State → Lok Sabha → District → Assembly (GET /api/vacancies/wings).
@@ -19,11 +20,6 @@ function Card({ label, value, tone }) {
   );
 }
 
-function StatusChip({ status }) {
-  if (status === "filled") return <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200">Filled</span>;
-  if (status === "review") return <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200">Needs review</span>;
-  return <span className="text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">VACANT</span>;
-}
 
 // Wing mapping problems — kept apart so they are never shown as vacancies.
 function WingDataCheck({ dq }) {
@@ -254,84 +250,12 @@ export default function WingVacancies() {
           <h2 className="text-sm font-bold text-gray-900">Wing Vacancy List</h2>
           {data?.capped && <span className="ml-auto text-xs text-amber-600">Showing the first {data.vacancies.length} rows — narrow the filters to see more.</span>}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1180px]">
-            <thead>
-              <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
-                <th className="px-3 py-3 font-semibold">Wing</th>
-                <th className="px-3 py-3 font-semibold">Level</th>
-                <th className="px-3 py-3 font-semibold">Location</th>
-                <th className="px-3 py-3 font-semibold">Vacant Designation</th>
-                <th className="px-3 py-3 font-semibold">Status</th>
-                <th className="px-3 py-3 font-semibold">Responsible Person</th>
-                <th className="px-3 py-3 font-semibold">Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
-              ) : err ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400">Wing vacancies could not be calculated — no positions are shown.</td></tr>
-              ) : !data?.vacancies?.length ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400"><CheckCircle2 size={28} className="mx-auto mb-2 opacity-40" />No positions for these filters.</td></tr>
-              ) : data.vacancies.map((r) => (
-                <tr key={`${r.wing}|${r.level}|${r.location_id}|${r.role}`} className="hover:bg-gray-50 align-top" data-status={r.status} data-wing={r.wing}>
-                  <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-200">{wingShortLabel(r.wing)}</span></td>
-                  <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">{r.level_label}</span></td>
-                  <td className="px-3 py-2.5 text-gray-700">
-                    <span className="font-medium text-gray-900">{r.location_name || "—"}</span>
-                    {[r.assembly_name, r.district_name, r.lok_sabha_name].filter((x) => x && x !== r.location_name).length > 0 && (
-                      <span className="block text-[11px] text-gray-400">{[r.assembly_name, r.district_name, r.lok_sabha_name].filter((x) => x && x !== r.location_name).join(" · ")}</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className="font-semibold text-gray-900">{r.role_label}</span>
-                    <span className="block text-[11px] text-gray-400">{r.designation_name}</span>
-                  </td>
-                  <td className="px-3 py-2.5"><StatusChip status={r.status} /></td>
-                  {/* Same Wing, same role, one level up — never the vacant post itself. */}
-                  <td className="px-3 py-2.5 text-xs" data-testid="wing-responsible">
-                    {r.status !== "vacant" || !r.responsible ? (
-                      <span className="text-gray-400">—</span>
-                    ) : r.responsible.status === "assigned" ? (
-                      r.responsible.people.map((h) => (
-                        <div key={h.contact_id}>
-                          <span className="text-gray-500">{h.designation}{r.responsible.area && r.responsible.area !== "State" ? ` (${r.responsible.area})` : ""}</span>
-                          <span className="text-gray-400"> – </span>
-                          <span className="font-semibold text-gray-900">{h.name}</span>
-                        </div>
-                      ))
-                    ) : r.responsible.status === "top_level" ? (
-                      <span className="text-gray-500">{r.responsible.note}</span>
-                    ) : (
-                      <span className="font-semibold text-red-600" data-testid="wing-responsible-missing">{r.responsible.note}</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-gray-600">
-                    {r.status === "filled" ? (
-                      r.holders.map((h) => (
-                        <div key={h.contact_id} data-testid="wing-holder">
-                          Held by <span className="font-medium text-gray-900">{h.name}</span>
-                          {/* The holder's saved Contact fields the match was made on. */}
-                          <span className="block text-[11px] text-gray-400">
-                            {[h.wings?.length ? `Wing: ${h.wings.join(", ")}` : "Wing: (from designation)", h.designation, h.lok_sabha_name && `LS: ${h.lok_sabha_name}`, h.district_name && `District: ${h.district_name}`, h.assembly_name && `Assembly: ${h.assembly_name}`].filter(Boolean).join(" · ")}
-                          </span>
-                        </div>
-                      ))
-                    ) : r.status === "review" ? (
-                      r.review_people.map((p) => <div key={p.contact_id}><span className="font-medium text-gray-900">{p.person_name}</span> — {p.reason}</div>)
-                    ) : (
-                      <>
-                        <div className="font-medium text-gray-700" data-testid="wing-path">{r.path}</div>
-                        <span className="text-gray-400">No eligible saved contact holds this post</span>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <VacancyTable
+          rows={(data?.vacancies || []).map(fromWingRow)}
+          loading={loading}
+          err={err}
+          errorText="Wing vacancies could not be calculated — no positions are shown."
+        />
       </div>
     </div>
   );

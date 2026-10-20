@@ -5,6 +5,7 @@ import {
 } from "@/lib/vacancyResponsibility";
 import { getReminderStates } from "@/lib/vacancyReminders";
 import { query } from "@/lib/db";
+import { wingPositionDesignationIds } from "@/lib/wingVacancies";
 
 const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
 // Levels scanned for vacancies (State vacancies are the State Prabhari's).
@@ -44,6 +45,10 @@ export async function buildVacancyDataset(session, filters = {}) {
   const holders = await loadResponsibleHolders();
 
   const levels = f.level ? [f.level] : VACANCY_LEVELS;
+  // Wing President / Prabhari / General Secretary posts belong to the Wings view
+  // (Wing responsibility hierarchy) — skipped here so no post appears twice.
+  const wingPositions = await wingPositionDesignationIds();
+  let wingPositionsSkipped = 0;
 
   // 1) Pull every (location × designation) row for each scanned level, tagged with
   //    ancestry, and keep the level-designation lists for the filter dropdowns.
@@ -58,11 +63,13 @@ export async function buildVacancyDataset(session, filters = {}) {
     // fail closed instead of reporting them.
     if (data.capped) throw new Error(`Too many ${LEVEL_LABEL[level]} designation holders to compute vacancies safely`);
     for (const d of data.level_designations) {
+      if (wingPositions.has(d.id)) continue;
       const k = `${level}:${d.id}`;
       if (!seenDes.has(k)) { seenDes.add(k); designationOptions.push({ id: d.id, name: d.name, wing: d.wing || null, wings: d.wings || [], level, level_label: LEVEL_LABEL[level] }); }
     }
-    for (const u of data.unmapped_holders || []) unmappedHolders.push({ ...u, level, level_label: LEVEL_LABEL[level] });
+    for (const u of data.unmapped_holders || []) if (!wingPositions.has(u.designation_id)) unmappedHolders.push({ ...u, level, level_label: LEVEL_LABEL[level] });
     for (const r of data.rows) {
+      if (wingPositions.has(r.designation_id)) { wingPositionsSkipped++; continue; }
       const anc = ancestryOf(index, level, r.location_id);
       // A real location whose parent chain is broken in the master (e.g. an
       // assembly with no district) — still a position, flagged for the data check.
@@ -245,6 +252,7 @@ export async function buildVacancyDataset(session, filters = {}) {
     },
     vacancies: tableRows,
     capped,
+    wing_positions_skipped: wingPositionsSkipped,
     hierarchy,
     data_quality: {
       unmapped_holders: scopedUnmapped,

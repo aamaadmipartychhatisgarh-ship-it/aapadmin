@@ -12,6 +12,7 @@ import { usePageAccess } from "@/components/usePageAccess";
 import { MultiSelect } from "@/components/MultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
 import WingVacancies from "./WingVacancies";
+import VacancyTable, { fromMainRow } from "./VacancyTable";
 
 const BRAND = "#164FA3";
 
@@ -127,9 +128,10 @@ export default function VacanciesPage() {
 
   const flash = (type, text) => { setToast({ type, text }); setTimeout(() => setToast(null), 3000); };
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts) => {
     if (!canAccess) return;
-    setLoading(true); setErr("");
+    if (!opts?.quiet) setLoading(true);
+    setErr("");
     try {
       const p = new URLSearchParams();
       if (level) p.set("level", level);
@@ -156,6 +158,20 @@ export default function VacanciesPage() {
   }, [canAccess, level, lokSabhaId, districtId, assemblyId, blockId, designationId, wingF, statusF, reminderF, responsibleF]);
 
   useEffect(() => { if (tab === "main") load(); }, [load, tab]);
+  // Computed live from Contacts — reload quietly when the user returns to this tab
+  // (e.g. after editing a contact), so the list never stays stale.
+  useEffect(() => {
+    if (tab !== "main") return undefined;
+    let last = Date.now();
+    const revalidate = () => {
+      if (document.visibilityState !== "visible" || Date.now() - last < 3000) return;
+      last = Date.now();
+      load({ quiet: true });
+    };
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
+    return () => { window.removeEventListener("focus", revalidate); document.removeEventListener("visibilitychange", revalidate); };
+  }, [load, tab]);
 
   // Wing options come from Master Data (/api/wings) — the single source of truth.
   useEffect(() => {
@@ -241,7 +257,7 @@ export default function VacanciesPage() {
           </div>
         </div>
         {tab === "main" && (
-          <button onClick={load} className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+          <button onClick={() => load()} className="inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50">
             <RefreshCw size={16} /> Refresh
           </button>
         )}
@@ -374,110 +390,28 @@ export default function VacanciesPage() {
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
           <h2 className="text-sm font-bold text-gray-900">Vacancy List</h2>
+          {data?.wing_positions_skipped > 0 && (
+            <button onClick={() => switchTab("wings")} className="text-xs text-violet-700 hover:underline" data-testid="wing-positions-note">
+              Wing President / Prabhari / General Secretary posts are listed in the Wings tab →
+            </button>
+          )}
           {data?.capped && <span className="ml-auto text-xs text-amber-600">Showing the first {data.vacancies.length} rows — narrow the filters to see more.</span>}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1100px]">
-            <thead>
-              <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
-                <th className="px-3 py-3 font-semibold">Level</th>
-                <th className="px-3 py-3 font-semibold">Location</th>
-                <th className="px-3 py-3 font-semibold">Vacant Designation</th>
-                <th className="px-3 py-3 font-semibold">Status</th>
-                <th className="px-3 py-3 font-semibold">Responsible Person</th>
-                <th className="px-3 py-3 font-semibold">Reminder</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
-              ) : err ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400">Vacancies could not be calculated — no positions are shown.</td></tr>
-              ) : !data?.vacancies?.length ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><CheckCircle2 size={28} className="mx-auto mb-2 opacity-40" />No positions for these filters.</td></tr>
-              ) : data.vacancies.map((r) => (
-                <tr key={`${r.level}:${r.location_id}:${r.designation_id}`} className="hover:bg-gray-50 align-top" data-status={r.status}>
-                  <td className="px-3 py-2.5" data-testid="vac-level"><span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">{r.level_label}</span></td>
-                  <td className="px-3 py-2.5 text-gray-700" data-testid="vac-location">
-                    <span className="font-medium text-gray-900">{r.location_name || "—"}</span>
-                    {/* Where this position sits in the hierarchy (grouping context). */}
-                    {[r.assembly_name, r.district_name, r.lok_sabha_name].filter((x) => x && x !== r.location_name).length > 0 && (
-                      <span className="block text-[11px] text-gray-400">{[r.assembly_name, r.district_name, r.lok_sabha_name].filter((x) => x && x !== r.location_name).join(" · ")}</span>
-                    )}
-                    {r.hierarchy_incomplete && <span className="block text-[11px] text-red-500">Parent area missing in master</span>}
-                  </td>
-                  <td className="px-3 py-2.5" data-testid="vac-designation">
-                    <span className="font-semibold text-gray-900">{r.designation_name}</span>
-                    <span className="block text-[11px] text-gray-400">{r.level_label} · {r.location_name}</span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {r.status === "filled" ? (
-                      <>
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200">Filled</span>
-                        <span className="block mt-1 text-[11px] text-gray-500">Held by {r.person_names || "—"}</span>
-                      </>
-                    ) : r.status === "review" ? (
-                      <>
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200" title="A holder of this designation has a missing/invalid location">Needs review</span>
-                        {(r.review_people || []).map((p) => (
-                          <span key={p.contact_id} className="block mt-1 text-[11px] text-gray-600"><span className="font-medium text-gray-900">{p.person_name}</span> holds this designation — {p.reason}</span>
-                        ))}
-                      </>
-                    ) : <span className="text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">VACANT</span>}
-                  </td>
-                  {/* Responsible person(s) — one line per required role; never the vacant post's own holder. */}
-                  <td className="px-3 py-2.5" data-testid="vac-responsible">
-                    {r.status !== "vacant" ? (
-                      <span className="text-xs text-gray-400">—</span>
-                    ) : (r.responsible_slots || []).length ? (
-                      <div className="space-y-1">
-                        {r.responsible_slots.map((sl) => (
-                          <div key={sl.label} className="text-xs" data-testid={sl.people.length ? "responsible" : "responsible-missing"}>
-                            {sl.people.length ? sl.people.map((h) => (
-                              <div key={h.contact_id}>
-                                <span className="text-gray-500">{h.designation}{sl.area && sl.area !== "State" ? ` (${sl.area})` : ""}</span>
-                                <span className="text-gray-400"> – </span>
-                                <span className="font-semibold text-gray-900">{h.name}</span>
-                              </div>
-                            )) : (
-                              <div>
-                                <span className="text-gray-500">{sl.label}{sl.area && sl.area !== "State" ? ` (${sl.area})` : ""}</span>
-                                <span className="text-gray-400"> – </span>
-                                <span className="font-semibold text-red-600 whitespace-nowrap">Not assigned</span>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-xs font-semibold text-red-600" data-testid="responsible-missing">Responsible person not found</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {r.status === "vacant" && (r.responsibles || []).length ? (
-                      <div className="space-y-1.5">
-                        {r.responsibles.map((rp) => (
-                          <div key={rp.contact_id} className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[11px] text-gray-700 font-medium">{rp.name}</span>
-                            <span className="text-gray-500 font-mono text-[11px]">{rp.mobile || "—"}</span>
-                            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border capitalize ${reminderChip(rp.reminder_status)}`}>{rp.reminder_status}{rp.reminder_attempts ? ` · ${rp.reminder_attempts}` : ""}</span>
-                            {rp.last_reminder_at && <span className="text-[11px] text-gray-400">{fmtDateTime(rp.last_reminder_at)}</span>}
-                            <button onClick={() => sendReminder(rp)} disabled={busyId === rp.contact_id}
-                              className="ml-auto inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-white text-xs font-semibold disabled:opacity-60" style={{ background: "#22a45d" }}>
-                              {busyId === rp.contact_id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} WhatsApp
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-gray-400">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <VacancyTable
+          rows={(data?.vacancies || []).map(fromMainRow)}
+          loading={loading}
+          err={err}
+          renderContactExtra={(l) => l.reminder ? (
+            <>
+              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border capitalize ${reminderChip(l.reminder.reminder_status)}`}>{l.reminder.reminder_status}{l.reminder.reminder_attempts ? ` · ${l.reminder.reminder_attempts}` : ""}</span>
+              {l.reminder.last_reminder_at && <span className="text-[11px] text-gray-400">{fmtDateTime(l.reminder.last_reminder_at)}</span>}
+              <button onClick={() => sendReminder(l.reminder)} disabled={busyId === l.contact_id}
+                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-white text-xs font-semibold disabled:opacity-60" style={{ background: "#22a45d" }}>
+                {busyId === l.contact_id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} WhatsApp
+              </button>
+            </>
+          ) : null}
+        />
       </div>
 
       </>)}
