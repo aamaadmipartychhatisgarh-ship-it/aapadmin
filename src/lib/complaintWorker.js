@@ -75,3 +75,30 @@ export async function resolveComplaintLocation({ phone, contactId }) {
   }
   return empty; // none / ambiguous → never guess
 }
+
+// DISPLAY-ONLY fallback for complaints saved before the Assembly was recorded: the
+// Assembly of the live contact(s) behind each mobile number, only when it is
+// unambiguous (every matching contact that has an assembly agrees). Batched — one
+// query for all numbers — and never written back to the complaint.
+// Returns Map<last10, { id, name }>.
+export async function assembliesForPhones(phones) {
+  const keys = [...new Set((phones || []).map((p) => phoneKey(p)).filter((k) => k && k.length >= 10))];
+  const out = new Map();
+  if (!keys.length) return out;
+  const live = await notPendingClause("c");
+  const rows = await query(
+    `SELECT ${last10Sql("c.phone_number")} AS k, c.assembly_id, la.name AS assembly_name
+       FROM contacts c LEFT JOIN locations la ON la.id = c.assembly_id
+      WHERE ${last10Sql("c.phone_number")} IN (${keys.map(() => "?").join(",")})${live}`,
+    keys
+  );
+  const byKey = new Map();
+  for (const r of rows) {
+    if (r.assembly_id == null) continue;
+    const cur = byKey.get(r.k);
+    if (!cur) byKey.set(r.k, { id: r.assembly_id, name: r.assembly_name, conflict: false });
+    else if (String(cur.id) !== String(r.assembly_id)) cur.conflict = true;
+  }
+  for (const [k, v] of byKey) if (!v.conflict) out.set(k, { id: v.id, name: v.name });
+  return out;
+}

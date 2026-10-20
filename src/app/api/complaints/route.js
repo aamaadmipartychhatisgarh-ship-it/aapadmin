@@ -4,7 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { resolveComplaintLocation } from "@/lib/complaintWorker";
+import { resolveComplaintLocation, assembliesForPhones } from "@/lib/complaintWorker";
+import { phoneKey } from "@/lib/phone";
 
 // Callers log complaints (heard live on calls); oversight roles review and
 // monitor them. Both can view (callers stay geo-scoped).
@@ -56,7 +57,7 @@ export async function GET(req) {
     if (statusF) { where.push("c.status = ?"); params.push(statusF); }
     if (typeF) { where.push("c.type = ?"); params.push(typeF); }
     if (districtId) { where.push("c.district_id = ?"); params.push(districtId); }
-    if (search) { where.push("(c.citizen_name LIKE ? OR c.citizen_phone LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
+    if (search) { where.push("(c.citizen_name LIKE ? OR c.citizen_phone LIKE ? OR la.name LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
     // complaints table has district_id + assembly_id (no zone_id)
     const scope = scopeFilterSync(session.user, "c", { cols: ["district_id", "assembly_id"] });
     if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
@@ -77,6 +78,18 @@ export async function GET(req) {
     // SLA timer + escalation flag, derived (no stored column): an unresolved
     // complaint past the SLA target is overdue and its hours-overdue is reported so
     // the UI can show the timer and flag it for escalation.
+    // Assembly: the complaint's own saved Assembly wins. For older complaints that
+    // never recorded one, show the Assembly of the Worker behind the mobile number
+    // when it is unambiguous (display only — the record is not modified); otherwise
+    // leave it empty rather than show anything uncertain.
+    const missing = rows.filter((c) => c.assembly_id == null && c.citizen_phone).map((c) => c.citizen_phone);
+    const derived = missing.length ? await assembliesForPhones(missing) : new Map();
+    for (const c of rows) {
+      if (c.assembly_id != null) { c.assembly_source = "saved"; continue; }
+      const d = derived.get(phoneKey(c.citizen_phone));
+      if (d) { c.assembly_name = d.name; c.assembly_source = "worker"; }
+      else c.assembly_source = null;
+    }
     const open = new Set(["open", "in_progress"]);
     const complaints = rows.map((c) => {
       const age = Number(c.age_hours) || 0;
