@@ -56,6 +56,9 @@ export async function GET(req) {
     // substring (so "Active" can never match "Very Active"). normalizeActiveStatus
     // rejects anything else, so an unknown/empty value simply means "All".
     const statusFilter = normalizeActiveStatus(searchParams.get("status"));
+    // Worker Status card filter — exact match on the contact's stored
+    // contacts.active_status (one of the four canonical codes only).
+    const workerStatus = normalizeActiveStatus(searchParams.get("worker_status"));
 
     let where = " WHERE c.assigned_to_user_id IS NOT NULL";
     const params = [];
@@ -78,6 +81,19 @@ export async function GET(req) {
     const scope = scopeFilterSync(session.user, "c");
     where += " " + scope.where;
     params.push(...scope.params);
+
+    // Card totals are always the FULL four-status breakdown of this scope, so the
+    // cards keep their numbers while one of them is selected as a filter.
+    const totalsRows = await query(
+      `SELECT c.active_status AS s, COUNT(*) AS n
+         FROM contacts c JOIN users u ON u.id = c.assigned_to_user_id
+        ${where}
+        GROUP BY c.active_status`,
+      params
+    );
+    const status_totals = Object.fromEntries(ACTIVE_STATUS_VALUES.map((v) => [v, 0]));
+    for (const r of totalsRows) if (r.s in status_totals) status_totals[r.s] = Number(r.n) || 0;
+    if (workerStatus) { where += " AND c.active_status = ?"; params.push(workerStatus); }
 
     const workerStatusSums = workerStatusReady
       ? ACTIVE_STATUS_VALUES.map((v) => `COALESCE(SUM(c.active_status = '${v}'), 0) AS ws_${v.toLowerCase()},`).join("\n              ")
@@ -111,7 +127,7 @@ export async function GET(req) {
       pending_count: Number(r.pending_count) || 0,
     }));
     const total = groups.reduce((a, g) => a + g.active_count, 0);
-    return NextResponse.json({ groups, total, callers: groups.length }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ groups, total, callers: groups.length, status_totals, worker_status: workerStatus }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("active-workers GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

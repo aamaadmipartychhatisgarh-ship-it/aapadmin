@@ -34,6 +34,9 @@ export default function ActiveWorkersPage() {
   const [callers, setCallers] = useState(0);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null); // user_id currently expanded
+  const [statusTotals, setStatusTotals] = useState({});
+  // Selected Worker Status card ("" = complete view). Filtering is server-side.
+  const [workerStatus, setWorkerStatus] = useState("");
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -43,15 +46,17 @@ export default function ActiveWorkersPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch("/api/contacts/active-workers");
+      const qs = workerStatus ? `?worker_status=${encodeURIComponent(workerStatus)}` : "";
+      const r = await fetch(`/api/contacts/active-workers${qs}`);
       if (r.ok) {
         const d = await r.json();
         setGroups(d.groups || []);
+        setStatusTotals(d.status_totals || {});
         setTotal(d.total || 0);
         setCallers(d.callers || 0);
       }
     } finally { setLoading(false); }
-  }, []);
+  }, [workerStatus]);
 
   useEffect(() => {
     if (!allowed) return;
@@ -79,8 +84,6 @@ export default function ActiveWorkersPage() {
   }, []);
 
   const visibleGroups = groups;
-  const statusTotals = {};
-  for (const g of groups) for (const o of ACTIVE_STATUS_OPTIONS) statusTotals[o.value] = (statusTotals[o.value] || 0) + (g.worker_status_counts?.[o.value] || 0);
 
   if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
@@ -105,20 +108,36 @@ export default function ActiveWorkersPage() {
           over the whole authorized dataset. Only the four canonical statuses;
           contacts with no status set are deliberately not counted here. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {ACTIVE_STATUS_OPTIONS.map((o) => (
-          <div key={o.value} className={`rounded-2xl border border-gray-100 shadow-sm p-4 ${STATUS_STYLE[o.value]}`}>
-            <div className="text-xs font-semibold uppercase tracking-wide opacity-80">{o.label}</div>
-            <div className="text-3xl font-bold mt-1">{Number(statusTotals[o.value] || 0).toLocaleString("en-IN")}</div>
-          </div>
-        ))}
+        {ACTIVE_STATUS_OPTIONS.map((o) => {
+          const on = workerStatus === o.value;
+          return (
+            <button
+              key={o.value}
+              type="button"
+              aria-pressed={on}
+              onClick={() => { setExpanded(null); setWorkerStatus(on ? "" : o.value); }}
+              className={`text-left rounded-2xl border shadow-sm p-4 transition hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#164FA3] ${STATUS_STYLE[o.value]} ${on ? "border-[#164FA3] ring-2 ring-[#164FA3]" : "border-gray-100"} ${workerStatus && !on ? "opacity-60" : ""}`}
+            >
+              <div className="text-xs font-semibold uppercase tracking-wide opacity-80">{o.label}</div>
+              <div className="text-3xl font-bold mt-1">{Number(statusTotals[o.value] || 0).toLocaleString("en-IN")}</div>
+            </button>
+          );
+        })}
       </div>
+
+      {workerStatus && (
+        <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-sm text-[#164FA3]">
+          <span>Showing only <b>{ACTIVE_STATUS_LABEL[workerStatus]}</b> workers ({Number(total).toLocaleString("en-IN")})</span>
+          <button type="button" onClick={() => { setExpanded(null); setWorkerStatus(""); }} className="font-semibold hover:underline">Show all Active Workers</button>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="py-12 text-center text-gray-400"><Loader2 className="inline animate-spin text-[#164FA3]" /></div>
         ) : visibleGroups.length === 0 ? (
           <div className="py-12 text-center text-gray-400">
-            No active workers found for your access.
+            {workerStatus ? `No ${ACTIVE_STATUS_LABEL[workerStatus]} workers found for your access.` : "No active workers found for your access."}
           </div>
         ) : (
           <ul className="divide-y divide-gray-100">
@@ -142,7 +161,7 @@ export default function ActiveWorkersPage() {
                     <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#164FA3] text-white font-bold">{Number(g.active_count).toLocaleString("en-IN")}</span>
                   </div>
                 </div>
-                {expanded === g.user_id && <CallerContacts userId={g.user_id} />}
+                {expanded === g.user_id && <CallerContacts userId={g.user_id} workerStatus={workerStatus} />}
               </li>
             ))}
           </ul>
@@ -154,16 +173,16 @@ export default function ActiveWorkersPage() {
 
 // The contacts assigned to one caller — loaded from the existing endpoint, which
 // already applies the same scope/permission checks and excludes wrong numbers.
-function CallerContacts({ userId }) {
+function CallerContacts({ userId, workerStatus }) {
   const [rows, setRows] = useState(null);
   useEffect(() => {
     let alive = true;
-    fetch(`/api/contacts?assigned_to=${encodeURIComponent(userId)}&worker_status_set=1&page_size=200`, { cache: "no-store" })
+    fetch(`/api/contacts?assigned_to=${encodeURIComponent(userId)}&worker_status_set=1${workerStatus ? `&worker_status=${encodeURIComponent(workerStatus)}` : ""}&page_size=200`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : { contacts: [] })
       .then((d) => { if (alive) setRows(d.contacts || []); })
       .catch(() => { if (alive) setRows([]); });
     return () => { alive = false; };
-  }, [userId]);
+  }, [userId, workerStatus]);
 
   if (rows === null) return <div className="px-6 py-4 text-sm text-gray-400"><Loader2 className="inline animate-spin text-[#164FA3]" size={14} /> Loading…</div>;
   if (rows.length === 0) return <div className="px-6 py-4 text-sm text-gray-400">No contacts.</div>;

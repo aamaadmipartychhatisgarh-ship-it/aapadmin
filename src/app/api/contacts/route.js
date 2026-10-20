@@ -7,7 +7,7 @@ import { query } from "@/lib/db";
 import { addedDateClause } from "@/lib/contactDateFilter";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { ACTIVE_STATUS_VALUES } from "@/lib/activeStatus";
+import { ACTIVE_STATUS_VALUES, normalizeActiveStatus } from "@/lib/activeStatus";
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureContactActiveStatusColumns, findRejectedContactByPhone, hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
@@ -129,6 +129,12 @@ export async function GET(req) {
         where += ` AND c.active_status IN (${ACTIVE_STATUS_VALUES.map(() => "?").join(",")})`;
         params.push(...ACTIVE_STATUS_VALUES);
       } else where += " AND 1 = 0";
+    }
+    // One exact Worker Status (Active Workers card filter).
+    const workerStatusOne = normalizeActiveStatus(searchParams.get("worker_status"));
+    if (workerStatusOne) {
+      if (await ensureContactActiveStatusColumns()) { where += " AND c.active_status = ?"; params.push(workerStatusOne); }
+      else where += " AND 1 = 0";
     }
     if (search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
