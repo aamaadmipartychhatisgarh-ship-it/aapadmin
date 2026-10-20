@@ -8,6 +8,7 @@ import PartySelect, { usePartyMaster, PartyLogo, PartyBadge, partyLogoFor } from
 import FilterMultiSelect from "@/components/FilterMultiSelect";
 import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
 import { MLA_EXPORT_COLUMNS, CANDIDATE_EXPORT_COLUMNS } from "@/lib/leaderAssessmentColumns";
+import { MLA_PROFILE_SECTIONS, EMPTY_MLA_PROFILE } from "@/lib/mlaProfileFields";
 import { usePageAccess } from "@/components/usePageAccess";
 import CommonPrintButton from "@/components/common/CommonPrintButton";
 import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
@@ -825,6 +826,7 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
       {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : bundle?.assembly ? (
         <div className="space-y-5">
           <AssemblyHeader a={bundle.assembly} status={bundle.status} />
+          <MlaProfileDetails mla={bundle.mla} assembly={bundle.assembly} />
           {bundle.candidates?.length > 0
             ? <ComparisonTab b={bundle} onChange={reload} flash={flash} fail={fail} />
             : <Empty msg="No AAP candidates yet — add candidates and score them to see the 10-parameter assessment." />}
@@ -839,8 +841,69 @@ function AssemblyFullView({ assemblyId, onClose, onChange, flash, fail }) {
   );
 }
 
+// The COMPLETE saved MLA Profile of the assembly, inside the Open (Full View)
+// modal. Every field comes from the shared MLA_PROFILE_SECTIONS list — the same
+// list the MLA Profile form is built around — and every value is read from this
+// assembly's own la_mla_profiles row (bundle.mla), so the two never drift apart.
+function mlaDateText(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v ?? ""));
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+function mlaFieldValue(f, mla, assembly) {
+  const raw = f.kind === "voter" ? assembly?.[f.key] : mla?.[f.key];
+  if (f.kind === "age") return mla?.age != null ? `${mla.age} years` : null;
+  if (raw == null || String(raw).trim() === "") return null;
+  if (f.kind === "date") return mlaDateText(raw);
+  if (f.kind === "votes" || f.kind === "voter" || f.kind === "margin") return nfmt(raw);
+  return String(raw);
+}
+function MlaProfileDetails({ mla, assembly }) {
+  const { byName: partyByName } = usePartyMaster(); // one party-master load for all party fields
+  if (!mla || !mla.name) {
+    return (
+      <Card title="MLA Profile" icon={UserSquare2}>
+        <div className="text-sm text-gray-400">MLA Data Not Available — no MLA profile is linked to this assembly yet.</div>
+      </Card>
+    );
+  }
+  return (
+    <Card title="MLA Profile" icon={UserSquare2} sub="All fields saved in the MLA Profile for this assembly.">
+      <div className="flex items-center gap-3 mb-4">
+        <ProfilePhoto name={mla.name} src={mla.photo_url} size={72} square editable={false} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3]" />
+        <div className="min-w-0">
+          <div className="font-bold text-gray-900 text-lg">{mla.name}</div>
+          <div className="text-xs text-emerald-700 font-semibold">Current MLA · {assembly?.name}{assembly?.district ? ` · ${assembly.district}` : ""}</div>
+        </div>
+      </div>
+      <div className="space-y-4" data-testid="mla-profile-details">
+        {MLA_PROFILE_SECTIONS.map((sec) => (
+          <div key={sec.title}>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-2">{sec.title}</div>
+            <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {sec.fields.map((f) => {
+                const v = mlaFieldValue(f, mla, assembly);
+                return (
+                  <div key={f.key} data-field={f.key} className={`rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2 min-w-0 ${f.full ? "sm:col-span-2 lg:col-span-3" : ""}`}>
+                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{f.label}</dt>
+                    <dd className={`text-sm font-semibold text-gray-800 mt-0.5 ${f.kind === "long" ? "whitespace-pre-wrap break-words font-medium" : "break-words"}`}>
+                      {v == null ? <span className="text-gray-300 font-normal">—</span>
+                        : f.kind === "party" ? <PartyLogo name={v} byName={partyByName} size={16} />
+                        : v}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 // -------------------------------- MLA -------------------------------------
-const EMPTY_MLA = { photo_url: "", name: "", phone: "", address: "", date_of_birth: "", caste: "", party: "", net_worth: "", criminal_cases: "", times_won: "", times_contested: "", largest_winning_margin: "", previous_winning_margin: "", party_won_from: "", party_defeated: "", mla_votes: "", competitor1_name: "", competitor1_party: "", competitor1_votes: "", competitor2_name: "", competitor2_party: "", competitor2_votes: "", competitor3_name: "", competitor3_party: "", competitor3_votes: "" };
+const EMPTY_MLA = EMPTY_MLA_PROFILE; // shared field list (src/lib/mlaProfileFields.js)
 
 // Winning Margin — computed live for the form preview (the backend recomputes and
 // stores the authoritative value). ALWAYS (MLA votes − Competitor 1 votes);
