@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
-  UserCog, Loader2, Shield, Filter, X, Send, RefreshCw, MapPin, ChevronDown, CheckCircle2,
+  ArrowLeft, UserCog, Loader2, Shield, Filter, X, Send, RefreshCw, MapPin, ChevronDown, CheckCircle2,
 } from "lucide-react";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
@@ -208,6 +209,12 @@ export default function VacanciesPage() {
 
   return (
     <div className="max-w-[1500px] mx-auto">
+      {/* Back to the Designation section (its main link opens the first designation
+          page this user may access — same route as the sidebar entry). */}
+      <Link href="/dashboard/admin/designation" data-testid="back-to-designation"
+        className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-[#164FA3] mb-3">
+        <ArrowLeft size={16} /> Back to Designation
+      </Link>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div className="flex items-center gap-3">
