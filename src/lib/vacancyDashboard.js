@@ -4,8 +4,12 @@ import {
   ancestryOf, resolveResponsible,
 } from "@/lib/vacancyResponsibility";
 import { getReminderStates } from "@/lib/vacancyReminders";
+import { query } from "@/lib/db";
 
-const LEVEL_LABEL = { lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
+const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
+// Levels scanned for vacancies. State has no higher authority, so its vacancies
+// carry no responsible person / reminder (TEAM_LEVELS are the ones that do).
+const VACANCY_LEVELS = ["state", ...TEAM_LEVELS];
 const MAX_ROWS = 2000;
 
 const asId = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 0 ? n : null; };
@@ -22,7 +26,7 @@ export function groupKeyFor(contactId) {
 // territory scope, so a non-super user only ever sees their own areas.
 export async function buildVacancyDataset(session, filters = {}) {
   const f = {
-    level: TEAM_LEVELS.includes(filters.level) ? filters.level : null,
+    level: VACANCY_LEVELS.includes(filters.level) ? filters.level : null,
     lokSabhaId: asId(filters.lokSabhaId),
     districtId: asId(filters.districtId),
     assemblyId: asId(filters.assemblyId),
@@ -32,7 +36,7 @@ export async function buildVacancyDataset(session, filters = {}) {
     wings: Array.isArray(filters.wings)
       ? filters.wings.map((w) => String(w || "").trim()).filter(Boolean)
       : String(filters.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
-    status: ["filled", "vacant"].includes(filters.status) ? filters.status : "all",
+    status: ["filled", "vacant", "review"].includes(filters.status) ? filters.status : "all",
     reminderStatus: ["sent", "pending", "failed"].includes(filters.reminderStatus) ? filters.reminderStatus : "all",
     responsibleId: asId(filters.responsibleId),
   };
@@ -40,22 +44,30 @@ export async function buildVacancyDataset(session, filters = {}) {
   const index = await loadLocationIndex();
   const holders = await loadResponsibleHolders();
 
-  const levels = f.level ? [f.level] : TEAM_LEVELS;
+  const levels = f.level ? [f.level] : VACANCY_LEVELS;
 
   // 1) Pull every (location × designation) row for each scanned level, tagged with
   //    ancestry, and keep the level-designation lists for the filter dropdowns.
   const allRows = [];
   const designationOptions = [];
   const seenDes = new Set();
+  const unmappedHolders = [];
   for (const level of levels) {
     // eslint-disable-next-line no-await-in-loop
     const data = await fetchIncompleteDesignation(session, { level, status: "all" });
+    // A truncated holder list would turn filled positions into false vacancies —
+    // fail closed instead of reporting them.
+    if (data.capped) throw new Error(`Too many ${LEVEL_LABEL[level]} designation holders to compute vacancies safely`);
     for (const d of data.level_designations) {
       const k = `${level}:${d.id}`;
       if (!seenDes.has(k)) { seenDes.add(k); designationOptions.push({ id: d.id, name: d.name, wing: d.wing || null, wings: d.wings || [], level, level_label: LEVEL_LABEL[level] }); }
     }
+    for (const u of data.unmapped_holders || []) unmappedHolders.push({ ...u, level, level_label: LEVEL_LABEL[level] });
     for (const r of data.rows) {
       const anc = ancestryOf(index, level, r.location_id);
+      // A real location whose parent chain is broken in the master (e.g. an
+      // assembly with no district) — still a position, flagged for the data check.
+      const hierarchyIncomplete = (level === "assembly" && !anc.district_id) || (level === "district" && !anc.lok_sabha_id) || (level === "block" && !anc.assembly_id);
       allRows.push({
         level,
         level_label: LEVEL_LABEL[level],
@@ -66,7 +78,10 @@ export async function buildVacancyDataset(session, filters = {}) {
         designation_wing: r.designation_wing || null,
         designation_wings: r.designation_wings || [],
         filled: r.filled,
+        status: r.status || (r.filled ? "filled" : "vacant"),
+        review_people: r.review_people || [],
         person_names: r.person_names,
+        hierarchy_incomplete: hierarchyIncomplete,
         ...anc,
       });
     }
@@ -84,56 +99,48 @@ export async function buildVacancyDataset(session, filters = {}) {
   });
 
   const totalDesignations = scoped.length;
-  const filledCount = scoped.filter((r) => r.filled).length;
-  const vacantCount = totalDesignations - filledCount;
+  const filledCount = scoped.filter((r) => r.status === "filled").length;
+  const vacantCount = scoped.filter((r) => r.status === "vacant").length;
+  const reviewCount = scoped.filter((r) => r.status === "review").length;
 
-  // 3) Expand each VACANT row into one display row per responsible person (or a
-  //    single "Responsible Person Not Assigned" row), and collect reminder groups.
-  const vacantRows = scoped.filter((r) => !r.filled);
+  // 3) ONE row per genuinely VACANT position (never duplicated per responsible
+  //    person): the responsible people are listed on the row, each with their own
+  //    reminder group. State has no higher level, so no responsible person.
+  const vacantRows = scoped.filter((r) => r.status === "vacant");
   const displayRows = [];
   const groupKeys = new Set();
   for (const r of vacantRows) {
-    const responsibles = resolveResponsible(r.level, r.location_id, index, holders);
-    if (!responsibles.length) {
-      displayRows.push({
-        ...r,
-        responsible_contact_id: null,
-        responsible_name: "Responsible Person Not Assigned",
-        responsible_role: RESPONSIBILITY_LABEL[r.level] || null,
-        responsible_mobile: null,
-        group_key: null,
-      });
-      continue;
-    }
-    for (const rp of responsibles) {
+    const responsibles = r.level === "state" ? [] : resolveResponsible(r.level, r.location_id, index, holders).map((rp) => {
       const gk = groupKeyFor(rp.contact_id);
       groupKeys.add(gk);
-      displayRows.push({
-        ...r,
-        responsible_contact_id: rp.contact_id,
-        responsible_name: rp.person_name,
-        responsible_role: rp.role || RESPONSIBILITY_LABEL[r.level] || null,
-        responsible_mobile: rp.mobile,
-        group_key: gk,
-      });
-    }
+      return { contact_id: rp.contact_id, name: rp.person_name, role: rp.role || RESPONSIBILITY_LABEL[r.level] || null, mobile: rp.mobile, group_key: gk };
+    });
+    displayRows.push({
+      ...r,
+      responsibles,
+      responsible_note: r.level === "state" ? "State level — no higher level to remind"
+        : responsibles.length ? null : `Responsible Person Not Assigned (${RESPONSIBILITY_LABEL[r.level] || "—"})`,
+    });
   }
 
-  // 4) Attach reminder state per group (missing → pending default).
+  // 4) Attach reminder state per responsible (missing → pending default).
   const states = await getReminderStates([...groupKeys]);
   for (const row of displayRows) {
-    const st = row.group_key ? states.get(row.group_key) : null;
-    row.reminder_status = st?.status || (row.group_key ? "pending" : "none");
-    row.reminder_attempts = st?.attempts || 0;
-    row.last_reminder_at = st?.last_reminder_at || null;
+    for (const rp of row.responsibles) {
+      const st = states.get(rp.group_key);
+      rp.reminder_status = st?.status || "pending";
+      rp.reminder_attempts = st?.attempts || 0;
+      rp.last_reminder_at = st?.last_reminder_at || null;
+    }
   }
 
   // 5) Reminder summary counts — over distinct responsible-person GROUPS.
   const groupStatus = new Map();
   for (const row of displayRows) {
-    if (!row.group_key) continue;
-    // A group's status is consistent (one record per group); take it once.
-    if (!groupStatus.has(row.group_key)) groupStatus.set(row.group_key, row.reminder_status);
+    for (const rp of row.responsibles) {
+      // A group's status is consistent (one record per group); take it once.
+      if (!groupStatus.has(rp.group_key)) groupStatus.set(rp.group_key, rp.reminder_status);
+    }
   }
   let remindersSent = 0, remindersPending = 0, remindersFailed = 0;
   for (const s of groupStatus.values()) {
@@ -143,15 +150,15 @@ export async function buildVacancyDataset(session, filters = {}) {
   // 6) Row-level filters (status + reminder + responsible) for the table only.
   let tableRows;
   if (f.status === "filled") {
-    tableRows = scoped.filter((r) => r.filled).map((r) => ({
-      ...r, responsible_name: "—", responsible_role: null, responsible_mobile: null,
-      group_key: null, reminder_status: "none", reminder_attempts: 0, last_reminder_at: null,
-    }));
+    tableRows = scoped.filter((r) => r.status === "filled").map((r) => ({ ...r, responsibles: [], responsible_note: null }));
+  } else if (f.status === "review") {
+    tableRows = scoped.filter((r) => r.status === "review").map((r) => ({ ...r, responsibles: [], responsible_note: null }));
   } else {
-    tableRows = displayRows;
-    if (f.status === "vacant") { /* already vacant-only */ }
-    if (f.reminderStatus !== "all") tableRows = tableRows.filter((r) => (r.reminder_status === f.reminderStatus) || (f.reminderStatus === "pending" && r.reminder_status === "none"));
-    if (f.responsibleId) tableRows = tableRows.filter((r) => r.responsible_contact_id === f.responsibleId);
+    // Default list = genuine vacancies; "all" also lists the needs-review positions.
+    tableRows = f.status === "vacant" ? displayRows
+      : [...displayRows, ...scoped.filter((r) => r.status === "review").map((r) => ({ ...r, responsibles: [], responsible_note: null }))];
+    if (f.reminderStatus !== "all") tableRows = tableRows.filter((r) => (r.responsibles || []).some((rp) => rp.reminder_status === f.reminderStatus));
+    if (f.responsibleId) tableRows = tableRows.filter((r) => (r.responsibles || []).some((rp) => rp.contact_id === f.responsibleId));
   }
   const capped = tableRows.length > MAX_ROWS;
   tableRows = tableRows.slice(0, MAX_ROWS);
@@ -164,11 +171,11 @@ export async function buildVacancyDataset(session, filters = {}) {
       hierMap.set(key, {
         level: r.level, level_label: r.level_label, location_id: r.location_id, location_name: r.location_name,
         lok_sabha_name: r.lok_sabha_name, district_name: r.district_name, assembly_name: r.assembly_name, block_name: r.block_name,
-        total: 0, filled: 0, vacant: 0,
+        total: 0, filled: 0, vacant: 0, review: 0,
       });
     }
     const h = hierMap.get(key);
-    h.total++; if (r.filled) h.filled++; else h.vacant++;
+    h.total++; if (r.status === "filled") h.filled++; else if (r.status === "review") h.review = (h.review || 0) + 1; else h.vacant++;
   }
   const hierarchy = [...hierMap.values()].map((h) => ({ ...h, incomplete_pct: h.total ? Math.round((h.vacant / h.total) * 100) : 0 }))
     .sort((a, b) => b.vacant - a.vacant || a.location_name?.localeCompare(b.location_name || ""))
@@ -177,10 +184,25 @@ export async function buildVacancyDataset(session, filters = {}) {
   // 8) Responsible-person filter options (distinct, from the current vacancies).
   const respMap = new Map();
   for (const row of displayRows) {
-    if (row.responsible_contact_id && !respMap.has(row.responsible_contact_id)) {
-      respMap.set(row.responsible_contact_id, { contact_id: row.responsible_contact_id, name: row.responsible_name });
+    for (const rp of row.responsibles) {
+      if (!respMap.has(rp.contact_id)) respMap.set(rp.contact_id, { contact_id: rp.contact_id, name: rp.name });
     }
   }
+
+  // 9) Data quality — kept apart from vacancies so a mapping problem is never
+  //    shown as a vacant position: holders with a missing/invalid location at
+  //    their level, master designations with no valid level (no positions can be
+  //    derived for them), and positions whose location chain is broken.
+  const validLevels = ["state", "zone", ...TEAM_LEVELS];
+  const hasEnabled = (await query("SHOW COLUMNS FROM designations LIKE 'enabled'")).length > 0;
+  const noLevel = await query(
+    `SELECT id, name, level FROM designations
+      WHERE (level IS NULL OR TRIM(level) = '' OR level NOT IN (${validLevels.map(() => "?").join(",")}))
+        ${hasEnabled ? "AND (enabled = 1 OR enabled IS NULL)" : ""}
+      ORDER BY name`,
+    validLevels
+  );
+  const scopedUnmapped = unmappedHolders.filter((u) => !f.designationId || u.designation_id === f.designationId);
 
   // Cascading location options (by type) for the filter dropdowns.
   const locByType = { lok_sabha: [], district: [], assembly: [], block: [] };
@@ -206,6 +228,7 @@ export async function buildVacancyDataset(session, filters = {}) {
       total: totalDesignations,
       filled: filledCount,
       vacant: vacantCount,
+      review: reviewCount,
       incomplete_pct: totalDesignations ? Math.round((vacantCount / totalDesignations) * 100) : 0,
       reminders_sent: remindersSent,
       reminders_pending: remindersPending,
@@ -214,6 +237,11 @@ export async function buildVacancyDataset(session, filters = {}) {
     vacancies: tableRows,
     capped,
     hierarchy,
+    data_quality: {
+      unmapped_holders: scopedUnmapped,
+      designations_without_level: noLevel,
+      hierarchy_incomplete: scoped.filter((r) => r.hierarchy_incomplete).length,
+    },
     filters: {
       // Keep the Designation Master order: options are already appended per level
       // (in level order) with designations in sort_order from incompleteDesignation
@@ -221,7 +249,7 @@ export async function buildVacancyDataset(session, filters = {}) {
       designations: designationOptions,
       responsibles: [...respMap.values()].sort((a, b) => String(a.name).localeCompare(String(b.name))),
       locations: locByType,
-      levels: TEAM_LEVELS.map((l) => ({ key: l, label: LEVEL_LABEL[l] })),
+      levels: VACANCY_LEVELS.map((l) => ({ key: l, label: LEVEL_LABEL[l] })),
     },
   };
 }
@@ -231,6 +259,6 @@ export async function buildVacancyDataset(session, filters = {}) {
 // so anything already filled is naturally excluded.
 export async function pendingVacanciesForResponsible(session, contactId) {
   const data = await buildVacancyDataset(session, { responsibleId: contactId });
-  const rows = data.vacancies.filter((r) => r.responsible_contact_id === contactId);
+  const rows = data.vacancies.filter((r) => r.status === "vacant" && (r.responsibles || []).some((rp) => rp.contact_id === contactId));
   return rows.map((r) => ({ designation_name: r.designation_name, location_name: r.location_name, level_label: r.level_label }));
 }

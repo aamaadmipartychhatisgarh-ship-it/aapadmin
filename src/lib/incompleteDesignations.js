@@ -173,7 +173,8 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     peopleRows = await query(
       `SELECT ${levelIdExpr} AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name,
               COALESCE(c.photo_url, w.photo_url) AS photo_url,
-              lac.name AS assembly_name
+              lac.name AS assembly_name,
+              c.lok_sabha_id AS raw_lok_sabha_id, c.district_id AS raw_district_id, c.assembly_id AS raw_assembly_id
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
          JOIN designations d ON d.id = cd.designation_id AND d.level = ?
@@ -205,7 +206,9 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     for (let i = 0; i < cids.length; i += 1000) {
       const chunk = cids.slice(i, i + 1000);
       // eslint-disable-next-line no-await-in-loop
-      const rows = await query(`SELECT contact_id, wing FROM contact_wings WHERE contact_id IN (${chunk.map(() => "?").join(",")})`, chunk).catch(() => []);
+      // No .catch: a failed lookup must surface as an error, never silently drop
+      // holders (which would turn filled positions into false vacancies).
+      const rows = await query(`SELECT contact_id, wing FROM contact_wings WHERE contact_id IN (${chunk.map(() => "?").join(",")})`, chunk);
       for (const w of rows) { if (!cwMap.has(w.contact_id)) cwMap.set(w.contact_id, []); cwMap.get(w.contact_id).push(w.wing); }
     }
     const effectiveWings = (r) => {
@@ -223,12 +226,29 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   }
   const allowedNorms = new Set(designations.map((d) => normName(d.name)));
 
-  // Bucket assigned people by EXACT (location id : designation id).
+  // Bucket assigned people by EXACT (location id : designation id). A holder whose
+  // location AT THIS LEVEL is missing, or is not a real location of this level in
+  // the master, is NOT counted against any position: it is collected as an
+  // UNMAPPED holder instead (a data problem, reported separately — see below).
+  const validLocIds = level === "state" ? null : new Set(allLocations.map((l) => l.id));
+  const unmapped = [];
   const bucket = new Map();
   for (const r of peopleRows) {
     const nm = idToNorm.get(r.designation_id) || normName(r.designation_name);
     if (!allowedNorms.has(nm)) continue;
     if (!personMatchesWing(r)) continue;
+    if (validLocIds && (r.loc_id == null || !validLocIds.has(Number(r.loc_id)))) {
+      unmapped.push({
+        contact_id: r.contact_id, person_name: r.person_name, norm: nm,
+        designation_id: r.designation_id,
+        designation_name: (repByNorm.get(nm) || {}).name || null,
+        reason: r.loc_id == null
+          ? `No ${LEVEL_LABEL[level]} saved on the contact`
+          : `Saved ${LEVEL_LABEL[level]} (id ${r.loc_id}) is not a valid ${LEVEL_LABEL[level]} in the location master`,
+        raw: { lok_sabha: r.raw_lok_sabha_id ?? null, district: r.raw_district_id ?? null, assembly: r.raw_assembly_id ?? null },
+      });
+      continue;
+    }
     const loc = r.loc_id ?? 0;
     const key = `${loc}:${nm}`;
     if (!bucket.has(key)) bucket.set(key, []);
@@ -236,11 +256,39 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     bucket.get(key).push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url, assembly_name: r.assembly_name || null });
   }
 
-  // Build one row per (location × level-designation). FILLED iff ≥1 person.
+  // Where could an unmapped holder belong? Narrowed by the most specific VALID
+  // higher-level location saved on their contact (e.g. an Assembly-level holder
+  // with a valid District can only be in that District's assemblies); with none,
+  // any location of this level is possible.
+  let couldBeAt = () => false;
+  if (unmapped.length) {
+    const all = await query("SELECT id, type, parent_id FROM locations");
+    const byId = new Map(all.map((x) => [x.id, x]));
+    const isType = (id, t) => id != null && byId.get(Number(id))?.type === t;
+    const anchorTypes = { lok_sabha: [], district: ["lok_sabha"], assembly: ["district", "lok_sabha"], block: ["assembly", "district", "lok_sabha"], zone: [] }[level] || [];
+    for (const u of unmapped) {
+      u.anchor = null;
+      for (const t of anchorTypes) {
+        const id = t === "lok_sabha" ? u.raw.lok_sabha : t === "district" ? u.raw.district : u.raw.assembly;
+        if (isType(id, t === "assembly" ? "assembly" : t)) { u.anchor = Number(id); break; }
+      }
+    }
+    const under = (locId, anchor) => {
+      let cur = byId.get(locId), guard = 0;
+      while (cur && guard++ < 12) { if (cur.id === anchor) return true; cur = cur.parent_id != null ? byId.get(cur.parent_id) : null; }
+      return false;
+    };
+    couldBeAt = (u, locId) => u.anchor == null || under(locId, u.anchor);
+  }
+
+  // Build one row per (location × level-designation). FILLED iff ≥1 person is
+  // mapped to that exact location. An unfilled position is NEEDS REVIEW (not
+  // vacant) when an unmapped holder of the same designation could belong to it.
   const allRows = [];
   for (const loc of locations) {
     for (const d of designations) {
       const people = bucket.get(`${loc.id}:${normName(d.name)}`) || [];
+      const reviewBy = people.length ? [] : unmapped.filter((u) => u.norm === normName(d.name) && couldBeAt(u, loc.id));
       allRows.push({
         location_id: loc.id,
         location_name: loc.name,
@@ -253,6 +301,9 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
         people,
         person_names: people.map((p) => p.person_name).join(", "),
         filled: people.length > 0,
+        // filled | vacant | review (an unmapped holder may fill it — check the data)
+        status: people.length > 0 ? "filled" : reviewBy.length ? "review" : "vacant",
+        review_people: reviewBy.map((u) => ({ contact_id: u.contact_id, person_name: u.person_name, reason: u.reason })),
       });
     }
   }
@@ -298,6 +349,9 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     total: allRows.length,
     filled: allRows.filter((r) => r.filled).length,
     blank: allRows.filter((r) => !r.filled).length,
+    // Of the blank rows: genuinely vacant vs possibly filled by an unmapped holder.
+    vacant: allRows.filter((r) => r.status === "vacant").length,
+    review: allRows.filter((r) => r.status === "review").length,
     assigned_persons: assignedPersons.length,
     assigned_unique: uniquePersons.size,
   };
@@ -338,6 +392,9 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     all_locations: allLocations,
     rows,
     counts,
+    // Holders of this level's designations whose location mapping is missing or
+    // invalid — reported, never counted as filling (or freeing) a position.
+    unmapped_holders: unmapped.map(({ norm, raw, anchor, ...u }) => u),
     capped: peopleRows.length >= MAX_PEOPLE,
   };
 }

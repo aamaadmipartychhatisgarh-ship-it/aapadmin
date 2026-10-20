@@ -20,6 +20,43 @@ function fmtDateTime(v) {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(d);
 }
 
+// Mapping problems, shown apart from vacancies so a missing or invalid location
+// is never presented as a vacant position.
+function DataQualityPanel({ dq }) {
+  const holders = dq?.unmapped_holders || [];
+  const noLevel = dq?.designations_without_level || [];
+  const broken = dq?.hierarchy_incomplete || 0;
+  if (!holders.length && !noLevel.length && !broken) return null;
+  return (
+    <div className="bg-white border border-red-200 rounded-xl overflow-hidden mb-4" data-testid="data-quality">
+      <div className="px-4 py-3 border-b border-red-100 bg-red-50/60 flex items-center gap-2">
+        <Shield size={15} className="text-red-600" />
+        <h2 className="text-sm font-bold text-red-800">Data check — these are NOT counted as vacancies</h2>
+      </div>
+      <div className="p-4 space-y-3 text-sm">
+        {holders.length > 0 && (
+          <div>
+            <div className="text-xs font-semibold text-gray-600 mb-1">{holders.length} designation holder{holders.length === 1 ? "" : "s"} with a missing or invalid location — related positions show as “Needs review”</div>
+            <ul className="space-y-0.5 max-h-40 overflow-y-auto">
+              {holders.map((u, i) => (
+                <li key={`${u.level}:${u.contact_id}:${u.designation_id}:${i}`} className="text-xs text-gray-700">
+                  <span className="font-semibold">{u.person_name}</span> · {u.designation_name} ({u.level_label}) — {u.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {noLevel.length > 0 && (
+          <div className="text-xs text-gray-700"><span className="font-semibold">{noLevel.length} designation{noLevel.length === 1 ? "" : "s"} in the Designation Master {noLevel.length === 1 ? "has" : "have"} no level</span>, so no positions can be derived for them: {noLevel.map((d) => d.name).join(", ")}</div>
+        )}
+        {broken > 0 && (
+          <div className="text-xs text-gray-700"><span className="font-semibold">{broken} position{broken === 1 ? "" : "s"}</span> {broken === 1 ? "sits" : "sit"} in a location whose parent area is missing in the location master (still listed, marked in the table).</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function reminderChip(status) {
   const s = String(status || "").toLowerCase();
   if (s === "sent") return "bg-green-50 text-green-700 border-green-200";
@@ -93,6 +130,8 @@ export default function VacanciesPage() {
       if (!r.ok) throw new Error("load failed");
       setData(await r.json());
     } catch {
+      // Drop any earlier result: stale rows next to a failed load would be misread.
+      setData(null);
       setErr("Could not load the vacancy dashboard. Please try again.");
     } finally {
       setLoading(false);
@@ -117,19 +156,20 @@ export default function VacanciesPage() {
   const assemblies = useMemo(() => locs.assembly.filter((a) => !districtId || String(a.parent_id) === String(districtId)), [locs.assembly, districtId]);
   const blocks = useMemo(() => locs.block.filter((b) => !assemblyId || String(b.parent_id) === String(assemblyId)), [locs.block, assemblyId]);
 
-  async function sendReminder(row) {
-    if (!row.responsible_contact_id) return;
-    setBusyId(row.responsible_contact_id + ":" + row.designation_id + ":" + row.location_id);
+  // One reminder per responsible person (covers all their open vacancies).
+  async function sendReminder(rp) {
+    if (!rp?.contact_id) return;
+    setBusyId(rp.contact_id);
     try {
       const r = await fetch("/api/vacancies/remind", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contact_id: row.responsible_contact_id }),
+        body: JSON.stringify({ contact_id: rp.contact_id }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { flash("error", d.message || "Could not send the reminder."); return; }
       if (d.status === "sent" && d.wa_url) {
         window.open(d.wa_url, "_blank", "noopener,noreferrer");
-        flash("success", `WhatsApp opened for ${row.responsible_name} (${d.count} vacancy${d.count === 1 ? "" : "ies"}).`);
+        flash("success", `WhatsApp opened for ${rp.name} (${d.count} vacanc${d.count === 1 ? "y" : "ies"}).`);
       } else if (d.status === "failed") {
         flash("error", d.message || "Reminder failed — no valid WhatsApp number.");
       }
@@ -183,10 +223,13 @@ export default function VacanciesPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
-        <StatCard label="Total Designations" value={c.total} tone="brand" />
+      <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 mb-4">
+        <StatCard label="Total Positions" value={c.total} tone="brand" />
         <StatCard label="Filled" value={c.filled} tone="green" />
-        <StatCard label="Incomplete / Vacant" value={c.vacant} tone="amber" />
+        <StatCard label="Vacant" value={c.vacant} tone="amber" />
+        {/* Not vacant: a holder of the designation exists but their location is
+            missing/invalid, so the position can't be confirmed either way. */}
+        <StatCard label="Needs Review" value={c.review} tone="red" />
         <StatCard label="Reminders Sent" value={c.reminders_sent} tone="green" />
         <StatCard label="Reminders Pending" value={c.reminders_pending} tone="amber" />
         <StatCard label="Reminders Failed" value={c.reminders_failed} tone="red" />
@@ -222,8 +265,9 @@ export default function VacanciesPage() {
           </select>
           <MultiSelect options={wingOptions} value={wingF} onChange={setWingF} allLabel="All Wings" className="h-10" />
           <select className={selCls} value={statusF} onChange={(e) => setStatusF(e.target.value)}>
-            <option value="">Filled &amp; Vacant</option>
+            <option value="">Vacant &amp; needs review</option>
             <option value="vacant">Vacant only</option>
+            <option value="review">Needs review only</option>
             <option value="filled">Filled only</option>
           </select>
           <select className={selCls} value={reminderF} onChange={(e) => setReminderF(e.target.value)}>
@@ -246,12 +290,14 @@ export default function VacanciesPage() {
 
       {err && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
 
+      <DataQualityPanel dq={data?.data_quality} />
+
       {/* Hierarchy drill-down */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-4">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
           <MapPin size={16} style={{ color: BRAND }} />
           <h2 className="text-sm font-bold text-gray-900">Hierarchy-wise Vacancy Summary</h2>
-          <span className="ml-auto text-xs text-gray-400">Total · Filled · Vacant · Incomplete %</span>
+          <span className="ml-auto text-xs text-gray-400">Total · Filled · Vacant · Review · Vacant %</span>
         </div>
         <div className="overflow-x-auto max-h-72 overflow-y-auto">
           <table className="w-full text-sm min-w-[720px]">
@@ -263,14 +309,15 @@ export default function VacanciesPage() {
                 <th className="px-4 py-2.5 font-semibold text-right">Total</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Filled</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Vacant</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Incomplete %</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Review</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Vacant %</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
               ) : !data?.hierarchy?.length ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No organizational data for this scope.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">{err ? "Data unavailable." : "No organizational data for this scope."}</td></tr>
               ) : data.hierarchy.map((h) => (
                 <tr key={h.level + ":" + h.location_id} className="hover:bg-gray-50">
                   <td className="px-4 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">{h.level_label}</span></td>
@@ -279,6 +326,7 @@ export default function VacanciesPage() {
                   <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{h.total}</td>
                   <td className="px-4 py-2.5 text-right text-green-700">{h.filled}</td>
                   <td className="px-4 py-2.5 text-right text-amber-700">{h.vacant}</td>
+                  <td className="px-4 py-2.5 text-right text-red-600">{h.review || 0}</td>
                   <td className="px-4 py-2.5 text-right"><span className={h.incomplete_pct >= 50 ? "text-red-600 font-semibold" : "text-gray-600"}>{h.incomplete_pct}%</span></td>
                 </tr>
               ))}
@@ -294,67 +342,73 @@ export default function VacanciesPage() {
           {data?.capped && <span className="ml-auto text-xs text-amber-600">Showing the first {data.vacancies.length} rows — narrow the filters to see more.</span>}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1000px]">
+          <table className="w-full text-sm min-w-[960px]">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
                 <th className="px-3 py-3 font-semibold">Level</th>
                 <th className="px-3 py-3 font-semibold">Location</th>
-                <th className="px-3 py-3 font-semibold">Vacant Designation</th>
+                <th className="px-3 py-3 font-semibold">Designation</th>
                 <th className="px-3 py-3 font-semibold">Status</th>
-                <th className="px-3 py-3 font-semibold">Responsible Person</th>
-                <th className="px-3 py-3 font-semibold">Mobile</th>
-                <th className="px-3 py-3 font-semibold">Reminder</th>
-                <th className="px-3 py-3 font-semibold">Last Reminder</th>
-                <th className="px-3 py-3 font-semibold text-right">Action</th>
+                <th className="px-3 py-3 font-semibold">Responsible Person · Reminder</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={9} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+              ) : err ? (
+                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400">Vacancies could not be calculated — no positions are shown.</td></tr>
               ) : !data?.vacancies?.length ? (
-                <tr><td colSpan={9} className="px-4 py-16 text-center text-gray-400"><CheckCircle2 size={28} className="mx-auto mb-2 opacity-40" />No vacancies for these filters.</td></tr>
-              ) : data.vacancies.map((r, i) => {
-                const filled = statusF === "filled";
-                const rowBusy = busyId === (r.responsible_contact_id + ":" + r.designation_id + ":" + r.location_id);
-                return (
-                  <tr key={`${r.level}:${r.location_id}:${r.designation_id}:${r.responsible_contact_id || "x"}:${i}`} className="hover:bg-gray-50">
-                    <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">{r.level_label}</span></td>
-                    <td className="px-3 py-2.5 text-gray-700">{r.location_name || "—"}</td>
-                    <td className="px-3 py-2.5 font-medium text-gray-900">{r.designation_name}</td>
-                    <td className="px-3 py-2.5">
-                      {filled
-                        ? <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200">Filled</span>
-                        : <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">Vacant</span>}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {r.responsible_contact_id
-                        ? <><span className="text-gray-900 font-medium">{r.responsible_name}</span>{r.responsible_role && <span className="block text-[11px] text-gray-400">{r.responsible_role}</span>}</>
-                        : <span className="text-red-600 text-xs font-medium">{r.responsible_name}</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-gray-600 font-mono text-xs">{r.responsible_mobile || "—"}</td>
-                    <td className="px-3 py-2.5">
-                      {r.reminder_status === "none"
-                        ? <span className="text-gray-400">—</span>
-                        : <span className={`text-xs font-medium px-2 py-0.5 rounded-full border capitalize ${reminderChip(r.reminder_status)}`}>{r.reminder_status}{r.reminder_attempts ? ` · ${r.reminder_attempts}` : ""}</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-gray-600 text-xs">{fmtDateTime(r.last_reminder_at)}</td>
-                    <td className="px-3 py-2.5 text-right">
-                      {!filled && r.responsible_contact_id ? (
-                        <button
-                          onClick={() => sendReminder(r)}
-                          disabled={rowBusy}
-                          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-white text-xs font-semibold disabled:opacity-60"
-                          style={{ background: "#22a45d" }}
-                        >
-                          {rowBusy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} WhatsApp
-                        </button>
-                      ) : !filled ? (
-                        <span className="text-[11px] text-gray-400">No responsible person</span>
-                      ) : <span className="text-gray-300">—</span>}
-                    </td>
-                  </tr>
-                );
-              })}
+                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400"><CheckCircle2 size={28} className="mx-auto mb-2 opacity-40" />No positions for these filters.</td></tr>
+              ) : data.vacancies.map((r) => (
+                <tr key={`${r.level}:${r.location_id}:${r.designation_id}`} className="hover:bg-gray-50 align-top" data-status={r.status}>
+                  <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">{r.level_label}</span></td>
+                  <td className="px-3 py-2.5 text-gray-700">
+                    {r.location_name || "—"}
+                    {/* Where this position sits in the hierarchy (grouping context). */}
+                    {[r.assembly_name, r.district_name, r.lok_sabha_name].filter((x) => x && x !== r.location_name).length > 0 && (
+                      <span className="block text-[11px] text-gray-400">{[r.assembly_name, r.district_name, r.lok_sabha_name].filter((x) => x && x !== r.location_name).join(" · ")}</span>
+                    )}
+                    {r.hierarchy_incomplete && <span className="block text-[11px] text-red-500">Parent area missing in master</span>}
+                  </td>
+                  <td className="px-3 py-2.5 font-medium text-gray-900">{r.designation_name}</td>
+                  <td className="px-3 py-2.5">
+                    {r.status === "filled"
+                      ? <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200">Filled</span>
+                      : r.status === "review"
+                        ? <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200" title="A holder of this designation has a missing/invalid location">Needs review</span>
+                        : <span className="text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">VACANT</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {r.status === "filled" ? (
+                      <span className="text-gray-600 text-xs">{r.person_names || "—"}</span>
+                    ) : r.status === "review" ? (
+                      <div className="text-xs text-gray-600 space-y-0.5">
+                        {(r.review_people || []).map((p) => (
+                          <div key={p.contact_id}><span className="font-medium text-gray-900">{p.person_name}</span> holds this designation — {p.reason}</div>
+                        ))}
+                      </div>
+                    ) : r.responsibles?.length ? (
+                      <div className="space-y-1.5">
+                        {r.responsibles.map((rp) => (
+                          <div key={rp.contact_id} className="flex items-center gap-2 flex-wrap">
+                            <span className="text-gray-900 font-medium">{rp.name}</span>
+                            {rp.role && <span className="text-[11px] text-gray-400">{rp.role}</span>}
+                            <span className="text-gray-500 font-mono text-[11px]">{rp.mobile || "—"}</span>
+                            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border capitalize ${reminderChip(rp.reminder_status)}`}>{rp.reminder_status}{rp.reminder_attempts ? ` · ${rp.reminder_attempts}` : ""}</span>
+                            {rp.last_reminder_at && <span className="text-[11px] text-gray-400">{fmtDateTime(rp.last_reminder_at)}</span>}
+                            <button onClick={() => sendReminder(rp)} disabled={busyId === rp.contact_id}
+                              className="ml-auto inline-flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-white text-xs font-semibold disabled:opacity-60" style={{ background: "#22a45d" }}>
+                              {busyId === rp.contact_id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} WhatsApp
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className={`text-xs font-medium ${r.level === "state" ? "text-gray-500" : "text-red-600"}`}>{r.responsible_note || "—"}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
