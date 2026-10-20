@@ -14,6 +14,7 @@ import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import { RatingBadge } from "@/components/KaryakartaRating";
 import PhoneActions from "@/components/PhoneActions";
+import { postContactAction, contactActionText } from "@/lib/contactActionClient";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 
 // Voter & Worker Registration — the admin side of the public link drive.
@@ -1109,7 +1110,12 @@ function PeopleTab({ filterQs, onError, canDelete = false }) {
                   <td className="px-3 py-2.5 font-semibold text-gray-900">{p.name}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     {p.mobile || "—"}
-                    <PhoneActions phone={p.mobile} name={p.name} size={14} className="mt-1 flex" />
+                    <PhoneActions phone={p.mobile} name={p.name} size={14} className="mt-1 flex"
+                                  onAction={async (action) => { await postContactAction(`/api/registration/people/${p.id}/contact-action`, { action }); load(); }} />
+                    {/* Only that an action was STARTED — not that it was answered/delivered. */}
+                    {contactActionText(p.last_contact_action, p.last_contact_at) && (
+                      <span className="block mt-1 text-[11px] text-gray-400" data-testid="last-action">Last action: {contactActionText(p.last_contact_action, p.last_contact_at)} (initiated)</span>
+                    )}
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{p.assembly_name || "—"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{[p.effective_ward && `Ward ${p.effective_ward}`, p.area_booth].filter(Boolean).join(" · ") || "—"}</td>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft, FileDown, Pencil } from "lucide-react";
 import { RatingScale } from "@/components/KaryakartaRating";
 import PhoneActions from "@/components/PhoneActions";
+import { postContactAction, contactActionText } from "@/lib/contactActionClient";
 
 // The registration form. It is OTP-gated at EVERY entry — there is no anonymous
 // access — and who ends up credited is the signed-in karyakarta, derived from the
@@ -51,6 +52,7 @@ const STRINGS = {
     blocksLoadErr: "ब्लॉक लोड नहीं हो सके. कृपया दोबारा प्रयास करें.",
     list: "सूची", myVoters: "मेरे वोटर", myWorkers: "मेरे कार्यकर्ता", exportPdf: "PDF डाउनलोड करें",
     callAct: "कॉल करें", smsAct: "SMS भेजें", waAct: "WhatsApp", noValidMobile: "मान्य मोबाइल नंबर नहीं है",
+    lastAction: "अंतिम कार्रवाई", initiated: "शुरू की गई", actCall: "कॉल", actSms: "SMS", actWa: "WhatsApp",
     edit: "संपादित करें", editTitle: "रिकॉर्ड संपादित करें", saveChanges: "बदलाव सहेजें", cancel: "रद्द करें", updated: "रिकॉर्ड अपडेट हो गया.", editFailed: "बदलाव सहेजे नहीं जा सके. कृपया दोबारा प्रयास करें.",
     backToForm: "फॉर्म पर वापस जाएँ", totalVoters: "कुल वोटर", totalWorkers: "कुल कार्यकर्ता",
     noRecords: "अभी तक कोई रिकॉर्ड नहीं.", listLoadErr: "सूची लोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
@@ -123,6 +125,7 @@ const STRINGS = {
     blocksLoadErr: "Could not load Blocks. Please try again.",
     list: "List", myVoters: "My Voters", myWorkers: "My Workers", exportPdf: "Export PDF",
     callAct: "Call", smsAct: "Send SMS", waAct: "WhatsApp", noValidMobile: "No valid mobile number",
+    lastAction: "Last action", initiated: "initiated", actCall: "Call", actSms: "SMS", actWa: "WhatsApp",
     edit: "Edit", editTitle: "Edit record", saveChanges: "Save changes", cancel: "Cancel", updated: "Record updated.", editFailed: "Could not save the changes. Please try again.",
     backToForm: "Back to form", totalVoters: "Total Voters", totalWorkers: "Total Workers",
     noRecords: "No records yet.", listLoadErr: "Could not load the list. Please try again.",
@@ -1030,6 +1033,8 @@ function PublicList({ token, t, lang, constituencies, initial, onBack, toggleLan
   const [err, setErr] = useState("");
   const [editing, setEditing] = useState(null); // the record being edited, or null
   const [notice, setNotice] = useState("");
+  const [reloadKey, setReloadKey] = useState(0); // bump to re-fetch (new order after an action)
+  const apiBase = token ? `/api/public/registration/${encodeURIComponent(token)}` : "/api/public/registration";
 
   useEffect(() => {
     let alive = true;
@@ -1041,7 +1046,7 @@ function PublicList({ token, t, lang, constituencies, initial, onBack, toggleLan
       .catch(() => { if (alive) setErr(t.listLoadErr); })
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [token, type, t.listLoadErr]);
+  }, [token, type, t.listLoadErr, reloadKey]);
 
   const Tab = ({ value, label }) => (
     <button type="button" onClick={() => setType(value)}
@@ -1098,11 +1103,17 @@ function PublicList({ token, t, lang, constituencies, initial, onBack, toggleLan
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-gray-900 truncate">{r.name}</div>
                   <div className="text-xs text-gray-500">{r.mobile || "—"}{r.assembly_name ? ` · ${r.assembly_name}` : ""}</div>
+                  {contactActionText(r.last_contact_action, r.last_contact_at, { call: t.actCall, sms: t.actSms, whatsapp: t.actWa }) && (
+                    <div className="text-[11px] text-gray-400 mt-0.5" data-testid="last-action">
+                      {t.lastAction}: {contactActionText(r.last_contact_action, r.last_contact_at, { call: t.actCall, sms: t.actSms, whatsapp: t.actWa })} ({t.initiated})
+                    </div>
+                  )}
                 </div>
                 {/* Call / SMS / WhatsApp + Edit — wraps under the name on narrow screens. */}
                 <div className="flex items-center gap-1.5 w-full justify-end sm:w-auto sm:ml-auto">
                 <PhoneActions phone={r.mobile} name={r.name} size={15} className="shrink-0"
-                              labels={{ call: t.callAct, sms: t.smsAct, whatsapp: t.waAct, invalid: t.noValidMobile }} />
+                              labels={{ call: t.callAct, sms: t.smsAct, whatsapp: t.waAct, invalid: t.noValidMobile }}
+                              onAction={async (action) => { await postContactAction(`${apiBase}/contact-action`, { id: r.id, action }); setReloadKey((k) => k + 1); }} />
                 <button type="button" onClick={() => { setNotice(""); setEditing(r); }} data-testid="edit-record"
                         className="shrink-0 h-9 px-3 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 inline-flex items-center gap-1.5">
                   <Pencil size={14} />{t.edit}

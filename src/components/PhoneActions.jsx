@@ -10,7 +10,10 @@ const DEFAULT_LABELS = { call: "Call", sms: "Send SMS", whatsapp: "WhatsApp", in
 // records or reports that a call or message happened. When the stored number
 // is missing or not a valid Indian mobile, the icons are shown disabled with an
 // explanation instead of building a link to a wrong number.
-export default function PhoneActions({ phone, name, labels, size = 15, className = "" }) {
+// onAction(action) — optional: called with "call" | "sms" | "whatsapp" when the
+// user clicks a live icon (the link still opens normally). Lists use it to record
+// that an action was INITIATED.
+export default function PhoneActions({ phone, name, labels, size = 15, className = "", onAction }) {
   const L = { ...DEFAULT_LABELS, ...(labels || {}) };
   const links = phoneActionLinks(phone);
   const box = "w-8 h-8 rounded-lg inline-flex items-center justify-center border";
@@ -36,7 +39,7 @@ export default function PhoneActions({ phone, name, labels, size = 15, className
   return (
     <span className={`inline-flex items-center gap-1 ${className}`} onClick={(e) => e.stopPropagation()} data-testid="phone-actions">
       {items.map(({ href, Icon, label, cls, key, external }) => (
-        <a key={key} href={href} data-action={key}
+        <a key={key} href={href} data-action={key} onClick={() => onAction?.(key)}
            {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
            title={`${label} ${who}(${links.display})`} aria-label={`${label} ${who}${links.display}`}
            className={`${box} bg-white ${cls}`}>

@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSchema";
+import { UNCONTACTED_FIRST_SQL } from "@/lib/registrationContactAction";
 
 // Server-side aggregation for the Voter & Worker Registration dashboard. Every
 // number is computed in SQL (COUNT / GROUP BY) so the client never pulls raw rows
@@ -259,7 +260,9 @@ export async function getPeoplePage(filters = {}) {
   const pageSize = Math.min(200, Math.max(1, Number(filters.pageSize) || 25));
   const offset = (page - 1) * pageSize;
   const f = peopleFilters(filters);
-  const orderBy = PEOPLE_SORTS[filters.sort] || PEOPLE_SORTS.newest;
+  // Records nobody has called / messaged / WhatsApp'd yet come first; the chosen
+  // sort then orders each group.
+  const orderBy = `${UNCONTACTED_FIRST_SQL}, ${PEOPLE_SORTS[filters.sort] || PEOPLE_SORTS.newest}`;
 
   const [{ total }] = await query(`SELECT COUNT(*) AS total ${PEOPLE_FROM} ${f.where}`, f.params);
   // pageSize/offset are clamped integers above — mysql2's execute() rejects

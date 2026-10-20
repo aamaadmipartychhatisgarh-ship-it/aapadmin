@@ -160,6 +160,24 @@ export async function ensureRegistrationSchema() {
     // registration (Designation Master id). It is only the PROPOSED designation — the
     // approval workflow (designation_assignments) owns its approval state.
     await ensureColumn("reg_people", "designation_id", "INT NULL");
+    // Latest communication action INITIATED from a list (Call / SMS / WhatsApp) —
+    // what the user clicked and when, never whether it was answered or delivered.
+    // Lists show records with no action first. Every click is also logged in
+    // reg_contact_actions for audit.
+    await ensureColumn("reg_people", "last_contact_action", "VARCHAR(16) NULL");
+    await ensureColumn("reg_people", "last_contact_at", "DATETIME NULL");
+    await query(
+      `CREATE TABLE IF NOT EXISTS reg_contact_actions (
+         id INT AUTO_INCREMENT PRIMARY KEY,
+         person_id INT NOT NULL,
+         action VARCHAR(16) NOT NULL,
+         by_user_id INT NULL,
+         by_worker_id INT NULL,
+         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         KEY idx_rca_person (person_id),
+         KEY idx_rca_created (created_at)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+    );
     // --- Mobile OTP verification -------------------------------------------
     // One row per OTP request. The CODE IS NEVER STORED: 2Factor generates and
     // checks it, and we keep only their opaque session id, so a dump of this

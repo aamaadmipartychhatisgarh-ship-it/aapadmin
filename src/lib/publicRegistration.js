@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { buildRegistrationPdf, registrationPdfFilename } from "@/lib/registrationPdf";
 import { MARKS_ORDER_SQL } from "@/lib/registrationStats";
+import { UNCONTACTED_FIRST_SQL, normalizeContactAction, recordContactAction } from "@/lib/registrationContactAction";
 import {
   ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
@@ -227,7 +228,7 @@ export async function publicOwnList(req, token, type) {
                 p.ward_name, p.area_booth, p.worker_rating, p.registered_at, w.name AS worker_name
            FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worker_id
           WHERE ${where.join(" AND ")}
-          ORDER BY ${personType === "worker" ? MARKS_ORDER_SQL : "p.registered_at DESC, p.id DESC"}
+          ORDER BY ${UNCONTACTED_FIRST_SQL}, ${personType === "worker" ? MARKS_ORDER_SQL : "p.registered_at DESC, p.id DESC"}
           LIMIT 5000`,
         params
       );
@@ -244,10 +245,11 @@ export async function publicOwnList(req, token, type) {
 
     const rows = await query(
       `SELECT p.id, p.person_type, p.name, p.mobile, p.photo_url, p.address, p.assembly_id, p.assembly_name,
-              p.ward_number, p.ward_name, p.block_id, p.area_booth, p.worker_rating, p.registered_at
+              p.ward_number, p.ward_name, p.block_id, p.area_booth, p.worker_rating, p.registered_at,
+              p.last_contact_action, p.last_contact_at
          FROM reg_people p
         WHERE ${where.join(" AND ")}
-        ORDER BY ${personType === "worker" ? MARKS_ORDER_SQL : "p.registered_at DESC, p.id DESC"}
+        ORDER BY ${UNCONTACTED_FIRST_SQL}, ${personType === "worker" ? MARKS_ORDER_SQL : "p.registered_at DESC, p.id DESC"}
         LIMIT 500`,
       params
     );
@@ -561,5 +563,33 @@ export async function updateOwnRegistration(req, token) {
     if (e?.code === "ER_DUP_ENTRY") return NextResponse.json({ message: "This mobile number is already registered.", duplicate: true }, { status: 409, headers: NO_STORE });
     console.error("[registration] public edit error:", e);
     return NextResponse.json({ message: "Could not save the changes. Please try again." }, { status: 500, headers: NO_STORE });
+  }
+}
+
+// POST — record that the signed-in karyakarta INITIATED a Call / SMS / WhatsApp on
+// one of their own registrations (same ownership rule as their list and edit).
+export async function recordOwnContactAction(req, token) {
+  try {
+    await ensureRegistrationSchema();
+    const link = await resolveLink(token);
+    if (!link) return NextResponse.json({ message: token ? INVALID_LINK : NO_OPEN_DRIVE }, { status: 404, headers: NO_STORE });
+    const workerId = await sessionWorkerId(req, token, link);
+    if (!workerId) return NextResponse.json({ message: "Please verify your mobile number with OTP to continue." }, { status: 401, headers: NO_STORE });
+    const d = await req.json().catch(() => null);
+    const id = /^\d+$/.test(String(d?.id || "")) ? Number(d.id) : null;
+    const action = normalizeContactAction(d?.action);
+    if (!id || !action) return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
+    const [rec] = await query("SELECT id, campaign_id, worker_id, status FROM reg_people WHERE id = ? LIMIT 1", [id]);
+    if (!rec || String(rec.campaign_id) !== String(link.campaign_id) || rec.status !== "active") {
+      return NextResponse.json({ message: "Record not found." }, { status: 404, headers: NO_STORE });
+    }
+    if (String(rec.worker_id) !== String(workerId)) {
+      return NextResponse.json({ message: "You can only do this for registrations you added." }, { status: 403, headers: NO_STORE });
+    }
+    const row = await recordContactAction(id, action, { workerId });
+    return NextResponse.json({ ok: true, person: row }, { headers: NO_STORE });
+  } catch (e) {
+    console.error("[registration] contact action error:", e);
+    return NextResponse.json({ message: "Could not record the action." }, { status: 500, headers: NO_STORE });
   }
 }
