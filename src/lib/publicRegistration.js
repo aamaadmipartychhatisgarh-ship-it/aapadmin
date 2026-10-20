@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { buildRegistrationPdf, registrationPdfFilename } from "@/lib/registrationPdf";
+import { MARKS_ORDER_SQL } from "@/lib/registrationStats";
 import {
   ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
@@ -226,7 +227,7 @@ export async function publicOwnList(req, token, type) {
                 p.ward_name, p.area_booth, p.worker_rating, p.registered_at, w.name AS worker_name
            FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worker_id
           WHERE ${where.join(" AND ")}
-          ORDER BY p.registered_at DESC, p.id DESC
+          ORDER BY ${personType === "worker" ? MARKS_ORDER_SQL : "p.registered_at DESC, p.id DESC"}
           LIMIT 5000`,
         params
       );
@@ -246,7 +247,7 @@ export async function publicOwnList(req, token, type) {
               p.ward_number, p.ward_name, p.block_id, p.area_booth, p.worker_rating, p.registered_at
          FROM reg_people p
         WHERE ${where.join(" AND ")}
-        ORDER BY p.registered_at DESC, p.id DESC
+        ORDER BY ${personType === "worker" ? MARKS_ORDER_SQL : "p.registered_at DESC, p.id DESC"}
         LIMIT 500`,
       params
     );

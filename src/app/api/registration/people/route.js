@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
-import { getPeoplePage } from "@/lib/registrationStats";
+import { defaultPeopleSort, getPeoplePage } from "@/lib/registrationStats";
 import { peopleScopeCond } from "@/lib/registrationScope";
 
 // The full registration list — "complete details of which worker added which
@@ -15,9 +15,11 @@ export async function GET(req) {
     const { session, error } = await requireRegistrationAccess();
     if (error) return error;
     const { searchParams } = new URL(req.url);
+    const filters = parseRegFilters(searchParams);
     const data = await getPeoplePage({
-      ...parseRegFilters(searchParams),
-      sort: searchParams.get("sort") || "newest",
+      ...filters,
+      // A Worker list defaults to marks (highest first); otherwise newest first.
+      sort: searchParams.get("sort") || defaultPeopleSort(filters.personType),
       page: parseInt(searchParams.get("page") || "1", 10) || 1,
       pageSize: parseInt(searchParams.get("pageSize") || "25", 10) || 25,
       // Zone-wise access control: a caller only sees records in their territory.

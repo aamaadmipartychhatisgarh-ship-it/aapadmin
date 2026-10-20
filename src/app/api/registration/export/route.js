@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
-import { getPeoplePage, getWorkerRanking, getBlockRanking } from "@/lib/registrationStats";
+import { defaultPeopleSort, getPeoplePage, getWorkerRanking, getBlockRanking } from "@/lib/registrationStats";
 import { peopleScopeCond, workerScopeCond } from "@/lib/registrationScope";
 import { buildRegistrationPdf, registrationPdfFilename } from "@/lib/registrationPdf";
 import { isCaller } from "@/lib/permissions";
@@ -73,7 +73,7 @@ export async function GET(req) {
       const all = [];
       let page = 1;
       for (;;) {
-        const d = await getPeoplePage({ ...f, sort: searchParams.get("sort") || "newest", page, pageSize: 500, scope });
+        const d = await getPeoplePage({ ...f, sort: searchParams.get("sort") || defaultPeopleSort(f.personType), page, pageSize: 500, scope });
         all.push(...d.people);
         if (page >= d.pages || all.length >= 50000) break;
         page += 1;

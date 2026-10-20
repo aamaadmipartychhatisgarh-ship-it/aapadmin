@@ -241,7 +241,17 @@ const PEOPLE_SORTS = {
   name_za: "p.name DESC",
   worker: "w.name ASC, p.registered_at DESC",
   ward: "p.ward_number ASC, p.registered_at DESC",
+  // Karyakarta Rating (marks out of 10), highest first — compared as a NUMBER
+  // (CAST, never the text), unrated last; equal marks keep newest-first, then id.
+  marks: "(p.worker_rating IS NULL) ASC, CAST(p.worker_rating AS DECIMAL(5,2)) DESC, p.registered_at DESC, p.id DESC",
 };
+// SQL ORDER BY for the marks sort, for queries outside getPeoplePage.
+export const MARKS_ORDER_SQL = PEOPLE_SORTS.marks;
+
+// Default list order: a Worker list is ranked by marks; any other list stays newest-first.
+export function defaultPeopleSort(personType) {
+  return personType === "worker" ? "marks" : "newest";
+}
 
 export async function getPeoplePage(filters = {}) {
   await ensureRegistrationSchema();
