@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { guard } from "@/lib/leaderAssessmentGuard";
 import { syncAssemblies } from "@/lib/leaderAssessment";
 import { fetchComparisonDataset } from "@/lib/mlaComparison";
+import { query } from "@/lib/db";
+import { ASSEMBLY_CATEGORY_LABEL, normalizeAssemblyCategory } from "@/lib/assemblyCategoryOptions";
 import {
   buildComparisonWorkbookBuffer,
   buildComparisonPdfBuffer,
@@ -12,7 +14,9 @@ export const dynamic = "force-dynamic";
 
 // GET /api/leader-assessment/comparison/export?format=xlsx|pdf
 //   &zone_id=&lok_sabha_id=&district_id=&assembly_id=   (same filters as the list)
+//   &party=&category=                                    (Party / Assembly Category filters)
 //   &ids=12,34,56                                        (optional: selected assemblies)
+//   &disposition=inline                                  (PDF opened for Print instead of download)
 //
 // Exports the COMPLETE filtered comparison — NEVER limited to a pagination page
 // (§10-§13). It rebuilds the dataset from the SAME source + filters the screen
@@ -49,12 +53,14 @@ export async function GET(req) {
     const subtitle = `${count} assembl${count === 1 ? "y" : "ies"} · exported ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}`;
 
     if (format === "pdf") {
-      const buf = await buildComparisonPdfBuffer(rows, subtitle);
+      const criteria = await describeCriteria(filters, idsParam ? count : 0);
+      const buf = await buildComparisonPdfBuffer(rows, { subtitle, criteria });
+      const inline = searchParams.get("disposition") === "inline";
       return new NextResponse(new Uint8Array(buf), {
         status: 200,
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${comparisonExportFilename("pdf")}"`,
+          "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${comparisonExportFilename("pdf")}"`,
           "Cache-Control": "no-store",
         },
       });
@@ -73,4 +79,23 @@ export async function GET(req) {
     console.error("[LA] comparison export:", e);
     return NextResponse.json({ message: "Export failed." }, { status: 500 });
   }
+}
+
+// The comparison criteria in words ("District: Raipur, Durg", "Party: BJP", …) for
+// the PDF header, resolving location ids to their master names.
+async function describeCriteria(filters, selectedCount) {
+  const out = [];
+  const LEVELS = [["zone_id", "Zone"], ["lok_sabha_id", "Lok Sabha"], ["district_id", "District"], ["assembly_id", "Assembly"]];
+  for (const [key, label] of LEVELS) {
+    const ids = String(filters[key] || "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    if (!ids.length) continue;
+    const names = await query(`SELECT name FROM locations WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY name`, ids).catch(() => []);
+    out.push(`${label}: ${names.map((r) => r.name).join(", ") || ids.join(", ")}`);
+  }
+  if (String(filters.party || "").trim()) out.push(`Party: ${String(filters.party).trim()}`);
+  const cat = normalizeAssemblyCategory(filters.category);
+  if (cat) out.push(`Category: ${ASSEMBLY_CATEGORY_LABEL[cat]} Assembly`);
+  if (selectedCount) out.push(`Selected rows only (${selectedCount})`);
+  if (!out.length) out.push("All assemblies (no filters)");
+  return out;
 }

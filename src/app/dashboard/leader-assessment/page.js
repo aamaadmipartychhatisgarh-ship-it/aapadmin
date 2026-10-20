@@ -3345,6 +3345,33 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
   }, [geoParams, page]);
   useEffect(() => { load(); }, [load]);
 
+  // Print = the same complete PDF the export produces (every field, all filtered
+  // rows, landscape, paginated) — never the on-screen table, whose 20-row page and
+  // horizontal scroll would cut columns/rows off.
+  async function printComparison() {
+    if (exporting) return;
+    setExporting("print");
+    try {
+      const p = geoParams();
+      p.set("format", "pdf");
+      p.set("disposition", "inline");
+      if (selected.size) p.set("ids", [...selected].join(","));
+      const r = await fetch(`/api/leader-assessment/comparison/export?${p.toString()}`, { cache: "no-store" });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "Print failed."); return; }
+      const url = URL.createObjectURL(await r.blob());
+      const frame = document.createElement("iframe");
+      frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+      frame.src = url;
+      frame.onload = () => {
+        try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+        catch { window.open(url, "_blank"); }
+        setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60000);
+      };
+      document.body.appendChild(frame);
+    } catch { fail?.("Print failed — network error."); }
+    finally { setExporting(""); }
+  }
+
   async function exportAs(format) {
     if (exporting) return;
     setExporting(format);
@@ -3436,7 +3463,11 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
             </button>
             <button onClick={() => exportAs("pdf")} disabled={!!exporting || loading}
               className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold">
-              {exporting === "pdf" ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Export PDF
+              {exporting === "pdf" ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />} Export PDF
+            </button>
+            <button onClick={printComparison} disabled={!!exporting || loading} data-testid="comparison-print"
+              className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold">
+              {exporting === "print" ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Print
             </button>
           </div>
         }

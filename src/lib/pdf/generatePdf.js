@@ -59,9 +59,9 @@ const styles = StyleSheet.create({
 // text across two subset fonts that share an internal name makes the PDF library mix
 // their glyphs up. If the font files are missing the document still renders (Helvetica).
 const FONT_DIR = path.join(process.cwd(), "public", "fonts");
-const FONT_FAMILY = "NotoSansDeva";
+export const FONT_FAMILY = "NotoSansDeva";
 let fontsReady = null;
-function ensureFonts() {
+export function ensureFonts() {
   if (fontsReady !== null) return fontsReady;
   try {
     const reg = path.join(FONT_DIR, "NotoSansDevanagari_400Regular.ttf");
