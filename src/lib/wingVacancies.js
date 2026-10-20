@@ -25,6 +25,9 @@ import { loadLocationIndex, ancestryOf } from "@/lib/vacancyResponsibility";
 //     Wings). A holder whose saved Wings match none of the designation's Wings is a
 //     Wing mapping problem → NEEDS REVIEW + listed in the data check.
 //   • One entry per (Wing, level, location, role) — never duplicated.
+//   • Responsible person of a vacancy: the same Wing's same role one level up, in
+//     the vacancy's parent area (President → upper President, Prabhari → upper
+//     Prabhari, General Secretary → upper General Secretary). State has none.
 // Any failed query propagates (the API returns an error, no vacancies shown).
 
 export const WING_VACANCY_LEVELS = ["state", "lok_sabha", "district", "assembly"];
@@ -61,6 +64,32 @@ export function wingRoleOf(baseName, designationName, wingNames = []) {
   const rest = s.toLowerCase().replace(/[\/,.\-()&]+/g, " ").replace(LEVEL_WORDS, " ").replace(/\bwings?\b/g, " ").replace(/\s+/g, " ").trim();
   for (const [k, names] of Object.entries(ROLE_NAMES)) if (names.includes(rest)) return k;
   return null;
+}
+
+const PARENT_LEVEL = { lok_sabha: "state", district: "lok_sabha", assembly: "district" };
+
+// { label, level_label, area, status, people, note } for a vacant position:
+//   status "assigned"       — people = the upper-level holder(s) (name + held designation)
+//   status "not_assigned"   — the upper position exists but nobody holds it
+//   status "review"         — the upper position's holder has a mapping problem
+//   status "not_configured" — the Wing master has no such role at the upper level
+//   status "no_parent_area" — the vacancy's parent area is missing in the master
+//   status "top_level"      — State: there is no upper Wing level
+function responsibleFor(p, positions) {
+  const parent = PARENT_LEVEL[p.level];
+  if (!parent) return { status: "top_level", label: null, people: [], note: "State level — no upper Wing level" };
+  const label = `${LEVEL_LABEL[parent]} ${ROLE_LABEL[p.role]}, ${p.wing}`;
+  const areaId = parent === "state" ? 0 : parent === "lok_sabha" ? p.lok_sabha_id : p.district_id;
+  const areaName = parent === "state" ? "State" : parent === "lok_sabha" ? p.lok_sabha_name : p.district_name;
+  if (areaId == null) return { status: "no_parent_area", label, level_label: LEVEL_LABEL[parent], area: null, people: [], note: `${LEVEL_LABEL[parent]} area missing in the location master` };
+  const up = positions.get(`${p.wing}|${parent}|${areaId}|${p.role}`);
+  if (!up) return { status: "not_configured", label, level_label: LEVEL_LABEL[parent], area: areaName, people: [], note: `${label} is not configured in the Wing master` };
+  if (up.holders.length) {
+    return { status: "assigned", label: up.designations.map((d) => d.name).join(" / ") || label, level_label: LEVEL_LABEL[parent], area: areaName,
+      people: up.holders.map((h) => ({ contact_id: h.contact_id, name: h.name, designation: h.designation })), note: null };
+  }
+  if (up.review_people.length) return { status: "review", label, level_label: LEVEL_LABEL[parent], area: areaName, people: [], note: `${label} (${areaName}) needs review — holder's location or Wing is incomplete` };
+  return { status: "not_assigned", label, level_label: LEVEL_LABEL[parent], area: areaName, people: [], note: `${label} (${areaName}) — Not assigned` };
 }
 
 const asId = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 0 ? n : null; };
@@ -105,8 +134,9 @@ export async function buildWingVacancyDataset(session, filters = {}) {
   const wingMismatch = [];
   const unmapped = [];
 
+  // Every level is always scanned (even with a level filter): a vacancy's
+  // responsible person sits one level up.
   for (const level of WING_VACANCY_LEVELS) {
-    if (f.level && f.level !== level) continue;
     // eslint-disable-next-line no-await-in-loop
     const data = await fetchIncompleteDesignation(session, { level, status: "all" });
     // A truncated holder list would turn filled positions into false vacancies.
@@ -191,6 +221,16 @@ export async function buildWingVacancyDataset(session, filters = {}) {
     status: p.holders.length ? "filled" : p.review_people.length ? "review" : "vacant",
   }));
 
+  // Responsible person of each VACANT position: the holder(s) of the SAME role in
+  // the SAME Wing at the immediately upper level, in the vacancy's own parent area
+  // (Lok Sabha → State; District → its Lok Sabha; Assembly → its District).
+  // Holders are the position's matched holders above, so a person from another
+  // Wing, another role or another area can never be picked.
+  for (const p of all) {
+    if (p.status !== "vacant") continue;
+    p.responsible = responsibleFor(p, positions);
+  }
+
   // Wing roles the Wing master does not define at a level — data check, not vacancies.
   const notConfigured = [];
   for (const wing of wings) {
@@ -204,6 +244,7 @@ export async function buildWingVacancyDataset(session, filters = {}) {
 
   // Filters (cards + table share the scope; status narrows the table only).
   const scoped = all.filter((p) => {
+    if (f.level && p.level !== f.level) return false;
     if (f.wing && norm(p.wing) !== norm(f.wing)) return false;
     if (f.role && p.role !== f.role) return false;
     if (f.lokSabhaId && p.lok_sabha_id !== f.lokSabhaId) return false;
