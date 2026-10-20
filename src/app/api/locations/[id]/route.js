@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
+import { ensureAssemblyCategoryColumn, normalizeAssemblyCategory } from "@/lib/assemblyCategory";
 
 // PUT: rename a location and/or move it under a different parent
 // (e.g. shift a Lok Sabha to another Zone). Children move along with it.
@@ -25,6 +26,17 @@ export async function PUT(req, { params }) {
         return Response.json({ message: "A location cannot be its own parent" }, { status: 400 });
       }
       sets.push("parent_id = ?"); vals.push(d.parent_id || null);
+    }
+    // Reservation category (General / SC / ST) — assemblies only; blank clears it.
+    if ("reservation_category" in d) {
+      const [loc] = await query("SELECT type FROM locations WHERE id = ?", [id]);
+      if (!loc) return Response.json({ message: "Not found" }, { status: 404 });
+      if (loc.type !== "assembly") return Response.json({ message: "Reservation category applies to assemblies only" }, { status: 400 });
+      const raw = String(d.reservation_category ?? "").trim();
+      const cat = raw ? normalizeAssemblyCategory(raw) : null;
+      if (raw && !cat) return Response.json({ message: "Category must be General, SC or ST" }, { status: 400 });
+      if (!(await ensureAssemblyCategoryColumn())) return Response.json({ message: "Category column unavailable" }, { status: 500 });
+      sets.push("reservation_category = ?"); vals.push(cat);
     }
     if (!sets.length) return Response.json({ message: "No fields to update" }, { status: 400 });
     vals.push(id);

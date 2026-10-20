@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureLocationSortOrder, locationOrderSql, nextLokSabhaSortOrder } from "@/lib/locationOrder";
+import { ensureAssemblyCategoryColumn } from "@/lib/assemblyCategory";
 
 export async function GET(req) {
   try {
@@ -14,6 +15,7 @@ export async function GET(req) {
     }
     // Lok Sabha must display in its Master SEQUENCE (never alphabetically).
     await ensureLocationSortOrder();
+    const hasCategory = await ensureAssemblyCategoryColumn();
 
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type");
@@ -33,7 +35,7 @@ export async function GET(req) {
       return Response.json({ locations: rows }, { status: 200 });
     }
 
-    let sql = "SELECT id, type, name, parent_id, sort_order FROM locations WHERE 1=1";
+    let sql = `SELECT id, type, name, parent_id, sort_order${hasCategory ? ", reservation_category" : ""} FROM locations WHERE 1=1`;
     const params = [];
 
     if (type) {

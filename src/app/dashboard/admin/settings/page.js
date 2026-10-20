@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { ASSEMBLY_CATEGORIES, ASSEMBLY_CATEGORY_LABEL } from "@/lib/assemblyCategoryOptions";
 import { Settings as SettingsIcon, Map, Plus, PhoneCall, Users, ChevronRight, ChevronDown, Loader2, Pencil, Trash2, Check, X, Search, GripVertical, ArrowUpDown } from "lucide-react";
 import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
@@ -1159,6 +1160,8 @@ function TreeNode({ node, depth, onChanged }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(node.name);
   const [editParent, setEditParent] = useState(node.parent_id || "");
+  const isAssembly = node.type === "assembly";
+  const [editCategory, setEditCategory] = useState(node.reservation_category || "");
   const [parentOptions, setParentOptions] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1182,6 +1185,7 @@ function TreeNode({ node, depth, onChanged }) {
     e.stopPropagation();
     setEditName(node.name);
     setEditParent(node.parent_id || "");
+    setEditCategory(node.reservation_category || "");
     setError("");
     if (parentType) {
       const r = await fetch(`/api/locations?type=${parentType}`);
@@ -1196,7 +1200,7 @@ function TreeNode({ node, depth, onChanged }) {
     const r = await fetch(`/api/locations/${node.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editName, ...(parentType ? { parent_id: editParent || null } : {}) }),
+      body: JSON.stringify({ name: editName, ...(parentType ? { parent_id: editParent || null } : {}), ...(isAssembly ? { reservation_category: editCategory } : {}) }),
     });
     const d = await r.json().catch(() => ({}));
     setBusy(false);
@@ -1233,6 +1237,9 @@ function TreeNode({ node, depth, onChanged }) {
         {!editing ? (
           <>
             <span className="font-medium text-gray-800">{node.name}</span>
+            {isAssembly && node.reservation_category && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100" title="Reservation category">{ASSEMBLY_CATEGORY_LABEL[node.reservation_category] || node.reservation_category}</span>
+            )}
             <span className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               <button onClick={openEdit} title={parentType ? "Rename / move to another parent" : "Rename"} className="p-1.5 text-gray-400 hover:text-[#164FA3] hover:bg-blue-100 rounded-lg"><Pencil size={13} /></button>
               <button onClick={del} disabled={busy} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"><Trash2 size={13} /></button>
@@ -1246,6 +1253,12 @@ function TreeNode({ node, depth, onChanged }) {
               <select value={editParent} onChange={(e) => setEditParent(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white">
                 <option value="">— {TYPE_LABEL[parentType]} —</option>
                 {parentOptions.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+            {isAssembly && (
+              <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} title="Reservation category" className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white">
+                <option value="">— Category —</option>
+                {ASSEMBLY_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             )}
             <button onClick={saveEdit} disabled={busy || !editName.trim()} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"><Check size={15} /></button>

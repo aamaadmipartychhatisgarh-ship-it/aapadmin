@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 // GET /api/leader-assessment/comparison
 //   ?zone_id=&lok_sabha_id=&district_id=&assembly_id=  (each a comma list; §9)
 //   &party=                                            (Current MLA's saved party)
+//   &category=SC|GEN                                   (assembly reservation category)
 //   &page=&pageSize=                                    (server-side pagination; §13)
 //
 // Current MLA vs AAP Candidate VOTE comparison, one row per master assembly.
@@ -30,6 +31,7 @@ export async function GET(req) {
       district_id: searchParams.get("district_id"),
       assembly_id: searchParams.get("assembly_id"),
       party: searchParams.get("party"),
+      category: searchParams.get("category"),
     };
 
     const all = await fetchComparisonDataset(filters);

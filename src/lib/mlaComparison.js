@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { ensureAssemblyCategoryColumn, normalizeAssemblyCategory } from "@/lib/assemblyCategory";
 
 // ---------------------------------------------------------------------------
 // Current MLA vs AAP Candidate — VOTE comparison (single source of truth).
@@ -94,9 +95,16 @@ function toIdList(v) {
 // (the filter UI is multi-select) — each narrows the set with an IN clause. All
 // ids are the authoritative `locations` ids (zone/lok_sabha/district/assembly),
 // the same source the rest of the app filters by.
-function geoFilter({ zone_id, lok_sabha_id, district_id, assembly_id, party }) {
+function geoFilter({ zone_id, lok_sabha_id, district_id, assembly_id, party, category }, categoryReady = true) {
   const where = [];
   const params = [];
+  // Assembly reservation category (SC / General …) from the ASSEMBLY master row
+  // (al = the assembly's locations row) — never from the MLA's caste or party.
+  const cat = normalizeAssemblyCategory(category);
+  if (cat) {
+    if (categoryReady) { where.push("al.reservation_category = ?"); params.push(cat); }
+    else where.push("1 = 0");
+  }
   // Party filter — the Current MLA's SAVED party (mp.party), matched exactly but
   // case/space-insensitively, so picking a party brings in every MLA of it.
   const partyName = String(party ?? "").trim();
@@ -134,7 +142,8 @@ export function compareVotes(mlaVotes, aapVotes) {
 // applied by the caller AFTER this, and never affects totals/exports, spec §13).
 // One row per master-linked assembly.
 export async function fetchComparisonDataset(filters = {}) {
-  const { where: geoWhere, params: geoParams } = geoFilter(filters);
+  const categoryReady = await ensureAssemblyCategoryColumn();
+  const { where: geoWhere, params: geoParams } = geoFilter(filters, categoryReady);
   const whereSql = geoWhere.length ? `AND ${geoWhere.join(" AND ")}` : "";
 
   // Assemblies + current MLA + full geography (for filters + display). INNER JOIN
@@ -146,6 +155,7 @@ export async function fetchComparisonDataset(filters = {}) {
         a.id            AS assembly_id,
         a.location_id   AS assembly_loc_id,
         al.name         AS assembly_name,
+        ${categoryReady ? "al.reservation_category" : "NULL"} AS assembly_category,
         zl.id           AS zone_id,          zl.name  AS zone_name,
         lsl.id          AS lok_sabha_id,     lsl.name AS lok_sabha_name,
         dl.id           AS district_id,      dl.name  AS district_name,
@@ -218,6 +228,7 @@ export async function fetchComparisonDataset(filters = {}) {
       assembly_id: r.assembly_id,
       assembly_loc_id: r.assembly_loc_id,
       assembly_name: r.assembly_name || null,
+      assembly_category: r.assembly_category || null, // SC / GEN / ST from the assembly master
       zone_id: r.zone_id || null,
       zone_name: r.zone_name || null,
       lok_sabha_id: r.lok_sabha_id || null,
@@ -287,7 +298,8 @@ export function comparisonSummary(rows) {
 // there is no double counting, and the whole filtered dataset is aggregated in
 // the database — never a paginated subset. Also returns the AAP-vs-BJP margin.
 export async function fetchComparisonPartyTotals(filters = {}) {
-  const { where: geoWhere, params: geoParams } = geoFilter(filters);
+  const categoryReady = await ensureAssemblyCategoryColumn();
+  const { where: geoWhere, params: geoParams } = geoFilter(filters, categoryReady);
   const whereSql = geoWhere.length ? `AND ${geoWhere.join(" AND ")}` : "";
 
   // The four (party column, votes column) pairs a profile contributes.
@@ -325,10 +337,11 @@ export async function fetchComparisonPartyTotals(filters = {}) {
   return { bjp_total: bjp, inc_total: inc, aap_total: aap, aap_bjp_margin: margin, margin_leader };
 }
 
-// MLA count per saved party within the geo filters (the party filter itself is
-// ignored here), for the Party filter's options. Blank parties are left out.
+// MLA count per saved party within the geo + category filters (the party filter
+// itself is ignored here), for the Party filter's options. Blank parties are left out.
 export async function fetchComparisonPartyCounts(filters = {}) {
-  const { where: geoWhere, params: geoParams } = geoFilter({ ...filters, party: null });
+  const categoryReady = await ensureAssemblyCategoryColumn();
+  const { where: geoWhere, params: geoParams } = geoFilter({ ...filters, party: null }, categoryReady);
   const whereSql = geoWhere.length ? `AND ${geoWhere.join(" AND ")}` : "";
   const rows = await query(
     `SELECT MIN(TRIM(mp.party)) AS party, COUNT(*) AS n

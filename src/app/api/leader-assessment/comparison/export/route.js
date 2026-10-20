@@ -32,6 +32,7 @@ export async function GET(req) {
       district_id: searchParams.get("district_id"),
       assembly_id: searchParams.get("assembly_id"),
       party: searchParams.get("party"),
+      category: searchParams.get("category"),
     };
     let rows = await fetchComparisonDataset(filters);
 

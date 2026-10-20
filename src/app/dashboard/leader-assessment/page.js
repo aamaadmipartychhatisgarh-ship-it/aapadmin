@@ -9,6 +9,7 @@ import FilterMultiSelect from "@/components/FilterMultiSelect";
 import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
 import { MLA_EXPORT_COLUMNS, CANDIDATE_EXPORT_COLUMNS } from "@/lib/leaderAssessmentColumns";
 import { MLA_PROFILE_SECTIONS, EMPTY_MLA_PROFILE } from "@/lib/mlaProfileFields";
+import { ASSEMBLY_CATEGORY_LABEL } from "@/lib/assemblyCategoryOptions";
 import { usePageAccess } from "@/components/usePageAccess";
 import CommonPrintButton from "@/components/common/CommonPrintButton";
 import CommonPDFExportButton from "@/components/common/CommonPDFExportButton";
@@ -3276,6 +3277,8 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
   const [geo, setGeo] = useState(emptyGeo());
   // Party filter: "" = all parties, else the Current MLA's saved party name.
   const [party, setParty] = useState("");
+  // Assembly reservation category: "" = all, "SC" or "GEN" (from the assembly master).
+  const [category, setCategory] = useState("");
   const [partyCounts, setPartyCounts] = useState([]);
   const [zones, setZones] = useState([]);
   const [lokSabhas, setLokSabhas] = useState([]);
@@ -3298,8 +3301,9 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
       if (geo[k]?.length) p.set(k, geo[k].join(","));
     }
     if (party) p.set("party", party);
+    if (category) p.set("category", category);
     return p;
-  }, [geo, party]);
+  }, [geo, party, category]);
 
   // Zones bootstrap once; the lower levels cascade from the selected parents.
   useEffect(() => { fetchLocations("zone", []).then(setZones); }, []);
@@ -3323,7 +3327,7 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
   }, [geo.district_id]);
 
   // Any filter change resets to page 1 (so the count/list stay consistent, §9).
-  useEffect(() => { setPage(1); }, [geo, party]);
+  useEffect(() => { setPage(1); }, [geo, party, category]);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -3362,8 +3366,8 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
     finally { setExporting(""); }
   }
 
-  const clearFilters = () => { setGeo(emptyGeo()); setParty(""); };
-  const hasFilters = geo.zone_id.length || geo.lok_sabha_id.length || geo.district_id.length || geo.assembly_id.length || party;
+  const clearFilters = () => { setGeo(emptyGeo()); setParty(""); setCategory(""); };
+  const hasFilters = geo.zone_id.length || geo.lok_sabha_id.length || geo.district_id.length || geo.assembly_id.length || party || category;
   // Party options: every party that has MLAs in the current area (with its MLA
   // count), plus the remaining Party Master parties (0 MLAs) so any party can be
   // searched and picked.
@@ -3444,12 +3448,24 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
           <FilterMultiSelect label="districts" items={districts.map((d) => ({ id: d.id, name: d.name }))} selected={geo.district_id} onChange={(v) => setGeo((g) => ({ ...g, district_id: v }))} />
           <FilterMultiSelect label="assemblies" items={assemblies.map((a) => ({ id: a.id, name: a.name }))} selected={geo.assembly_id} onChange={(v) => setGeo((g) => ({ ...g, assembly_id: v }))} />
           <PartyFilter options={partyOptions} value={party} onChange={setParty} partyByName={partyByName} />
+          <select value={category} onChange={(e) => setCategory(e.target.value)} data-testid="category-filter" title="Assembly reservation category"
+            className={`h-9 px-3 rounded-lg border text-sm bg-white ${category ? "border-[#164FA3] text-[#164FA3] font-semibold" : "border-gray-200 text-gray-700"}`}>
+            <option value="">All categories</option>
+            <option value="SC">SC Assembly</option>
+            <option value="GEN">General Assembly</option>
+          </select>
           {hasFilters ? <button onClick={clearFilters} className="text-xs font-semibold text-gray-500 hover:text-gray-700 px-2 py-1">Clear filters</button> : null}
           {selected.size > 0 ? <span className="text-xs font-semibold text-[#164FA3] ml-auto">{selected.size} selected for export · <button onClick={() => setSelected(new Set())} className="underline">clear</button></span> : null}
         </div>
 
         {loading ? <LoadingBlock /> : error ? <ErrorBlock msg={error} onRetry={load} /> : rows.length === 0 ? (
-          <Empty msg={party ? `No MLAs from ${party} match the current selection.` : "No assemblies match the current selection."} />
+          <Empty msg={(() => {
+            const cat = category === "SC" ? "SC" : category === "GEN" ? "General" : "";
+            if (party && cat) return `No MLAs from ${party} in ${cat} assemblies match the current selection.`;
+            if (party) return `No MLAs from ${party} match the current selection.`;
+            if (cat) return `No ${cat} assemblies match the current selection.`;
+            return "No assemblies match the current selection.";
+          })()} />
         ) : (
           <>
             {/* Comparison LIST — ONE ROW per assembly (not cards). Columns: the
@@ -3477,7 +3493,8 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
                     <tr key={r.assembly_id} className="border-t border-gray-200 hover:bg-gray-50/60 align-top">
                       <td className="py-3 pr-2"><input type="checkbox" checked={selected.has(r.assembly_id)} onChange={() => toggleOne(r.assembly_id)} className="accent-[#164FA3]" /></td>
                       <td className="py-3 pr-3">
-                        <div className="font-semibold text-gray-900">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[10px] font-normal text-gray-400">({r.election_year})</span> : null}</div>
+                        <div className="font-semibold text-gray-900">{r.assembly_name || "—"}{r.election_year ? <span className="ml-1 text-[10px] font-normal text-gray-400">({r.election_year})</span> : null}
+                          {r.assembly_category ? <span data-testid="assembly-category" className="ml-1.5 align-middle text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">{ASSEMBLY_CATEGORY_LABEL[r.assembly_category] || r.assembly_category}</span> : null}</div>
                         <div className="text-xs text-gray-500">{r.district_name || "—"}</div>
                         {r.mla_name && onEditMla ? (
                           <button onClick={() => onEditMla(r.assembly_id)} title="Edit this MLA's profile"
