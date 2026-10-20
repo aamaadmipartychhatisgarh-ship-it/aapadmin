@@ -348,14 +348,15 @@ export default function InfluencersPage() {
                 <th className="px-4 py-3 font-semibold">Mobile Number</th>
                 <th className="px-4 py-3 font-semibold">Party</th>
                 <th className="px-4 py-3 font-semibold">Joined By</th>
+                <th className="px-4 py-3 font-semibold">Remark</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400">
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400">
                   <Users size={30} className="mx-auto mb-2 opacity-40" />
                   No influencers found.
                 </td></tr>
@@ -406,6 +407,13 @@ export default function InfluencersPage() {
                         </div>
                       </div>
                     ) : <span className="text-gray-400">—</span>}
+                  </td>
+                  {/* The influencer's own saved Remark — shown in full, line breaks
+                      kept and long words wrapped (read-only here). */}
+                  <td className="px-4 py-3 align-top text-gray-700 text-sm min-w-[200px] max-w-[380px]">
+                    {String(r.remark ?? "").trim()
+                      ? <div className="whitespace-pre-wrap break-words leading-snug">{r.remark}</div>
+                      : <span className="text-gray-400">—</span>}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
