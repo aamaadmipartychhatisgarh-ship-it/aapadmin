@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network, Printer, Link2, Copy } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
+import ImportEditModal from "@/components/contacts/ImportEditModal";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
@@ -153,6 +154,7 @@ export default function ContactsModule({ session, mode }) {
   const [taskFor, setTaskFor] = useState(null); // contact to create a task for
   const [viewingContact, setViewingContact] = useState(null); // contact row to show in the detail modal, or null
   const [showImport, setShowImport] = useState(false);
+  const [showImportEdit, setShowImportEdit] = useState(false); // separate bulk-UPDATE import
   const [uploading, setUploading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [bulkCallers, setBulkCallers] = useState([]); // selected caller ids
@@ -777,6 +779,9 @@ export default function ContactsModule({ session, mode }) {
           <ActionBar items={[
             { key: "hierarchy", label: "Designation Hierarchy", icon: Network, menuOnly: true, onClick: () => { window.location.href = "/dashboard/admin/contacts-hierarchy"; } },
             cfg.canImport && { key: "import", label: "Import Excel", icon: Upload, menuOnly: true, onClick: () => setShowImport(true) },
+            // Import Edit — a SEPARATE import that updates existing contacts (by Contact ID /
+            // phone) from a sheet; the normal Import above only adds new ones.
+            cfg.canImport && { key: "import-edit", label: "Import Edit", icon: Upload, menuOnly: true, onClick: () => setShowImportEdit(true) },
             // Export — Excel / PDF / CSV. The label reflects the priority: when
             // contacts are checkbox-selected it exports ONLY those, otherwise the
             // current filters (or everything when unfiltered).
@@ -793,6 +798,9 @@ export default function ContactsModule({ session, mode }) {
       {cfg.canImport && (
         <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
                onChange={(e) => e.target.files?.[0] && uploadCsv(e.target.files[0])} />
+      )}
+      {showImportEdit && (
+        <ImportEditModal onClose={() => setShowImportEdit(false)} onApplied={() => load()} />
       )}
       {showImport && (
         <ImportModal
