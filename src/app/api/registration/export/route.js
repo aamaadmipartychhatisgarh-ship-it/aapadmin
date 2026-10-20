@@ -51,8 +51,8 @@ export async function GET(req) {
     if (report === "workers") {
       const rows = await getWorkerRanking({ ...f, limit: 500, workerScope });
       csv = toCsv(
-        ["Rank", "Worker Name", "Mobile", "Worker ID", "Ward", "Area/Booth", "Voters Added", "Workers Added", "Total", "Link Status"],
-        rows.map((r) => [r.rank, r.name, r.mobile, r.worker_code, r.ward_number, r.area_booth, r.voters, r.new_workers, r.total, r.status])
+        ["Rank", "Worker Name", "Mobile", "Worker ID", "Ward", "Area/Booth", "Workers Added", "Voters Added", "Total", "Link Status"],
+        rows.map((r) => [r.rank, r.name, r.mobile, r.worker_code, r.ward_number, r.area_booth, r.new_workers, r.voters, r.total, r.status])
       );
       filename = `AAP_Worker_Performance_${stamp}.csv`;
     } else if (report === "blocks" || report === "wards") {
@@ -60,8 +60,8 @@ export async function GET(req) {
       // old link still resolves to the same Block report.
       const rows = await getBlockRanking({ ...f, limit: 500, scope });
       csv = toCsv(
-        ["Rank", "Block (Area/Booth)", "Voters Added", "Workers Added", "Total"],
-        rows.map((r) => [r.rank, r.block, r.voters, r.new_workers, r.total])
+        ["Rank", "Block (Area/Booth)", "Workers Added", "Voters Added", "Total"],
+        rows.map((r) => [r.rank, r.block, r.new_workers, r.voters, r.total])
       );
       filename = `AAP_Block_Performance_${stamp}.csv`;
     } else {

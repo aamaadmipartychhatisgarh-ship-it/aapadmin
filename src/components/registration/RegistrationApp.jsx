@@ -370,8 +370,9 @@ function DashboardTab({ filterQs, onWard, onError }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat icon={Vote} label="Total Voters Added" value={p.voters.toLocaleString("en-IN")} sub={`${s.lifetime.voters.toLocaleString("en-IN")} all time`} />
+        {/* Worker first, Voter second — the same order everywhere on this dashboard. */}
         <Stat icon={UserPlus} label="Total New Workers" value={p.new_workers.toLocaleString("en-IN")} sub={`${s.lifetime.new_workers.toLocaleString("en-IN")} all time`} tone="green" />
+        <Stat icon={Vote} label="Total Voters Added" value={p.voters.toLocaleString("en-IN")} sub={`${s.lifetime.voters.toLocaleString("en-IN")} all time`} />
         <Stat icon={BarChart3} label="Total Registrations" value={p.total.toLocaleString("en-IN")} sub={`${s.lifetime.total.toLocaleString("en-IN")} all time`} tone="amber" />
         {/* Where they came from: a karyakarta's generated link, or the general
             /join link with nobody behind it. The split is the whole point of
@@ -385,7 +386,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
           <div key={k} className={`${cardCls} p-3`}>
             <p className="text-xs text-gray-500">{label}</p>
             <p className="text-xl font-bold text-gray-900">{s.buckets[k].total.toLocaleString("en-IN")}</p>
-            <p className="text-[11px] text-gray-500">{s.buckets[k].voters} voters · {s.buckets[k].new_workers} workers</p>
+            <p className="text-[11px] text-gray-500">{s.buckets[k].new_workers} workers · {s.buckets[k].voters} voters</p>
           </div>
         ))}
       </div>
@@ -397,7 +398,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
             <p className="text-xs text-gray-500">Top Performing Worker</p>
             <p className="font-bold text-gray-900 truncate">{s.top_worker?.name || "—"}</p>
             <p className="text-xs text-gray-500">
-              {s.top_worker ? `${s.top_worker.total} total · ${s.top_worker.voters} voters · ${s.top_worker.new_workers} workers` : "No registrations yet"}
+              {s.top_worker ? `${s.top_worker.total} total · ${s.top_worker.new_workers} workers · ${s.top_worker.voters} voters` : "No registrations yet"}
             </p>
           </div>
         </div>
@@ -407,7 +408,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
             <p className="text-xs text-gray-500">Best Performing Block</p>
             <p className="font-bold text-gray-900 truncate">{topBlock ? topBlock.block : "—"}</p>
             <p className="text-xs text-gray-500">
-              {topBlock ? `${topBlock.total} total · ${topBlock.voters} voters · ${topBlock.new_workers} workers` : "No registrations yet"}
+              {topBlock ? `${topBlock.total} total · ${topBlock.new_workers} workers · ${topBlock.voters} voters` : "No registrations yet"}
             </p>
           </div>
         </div>
@@ -418,11 +419,11 @@ function DashboardTab({ filterQs, onWard, onError }) {
           title="Worker-wise Performance"
           subtitle={`Top ${Math.min(200, data.workers.length)}`}
           exportHref={`/api/registration/export?${filterQs({ report: "workers" })}`}
-          head={["Rank", "Worker Name", "Mobile", "Voters", "Workers", "Total"]}
+          head={["Rank", "Worker Name", "Mobile", "Workers", "Voters", "Total"]}
           rows={data.workers.map((w) => [
             <RankBadge key="r" rank={w.rank} />,
             <span key="n" className="font-semibold text-gray-900">{w.name}<span className="block text-[11px] font-normal text-gray-400 font-mono">{w.worker_code}</span></span>,
-            w.mobile || "—", w.voters, w.new_workers,
+            w.mobile || "—", w.new_workers, w.voters,
             <span key="t" className="font-bold text-gray-900">{w.total}</span>,
           ])}
           empty="No workers yet — add them in the Workers & Links tab."
@@ -431,11 +432,11 @@ function DashboardTab({ filterQs, onWard, onError }) {
           title="Block-wise Performance"
           subtitle={`Top ${Math.min(100, (data.blocks || []).length)}`}
           exportHref={`/api/registration/export?${filterQs({ report: "blocks" })}`}
-          head={["Rank", "Block", "Voters", "Workers", "Total"]}
+          head={["Rank", "Block", "Workers", "Voters", "Total"]}
           rows={(data.blocks || []).map((b) => [
             <RankBadge key="r" rank={b.rank} />,
             <span key="b" className="font-semibold text-gray-900">{b.block}</span>,
-            b.voters, b.new_workers,
+            b.new_workers, b.voters,
             <span key="t" className="font-bold text-gray-900">{b.total}</span>,
           ])}
           empty="No block data yet."
@@ -443,7 +444,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
       </div>
 
       {/* Assembly-wise graph — ALL assemblies (all 90) from live data, each with
-          its Voter and Worker registration counts; zero-registration assemblies
+          its Worker and Voter registration counts; zero-registration assemblies
           still appear with 0. Fixed-width chart inside a horizontal scroller so no
           assembly is hidden on desktop or mobile (§8). */}
       <AssemblyRegistrationGraph assemblies={data.assemblies} />
@@ -461,17 +462,19 @@ function AssemblyRegistrationGraph({ assemblies }) {
     <div className={`${cardCls} p-4`}>
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <h3 className="text-sm font-bold text-gray-900">Assembly-wise Registrations</h3>
-        <span className="text-xs text-gray-500">{rows.length} assembl{rows.length === 1 ? "y" : "ies"} · Voters vs Workers</span>
+        <span className="text-xs text-gray-500">{rows.length} assembl{rows.length === 1 ? "y" : "ies"} · Workers vs Voters</span>
       </div>
       <div className="overflow-x-auto">
         <BarChart width={width} height={340} data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 96 }} barGap={2}>
           <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
           <XAxis dataKey="name" interval={0} angle={-60} textAnchor="end" height={96} tick={{ fontSize: 10, fill: "#6b7280" }} />
           <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#6b7280" }} />
-          <Tooltip cursor={{ fill: "rgba(22,79,163,0.05)" }} />
-          <Legend />
-          <Bar dataKey="voters" name="Voters" fill="#164FA3" radius={[3, 3, 0, 0]} />
+          {/* itemSorter={null}: keep the bar order (Workers, then Voters) — recharts
+              otherwise sorts legend/tooltip entries alphabetically. */}
+          <Tooltip cursor={{ fill: "rgba(22,79,163,0.05)" }} itemSorter={null} />
+          <Legend itemSorter={null} />
           <Bar dataKey="workers" name="Workers" fill="#FCB712" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="voters" name="Voters" fill="#164FA3" radius={[3, 3, 0, 0]} />
         </BarChart>
       </div>
     </div>
