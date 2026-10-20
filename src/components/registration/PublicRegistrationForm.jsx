@@ -43,7 +43,6 @@ const STRINGS = {
     photoBadType: "कृपया JPG, JPEG, PNG या WEBP छवि अपलोड करें.",
     photoFailed: "फोटो अपलोड नहीं हो सकी. कृपया दोबारा प्रयास करें.",
     blockName: "ब्लॉक का नाम", selectBlock: "ब्लॉक चुनें…",
-    designation: "पदनाम (वैकल्पिक)", designationNone: "कोई पदनाम नहीं", designationHint: "पदनाम चुनने पर यह स्वीकृति प्रक्रिया में चला जाएगा।",
     selectAssemblyFirst: "पहले विधानसभा क्षेत्र चुनें",
     noBlocks: "इस विधानसभा के लिए कोई ब्लॉक उपलब्ध नहीं",
     loadingBlocks: "ब्लॉक लोड हो रहे हैं…",
@@ -114,7 +113,6 @@ const STRINGS = {
     photoBadType: "Please upload a JPG, JPEG, PNG, or WEBP image.",
     photoFailed: "Unable to upload photo. Please try again.",
     blockName: "Block Name", selectBlock: "Select a Block…",
-    designation: "Designation (optional)", designationNone: "No designation", designationHint: "Choosing a designation sends it into the approval process.",
     selectAssemblyFirst: "Select a Vidhan Sabha first",
     noBlocks: "No Blocks available for this Vidhan Sabha",
     loadingBlocks: "Loading Blocks…",
@@ -267,10 +265,6 @@ export default function PublicRegistrationForm({ token }) {
   // fetched from the Political Location master (never hardcoded, never all-blocks
   // filtered on the client).
   const [blockId, setBlockId] = useState("");
-  // Designation assignment — offered ONLY to a signed-in Block President / Vidhansabha
-  // Prabhari (the server decides; the list is empty for everyone else).
-  const [designationOpts, setDesignationOpts] = useState({ eligible: false, designations: [] });
-  const [designationId, setDesignationId] = useState("");
   const [blocks, setBlocks] = useState([]);
   const [blocksLoading, setBlocksLoading] = useState(false);
   const [blocksErr, setBlocksErr] = useState("");
@@ -413,20 +407,10 @@ export default function PublicRegistrationForm({ token }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assemblyId]);
 
-  useEffect(() => {
-    if (!session?.authenticated) { setDesignationOpts({ eligible: false, designations: [] }); setDesignationId(""); return; }
-    let alive = true;
-    fetch("/api/public/registration/designations", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { eligible: false }))
-      .then((d) => { if (alive) setDesignationOpts(d?.eligible ? d : { eligible: false, designations: [] }); })
-      .catch(() => { if (alive) setDesignationOpts({ eligible: false, designations: [] }); });
-    return () => { alive = false; };
-  }, [session?.authenticated]);
-
   function resetPerson() {
     // Block selection is cleared for the next person; the Block LIST is kept because
     // the constituency is retained (below), so the same assembly's blocks stay ready.
-    setPersonType("voter"); setWorkerRating(""); setBlockId(""); setDesignationId("");
+    setPersonType("voter"); setWorkerRating(""); setBlockId("");
     setName(""); setMobile(""); setAddress("");
     setPhotoUrl(""); setPhotoPreview(""); setPhotoErr(""); setContactPhoto(null);
     setOtpStage("idle"); setOtpCode(""); setOtpFor(""); setOtpNote("");
@@ -597,8 +581,6 @@ export default function PublicRegistrationForm({ token }) {
           // selected assembly; the backend resolves and stores the Block's name.
           block_id: isWorker ? blockId : "",
           worker_rating: isWorker && workerRating ? Number(workerRating) : null,
-          // Optional designation (eligible submitters only; re-validated on the server).
-          designation_id: designationOpts.eligible && designationId ? designationId : "",
           // Manual capture/upload wins; otherwise the photo already stored against
           // this person's Contact (same URL, not a re-upload/duplicate) so the saved
           // record is never left photo-less when Contacts already has one.
@@ -932,21 +914,6 @@ export default function PublicRegistrationForm({ token }) {
                 ))}
               </select>
               {blocksErr ? <p className="text-[12px] text-red-700 mt-1.5">{blocksErr}</p> : null}
-            </Field>
-          )}
-
-          {/* Designation — only a Block President / Vidhansabha Prabhari sees this. Picking
-              one sends the registration into the 8-stage approval workflow (created on
-              the server together with the registration); leaving it blank starts nothing. */}
-          {designationOpts.eligible && (
-            <Field label={t.designation}>
-              <select className={inputCls} value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
-                <option value="">{t.designationNone}</option>
-                {designationOpts.designations.map((dg) => (
-                  <option key={dg.id} value={dg.id}>{dg.name}</option>
-                ))}
-              </select>
-              <p className="text-[11px] text-gray-500 mt-1.5">{t.designationHint}</p>
             </Field>
           )}
 

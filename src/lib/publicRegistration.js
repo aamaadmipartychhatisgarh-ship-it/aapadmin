@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { query, withConnection } from "@/lib/db";
+import { query } from "@/lib/db";
 import {
   ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
 } from "@/lib/registrationSchema";
@@ -8,8 +8,6 @@ import { blockBelongsToAssembly } from "@/lib/politicalLocation";
 import { phoneKey } from "@/lib/phone";
 import { isMobileVerified, consumeVerification, otpConfigured } from "@/lib/registrationOtp";
 import { toPublicRegistrationPhoto, fromPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
-import { resolveRegistrationSubmitter, findContactByMobile } from "@/lib/registrationDesignation";
-import { createAssignmentTx, afterAssignmentCreated, buildLocationFromAssembly } from "@/lib/designationApprovals";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
 // Both public routes are thin wrappers over the two handlers at the bottom of
@@ -384,21 +382,8 @@ export async function submitPublicRegistration(req, token) {
     // drive link). Never client-supplied.
     const workerId = attributedWorkerId ?? link.worker_id ?? null;
 
-    // Optional DESIGNATION. Only a Block President or a Vidhansabha Prabhari may attach
-    // one — decided on the server from the signed-in karyakarta's real designation, never
-    // from the form. Nothing is started when no designation is chosen.
-    let designation = null;
-    let submitter = null;
-    const wantedDesignationId = /^\d+$/.test(String(d.designation_id || "")) ? Number(d.designation_id) : null;
-    if (wantedDesignationId) {
-      submitter = await resolveRegistrationSubmitter(workerId);
-      if (!submitter.eligible) {
-        return NextResponse.json({ message: "Only a Block President or a Vidhansabha Prabhari can assign a designation." }, { status: 403, headers: NO_STORE });
-      }
-      const [dg] = await query("SELECT id, name FROM designations WHERE id = ? LIMIT 1", [wantedDesignationId]);
-      if (!dg) return NextResponse.json({ message: "The selected designation was not found." }, { status: 400, headers: NO_STORE });
-      designation = dg;
-    }
+    // The registration form has no Designation field: any designation_id sent is
+    // ignored, so registering never assigns a designation or starts an approval.
 
     // One mobile number is one person per drive. A repeat is reported plainly
     // (with who first registered them) instead of silently creating a duplicate
@@ -438,65 +423,17 @@ export async function submitPublicRegistration(req, token) {
        assemblyId, assemblyName, ward, wardName, blockId, areaBooth, wantsWorker, workerRating, photoUrl,
        verificationId ? 1 : 0, ip, regNow()];
 
-    if (!designation) {
-      await query(
-        `INSERT INTO reg_people (${insertCols}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
-        insertArgs
-      );
-    } else {
-      // Registration + approval workflow are saved ATOMICALLY: a registration with a
-      // designation can never be saved without its approval record, and a failure
-      // rolls both back. The per-mobile lock + re-check makes a double-click / retry
-      // return "already registered" instead of creating a second registration (and a
-      // second approval).
-      const lockName = `regp:${link.campaign_id}:${mobile}`;
-      const outcome = await withConnection(async (conn) => {
-        await conn.query("SELECT GET_LOCK(?, 10)", [lockName]);
-        try {
-          await conn.beginTransaction();
-          const [[again]] = await conn.query(
-            "SELECT id FROM reg_people WHERE campaign_id = ? AND mobile = ? AND status = 'active' LIMIT 1",
-            [link.campaign_id, mobile]
-          );
-          if (again) { await conn.rollback(); return { duplicate: true }; }
-          const [ins] = await conn.query(
-            `INSERT INTO reg_people (${insertCols}, designation_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?)`,
-            [...insertArgs, designation.id]
-          );
-          const loc = await buildLocationFromAssembly((sql, p) => conn.query(sql, p).then(([r]) => r), assemblyId);
-          const memberId = await findContactByMobile(mobile);
-          const made = await createAssignmentTx(conn, {
-            memberId, memberName: name.slice(0, 160), memberPhone: mobile, memberPhotoUrl: photoUrl,
-            designationId: designation.id, designationName: designation.name,
-            assembly: loc.assembly || { id: assemblyId, name: assemblyName }, district: loc.district, lokSabha: loc.lokSabha, zone: loc.zone,
-            block: blockId ? { id: blockId, name: wardName } : null,
-            assignedByUserId: submitter.userId, assignedByName: submitter.name,
-            submittedByRegWorkerId: workerId, submittedByDesignation: submitter.label,
-            registrationType: "reg_people", registrationId: ins.insertId, ip,
-          });
-          await conn.commit();
-          return { id: made.id, existing: made.existing };
-        } catch (e) {
-          await conn.rollback().catch(() => {});
-          throw e;
-        } finally {
-          await conn.query("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => {});
-        }
-      });
-      if (outcome.duplicate) {
-        return NextResponse.json({ message: "This mobile number is already registered.", duplicate: true }, { status: 409, headers: NO_STORE });
-      }
-      if (!outcome.existing) {
-        afterAssignmentCreated(null, outcome.id, { member: name, designation: designation.name, assembly: assemblyName }).catch(() => {});
-      }
-    }
+    await query(
+      `INSERT INTO reg_people (${insertCols}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
+      insertArgs
+    );
     // Spend the proof so one verification cannot be replayed to push a second
     // person through on the same number.
     await consumeVerification(verificationId);
 
     // Just an acknowledgement — no counts, for the same reason the bootstrap
     // returns none: whoever is holding this link is a member of the public.
-    return NextResponse.json({ ok: true, approval_started: !!designation }, { status: 201, headers: NO_STORE });
+    return NextResponse.json({ ok: true }, { status: 201, headers: NO_STORE });
   } catch (e) {
     console.error("[registration] public POST error:", e);
     return NextResponse.json({ message: "Could not save this registration. Please try again." }, { status: 500, headers: NO_STORE });
