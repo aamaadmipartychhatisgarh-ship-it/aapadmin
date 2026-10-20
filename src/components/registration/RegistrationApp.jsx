@@ -13,6 +13,7 @@ import { usePageGuard } from "@/components/usePageGuard";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import { RatingBadge } from "@/components/KaryakartaRating";
+import PhoneActions from "@/components/PhoneActions";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 
 // Voter & Worker Registration — the admin side of the public link drive.
@@ -1106,7 +1107,10 @@ function PeopleTab({ filterQs, onError, canDelete = false }) {
                     <Avatar name={p.name} src={p.photo_url} size={34} square className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
                   </td>
                   <td className="px-3 py-2.5 font-semibold text-gray-900">{p.name}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">{p.mobile || "—"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    {p.mobile || "—"}
+                    <PhoneActions phone={p.mobile} name={p.name} size={14} className="mt-1 flex" />
+                  </td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{p.assembly_name || "—"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{[p.effective_ward && `Ward ${p.effective_ward}`, p.area_booth].filter(Boolean).join(" · ") || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600 max-w-[240px]"><span className="line-clamp-2">{p.address || "—"}</span></td>
