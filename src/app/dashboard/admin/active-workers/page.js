@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Users, Search, Loader2, ChevronDown, ChevronRight, Phone, RefreshCcw } from "lucide-react";
+import { Users, Loader2, ChevronDown, ChevronRight, Phone } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import Avatar from "@/components/Avatar";
 import { isAdmin } from "@/lib/permissions";
@@ -33,8 +33,6 @@ export default function ActiveWorkersPage() {
   const [total, setTotal] = useState(0);
   const [callers, setCallers] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState(""); // "" = all, else a canonical value
   const [expanded, setExpanded] = useState(null); // user_id currently expanded
 
   useEffect(() => {
@@ -45,13 +43,7 @@ export default function ActiveWorkersPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const p = new URLSearchParams();
-      if (search) p.set("search", search);
-      // Status filtering is applied SERVER-SIDE (exact match on the canonical code),
-      // so the counts and the whole result set reflect the filter, not just the
-      // rows currently in memory.
-      if (statusFilter) p.set("status", statusFilter);
-      const r = await fetch(`/api/contacts/active-workers?${p}`);
+      const r = await fetch("/api/contacts/active-workers");
       if (r.ok) {
         const d = await r.json();
         setGroups(d.groups || []);
@@ -59,13 +51,12 @@ export default function ActiveWorkersPage() {
         setCallers(d.callers || 0);
       }
     } finally { setLoading(false); }
-  }, [search, statusFilter]);
+  }, []);
 
   useEffect(() => {
     if (!allowed) return;
-    const t = setTimeout(load, search ? 300 : 0);
-    return () => clearTimeout(t);
-  }, [allowed, search, statusFilter, load]);
+    load();
+  }, [allowed, load]);
 
   // Persist a worker's Active Status to the backend (users.active_status) and
   // reflect it locally — the value survives refresh/relogin because it is stored,
@@ -82,18 +73,14 @@ export default function ActiveWorkersPage() {
       setGroups((gs) => gs.map((g) => (g.user_id === userId
         ? { ...g, active_status: r.ok ? (d.active_status || value) : g.active_status, _saving: false }
         : g)));
-      // When a status filter is active, a worker whose status just changed may no
-      // longer belong in the filtered list — reload so stale rows don't linger.
-      if (r.ok && statusFilter) load();
     } catch {
       setGroups((gs) => gs.map((g) => (g.user_id === userId ? { ...g, _saving: false } : g)));
     }
-  }, [statusFilter, load]);
+  }, []);
 
-  // Server already returns only the matching workers (exact status match), so no
-  // client-side status filtering is done here — this avoids the classic
-  // substring-match bug and keeps counts consistent with the filtered list.
   const visibleGroups = groups;
+  const statusTotals = {};
+  for (const g of groups) for (const o of ACTIVE_STATUS_OPTIONS) statusTotals[o.value] = (statusTotals[o.value] || 0) + (g.worker_status_counts?.[o.value] || 0);
 
   if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
@@ -114,20 +101,16 @@ export default function ActiveWorkersPage() {
         <SumCard label="Avg per Caller" value={callers ? Math.round(total / callers).toLocaleString("en-IN") : "—"} />
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search caller…"
-                 className="w-full pl-9 h-10 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
-        </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-                className="h-10 px-3 rounded-lg border border-gray-200 text-sm text-gray-700 outline-none focus:ring-2 focus:ring-[#164FA3]">
-          <option value="">All statuses</option>
-          {ACTIVE_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <button onClick={() => { setSearch(""); setStatusFilter(""); }} className="h-10 px-4 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-          <RefreshCcw size={14} /> Reset
-        </button>
+      {/* Worker Status cards — counts of the stored contacts.active_status, summed
+          over the whole authorized dataset. Only the four canonical statuses;
+          contacts with no status set are deliberately not counted here. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {ACTIVE_STATUS_OPTIONS.map((o) => (
+          <div key={o.value} className={`rounded-2xl border border-gray-100 shadow-sm p-4 ${STATUS_STYLE[o.value]}`}>
+            <div className="text-xs font-semibold uppercase tracking-wide opacity-80">{o.label}</div>
+            <div className="text-3xl font-bold mt-1">{Number(statusTotals[o.value] || 0).toLocaleString("en-IN")}</div>
+          </div>
+        ))}
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -135,7 +118,7 @@ export default function ActiveWorkersPage() {
           <div className="py-12 text-center text-gray-400"><Loader2 className="inline animate-spin text-[#164FA3]" /></div>
         ) : visibleGroups.length === 0 ? (
           <div className="py-12 text-center text-gray-400">
-            {statusFilter ? `No workers with status “${ACTIVE_STATUS_LABEL[statusFilter]}”.` : "No active workers found for your access."}
+            No active workers found for your access.
           </div>
         ) : (
           <ul className="divide-y divide-gray-100">
