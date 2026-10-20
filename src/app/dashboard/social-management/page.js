@@ -207,7 +207,7 @@ function Body() {
           deep-link lands on the same unified view instead of a blank tab. */}
       {(tab === "dashboard" || tab === "overview") && (
         <div id="social-dashboard-capture" className="space-y-6">
-          <SocialDashboardTab PLATFORM={PLATFORM} />
+          <SocialDashboardTab />
           <OverviewTab data={data} />
         </div>
       )}
