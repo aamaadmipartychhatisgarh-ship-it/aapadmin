@@ -183,13 +183,16 @@ export async function loadResponsibleHolders() {
 
 // Resolve the responsible person(s) for a vacancy of `designationName` at
 // (level, locationId). Returns:
-//   { people: [{ contact_id, person_name, mobile, role, area }], missing: [role labels], rule }
-// `missing` lists each required role nobody holds in the responsible area (or whose
-// area is missing from the hierarchy) — shown as "Not assigned", never guessed.
+//   { people: [{ contact_id, person_name, mobile, role, area }], missing: [role labels],
+//     slots: [{ label, area, people }], rule }
+// `slots` has one entry per required role (in rule order) with the people found
+// for it; `missing` lists each required role nobody holds in the responsible area
+// (or whose area is missing from the hierarchy) — shown as "Not assigned", never guessed.
 export function resolveResponsible(level, locationId, designationName, index, holders) {
   const rule = responsibilityRule(level, designationName);
   const people = [];
   const missing = [];
+  const slots = [];
   const seen = new Set();
   for (const req of rule.required) {
     const [lvl, kind] = req;
@@ -200,6 +203,7 @@ export function resolveResponsible(level, locationId, designationName, index, ho
       if (a) area = { id: a.id, name: a.name };
     }
     const found = area ? (holders.get(`${lvl}:${kind}`)?.get(area.id) || []) : [];
+    slots.push({ label: roleLabel(req), area: area?.name ?? null, people: found.map((h) => ({ ...h, area: area.name })) });
     if (!found.length) { missing.push(roleLabel(req)); continue; }
     for (const h of found) {
       if (seen.has(h.contact_id)) continue;
@@ -207,5 +211,5 @@ export function resolveResponsible(level, locationId, designationName, index, ho
       people.push({ ...h, area: area.name });
     }
   }
-  return { people, missing, rule: rule.label };
+  return { people, missing, slots, rule: rule.label };
 }

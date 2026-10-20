@@ -342,58 +342,88 @@ export default function VacanciesPage() {
           {data?.capped && <span className="ml-auto text-xs text-amber-600">Showing the first {data.vacancies.length} rows — narrow the filters to see more.</span>}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[960px]">
+          <table className="w-full text-sm min-w-[1100px]">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
                 <th className="px-3 py-3 font-semibold">Level</th>
                 <th className="px-3 py-3 font-semibold">Location</th>
-                <th className="px-3 py-3 font-semibold">Designation</th>
+                <th className="px-3 py-3 font-semibold">Vacant Designation</th>
                 <th className="px-3 py-3 font-semibold">Status</th>
-                <th className="px-3 py-3 font-semibold">Responsible Person · Reminder</th>
+                <th className="px-3 py-3 font-semibold">Responsible Person</th>
+                <th className="px-3 py-3 font-semibold">Reminder</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
               ) : err ? (
-                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400">Vacancies could not be calculated — no positions are shown.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400">Vacancies could not be calculated — no positions are shown.</td></tr>
               ) : !data?.vacancies?.length ? (
-                <tr><td colSpan={5} className="px-4 py-16 text-center text-gray-400"><CheckCircle2 size={28} className="mx-auto mb-2 opacity-40" />No positions for these filters.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><CheckCircle2 size={28} className="mx-auto mb-2 opacity-40" />No positions for these filters.</td></tr>
               ) : data.vacancies.map((r) => (
                 <tr key={`${r.level}:${r.location_id}:${r.designation_id}`} className="hover:bg-gray-50 align-top" data-status={r.status}>
-                  <td className="px-3 py-2.5"><span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">{r.level_label}</span></td>
-                  <td className="px-3 py-2.5 text-gray-700">
-                    {r.location_name || "—"}
+                  <td className="px-3 py-2.5" data-testid="vac-level"><span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">{r.level_label}</span></td>
+                  <td className="px-3 py-2.5 text-gray-700" data-testid="vac-location">
+                    <span className="font-medium text-gray-900">{r.location_name || "—"}</span>
                     {/* Where this position sits in the hierarchy (grouping context). */}
                     {[r.assembly_name, r.district_name, r.lok_sabha_name].filter((x) => x && x !== r.location_name).length > 0 && (
                       <span className="block text-[11px] text-gray-400">{[r.assembly_name, r.district_name, r.lok_sabha_name].filter((x) => x && x !== r.location_name).join(" · ")}</span>
                     )}
                     {r.hierarchy_incomplete && <span className="block text-[11px] text-red-500">Parent area missing in master</span>}
                   </td>
-                  <td className="px-3 py-2.5 font-medium text-gray-900">{r.designation_name}</td>
-                  <td className="px-3 py-2.5">
-                    {r.status === "filled"
-                      ? <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200">Filled</span>
-                      : r.status === "review"
-                        ? <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200" title="A holder of this designation has a missing/invalid location">Needs review</span>
-                        : <span className="text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">VACANT</span>}
+                  <td className="px-3 py-2.5" data-testid="vac-designation">
+                    <span className="font-semibold text-gray-900">{r.designation_name}</span>
+                    <span className="block text-[11px] text-gray-400">{r.level_label} · {r.location_name}</span>
                   </td>
                   <td className="px-3 py-2.5">
                     {r.status === "filled" ? (
-                      <span className="text-gray-600 text-xs">{r.person_names || "—"}</span>
+                      <>
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200">Filled</span>
+                        <span className="block mt-1 text-[11px] text-gray-500">Held by {r.person_names || "—"}</span>
+                      </>
                     ) : r.status === "review" ? (
-                      <div className="text-xs text-gray-600 space-y-0.5">
+                      <>
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200" title="A holder of this designation has a missing/invalid location">Needs review</span>
                         {(r.review_people || []).map((p) => (
-                          <div key={p.contact_id}><span className="font-medium text-gray-900">{p.person_name}</span> holds this designation — {p.reason}</div>
+                          <span key={p.contact_id} className="block mt-1 text-[11px] text-gray-600"><span className="font-medium text-gray-900">{p.person_name}</span> holds this designation — {p.reason}</span>
+                        ))}
+                      </>
+                    ) : <span className="text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">VACANT</span>}
+                  </td>
+                  {/* Responsible person(s) — one line per required role; never the vacant post's own holder. */}
+                  <td className="px-3 py-2.5" data-testid="vac-responsible">
+                    {r.status !== "vacant" ? (
+                      <span className="text-xs text-gray-400">—</span>
+                    ) : (r.responsible_slots || []).length ? (
+                      <div className="space-y-1">
+                        {r.responsible_slots.map((sl) => (
+                          <div key={sl.label} className="text-xs" data-testid={sl.people.length ? "responsible" : "responsible-missing"}>
+                            {sl.people.length ? sl.people.map((h) => (
+                              <div key={h.contact_id}>
+                                <span className="text-gray-500">{h.designation}{sl.area && sl.area !== "State" ? ` (${sl.area})` : ""}</span>
+                                <span className="text-gray-400"> – </span>
+                                <span className="font-semibold text-gray-900">{h.name}</span>
+                              </div>
+                            )) : (
+                              <div>
+                                <span className="text-gray-500">{sl.label}{sl.area && sl.area !== "State" ? ` (${sl.area})` : ""}</span>
+                                <span className="text-gray-400"> – </span>
+                                <span className="font-semibold text-red-600 whitespace-nowrap">Not assigned</span>
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
-                    ) : r.status === "vacant" ? (
+                    ) : (
+                      <span className="text-xs font-semibold text-red-600" data-testid="responsible-missing">Responsible person not found</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {r.status === "vacant" && (r.responsibles || []).length ? (
                       <div className="space-y-1.5">
-                        {r.responsible_rule && <div className="text-[11px] text-gray-400">Responsible: {r.responsible_rule}</div>}
-                        {(r.responsibles || []).map((rp) => (
-                          <div key={rp.contact_id} className="flex items-center gap-2 flex-wrap" data-testid="responsible">
-                            <span className="text-gray-900 font-medium">{rp.name}</span>
-                            {rp.role && <span className="text-[11px] text-gray-500">{rp.role}{rp.area && rp.area !== "State" ? ` · ${rp.area}` : ""}</span>}
+                        {r.responsibles.map((rp) => (
+                          <div key={rp.contact_id} className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] text-gray-700 font-medium">{rp.name}</span>
                             <span className="text-gray-500 font-mono text-[11px]">{rp.mobile || "—"}</span>
                             <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border capitalize ${reminderChip(rp.reminder_status)}`}>{rp.reminder_status}{rp.reminder_attempts ? ` · ${rp.reminder_attempts}` : ""}</span>
                             {rp.last_reminder_at && <span className="text-[11px] text-gray-400">{fmtDateTime(rp.last_reminder_at)}</span>}
@@ -402,9 +432,6 @@ export default function VacanciesPage() {
                               {busyId === rp.contact_id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} WhatsApp
                             </button>
                           </div>
-                        ))}
-                        {(r.responsible_missing || []).map((m) => (
-                          <div key={m} className="text-xs font-medium text-red-600" data-testid="responsible-missing">{m} — Not assigned</div>
                         ))}
                       </div>
                     ) : (

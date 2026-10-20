@@ -122,6 +122,12 @@ export async function buildVacancyDataset(session, filters = {}) {
       responsible_rule: res.rule,
       // Required roles nobody holds — shown as "Not assigned", never replaced.
       responsible_missing: res.missing,
+      // One entry per required role: "District President – <name(s)>" or not assigned.
+      responsible_slots: res.slots.map((s) => ({
+        label: s.label,
+        area: s.area,
+        people: s.people.map((h) => ({ contact_id: h.contact_id, name: h.person_name, designation: h.role })),
+      })),
       responsible_note: res.missing.length ? `Not assigned: ${res.missing.join(", ")}` : null,
     });
   }
