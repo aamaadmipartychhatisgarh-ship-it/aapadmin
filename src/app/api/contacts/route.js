@@ -7,7 +7,8 @@ import { query } from "@/lib/db";
 import { addedDateClause } from "@/lib/contactDateFilter";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause, notNotInterestedClause, notPendingClause, findRejectedContactByPhone, hasApprovalStatusColumn } from "@/lib/contactExtras";
+import { ACTIVE_STATUS_VALUES } from "@/lib/activeStatus";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureContactActiveStatusColumns, findRejectedContactByPhone, hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
@@ -121,6 +122,14 @@ export async function GET(req) {
     where += person.where;
     params.push(...person.params);
     if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
+    // Active Workers page: only workers with one of the four real statuses —
+    // "Not Set" (NULL/blank) workers stay stored but are left out of the view.
+    if (searchParams.get("worker_status_set") === "1") {
+      if (await ensureContactActiveStatusColumns()) {
+        where += ` AND c.active_status IN (${ACTIVE_STATUS_VALUES.map(() => "?").join(",")})`;
+        params.push(...ACTIVE_STATUS_VALUES);
+      } else where += " AND 1 = 0";
+    }
     if (search) {
       where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
       params.push(`%${search}%`, `%${search}%`);

@@ -158,7 +158,7 @@ function CallerContacts({ userId }) {
   const [rows, setRows] = useState(null);
   useEffect(() => {
     let alive = true;
-    fetch(`/api/contacts?assigned_to=${encodeURIComponent(userId)}&page_size=200`, { cache: "no-store" })
+    fetch(`/api/contacts?assigned_to=${encodeURIComponent(userId)}&worker_status_set=1&page_size=200`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : { contacts: [] })
       .then((d) => { if (alive) setRows(d.contacts || []); })
       .catch(() => { if (alive) setRows([]); });
@@ -256,7 +256,6 @@ function WorkerStatusChips({ counts }) {
           {counts[o.value]} {o.label}
         </span>
       ))}
-      {counts.UNSET > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-400" title="No worker status yet">{counts.UNSET} not set</span>}
     </span>
   );
 }

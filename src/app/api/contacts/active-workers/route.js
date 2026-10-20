@@ -64,6 +64,12 @@ export async function GET(req) {
     where += await notPendingClause("c"); // caller submissions awaiting approval are not live
     where += await notNotInterestedClause("c");
     where += await repeatOffExclusion("c");
+    // Not Set workers (NULL/blank contacts.active_status) are excluded from the page
+    // entirely — list, counters and total — but remain stored untouched.
+    if (workerStatusReady) {
+      where += ` AND c.active_status IN (${ACTIVE_STATUS_VALUES.map(() => "?").join(",")})`;
+      params.push(...ACTIVE_STATUS_VALUES);
+    } else where += " AND 1 = 0";
     if (district_id) { where += " AND c.district_id = ?"; params.push(district_id); }
     if (assembly_id) { where += " AND c.assembly_id = ?"; params.push(assembly_id); }
     if (search) { where += " AND u.username LIKE ?"; params.push(`%${search}%`); }
