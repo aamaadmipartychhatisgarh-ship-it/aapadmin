@@ -83,6 +83,8 @@ const CALLER_NAV = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Log a Call", href: "/dashboard/calls/new", icon: PhoneCall },
   { name: "My Calls", href: "/dashboard/calls", icon: Database },
+  // Every contact of the caller's assigned Zone, read-only (page key zone_contacts).
+  { name: "Contacts", href: "/dashboard/zone-contacts", icon: Users },
   { name: "Complaints", href: "/dashboard/complaints", icon: MessageSquare },
   { name: "My Tasks", href: "/dashboard/tasks", icon: ClipboardList },
   // Callers run the Worker & Voter Registration drive on the ground (access is also

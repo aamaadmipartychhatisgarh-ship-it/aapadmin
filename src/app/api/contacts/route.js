@@ -18,6 +18,7 @@ import { ensureQualificationColumns, normalizeQualification } from "@/lib/contac
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
+import { callerZoneAccess, zoneContactClause } from "@/lib/callerZoneScope";
 
 // Cached feature-detect: does contacts.photo_verified exist yet? The Photo Update
 // Count reflects RETRIEVABLE photos (not just a populated field) once recovery has
@@ -62,7 +63,12 @@ function idList(raw) {
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!(await pageAllowed(session, "contacts", session && isSupervisor(session)))) {
+    // Contact managers (Admin / Supervisor / a "contacts" grant) — unchanged. A
+    // CALLER with the Zone Contacts page reads the same list, but confined
+    // server-side to their CURRENT Zone (callerZone below), read-only.
+    const canManage = await pageAllowed(session, "contacts", session && isSupervisor(session));
+    const callerZone = canManage ? null : await callerZoneAccess(session);
+    if (!canManage && !callerZone) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     // The multi-designation join table must exist before the list query reads it.
@@ -72,7 +78,11 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
     const duplicates = searchParams.get("duplicates"); // "1" → only likely-duplicate contacts
-    const wrong = searchParams.get("wrong"); // "1" → only contacts whose latest call was a Wrong Number
+    // "1" → only contacts whose latest call was a Wrong Number. That is the Wrong
+    // Numbers module's own view — never available to a caller, whose list always
+    // keeps the default visibility rules (wrong number / not interested / pending
+    // approval / 10+ switched-off excluded).
+    const wrong = callerZone ? null : searchParams.get("wrong");
     const zone_id = searchParams.get("zone_id");
     const lok_sabha_id = searchParams.get("lok_sabha_id");
     const district_id = searchParams.get("district_id");
@@ -191,8 +201,8 @@ export async function GET(req) {
          ORDER BY cx.called_at DESC, cx.id DESC LIMIT 1
       ) = c.phone_number`;
     }
-    // Geographic scope from role
-    const scope = scopeFilterSync(session.user, "c");
+    // Geographic scope: the role's scope, or — for a caller — their current Zone.
+    const scope = callerZone ? zoneContactClause(callerZone.zoneId, "c") : scopeFilterSync(session.user, "c");
     where += " " + scope.where;
     params.push(...scope.params);
 
@@ -200,6 +210,10 @@ export async function GET(req) {
     // `where`/`params`), just every matching row instead of one page. Both CSV
     // and Excel share the identical dataset + columns.
     const format = searchParams.get("format");
+    // Exports stay a Contact-management feature (callers never had them).
+    if (callerZone && format) {
+      return NextResponse.json({ message: "Export is not available for your role." }, { status: 403 });
+    }
     if (format === "csv" || format === "xlsx" || format === "pdf") {
       // Selected-contacts export (priority 1): when explicit ids are passed, they
       // OVERRIDE the filters — export EXACTLY those contacts, still confined to the
@@ -315,9 +329,16 @@ export async function GET(req) {
     // (every record is reachable across pages — nothing is silently dropped by a
     // cap). no-store so all authorized users always get the same fresh list.
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    // A caller's list carries the Zone it is confined to (read fresh), so the page
+    // can show it and offer only that Zone's Lok Sabha / District / Assembly options.
+    let caller_zone;
+    if (callerZone) {
+      const [z] = callerZone.zoneId ? await query("SELECT id, name FROM locations WHERE id = ?", [callerZone.zoneId]) : [];
+      caller_zone = { zone_id: callerZone.zoneId, zone_name: z?.name || null };
+    }
     return NextResponse.json(
       { contacts, total, page, page_size: pageSize,
-        pagination: { page, pageSize, total, totalPages } },
+        pagination: { page, pageSize, total, totalPages }, caller_zone },
       { headers: { "Cache-Control": "no-store, max-age=0" } }
     );
   } catch (err) {

@@ -17,6 +17,7 @@ import { syncContactWings } from "@/lib/contactWings";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { callerOwnsContact } from "@/lib/callerContactAccess";
+import { callerCanReadContact } from "@/lib/callerZoneScope";
 
 // GET /api/contacts/[id] — fetch ONE contact by its unique database id, with the
 // same resolved fields the workspace edit form needs (ward/district names +
@@ -42,9 +43,11 @@ export async function GET(_req, { params }) {
     // role explicitly, so a supervisor can open any contact to edit it.)
     const canManage = await pageAllowed(session, "contacts", session && isOversight(session));
     if (!canManage) {
+      // A caller may READ their own working contact, or any contact of their
+      // current Zone (Zone Contacts page). Editing (PUT) is unchanged below.
       const { userId } = await resolveActingUserId(session);
-      const mine = await callerOwnsContact(id, userId);
-      if (!mine) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+      const allowed = await callerCanReadContact(session, id, userId);
+      if (!allowed) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
     // Fully-resolved single record (all display names) — same shape the list

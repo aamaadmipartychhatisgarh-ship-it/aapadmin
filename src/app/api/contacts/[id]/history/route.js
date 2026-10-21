@@ -3,6 +3,10 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { hasFollowUpTimeColumn } from "@/lib/contactExtras";
+import { normalizeRole, ROLES } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
+import { resolveActingUserId } from "@/lib/actAs";
+import { callerCanReadContact } from "@/lib/callerZoneScope";
 
 export async function GET(req, { params }) {
   try {
@@ -11,6 +15,15 @@ export async function GET(req, { params }) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
     const { id } = await params;
+    // A caller only sees the history of a contact they work on or one in their
+    // current Zone — never another Zone's contact by changing the id. Every other
+    // role keeps its existing access.
+    if (normalizeRole(session.user?.role) === ROLES.CALLER && !(await pageAllowed(session, "contacts", false))) {
+      const { userId } = await resolveActingUserId(session);
+      if (!(await callerCanReadContact(session, id, userId))) {
+        return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+      }
+    }
     const hasFupTime = await hasFollowUpTimeColumn();
 
     const rows = await query(
