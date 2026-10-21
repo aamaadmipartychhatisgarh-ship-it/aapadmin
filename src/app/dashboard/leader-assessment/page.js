@@ -3232,8 +3232,10 @@ function MarginCell({ stats }) {
   );
 }
 
-// Searchable single-select party picker for the Comparison filters. Options carry
-// each party's MLA count; picking one shows all of that party's MLAs at once.
+// Searchable single-select party picker for the Comparison filters. Options are
+// every party saved as a Current MLA's OR a competitor's party, each with the
+// number of assemblies it appears in (= the rows the filter returns) and its MLA
+// count; picking one shows every assembly that party contested.
 function PartyFilter({ options, value, onChange, partyByName }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -3245,7 +3247,7 @@ function PartyFilter({ options, value, onChange, partyByName }) {
       <button type="button" onClick={() => { setOpen((o) => !o); setQ(""); }} data-testid="party-filter"
         className={`h-9 px-3 rounded-lg border text-sm bg-white flex items-center gap-2 ${value ? "border-[#164FA3] text-[#164FA3] font-semibold" : "border-gray-200 text-gray-700"}`}>
         <Flag size={13} />
-        <span>{value ? `${value}${current ? ` (${current.count})` : ""}` : "All parties"}</span>
+        <span>{value ? `${value}${current ? ` (${current.assemblies ?? current.count})` : ""}` : "All parties"}</span>
         <span className="text-gray-400">▾</span>
       </button>
       {open && (
@@ -3261,7 +3263,9 @@ function PartyFilter({ options, value, onChange, partyByName }) {
                 <button key={o.party} type="button" onClick={() => { onChange(o.party); setOpen(false); }}
                   className={`w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center justify-between gap-2 ${o.party.toLowerCase() === String(value).toLowerCase() ? "bg-blue-50/60 font-semibold text-[#164FA3]" : "text-gray-700"}`}>
                   <PartyLogo name={o.party} byName={partyByName} size={16} />
-                  <span className={`text-[11px] shrink-0 ${o.count ? "text-gray-500" : "text-gray-300"}`}>{o.count} MLA{o.count === 1 ? "" : "s"}</span>
+                  <span className={`text-[11px] shrink-0 text-right ${(o.assemblies ?? o.count) ? "text-gray-500" : "text-gray-300"}`} data-testid="party-option-count">
+                    {o.assemblies ?? o.count} assembl{(o.assemblies ?? o.count) === 1 ? "y" : "ies"} · {o.count} MLA{o.count === 1 ? "" : "s"}
+                  </span>
                 </button>
               ))}
             </div>
@@ -3275,7 +3279,8 @@ function PartyFilter({ options, value, onChange, partyByName }) {
 function VoteComparisonTab({ flash, fail, onEditMla }) {
   const { byName: partyByName, parties: partyMaster } = usePartyMaster(); // live party logos by name
   const [geo, setGeo] = useState(emptyGeo());
-  // Party filter: "" = all parties, else the Current MLA's saved party name.
+  // Party filter: "" = all parties, else a party name saved as the Current MLA's
+  // or a competitor's party.
   const [party, setParty] = useState("");
   // Assembly reservation category: "" = all, "SC" or "GEN" (from the assembly master).
   const [category, setCategory] = useState("");
@@ -3395,16 +3400,16 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
 
   const clearFilters = () => { setGeo(emptyGeo()); setParty(""); setCategory(""); };
   const hasFilters = geo.zone_id.length || geo.lok_sabha_id.length || geo.district_id.length || geo.assembly_id.length || party || category;
-  // Party options: every party that has MLAs in the current area (with its MLA
-  // count), plus the remaining Party Master parties (0 MLAs) so any party can be
-  // searched and picked.
+  // Party options: every party saved as a Current MLA's OR a competitor's party in
+  // the current area (with its assembly + MLA counts), plus the remaining Party
+  // Master parties (0) so any party can be searched and picked.
   const partyOptions = (() => {
     // Label each counted party with its Party Master spelling when one matches
     // (the filter itself is case-insensitive, so "Bjp" and "BJP" are one party).
     const counted = partyCounts.map((c) => ({ ...c, party: partyByName.get(c.party.trim().toLowerCase())?.name || c.party }));
     const seen = new Set(counted.map((c) => c.party.trim().toLowerCase()));
     const extra = (partyMaster || []).map((p) => String(p.name || "").trim()).filter((n) => n && !seen.has(n.toLowerCase()))
-      .sort((a, b) => a.localeCompare(b)).map((n) => ({ party: n, count: 0 }));
+      .sort((a, b) => a.localeCompare(b)).map((n) => ({ party: n, count: 0, assemblies: 0 }));
     return [...counted, ...extra];
   })();
 

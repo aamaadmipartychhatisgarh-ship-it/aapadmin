@@ -95,6 +95,9 @@ function toIdList(v) {
 // (the filter UI is multi-select) — each narrows the set with an IN clause. All
 // ids are the authoritative `locations` ids (zone/lok_sabha/district/assembly),
 // the same source the rest of the app filters by.
+// The four party fields of an MLA Profile: the Current MLA's and Competitor 1/2/3.
+const PARTY_COLUMNS = ["mp.party", "mp.competitor1_party", "mp.competitor2_party", "mp.competitor3_party"];
+
 function geoFilter({ zone_id, lok_sabha_id, district_id, assembly_id, party, category }, categoryReady = true) {
   const where = [];
   const params = [];
@@ -105,10 +108,15 @@ function geoFilter({ zone_id, lok_sabha_id, district_id, assembly_id, party, cat
     if (categoryReady) { where.push("al.reservation_category = ?"); params.push(cat); }
     else where.push("1 = 0");
   }
-  // Party filter — the Current MLA's SAVED party (mp.party), matched exactly but
-  // case/space-insensitively, so picking a party brings in every MLA of it.
+  // Party filter — an assembly matches when the party is the SAVED party of its
+  // Current MLA OR of any of its three competitors (the four party fields of the
+  // MLA Profile), matched exactly but case/space-insensitively. So a party that
+  // only ever appears as a competitor still finds every assembly it contested.
   const partyName = String(party ?? "").trim();
-  if (partyName) { where.push("LOWER(TRIM(mp.party)) = LOWER(?)"); params.push(partyName); }
+  if (partyName) {
+    where.push(`(${PARTY_COLUMNS.map((c) => `LOWER(TRIM(${c})) = LOWER(?)`).join(" OR ")})`);
+    params.push(...PARTY_COLUMNS.map(() => partyName));
+  }
   const add = (col, vals) => {
     const ids = toIdList(vals);
     if (ids.length) { where.push(`${col} IN (${ids.map(() => "?").join(",")})`); params.push(...ids); }
@@ -337,25 +345,34 @@ export async function fetchComparisonPartyTotals(filters = {}) {
   return { bjp_total: bjp, inc_total: inc, aap_total: aap, aap_bjp_margin: margin, margin_leader };
 }
 
-// MLA count per saved party within the geo + category filters (the party filter
-// itself is ignored here), for the Party filter's options. Blank parties are left out.
+// Every party saved on an MLA Profile within the geo + category filters (the
+// party filter itself is ignored here), for the Party filter's options — from the
+// Current MLA's party AND Competitor 1/2/3's parties, so a competitor-only party
+// is offered too. One option per party (case/space-insensitive, so "BJP" and
+// "Bjp " are one; distinct names are never merged), shown with one of its stored
+// spellings. Blank / whitespace-only / NULL parties are left out.
+//   count      — MLAs of the party (the Current MLA's party), as before
+//   assemblies — assemblies where the party appears as MLA or competitor
+//                (= the rows the filter returns for it)
 export async function fetchComparisonPartyCounts(filters = {}) {
   const categoryReady = await ensureAssemblyCategoryColumn();
   const { where: geoWhere, params: geoParams } = geoFilter({ ...filters, party: null }, categoryReady);
   const whereSql = geoWhere.length ? `AND ${geoWhere.join(" AND ")}` : "";
-  const rows = await query(
-    `SELECT MIN(TRIM(mp.party)) AS party, COUNT(*) AS n
+  const people = PARTY_COLUMNS.map((c, i) => `SELECT mp.assembly_id AS assembly_id, TRIM(${c}) AS party, ${i === 0 ? 1 : 0} AS is_mla
        FROM la_mla_profiles mp
        JOIN la_assemblies a  ON a.id = mp.assembly_id
        JOIN locations al  ON al.id = a.location_id AND al.type = 'assembly'
        LEFT JOIN locations dl  ON dl.id  = al.parent_id  AND dl.type  = 'district'
        LEFT JOIN locations lsl ON lsl.id = dl.parent_id  AND lsl.type = 'lok_sabha'
        LEFT JOIN locations zl  ON zl.id  = lsl.parent_id AND zl.type  = 'zone'
-      WHERE a.location_id IS NOT NULL AND TRIM(COALESCE(mp.party, '')) <> ''
-        ${whereSql}
-      GROUP BY LOWER(TRIM(mp.party))
-      ORDER BY n DESC, party ASC`,
-    geoParams
+      WHERE a.location_id IS NOT NULL AND TRIM(COALESCE(${c}, '')) <> ''
+        ${whereSql}`).join("\n      UNION ALL\n      ");
+  const rows = await query(
+    `SELECT MIN(p.party) AS party, SUM(p.is_mla) AS mlas, COUNT(DISTINCT p.assembly_id) AS assemblies
+       FROM (${people}) p
+      GROUP BY LOWER(p.party)
+      ORDER BY mlas DESC, assemblies DESC, party ASC`,
+    PARTY_COLUMNS.flatMap(() => geoParams)
   );
-  return rows.map((r) => ({ party: r.party, count: Number(r.n) || 0 }));
+  return rows.map((r) => ({ party: r.party, count: Number(r.mlas) || 0, assemblies: Number(r.assemblies) || 0 }));
 }
