@@ -9,12 +9,14 @@ import {
 } from "lucide-react";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
-import { MultiSelect } from "@/components/MultiSelect";
-import { wingShortLabel } from "@/lib/wingLabel";
 import WingVacancies from "./WingVacancies";
 import VacancyTable, { fromMainRow } from "./VacancyTable";
 
 const BRAND = "#164FA3";
+// Default filters: Main Organisation (designations of no other Wing) at State level.
+// Must match MAIN_WING_FILTER in lib/vacancyDashboard.
+const MAIN_WING = "__main__";
+const DEFAULT_LEVEL = "state";
 
 function fmtDateTime(v) {
   if (!v) return "—";
@@ -114,14 +116,15 @@ export default function VacanciesPage() {
   const [toast, setToast] = useState(null);
 
   // Filters
-  const [level, setLevel] = useState("");
+  // Default view: Main Organisation at State level (the page opens on it, and
+  // returns to it on refresh / Clear) — no need to pick them by hand.
+  const [wing, setWing] = useState(MAIN_WING);
+  const [level, setLevel] = useState(DEFAULT_LEVEL);
   const [lokSabhaId, setLokSabhaId] = useState("");
   const [districtId, setDistrictId] = useState("");
   const [assemblyId, setAssemblyId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [designationId, setDesignationId] = useState("");
-  const [wingF, setWingF] = useState([]); // selected wing names ([] = All)
-  const [wingOptions, setWingOptions] = useState([]); // [{ id: wingName, name: shortLabel }]
   const [statusF, setStatusF] = useState(""); // '', filled, vacant
   const [reminderF, setReminderF] = useState("");
   const [responsibleF, setResponsibleF] = useState("");
@@ -134,20 +137,24 @@ export default function VacanciesPage() {
     setErr("");
     try {
       const p = new URLSearchParams();
+      p.set("wing", wing);
       if (level) p.set("level", level);
       if (lokSabhaId) p.set("lok_sabha_id", lokSabhaId);
       if (districtId) p.set("district_id", districtId);
       if (assemblyId) p.set("assembly_id", assemblyId);
       if (blockId) p.set("block_id", blockId);
       if (designationId) p.set("designation_id", designationId);
-      if (wingF.length) p.set("wings", wingF.join(","));
       if (statusF) p.set("status", statusF);
       if (reminderF) p.set("reminder_status", reminderF);
       if (responsibleF) p.set("responsible_id", responsibleF);
       const r = await fetch(`/api/vacancies?${p.toString()}`, { cache: "no-store" });
       if (r.status === 403) { setErr("You do not have access to this module."); setData(null); return; }
       if (!r.ok) throw new Error("load failed");
-      setData(await r.json());
+      const d = await r.json();
+      setData(d);
+      // The server ignores a Designation that isn't valid for the chosen Wing /
+      // Level / area; drop it here too so the selection never shows a stale value.
+      if (d.designation_cleared) setDesignationId("");
     } catch {
       // Drop any earlier result: stale rows next to a failed load would be misread.
       setData(null);
@@ -155,7 +162,7 @@ export default function VacanciesPage() {
     } finally {
       setLoading(false);
     }
-  }, [canAccess, level, lokSabhaId, districtId, assemblyId, blockId, designationId, wingF, statusF, reminderF, responsibleF]);
+  }, [canAccess, wing, level, lokSabhaId, districtId, assemblyId, blockId, designationId, statusF, reminderF, responsibleF]);
 
   useEffect(() => { if (tab === "main") load(); }, [load, tab]);
   // Computed live from Contacts — reload quietly when the user returns to this tab
@@ -172,16 +179,6 @@ export default function VacanciesPage() {
     document.addEventListener("visibilitychange", revalidate);
     return () => { window.removeEventListener("focus", revalidate); document.removeEventListener("visibilitychange", revalidate); };
   }, [load, tab]);
-
-  // Wing options come from Master Data (/api/wings) — the single source of truth.
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/wings")
-      .then((r) => (r.ok ? r.json() : { wings: [] }))
-      .then((d) => { if (alive) setWingOptions((d.wings || []).map((w) => ({ id: w.name, name: wingShortLabel(w.name) }))); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
 
   // Cascading location option lists (filtered by the chosen parent).
   const locs = data?.filters?.locations || { lok_sabha: [], district: [], assembly: [], block: [] };
@@ -214,10 +211,11 @@ export default function VacanciesPage() {
     }
   }
 
-  const anyFilter = level || lokSabhaId || districtId || assemblyId || blockId || designationId || wingF.length || statusF || reminderF || responsibleF;
+  const anyFilter = wing !== MAIN_WING || level !== DEFAULT_LEVEL || lokSabhaId || districtId || assemblyId || blockId || designationId || statusF || reminderF || responsibleF;
+  // Back to the default view (Main Organisation + State), not to "everything".
   const clearFilters = () => {
-    setLevel(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setBlockId("");
-    setDesignationId(""); setWingF([]); setStatusF(""); setReminderF(""); setResponsibleF("");
+    setWing(MAIN_WING); setLevel(DEFAULT_LEVEL); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setBlockId("");
+    setDesignationId(""); setStatusF(""); setReminderF(""); setResponsibleF("");
   };
 
   if (authStatus === "loading" || (!isSuper && pagesLoading)) {
@@ -290,7 +288,13 @@ export default function VacanciesPage() {
       <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
         <div className="flex items-center gap-2 mb-3 text-gray-600"><Filter size={15} /><span className="text-sm font-semibold">Filters</span></div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          <select className={selCls} value={level} onChange={(e) => setLevel(e.target.value)}>
+          {/* Wing → Level → Designation: the Designation options always follow the
+              chosen Wing, Level and area (from the server), and a parent change
+              clears a Designation that no longer applies. */}
+          <select className={selCls} aria-label="Wing" value={wing} onChange={(e) => { setWing(e.target.value); setDesignationId(""); }}>
+            {(data?.filters?.wings || [{ key: MAIN_WING, label: "Main Organisation" }]).map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+          </select>
+          <select className={selCls} aria-label="Level" value={level} onChange={(e) => { setLevel(e.target.value); setDesignationId(""); }}>
             <option value="">All levels</option>
             {(data?.filters?.levels || []).map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
           </select>
@@ -310,11 +314,10 @@ export default function VacanciesPage() {
             <option value="">All Blocks</option>
             {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
-          <select className={selCls} value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
-            <option value="">All Designations</option>
-            {(data?.filters?.designations || []).map((d) => <option key={d.level + d.id} value={d.id}>{d.name} · {d.level_label}</option>)}
+          <select className={selCls} aria-label="Designation" value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
+            <option value="">All Designations{data?.filters?.designations ? ` (${data.filters.designations.length})` : ""}</option>
+            {(data?.filters?.designations || []).map((d) => <option key={d.level + d.id} value={d.id}>{d.name}{level ? "" : ` · ${d.level_label}`}</option>)}
           </select>
-          <MultiSelect options={wingOptions} value={wingF} onChange={setWingF} allLabel="All Wings" className="h-10" />
           <select className={selCls} value={statusF} onChange={(e) => setStatusF(e.target.value)}>
             <option value="">Vacant &amp; needs review</option>
             <option value="vacant">Vacant only</option>

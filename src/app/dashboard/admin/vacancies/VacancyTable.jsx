@@ -26,9 +26,11 @@ export function fromMainRow(r) {
       if (sl.people.length) {
         for (const h of sl.people) lines.push({ kind: "person", contact_id: h.contact_id, name: h.name, designation: h.designation, area: sl.area, mobile: byId.get(h.contact_id)?.mobile || null, reminder: byId.get(h.contact_id) || null });
       } else {
-        lines.push({ kind: "missing", designation: sl.label, area: sl.area, note: "Not assigned" });
+        lines.push({ kind: "missing", designation: sl.label, area: sl.area, note: sl.note || "Not assigned" });
       }
     }
+    // A State Wing post has no upper Wing level — a plain note, not a missing person.
+    if (!lines.length && r.responsible_top_level) lines.push({ kind: "note", note: r.responsible_note });
     if (!lines.length) lines.push({ kind: "missing", designation: "—", note: "Responsible person not found" });
   }
   return {

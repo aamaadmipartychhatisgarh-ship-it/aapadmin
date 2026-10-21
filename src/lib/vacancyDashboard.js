@@ -5,7 +5,8 @@ import {
 } from "@/lib/vacancyResponsibility";
 import { getReminderStates } from "@/lib/vacancyReminders";
 import { query } from "@/lib/db";
-import { wingPositionDesignationIds } from "@/lib/wingVacancies";
+import { wingPositionDesignationIds, buildWingVacancyDataset } from "@/lib/wingVacancies";
+import { listWings } from "@/lib/wingDesignations";
 
 const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
 // Levels scanned for vacancies (State vacancies are the State Prabhari's).
@@ -13,6 +14,36 @@ const VACANCY_LEVELS = ["state", ...TEAM_LEVELS];
 const MAX_ROWS = 2000;
 
 const asId = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 0 ? n : null; };
+const normW = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
+// The Wing filter value meaning "Main Organisation" (designations of no other Wing).
+export const MAIN_WING_FILTER = "__main__";
+
+// A Wing President / Prabhari / General Secretary position from the Wing engine
+// (lib/wingVacancies) in this dashboard's row shape — with the Wing responsibility
+// hierarchy's responsible person, so the post reads the same as on the Wings tab.
+function fromWingPosition(p) {
+  const resp = p.responsible || null;
+  return {
+    level: p.level,
+    level_label: p.level_label,
+    location_id: p.location_id,
+    location_name: p.location_name,
+    designation_id: p.designations[0]?.id ?? null,
+    designation_name: p.designation_name,
+    designation_wing: p.wing,
+    designation_wings: [p.wing],
+    filled: p.status === "filled",
+    status: p.status,
+    review_people: p.review_people || [],
+    person_names: (p.holders || []).map((h) => h.name).join(", "),
+    hierarchy_incomplete: false,
+    lok_sabha_id: p.lok_sabha_id ?? null, lok_sabha_name: p.lok_sabha_name ?? null,
+    district_id: p.district_id ?? null, district_name: p.district_name ?? null,
+    assembly_id: p.assembly_id ?? null, assembly_name: p.assembly_name ?? null,
+    block_id: p.block_id ?? null, block_name: p.block_name ?? null,
+    wing_responsible: resp,
+  };
+}
 
 // The reminder group for a responsible person: all their vacancies share it, so
 // one WhatsApp message covers them all.
@@ -32,7 +63,10 @@ export async function buildVacancyDataset(session, filters = {}) {
     assemblyId: asId(filters.assemblyId),
     blockId: asId(filters.blockId),
     designationId: asId(filters.designationId),
-    // Wing filter: a set of stored wing names (from Master Data / the wing dropdown).
+    // Wing filter (single): MAIN_WING_FILTER = Main Organisation, else a Wing name
+    // from the Wing master; absent = every Wing.
+    wing: String(filters.wing || "").trim() || null,
+    // Legacy multi-wing filter: a set of stored wing names.
     wings: Array.isArray(filters.wings)
       ? filters.wings.map((w) => String(w || "").trim()).filter(Boolean)
       : String(filters.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
@@ -50,6 +84,23 @@ export async function buildVacancyDataset(session, filters = {}) {
   const wingPositions = await wingPositionDesignationIds();
   let wingPositionsSkipped = 0;
 
+  // Wing filter. Main Organisation = a designation that belongs to no Wing other
+  // than the main one (most main designations carry no Wing at all). A named Wing
+  // = a designation of that Wing. The Wing master decides which names are "main".
+  const wingMaster = await listWings();
+  const mainNames = new Set(wingMaster.filter((w) => Number(w.is_main) === 1).map((w) => normW(w.name)));
+  const isMain = f.wing === MAIN_WING_FILTER;
+  const wingNorm = f.wing && !isMain ? normW(f.wing) : null;
+  const wingMatch = (wings) => {
+    const ws = (wings || []).map(normW).filter(Boolean);
+    if (isMain) return ws.every((w) => mainNames.has(w));
+    if (wingNorm) return ws.includes(wingNorm);
+    return true;
+  };
+  // A named Wing's own President / Prabhari / General Secretary positions come from
+  // the Wing engine (same status + Wing responsible person as the Wings tab).
+  const wingRecord = wingNorm ? wingMaster.find((w) => normW(w.name) === wingNorm && Number(w.is_main) !== 1) : null;
+
   // 1) Pull every (location × designation) row for each scanned level, tagged with
   //    ancestry, and keep the level-designation lists for the filter dropdowns.
   const allRows = [];
@@ -62,14 +113,9 @@ export async function buildVacancyDataset(session, filters = {}) {
     // A truncated holder list would turn filled positions into false vacancies —
     // fail closed instead of reporting them.
     if (data.capped) throw new Error(`Too many ${LEVEL_LABEL[level]} designation holders to compute vacancies safely`);
-    for (const d of data.level_designations) {
-      if (wingPositions.has(d.id)) continue;
-      const k = `${level}:${d.id}`;
-      if (!seenDes.has(k)) { seenDes.add(k); designationOptions.push({ id: d.id, name: d.name, wing: d.wing || null, wings: d.wings || [], level, level_label: LEVEL_LABEL[level] }); }
-    }
     for (const u of data.unmapped_holders || []) if (!wingPositions.has(u.designation_id)) unmappedHolders.push({ ...u, level, level_label: LEVEL_LABEL[level] });
     for (const r of data.rows) {
-      if (wingPositions.has(r.designation_id)) { wingPositionsSkipped++; continue; }
+      if (wingPositions.has(r.designation_id)) { if (!f.wing) wingPositionsSkipped++; continue; }
       const anc = ancestryOf(index, level, r.location_id);
       // A real location whose parent chain is broken in the master (e.g. an
       // assembly with no district) — still a position, flagged for the data check.
@@ -93,16 +139,36 @@ export async function buildVacancyDataset(session, filters = {}) {
     }
   }
 
-  // 2) Apply the hierarchy + designation filters (shared by cards and table).
-  const scoped = allRows.filter((r) => {
+  if (wingRecord) {
+    const wd = await buildWingVacancyDataset(session, { wing: wingRecord.name, level: f.level || undefined, status: "any" });
+    for (const p of wd.vacancies) if (levels.includes(p.level)) allRows.push(fromWingPosition(p));
+  }
+
+  // 2) Structural scope — Wing, Level (already applied above) and area. The
+  //    Designation options are exactly the designations present in this scope, so
+  //    the dropdown and the list always follow the same rules.
+  const inScope = (r) => {
     if (f.lokSabhaId && r.lok_sabha_id !== f.lokSabhaId) return false;
     if (f.districtId && r.district_id !== f.districtId) return false;
     if (f.assemblyId && r.assembly_id !== f.assemblyId) return false;
     if (f.blockId && r.block_id !== f.blockId) return false;
-    if (f.designationId && r.designation_id !== f.designationId) return false;
+    if (!wingMatch(r.designation_wings)) return false;
     if (f.wings.length && !(r.designation_wings || []).some((w) => f.wings.includes(w))) return false;
     return true;
-  });
+  };
+  const structural = allRows.filter(inScope);
+  for (const r of structural) {
+    const k = `${r.level}:${r.designation_id}`;
+    if (seenDes.has(k)) continue;
+    seenDes.add(k);
+    designationOptions.push({ id: r.designation_id, name: r.designation_name, wing: r.designation_wing || null, wings: r.designation_wings || [], level: r.level, level_label: r.level_label });
+  }
+  // A Designation that is not valid for the current Wing / Level / area (e.g. left
+  // over from before a parent filter changed) is ignored, never applied — so a stale
+  // choice can't produce a wrong or empty list. The page clears it.
+  let designationCleared = false;
+  if (f.designationId && !designationOptions.some((d) => d.id === f.designationId)) { f.designationId = null; designationCleared = true; }
+  const scoped = structural.filter((r) => !f.designationId || r.designation_id === f.designationId);
 
   const totalDesignations = scoped.length;
   const filledCount = scoped.filter((r) => r.status === "filled").length;
@@ -117,6 +183,29 @@ export async function buildVacancyDataset(session, filters = {}) {
   const displayRows = [];
   const groupKeys = new Set();
   for (const r of vacantRows) {
+    if (r.wing_responsible !== undefined) {
+      // Wing position — the Wing hierarchy's responsible person (as on the Wings tab).
+      const wr = r.wing_responsible || { status: "not_assigned", people: [] };
+      const responsibles = (wr.people || []).map((h) => {
+        const gk = groupKeyFor(h.contact_id);
+        groupKeys.add(gk);
+        return { contact_id: h.contact_id, name: h.name, role: h.designation, area: wr.area, mobile: h.mobile || null, group_key: gk };
+      });
+      const missingText = { not_assigned: "Not assigned", review: "Needs review", not_configured: "Not configured in Wing master", no_parent_area: "Parent area missing" }[wr.status];
+      displayRows.push({
+        ...r,
+        responsibles,
+        responsible_rule: wr.label || null,
+        responsible_missing: missingText ? [wr.label] : [],
+        responsible_slots: wr.status === "top_level" ? [] : [{
+          label: wr.label, area: wr.area || null, note: missingText || null,
+          people: (wr.people || []).map((h) => ({ contact_id: h.contact_id, name: h.name, designation: h.designation })),
+        }],
+        responsible_note: wr.status === "top_level" ? wr.note : missingText ? `${missingText}: ${wr.label}` : null,
+        responsible_top_level: wr.status === "top_level",
+      });
+      continue;
+    }
     const res = resolveResponsible(r.level, r.location_id, r.designation_name, index, holders);
     const responsibles = res.people.map((rp) => {
       const gk = groupKeyFor(rp.contact_id);
@@ -253,6 +342,8 @@ export async function buildVacancyDataset(session, filters = {}) {
     vacancies: tableRows,
     capped,
     wing_positions_skipped: wingPositionsSkipped,
+    designation_cleared: designationCleared,
+    applied: { wing: f.wing, level: f.level, designation_id: f.designationId },
     hierarchy,
     data_quality: {
       unmapped_holders: scopedUnmapped,
@@ -267,6 +358,11 @@ export async function buildVacancyDataset(session, filters = {}) {
       responsibles: [...respMap.values()].sort((a, b) => String(a.name).localeCompare(String(b.name))),
       locations: locByType,
       levels: VACANCY_LEVELS.map((l) => ({ key: l, label: LEVEL_LABEL[l] })),
+      // Wing choices from the Wing master: Main Organisation first, then every
+      // enabled Wing (one per name).
+      wings: [{ key: MAIN_WING_FILTER, label: wingMaster.find((w) => Number(w.is_main) === 1)?.name || "Main Organisation" },
+        ...[...new Map(wingMaster.filter((w) => Number(w.is_main) !== 1 && (w.enabled == null || Number(w.enabled) === 1)).map((w) => [normW(w.name), w.name])).values()]
+          .map((n) => ({ key: n, label: n }))],
     },
   };
 }

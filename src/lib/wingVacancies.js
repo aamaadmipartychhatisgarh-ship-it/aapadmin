@@ -149,7 +149,9 @@ export async function buildWingVacancyDataset(session, filters = {}) {
     lokSabhaId: asId(filters.lokSabhaId),
     districtId: asId(filters.districtId),
     assemblyId: asId(filters.assemblyId),
-    status: ["filled", "vacant", "review"].includes(filters.status) ? filters.status : "all",
+    // "any" = every position whatever its status, uncapped (used by the Main tab's
+    // Wing filter to merge this Wing's positions into its own list).
+    status: ["filled", "vacant", "review", "any"].includes(filters.status) ? filters.status : "all",
   };
 
   await ensureWingSchema();
@@ -353,9 +355,10 @@ export async function buildWingVacancyDataset(session, filters = {}) {
     || String(a.location_name).localeCompare(String(b.location_name))
     || (roleOrder.get(a.role) - roleOrder.get(b.role)));
 
-  let rows = f.status === "all" ? scoped.filter((p) => p.status !== "filled") : scoped.filter((p) => p.status === f.status);
-  const capped = rows.length > MAX_ROWS;
-  rows = rows.slice(0, MAX_ROWS);
+  let rows = f.status === "any" ? scoped
+    : f.status === "all" ? scoped.filter((p) => p.status !== "filled") : scoped.filter((p) => p.status === f.status);
+  const capped = f.status !== "any" && rows.length > MAX_ROWS;
+  if (f.status !== "any") rows = rows.slice(0, MAX_ROWS);
 
   // Per-Wing summary (scope applied).
   const byWing = new Map();
