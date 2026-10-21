@@ -25,7 +25,7 @@ export async function resolveContactCard(id) {
             -- the single legacy designation.
             COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
             ${DESIGNATION_IDS_SQL} AS designation_ids,
-            COALESCE(c.photo_url, w.photo_url) AS photo_url
+            COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
        FROM contacts c
        LEFT JOIN workers w ON w.id = c.worker_id
        LEFT JOIN users u ON u.id = c.assigned_to_user_id

@@ -203,8 +203,10 @@ export async function POST(req) {
           district_name: nameRows[0]?.district_name ?? null,
           // Show the contact's OWN photo first, falling back to the linked worker's
           // photo so an existing image never disappears from the workspace unless
-          // its data is actually deleted (same resolution the Contacts list uses).
-          photo_url: row.photo_url ?? nameRows[0]?.photo_url ?? null,
+          // its data is actually deleted (same resolution the Contacts list uses:
+          // an empty/blank stored value counts as "no photo", so it falls through
+          // to the worker photo instead of showing a blank avatar).
+          photo_url: String(row.photo_url ?? "").trim() || String(nameRows[0]?.photo_url ?? "").trim() || null,
           designation_ids: dsgIds || (row.designation_id ? String(row.designation_id) : ""),
           locked_by_user_id: userId,
         },

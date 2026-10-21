@@ -70,7 +70,7 @@ export async function GET(req) {
       const rows = await query(
         `SELECT d.id AS designation_id, d.name AS designation_name, d.sort_order,
                 c.id AS contact_id, c.person_name,
-                COALESCE(c.photo_url, w.photo_url) AS photo_url
+                COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
            FROM designations d
            LEFT JOIN contact_designations cd ON cd.designation_id = d.id
            LEFT JOIN contacts c ON c.id = cd.contact_id ${notWrong} ${scope.where}
@@ -126,7 +126,7 @@ export async function GET(req) {
     const peopleRows = await query(
       `SELECT ${levelIdExpr} AS loc_id, cd.designation_id,
               c.id AS contact_id, c.person_name,
-              COALESCE(c.photo_url, w.photo_url) AS photo_url
+              COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
          LEFT JOIN workers w ON w.id = c.worker_id

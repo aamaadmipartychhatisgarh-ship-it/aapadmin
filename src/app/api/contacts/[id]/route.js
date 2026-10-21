@@ -16,6 +16,7 @@ import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle 
 import { syncContactWings } from "@/lib/contactWings";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
+import { callerOwnsContact } from "@/lib/callerContactAccess";
 
 // GET /api/contacts/[id] — fetch ONE contact by its unique database id, with the
 // same resolved fields the workspace edit form needs (ward/district names +
@@ -26,18 +27,8 @@ import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 // can show every existing detail instead of failing. Authorization mirrors the
 // PUT: admins may read any contact; a caller may read a contact they hold the
 // lock on OR that is assigned to them (the correct caller/workspace relationship).
-// A caller owns a contact they hold, are assigned, or have already called — so a
-// designation fix still works after the lock expires and the contact is returned
-// to the pool. No admin permission is granted by this.
-async function callerOwnsContact(id, userId) {
-  const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
-  if (!row) return false;
-  if (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId)) return true;
-  try {
-    const called = await query("SELECT 1 FROM calls WHERE contact_id = ? AND user_id = ? LIMIT 1", [id, userId]);
-    return called.length > 0;
-  } catch { return false; }
-}
+// The caller access rule lives in lib/callerContactAccess (shared with the photo
+// route).
 
 export async function GET(_req, { params }) {
   try {

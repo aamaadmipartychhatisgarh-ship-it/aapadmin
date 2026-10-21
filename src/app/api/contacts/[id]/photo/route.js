@@ -8,6 +8,7 @@ import { query } from "@/lib/db";
 import { hasContactPhotoColumn, hasContactPhotoUpdatedAtColumn } from "@/lib/contactExtras";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
+import { callerOwnsContact } from "@/lib/callerContactAccess";
 
 // POST /api/contacts/[id]/photo  { photo_url }
 // Saves a profile photo directly on the contact (contacts.photo_url) — no
@@ -34,9 +35,12 @@ export async function POST(req, { params }) {
     // Supervisor may remove).
     const canManage = await pageAllowed(session, "contacts", session && isOversight(session));
     if (!canManage) {
+      // EXACTLY the rule the contact edit uses (held, assigned, or already called).
+      // This route used to accept only held/assigned, so on a contact the caller had
+      // called before (opened via My Calls → Edit in Workspace after the lock
+      // expired) the details saved but the photo was refused — it never persisted.
       const { userId } = await resolveActingUserId(session);
-      const [row] = await query("SELECT locked_by_user_id, assigned_to_user_id FROM contacts WHERE id = ?", [id]);
-      const mine = row && (String(row.locked_by_user_id) === String(userId) || String(row.assigned_to_user_id) === String(userId));
+      const mine = await callerOwnsContact(id, userId);
       if (!mine) {
         return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
       }
