@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { resolveComplaintLocation } from "@/lib/complaintWorker";
+import { resolveComplaintLocation, contactDesignationId } from "@/lib/complaintWorker";
 import { loadComplaintRows } from "@/lib/complaintsList";
 
 // Callers log complaints (heard live on calls); oversight roles review and
@@ -98,10 +98,15 @@ export async function POST(req) {
     // unambiguous match is used; no match / ambiguous → NULL, never a guess. The
     // district is only filled from the worker when the form left it blank.
     const loc = await resolveComplaintLocation({ phone: d.citizen_phone, contactId: d.contact_id });
+    // Workspace complaints show the contact's designation read-only, so it is
+    // taken from the verified contact record here — any client designation_id is
+    // ignored (no contact / number not owned by it → no designation).
+    let designationId = d.designation_id || null;
+    if (d.designation_from_contact) designationId = d.contact_id ? await contactDesignationId(loc.contact_id) : null;
     const res = await query(
       `INSERT INTO complaints (citizen_name, citizen_phone, type, description, designation_id, district_id, assembly_id, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
-      [d.citizen_name, d.citizen_phone || null, d.type || "other", d.description || null, d.designation_id || null, d.district_id || loc.district_id || null, loc.assembly_id]
+      [d.citizen_name, d.citizen_phone || null, d.type || "other", d.description || null, designationId, d.district_id || loc.district_id || null, loc.assembly_id]
     );
     return NextResponse.json({ id: res.insertId, assembly_id: loc.assembly_id }, { status: 201 });
   } catch (err) {

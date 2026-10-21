@@ -76,6 +76,16 @@ export async function resolveComplaintLocation({ phone, contactId }) {
   return empty; // none / ambiguous → never guess
 }
 
+// The designation to SAVE with a complaint logged from the Caller Workspace: the
+// contact's own (primary) designation — the same value the Workspace shows
+// read-only. Never taken from the client. null when there is no verified contact.
+export async function contactDesignationId(contactId) {
+  const id = Number(contactId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const [row] = await query("SELECT designation_id FROM contacts WHERE id = ? LIMIT 1", [id]);
+  return row?.designation_id ?? null;
+}
+
 // DISPLAY-ONLY fallback for complaints saved before the Assembly was recorded: the
 // Assembly of the live contact(s) behind each mobile number, only when it is
 // unambiguous (every matching contact that has an assembly agrees). Batched — one

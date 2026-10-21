@@ -1719,19 +1719,29 @@ function ComplaintModal({ contact, districts, designations = [], onClose, onSave
     citizen_name: contact?.person_name || "",
     citizen_phone: contact?.phone_number || "",
     type: "water",
-    designation_id: contact?.designation_id ? String(contact.designation_id) : "",
     description: "",
     district_id: contact?.district_id || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Designation is READ-ONLY here: it is the designation of the contact being
+  // called, never typed or picked. It follows the contact automatically and is
+  // cleared when there is no contact or the phone no longer belongs to it. The
+  // server re-derives it from the contact record (client values are ignored).
+  const last10 = (v) => String(v || "").replace(/\D/g, "").slice(-10);
+  const linked = contact?.id && last10(form.citizen_phone) && last10(form.citizen_phone) === last10(contact.phone_number);
+  const designationName = linked && contact.designation_id
+    ? designations.find((d) => String(d.id) === String(contact.designation_id))?.name || ""
+    : "";
+
   async function save() {
     setSaving(true); setError("");
+    const { citizen_name, citizen_phone, type, description, district_id } = form;
     const r = await fetch("/api/complaints", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ citizen_name, citizen_phone, type, description, district_id, contact_id: linked ? contact.id : undefined, designation_from_contact: true }),
     });
     if (r.ok) { onSaved(); return; }
     const d = await r.json().catch(() => ({}));
@@ -1750,12 +1760,12 @@ function ComplaintModal({ contact, districts, designations = [], onClose, onSave
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className={inp} placeholder="Citizen name *" value={form.citizen_name} onChange={(e) => setForm({ ...form, citizen_name: e.target.value })} />
         <input className={inp} placeholder="Phone" value={form.citizen_phone} onChange={(e) => setForm({ ...form, citizen_phone: e.target.value })} />
-        {/* Designation — a separate field (existing designations master), stored
-            independently from the name. */}
-        <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
-          <option value="">Designation (optional)</option>
-          {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
-        </select>
+        {/* Designation — display only, fetched from the contact record. */}
+        <div data-testid="complaint-designation" role="textbox" aria-readonly="true" aria-label="Designation" title="Fetched from the contact record — not editable here"
+          className="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-700 cursor-not-allowed select-text">
+          <span className="text-gray-400 text-xs mr-1">Designation:</span>
+          {designationName || <span className="text-gray-400">{linked ? "No designation" : "—"}</span>}
+        </div>
         <select className={inp} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
           {Object.entries(COMPLAINT_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
