@@ -25,43 +25,6 @@ function fmtDateTime(v) {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(d);
 }
 
-// Mapping problems, shown apart from vacancies so a missing or invalid location
-// is never presented as a vacant position.
-function DataQualityPanel({ dq }) {
-  const holders = dq?.unmapped_holders || [];
-  const noLevel = dq?.designations_without_level || [];
-  const broken = dq?.hierarchy_incomplete || 0;
-  if (!holders.length && !noLevel.length && !broken) return null;
-  return (
-    <div className="bg-white border border-red-200 rounded-xl overflow-hidden mb-4" data-testid="data-quality">
-      <div className="px-4 py-3 border-b border-red-100 bg-red-50/60 flex items-center gap-2">
-        <Shield size={15} className="text-red-600" />
-        <h2 className="text-sm font-bold text-red-800">Data check — these are NOT counted as vacancies</h2>
-      </div>
-      <div className="p-4 space-y-3 text-sm">
-        {holders.length > 0 && (
-          <div>
-            <div className="text-xs font-semibold text-gray-600 mb-1">{holders.length} designation holder{holders.length === 1 ? "" : "s"} with a missing or invalid location — related positions show as “Needs review”</div>
-            <ul className="space-y-0.5 max-h-40 overflow-y-auto">
-              {holders.map((u, i) => (
-                <li key={`${u.level}:${u.contact_id}:${u.designation_id}:${i}`} className="text-xs text-gray-700">
-                  <span className="font-semibold">{u.person_name}</span> · {u.designation_name} ({u.level_label}) — {u.reason}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {noLevel.length > 0 && (
-          <div className="text-xs text-gray-700"><span className="font-semibold">{noLevel.length} designation{noLevel.length === 1 ? "" : "s"} in the Designation Master {noLevel.length === 1 ? "has" : "have"} no level</span>, so no positions can be derived for them: {noLevel.map((d) => d.name).join(", ")}</div>
-        )}
-        {broken > 0 && (
-          <div className="text-xs text-gray-700"><span className="font-semibold">{broken} position{broken === 1 ? "" : "s"}</span> {broken === 1 ? "sits" : "sit"} in a location whose parent area is missing in the location master (still listed, marked in the table).</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function reminderChip(status) {
   const s = String(status || "").toLowerCase();
   if (s === "sent") return "bg-green-50 text-green-700 border-green-200";
@@ -344,7 +307,6 @@ export default function VacanciesPage() {
 
       {err && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
 
-      <DataQualityPanel dq={data?.data_quality} />
 
       {/* Hierarchy drill-down */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-4">

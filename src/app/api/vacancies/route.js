@@ -36,6 +36,9 @@ export async function GET(req) {
       reminderStatus: searchParams.get("reminder_status"),
       responsibleId: searchParams.get("responsible_id"),
     });
+    // The Data check panel was removed from Designation Vacancies; its
+    // mapping-problem lists are no longer served.
+    delete data.data_quality;
     return NextResponse.json(data, { headers: NO_STORE });
   } catch (err) {
     console.error("[vacancies] GET error:", err?.message || err);

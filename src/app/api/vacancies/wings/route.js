@@ -30,6 +30,9 @@ export async function GET(req) {
       assemblyId: searchParams.get("assembly_id"),
       status: searchParams.get("status"),
     });
+    // The Data check panel was removed from Designation Vacancies; its
+    // mapping-problem lists are no longer served.
+    delete data.data_quality;
     return NextResponse.json(data, { headers: NO_STORE });
   } catch (err) {
     console.error("[vacancies/wings] GET error:", err?.message || err);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, Filter, X, ShieldAlert } from "lucide-react";
+import { Loader2, RefreshCw, Filter, X } from "lucide-react";
 import { wingShortLabel } from "@/lib/wingLabel";
 import VacancyTable, { fromWingRow } from "./VacancyTable";
 
@@ -19,75 +19,6 @@ function Card({ label, value, tone }) {
     </div>
   );
 }
-
-
-// Wing mapping problems — kept apart so they are never shown as vacancies.
-function WingDataCheck({ dq }) {
-  const nc = dq?.not_configured || [];
-  const mm = dq?.wing_mismatch || [];
-  const unk = dq?.unknown_wing_designations || [];
-  const um = dq?.unmapped_holders || [];
-  const orph = dq?.orphan_assignments || [];
-  const hc = dq?.hierarchy_conflicts || [];
-  if (!nc.length && !mm.length && !unk.length && !um.length && !orph.length && !hc.length) return null;
-  // Not-configured roles grouped by Wing → "Prabhari: State, District".
-  const grouped = new Map();
-  for (const n of nc) {
-    if (!grouped.has(n.wing)) grouped.set(n.wing, new Map());
-    const g = grouped.get(n.wing);
-    if (!g.has(n.role_label)) g.set(n.role_label, []);
-    g.get(n.role_label).push(n.level_label);
-  }
-  return (
-    <div className="bg-white border border-red-200 rounded-xl mb-4" data-testid="wing-data-check">
-      <div className="px-4 py-3 border-b border-red-100 flex items-center gap-2 bg-red-50/60 rounded-t-xl">
-        <ShieldAlert size={16} className="text-red-600" />
-        <h2 className="text-sm font-bold text-red-700">Wing data check — these are NOT counted as vacancies</h2>
-      </div>
-      <div className="px-4 py-3 space-y-3 text-xs text-gray-700">
-        {mm.length > 0 && (
-          <div>
-            <div className="font-semibold text-gray-600 mb-1">{mm.length} holder{mm.length === 1 ? "" : "s"} whose saved Wing does not match the designation&apos;s Wing — related positions show as &ldquo;Needs review&rdquo;</div>
-            {mm.map((m) => <div key={`${m.contact_id}:${m.designation_id}`}><span className="font-medium text-gray-900">{m.person_name}</span> · {m.designation_name} ({m.level_label}, {m.location_name}) — saved Wings: {m.saved_wings.join(", ") || "—"}</div>)}
-          </div>
-        )}
-        {hc.length > 0 && (
-          <div>
-            <div className="font-semibold text-gray-600 mb-1">{hc.length} holder{hc.length === 1 ? "" : "s"} whose saved Lok Sabha / District / Assembly disagree — related positions show as &ldquo;Needs review&rdquo;</div>
-            {hc.map((m) => <div key={`${m.contact_id}:${m.designation_id}`}><span className="font-medium text-gray-900">{m.person_name}</span> · {m.designation_name} — {m.reason}</div>)}
-          </div>
-        )}
-        {um.length > 0 && (
-          <div>
-            <div className="font-semibold text-gray-600 mb-1">{um.length} Wing designation holder{um.length === 1 ? "" : "s"} with a missing or invalid location</div>
-            {um.map((u) => <div key={`${u.contact_id}:${u.designation_id}`}><span className="font-medium text-gray-900">{u.person_name}</span> · {u.designation_name} ({u.level_label}) — {u.reason}</div>)}
-          </div>
-        )}
-        {orph.length > 0 && (
-          <div>
-            <div className="font-semibold text-gray-600 mb-1">{orph.length} contact assignment{orph.length === 1 ? "" : "s"} point to a designation that no longer exists — they fill no position</div>
-            {orph.map((o) => <div key={`${o.contact_id}:${o.designation_id}`}><span className="font-medium text-gray-900">{o.person_name}</span> · designation id {o.designation_id}</div>)}
-          </div>
-        )}
-        {unk.length > 0 && (
-          <div>
-            <div className="font-semibold text-gray-600 mb-1">{unk.length} designation{unk.length === 1 ? "" : "s"} tagged with a Wing that is not in the Wing master</div>
-            {unk.map((u) => <div key={`${u.designation_id}:${u.wing}`}>{u.designation_name} ({u.level_label}) — Wing &ldquo;{u.wing}&rdquo;</div>)}
-          </div>
-        )}
-        {grouped.size > 0 && (
-          <div>
-            <div className="font-semibold text-gray-600 mb-1">Roles not configured in the Wing master (no designation exists, so no position can be checked)</div>
-            {[...grouped.entries()].map(([wing, roles]) => (
-              <div key={wing}><span className="font-medium text-gray-900">{wing}</span>: {[...roles.entries()].map(([role, lv]) => `${role} (${lv.join(", ")})`).join(" · ")}</div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function WingVacancies() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -212,8 +143,6 @@ export default function WingVacancies() {
       </div>
 
       {err && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
-
-      <WingDataCheck dq={data?.data_quality} />
 
       {/* Per-Wing summary */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-4">
