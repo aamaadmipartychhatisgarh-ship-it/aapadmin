@@ -8,7 +8,8 @@ import { isAdmin } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
 import IncompleteDesignationView from "@/components/contacts/IncompleteDesignationView";
 
-// Contacts → Incomplete Designation. Admin-gated (same as the Contacts page): a
+// Incomplete Designation — a dedicated page (its own sidebar entry, no Contacts /
+// Call Records tabs; see lib/navGroups). Admin-gated (same as the Contacts page): a
 // non-admin hitting this URL directly is redirected out, and the API enforces
 // the Contacts permission too. It's a filtered VIEW of the existing contacts —
 // no separate/duplicate contact store.

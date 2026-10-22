@@ -15,7 +15,9 @@ export const GROUPS = [
   // lives only under its own group above (still reachable from the sidebar).
   // (The Daily Assignment module was removed; the workspace's Call Assignment
   // logic that reads the assignment_rules table is unaffected.)
-  { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers", "/dashboard/admin/contacts-incomplete"] },
+  // Incomplete Designation is deliberately NOT in this group: it is a dedicated
+  // page, so it shows no Contacts / Call Records / Wrong Numbers tabs.
+  { key: "calling", label: "People", hrefs: ["/dashboard/admin/contacts", "/dashboard/admin/calls", "/dashboard/admin/wrong-numbers"] },
   { key: "tasks", label: "Task Management", hrefs: ["/dashboard/tasks", "/dashboard/admin/events", "/dashboard/admin/complaints"] },
   // Every report/analytics page links to every other one (and to the main
   // Reports Center) via this single group — a page only appears here if the
@@ -69,8 +71,8 @@ export function primaryItems(items) {
   // carries its own children (e.g. Wrong Numbers → the "10+ Times" pages). A
   // curated parent must survive the sidebar shortening even when its own href
   // happens to sit inside a group, so its child pages stay reachable.
-  // (c) any item marked `pinned` (a page that must stay a direct sidebar entry,
-  // e.g. Incomplete Designation, whose route is also in the People group).
+  // (c) any item marked `pinned` (a page that must stay a direct sidebar entry
+  // even if its route is ever listed in a group).
   const ungrouped = items.filter((i) => !allGroupedHrefs.has(i.href) || (i.children && i.children.length) || i.pinned);
   const primaries = GROUPS
     .map((g) => g.hrefs.map((h) => items.find((i) => i.href === h)).find(Boolean))

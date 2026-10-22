@@ -254,8 +254,8 @@ export default function DashboardLayout({ children }) {
 
   // Designation pages — two DIRECT sidebar items (no Designation dropdown).
   // Same routes/pages/permissions as before; each page keeps its own guard.
-  // `pinned` keeps them in the shortened admin sidebar (primaryItems) even
-  // though Incomplete Designation's route also belongs to the People group.
+  // `pinned` keeps them in the shortened admin sidebar (primaryItems) whatever
+  // nav group their routes belong to.
   const DESIGNATION_ITEMS = [
     { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle, pinned: true },
     { name: "Designation Vacancies", href: "/dashboard/admin/vacancies", icon: UserCog, pinned: true },
