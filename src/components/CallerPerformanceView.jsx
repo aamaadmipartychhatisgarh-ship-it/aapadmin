@@ -84,6 +84,10 @@ export default function CallerPerformanceView() {
                 <th className="px-4 py-3 font-semibold text-gray-600">#</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Caller</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Total</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Regular</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Unfiltered</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Completed</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Pending</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Connected</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Not Picked</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Wrong #</th>
@@ -101,6 +105,10 @@ export default function CallerPerformanceView() {
                   </td>
                   <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
                   <td className="px-4 py-3 font-bold">{c.total_calls}</td>
+                  <td className="px-4 py-3 text-gray-600">{c.regular_calls ?? 0}</td>
+                  <td className="px-4 py-3 text-gray-600">{c.unfiltered_calls ?? 0}</td>
+                  <td className="px-4 py-3 text-emerald-700">{c.completed ?? 0}</td>
+                  <td className="px-4 py-3 text-amber-700">{c.pending ?? 0}</td>
                   <td className="px-4 py-3 text-emerald-600">{c.connected || 0}</td>
                   <td className="px-4 py-3 text-amber-600">{c.no_answer || 0}</td>
                   <td className="px-4 py-3 text-gray-500">{c.wrong_number || 0}</td>

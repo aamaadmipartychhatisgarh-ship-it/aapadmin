@@ -6,6 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { districtWorkerStats } from "@/lib/districtStats";
 import { contactsByAssembly } from "@/lib/workerCounts";
+import { callsUnion, CALL_TYPE_SPLIT } from "@/lib/allCalls";
 
 // Powers /dashboard/analytics. Returns datasets for all charts in one round-trip.
 export async function GET(req) {
@@ -28,21 +29,25 @@ export async function GET(req) {
     // charts (which keep using the shared filter bar).
     const section = searchParams.get("section");
 
-    const params = [];
-    let where = "WHERE 1=1";
-    if (dateFrom)   { where += " AND DATE(c.called_at) >= ?"; params.push(dateFrom); }
-    if (dateTo)     { where += " AND DATE(c.called_at) <= ?"; params.push(dateTo); }
-    if (districtId) { where += " AND c.district_id = ?";       params.push(districtId); }
+    const callParams = [];
+    let callWhere = "";
+    if (dateFrom)   { callWhere += " AND DATE(c.called_at) >= ?"; callParams.push(dateFrom); }
+    if (dateTo)     { callWhere += " AND DATE(c.called_at) <= ?"; callParams.push(dateTo); }
+    if (districtId) { callWhere += " AND c.district_id = ?";       callParams.push(districtId); }
 
     // Geographic scope: zone/district/assembly admins are restricted to their territory.
     const scope = scopeFilterSync(session.user, "c");
-    where += " " + scope.where;
-    params.push(...scope.params);
+    callWhere += " " + scope.where;
+    callParams.push(...scope.params);
+    // Every calling chart counts Regular + Unfiltered Calls (lib/allCalls), each
+    // call record once. The filters above are applied inside that source.
+    const { sql: calls, params } = await callsUnion({ where: callWhere, params: callParams });
+    const where = "WHERE 1=1";
 
     // 1. Line: calls per day
     const line = await query(
-      `SELECT DATE(c.called_at) AS day, COUNT(*) AS calls
-         FROM calls c
+      `SELECT DATE(c.called_at) AS day, COUNT(*) AS calls, ${CALL_TYPE_SPLIT}
+         FROM ${calls} c
          ${where}
          GROUP BY DATE(c.called_at)
          ORDER BY day ASC`,
@@ -53,9 +58,9 @@ export async function GET(req) {
     // ("Phone Picked"), only actual callers (not oversight roles). Ranked by
     // connected calls (then total), matching the caller-ranking preference.
     const topAgents = await query(
-      `SELECT u.username AS agent, COUNT(c.id) AS calls,
+      `SELECT u.username AS agent, COUNT(c.id) AS calls, ${CALL_TYPE_SPLIT},
               SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected
-         FROM calls c
+         FROM ${calls} c
          JOIN users u ON u.id = c.user_id
          LEFT JOIN call_statuses cs ON cs.id = c.status_id
          ${where}
@@ -75,7 +80,7 @@ export async function GET(req) {
     // 3. Pie: status breakdown
     const statusPie = await query(
       `SELECT cs.name AS status, COUNT(c.id) AS n
-         FROM calls c
+         FROM ${calls} c
          LEFT JOIN call_statuses cs ON cs.id = c.status_id
          ${where}
          GROUP BY cs.name`,
@@ -89,16 +94,19 @@ export async function GET(req) {
     // calls WITHOUT dropping any district. The single-district global filter is
     // intentionally NOT applied here — this chart's whole point is the
     // all-districts breakdown.
-    const sdParams = [];
-    let sdOn = "c.district_id = ld.id";
-    if (dateFrom) { sdOn += " AND DATE(c.called_at) >= ?"; sdParams.push(dateFrom); }
-    if (dateTo)   { sdOn += " AND DATE(c.called_at) <= ?"; sdParams.push(dateTo); }
+    const sdCallParams = [];
+    let sdCallWhere = "";
+    if (dateFrom) { sdCallWhere += " AND DATE(c.called_at) >= ?"; sdCallParams.push(dateFrom); }
+    if (dateTo)   { sdCallWhere += " AND DATE(c.called_at) <= ?"; sdCallParams.push(dateTo); }
     // Scope the CALLS to the viewer's territory (empty for super_admin/state_admin/
-    // supervisor → all calls). Applied in the ON clause so out-of-scope districts
-    // still show, just with zero counts.
+    // supervisor → all calls). Applied to the calls source (then LEFT JOINed) so
+    // out-of-scope districts still show, just with zero counts.
     const sdScope = scopeFilterSync(session.user, "c");
-    sdOn += " " + sdScope.where;
-    sdParams.push(...sdScope.params);
+    sdCallWhere += " " + sdScope.where;
+    sdCallParams.push(...sdScope.params);
+    const sdSrc = await callsUnion({ where: sdCallWhere, params: sdCallParams });
+    const sdOn = "c.district_id = ld.id";
+    const sdParams = sdSrc.params;
     const stackedDistrict = await query(
       `SELECT ld.name AS district,
               SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
@@ -109,7 +117,7 @@ export async function GET(req) {
               SUM(CASE WHEN cs.name = 'Switched Off' THEN 1 ELSE 0 END) AS switched_off,
               COUNT(c.id) AS total
          FROM locations ld
-         LEFT JOIN calls c ON ${sdOn}
+         LEFT JOIN ${sdSrc.sql} c ON ${sdOn}
          LEFT JOIN call_statuses cs ON cs.id = c.status_id
         WHERE ld.type = 'district'
         GROUP BY ld.id, ld.name
@@ -121,7 +129,7 @@ export async function GET(req) {
     const cumulativeRaw = await query(
       `SELECT DATE(c.called_at) AS day,
               SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected
-         FROM calls c
+         FROM ${calls} c
          LEFT JOIN call_statuses cs ON cs.id = c.status_id
          ${where}
          GROUP BY DATE(c.called_at)
@@ -140,7 +148,7 @@ export async function GET(req) {
     // dates (the old day-of-week aggregate did the latter, which read as false
     // activity on quiet days).
     //
-    // • Single source of truth: a plain COUNT over `calls`, grouped by the IST
+    // • Single source of truth: a plain COUNT over all calls (Regular + Unfiltered), grouped by the IST
     //   calendar day AND hour of `called_at` — each call counted once (no joins
     //   → no duplicates), non-cumulative (each cell = ONLY that hour's calls).
     // • Timezone: `called_at` is UTC; the day/hour buckets and the window bounds
@@ -168,17 +176,20 @@ export async function GET(req) {
     // Heat-map-specific WHERE: keep the territory/district scope but bound dates
     // by the IST window (NOT the UTC-DATE range the other charts use), so a call
     // near midnight lands on its correct IST day.
-    let heatWhere = "WHERE 1=1";
-    const heatParams = [];
-    if (districtId) { heatWhere += " AND c.district_id = ?"; heatParams.push(districtId); }
-    heatWhere += " " + scope.where; heatParams.push(...scope.params);
-    heatWhere += ` AND c.called_at >= CONVERT_TZ(CONCAT(?,' 00:00:00'),'${IST}','+00:00')`
+    let heatCallWhere = "";
+    const heatCallParams = [];
+    if (districtId) { heatCallWhere += " AND c.district_id = ?"; heatCallParams.push(districtId); }
+    heatCallWhere += " " + scope.where; heatCallParams.push(...scope.params);
+    heatCallWhere += ` AND c.called_at >= CONVERT_TZ(CONCAT(?,' 00:00:00'),'${IST}','+00:00')`
               +  ` AND c.called_at <  CONVERT_TZ(CONCAT(?,' 00:00:00'),'${IST}','+00:00') + INTERVAL 1 DAY`;
-    heatParams.push(winFrom, winTo);
+    heatCallParams.push(winFrom, winTo);
+    const heatSrc = await callsUnion({ where: heatCallWhere, params: heatCallParams });
+    const heatWhere = "";
+    const heatParams = heatSrc.params;
 
     const heatRows = await query(
       `SELECT DATE(${istTs}) AS day, HOUR(${istTs}) AS hour, COUNT(*) AS n
-         FROM calls c
+         FROM ${heatSrc.sql} c
          ${heatWhere}
          GROUP BY DATE(${istTs}), HOUR(${istTs})`,
       heatParams

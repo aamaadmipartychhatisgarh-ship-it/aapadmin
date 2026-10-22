@@ -73,6 +73,10 @@ export const MODULES = [
     label: "Calls",
     icon: "PhoneCall",
     table: "calls",
+    // Regular + Unfiltered Calls (engine reads lib/allCalls instead of `calls`);
+    // "Call type" tells them apart. Unfiltered rows have no sentiment/follow-up/
+    // designation, so those read empty for them.
+    callsUnion: true,
     alias: "c",
     dateField: "c.called_at",
     scopeCols: ["zone_id", "district_id", "assembly_id"],
@@ -89,6 +93,7 @@ export const MODULES = [
       { key: "id", label: "ID", sql: "c.id", type: "number" },
       { key: "person_name", label: "Person", sql: "c.person_name", type: "string" },
       { key: "phone_number", label: "Phone", sql: "c.phone_number", type: "string" },
+      { key: "call_type", label: "Call type", sql: "CASE c.call_type WHEN 'unfiltered' THEN 'Unfiltered' ELSE 'Regular' END", type: "string" },
       { key: "status", label: "Status", sql: "cs.name", type: "string" },
       { key: "sentiment", label: "Sentiment", sql: "c.sentiment", type: "string" },
       { key: "caller", label: "Caller", sql: "u.username", type: "string" },
@@ -104,6 +109,7 @@ export const MODULES = [
       { key: "called_at", label: "Called at", sql: "c.called_at", type: "datetime" },
     ],
     filters: [
+      { key: "call_type", label: "Call type", type: "enum", column: "c.call_type", options: [{ value: "regular", label: "Regular" }, { value: "unfiltered", label: "Unfiltered" }] },
       { key: "status_id", label: "Call status", type: "enum", column: "c.status_id", optionsFrom: "call_statuses" },
       {
         key: "sentiment", label: "Sentiment", type: "enum", column: "c.sentiment",
@@ -116,6 +122,7 @@ export const MODULES = [
     ],
     searchCols: ["c.person_name", "c.phone_number", "c.remarks"],
     groupBy: [
+      { key: "call_type", label: "Call type", sql: "CASE c.call_type WHEN 'unfiltered' THEN 'Unfiltered' ELSE 'Regular' END" },
       { key: "status", label: "Status", sql: "cs.name" },
       { key: "sentiment", label: "Sentiment", sql: "c.sentiment" },
       { key: "caller", label: "Caller", sql: "u.username" },
@@ -124,7 +131,7 @@ export const MODULES = [
       { key: "assembly", label: "Assembly", sql: "asm.name" },
       ...timeGroupBys("c.called_at"),
     ],
-    defaultColumns: ["person_name", "phone_number", "status", "sentiment", "caller", "designation", "district", "assembly", "called_at"],
+    defaultColumns: ["person_name", "phone_number", "call_type", "status", "sentiment", "caller", "designation", "district", "assembly", "called_at"],
   },
 
   // ------------------------------------------------------------- CONTACTS ---

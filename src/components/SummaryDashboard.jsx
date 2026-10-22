@@ -117,7 +117,9 @@ export default function SummaryDashboard({
   const tally = data?.tally;
 
   const cards = [
-    { label: "Total Calls", value: tally?.total, icon: PhoneCall, accent: "bg-[#164FA3]", primary: true },
+    // Total = Regular + Unfiltered Calls (each call record once).
+    { label: "Total Calls", value: tally?.total, icon: PhoneCall, accent: "bg-[#164FA3]", primary: true,
+      sub: tally ? `Regular ${(tally.regular_calls ?? 0).toLocaleString()} · Unfiltered ${(tally.unfiltered_calls ?? 0).toLocaleString()}` : null },
     { label: "Connected", value: tally?.connected, icon: PhoneForwarded, accent: "text-emerald-600 bg-emerald-50" },
     { label: "Not Picked", value: tally?.no_answer, icon: PhoneOff, accent: "text-amber-600 bg-amber-50" },
     { label: "Switched Off", value: tally?.switched_off, icon: PowerOff, accent: "text-sky-600 bg-sky-50" },
@@ -205,6 +207,7 @@ export default function SummaryDashboard({
                       <div>
                         <h3 className="text-3xl font-bold tracking-tighter text-white">{(c.value ?? 0).toLocaleString()}</h3>
                         <p className="text-sm font-medium mt-1 text-blue-200">{c.label}</p>
+                        {c.sub && <p className="text-[11px] mt-0.5 text-blue-100/80" data-testid="summary-total-split">{c.sub}</p>}
                       </div>
                     </div>
                   );

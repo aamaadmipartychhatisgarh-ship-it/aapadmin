@@ -92,7 +92,8 @@ function Body() {
       {/* Summary tiles */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Tile icon={Users} label="Callers" value={t.callers ?? 0} color="text-[#164FA3]" bg="bg-blue-50" />
-        <Tile icon={Phone} label="Total Calls" value={(t.total_calls ?? 0).toLocaleString()} color="text-indigo-700" bg="bg-indigo-50" />
+        <Tile icon={Phone} label="Total Calls" value={(t.total_calls ?? 0).toLocaleString()} color="text-indigo-700" bg="bg-indigo-50"
+          sub={`Regular ${(t.regular_calls ?? 0).toLocaleString()} · Unfiltered ${(t.unfiltered_calls ?? 0).toLocaleString()}`} testId="cr-total" />
         <Tile icon={PhoneCall} label="Connected" value={(t.connected ?? 0).toLocaleString()} color="text-emerald-700" bg="bg-emerald-50" />
         <Tile icon={TrendingUp} label="Connect Rate" value={`${t.connect_rate ?? 0}%`} color="text-amber-700" bg="bg-amber-50" />
         <Tile icon={Star} label="Interested" value={(t.interested ?? 0).toLocaleString()} color="text-fuchsia-700" bg="bg-fuchsia-50" />
@@ -155,6 +156,11 @@ function Body() {
                   <Th>#</Th>
                   <Th>Caller</Th>
                   <Th right>Total Calls</Th>
+                  <Th right>Regular</Th>
+                  <Th right>Unfiltered</Th>
+                  <Th right>Assigned</Th>
+                  <Th right>Completed</Th>
+                  <Th right>Pending</Th>
                   <Th right>Connected</Th>
                   <Th right>Connect %</Th>
                   <Th right>Not Picked</Th>
@@ -174,7 +180,12 @@ function Body() {
                   <tr key={c.user_id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-3"><RankBadge rank={c.rank} /></td>
                     <td className="px-4 py-3 font-semibold text-gray-900">{c.name}</td>
-                    <td className="px-4 py-3 text-right font-bold text-gray-900">{c.total_calls.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right font-bold text-gray-900" data-testid="cr-total-calls">{c.total_calls.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-gray-700" data-testid="cr-regular">{(c.regular_calls ?? 0).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-gray-700" data-testid="cr-unfiltered">{(c.unfiltered_calls ?? 0).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-gray-700" title={`Regular ${c.regular?.assigned ?? 0} + Unfiltered ${c.unfiltered?.assigned ?? 0}`}>{c.assigned ?? 0}</td>
+                    <td className="px-4 py-3 text-right text-emerald-700" title={`Regular ${c.regular?.completed ?? 0} + Unfiltered ${c.unfiltered?.completed ?? 0}`}>{c.completed ?? 0}</td>
+                    <td className="px-4 py-3 text-right text-amber-700" title={`Regular ${c.regular?.pending ?? 0} + Unfiltered ${c.unfiltered?.pending ?? 0}`}>{c.pending ?? 0}</td>
                     <td className="px-4 py-3 text-right font-semibold text-emerald-700">{c.connected.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right"><RateChip rate={c.connect_rate} /></td>
                     <td className="px-4 py-3 text-right text-gray-500">{c.not_picked}</td>
@@ -198,11 +209,12 @@ function Body() {
   );
 }
 
-function Tile({ icon: Icon, label, value, color, bg }) {
+function Tile({ icon: Icon, label, value, color, bg, sub, testId }) {
   return (
-    <div className={`${bg} rounded-2xl p-4 border border-gray-100`}>
+    <div className={`${bg} rounded-2xl p-4 border border-gray-100`} data-testid={testId}>
       <div className={`flex items-center gap-2 ${color} mb-1`}><Icon size={16} /><span className="text-xs uppercase tracking-wide font-semibold">{label}</span></div>
       <div className={`text-2xl font-bold ${color}`}>{value}</div>
+      {sub && <div className="text-[11px] text-gray-500 mt-0.5">{sub}</div>}
     </div>
   );
 }

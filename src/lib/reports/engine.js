@@ -11,6 +11,7 @@
 // are clamped integers inlined directly (never client strings).
 
 import { query } from "@/lib/db";
+import { callsUnion } from "@/lib/allCalls";
 import { getModule, MODULES } from "./registry";
 import { resolveRange } from "./timeRanges";
 import { geoFilter } from "@/lib/geoFilter";
@@ -175,8 +176,17 @@ export async function runReport({ moduleKey, session, body, opts = {}, roleOverr
   const role = roleOverride || roleOf(session);
   if (!canAccess(module, role)) return { error: "Forbidden", status: 403 };
 
-  const from = `FROM ${module.table} ${module.alias} ${module.joins || ""}`;
-  const { where, params } = buildWhere(module, session, body);
+  let from = `FROM ${module.table} ${module.alias} ${module.joins || ""}`;
+  let { where, params } = buildWhere(module, session, body);
+  // A module over ALL calls (Regular + Unfiltered, lib/allCalls): the whole
+  // WHERE (scope, time, filters, geo, search — all on the module alias) is
+  // applied inside both branches of the combined source.
+  if (module.callsUnion) {
+    const src = await callsUnion({ where: where.replace(/^WHERE 1=1/, ""), params });
+    from = `FROM ${src.sql} ${module.alias} ${module.joins || ""}`;
+    where = "";
+    params = src.params;
+  }
 
   // ---- Summary (GROUP BY) mode --------------------------------------------
   if (body.group_by) {

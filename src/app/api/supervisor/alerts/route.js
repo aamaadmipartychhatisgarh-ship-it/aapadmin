@@ -2,6 +2,7 @@ import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { callsUnion } from "@/lib/allCalls";
 
 // Rule-based alerts derived from today's data.
 // Rules:
@@ -18,18 +19,22 @@ export async function GET() {
 
     const alerts = [];
 
+    // Call-volume / outcome alerts count Regular + Unfiltered Calls (lib/allCalls).
+    const todaySrc = await callsUnion({ where: " AND DATE(c.called_at) = CURDATE()" });
+    const hourSrc = await callsUnion({ where: " AND c.called_at >= NOW() - INTERVAL 1 HOUR" });
+
     // Wrong-number rate (today) — only flag actual callers
     const wrongRows = await query(
       `SELECT u.id AS user_id, u.username,
               COUNT(c.id) AS total,
               SUM(CASE WHEN cs.name = 'Wrong Number' THEN 1 ELSE 0 END) AS wrong
          FROM users u
-         JOIN calls c ON c.user_id = u.id
+         JOIN ${todaySrc.sql} c ON c.user_id = u.id
          LEFT JOIN call_statuses cs ON cs.id = c.status_id
-        WHERE DATE(c.called_at) = CURDATE()
-          AND u.role IN ('caller','user','agent')
+        WHERE u.role IN ('caller','user','agent')
         GROUP BY u.id, u.username
-       HAVING total >= 10 AND wrong / total > 0.25`
+       HAVING total >= 10 AND wrong / total > 0.25`,
+      todaySrc.params
     );
     wrongRows.forEach((r) => {
       alerts.push({
@@ -44,13 +49,13 @@ export async function GET() {
     const rudeRows = await query(
       `SELECT u.id AS user_id, u.username, COUNT(c.id) AS rude
          FROM users u
-         JOIN calls c ON c.user_id = u.id
+         JOIN ${hourSrc.sql} c ON c.user_id = u.id
          JOIN call_statuses cs ON cs.id = c.status_id
         WHERE cs.name = 'Rudely Behaved'
-          AND c.called_at >= NOW() - INTERVAL 1 HOUR
           AND u.role IN ('caller','user','agent')
         GROUP BY u.id, u.username
-       HAVING rude >= 3`
+       HAVING rude >= 3`,
+      hourSrc.params
     );
     rudeRows.forEach((r) => {
       alerts.push({
@@ -78,12 +83,14 @@ export async function GET() {
 
     // Low activity: callers who have been seen recently but logged fewer than 5 calls today
     const idleRows = await query(
-      `SELECT u.id AS user_id, u.username,
-              (SELECT COUNT(*) FROM calls WHERE user_id = u.id AND DATE(called_at) = CURDATE()) AS today_calls
+      `SELECT u.id AS user_id, u.username, COUNT(c.id) AS today_calls
          FROM users u
+         LEFT JOIN ${todaySrc.sql} c ON c.user_id = u.id
         WHERE u.role IN ('caller','user','agent')
           AND u.last_seen_at >= NOW() - INTERVAL 10 MINUTE
-       HAVING today_calls < 5`
+        GROUP BY u.id, u.username
+       HAVING today_calls < 5`,
+      todaySrc.params
     );
     idleRows.forEach((r) => {
       alerts.push({

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { query } from "@/lib/db";
+import { callsUnion, CALL_TYPE_SPLIT } from "@/lib/allCalls";
 
 // GET ?date_from=&date_to= : the signed-in caller's progress grouped by call
 // OUTCOME for the selected range (defaults to TODAY). One aggregated query — no
@@ -33,9 +34,12 @@ export async function GET(req) {
       where.push(`${dateExpr} = DATE(CONVERT_TZ(UTC_TIMESTAMP(),'+00:00','${IST}'))`);
     }
 
+    // Regular + Unfiltered Calls (lib/allCalls) — each call record counted once.
+    const src = await callsUnion({ where: " AND " + where.join(" AND "), params });
     const [agg] = await query(
       `SELECT
          COUNT(*)                          AS total_calls,
+         ${CALL_TYPE_SPLIT},
          SUM(cs.name = 'Phone Picked')     AS connected,
          SUM(cs.name = 'Not Picked')       AS no_answer,
          SUM(cs.name = 'Busy')             AS busy,
@@ -43,15 +47,16 @@ export async function GET(req) {
          SUM(cs.name = 'Wrong Number')     AS wrong_number,
          SUM(cs.name = 'Rudely Behaved')   AS rejected,
          SUM(c.follow_up_date IS NOT NULL) AS follow_up
-       FROM calls c
-       LEFT JOIN call_statuses cs ON cs.id = c.status_id
-       WHERE ${where.join(" AND ")}`,
-      params
+       FROM ${src.sql} c
+       LEFT JOIN call_statuses cs ON cs.id = c.status_id`,
+      src.params
     );
 
     const n = (v) => Number(v) || 0;
     return NextResponse.json({
       total_calls: n(agg?.total_calls),
+      regular_calls: n(agg?.regular_calls),
+      unfiltered_calls: n(agg?.unfiltered_calls),
       outcomes: {
         connected: n(agg?.connected),
         no_answer: n(agg?.no_answer),

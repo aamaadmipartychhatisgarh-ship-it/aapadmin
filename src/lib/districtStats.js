@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { callsUnion } from "@/lib/allCalls";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { contactsByDistrict } from "@/lib/workerCounts";
 import { requiredWorkersFor } from "@/lib/chhattisgarhAssemblies";
@@ -62,7 +63,9 @@ export async function districtWorkerStats(session, { districtId } = {}) {
       params
     ),
     contactsByDistrict(),
-    query("SELECT district_id, COUNT(*) AS n FROM calls WHERE district_id IS NOT NULL GROUP BY district_id"),
+    // Call attempts per district — Regular + Unfiltered Calls (lib/allCalls).
+    callsUnion({ where: " AND c.district_id IS NOT NULL" }).then((src) =>
+      query(`SELECT c.district_id, COUNT(*) AS n FROM ${src.sql} c GROUP BY c.district_id`, src.params)),
   ]);
   const attemptByDistrict = new Map(callRows.map((r) => [r.district_id, Number(r.n) || 0]));
 

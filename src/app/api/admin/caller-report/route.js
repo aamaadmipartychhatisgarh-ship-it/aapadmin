@@ -5,27 +5,14 @@ import { isAdmin, scopeFilterSync, loadUserScope } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { connectRate } from "@/lib/callerMetrics";
+import { callsUnion, CALL_TYPE_SPLIT, assignmentCountsByCaller, EMPTY_ASSIGNMENT } from "@/lib/allCalls";
 
 // Per-caller performance report for the admin dashboard: call volume, outcome
 // (review status) breakdown, connect rate, sentiment, follow-ups and a ranking.
 //
-// Some deployments predate the supervisor-schema columns on `calls`
-// (duration_seconds / sentiment / is_follow_up_required) and the contacts
-// link (contact_id). We detect which exist and fold missing ones to 0/NULL so
-// the report never 500s on a lagging schema.
-let callColumnsPromise;
-async function getCallColumns() {
-  if (!callColumnsPromise) {
-    callColumnsPromise = query(
-      `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'calls'`
-    )
-      .then((rows) => new Set(rows.map((r) => r.name)))
-      .catch((err) => { callColumnsPromise = undefined; throw err; });
-  }
-  return callColumnsPromise;
-}
-
+// Counts BOTH call types — Regular Calls and Unfiltered Calls — through the
+// shared lib/allCalls source (each call record once; columns a deployment lacks
+// read as NULL there), with the Regular / Unfiltered split alongside.
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -47,30 +34,25 @@ export async function GET(req) {
     const granularity = ["day", "week", "month"].includes(searchParams.get("granularity"))
       ? searchParams.get("granularity") : "day";
 
-    const cols = await getCallColumns();
-    const has = (c) => cols.has(c);
-    // Optional-column-aware expressions.
     // Clamp each row's duration to non-negative before aggregating, so a legacy
     // invalid (negative) duration can never produce a negative average/total.
-    const durAvg = has("duration_seconds") ? "ROUND(AVG(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0)" : "0";
-    const durSum = has("duration_seconds") ? "COALESCE(SUM(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0)" : "0";
-    const followUps = has("is_follow_up_required")
-      ? "SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END)" : "0";
-    const interested = has("sentiment")
-      ? "SUM(CASE WHEN c.sentiment IN ('positive','supporter') THEN 1 ELSE 0 END)" : "0";
-    const negative = has("sentiment")
-      ? "SUM(CASE WHEN c.sentiment IN ('negative','opponent','not_supporter') THEN 1 ELSE 0 END)" : "0";
-    const uniqueReached = has("contact_id") ? "COUNT(DISTINCT c.contact_id)" : "0";
+    const durAvg = "ROUND(AVG(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0)";
+    const durSum = "COALESCE(SUM(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0)";
+    const followUps = "SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END)";
+    const interested = "SUM(CASE WHEN c.sentiment IN ('positive','supporter') THEN 1 ELSE 0 END)";
+    const negative = "SUM(CASE WHEN c.sentiment IN ('negative','opponent','not_supporter') THEN 1 ELSE 0 END)";
+    const uniqueReached = "COUNT(DISTINCT c.reach_key)";
 
-    // Date range is applied in the LEFT JOIN's ON clause so callers with zero
-    // calls in the window still appear (with all-zero stats).
+    // Date range + territory scope are applied INSIDE the calls source, which is
+    // then LEFT JOINed so callers with zero calls in the window still appear.
     const params = [];
-    let joinExtra = "";
-    if (dateFrom) { joinExtra += " AND DATE(c.called_at) >= ?"; params.push(dateFrom); }
-    if (dateTo) { joinExtra += " AND DATE(c.called_at) <= ?"; params.push(dateTo); }
+    let callWhere = "";
+    if (dateFrom) { callWhere += " AND DATE(c.called_at) >= ?"; params.push(dateFrom); }
+    if (dateTo) { callWhere += " AND DATE(c.called_at) <= ?"; params.push(dateTo); }
     const scope = scopeFilterSync(session.user, "c", { cols: ["zone_id", "district_id", "assembly_id"] });
-    joinExtra += " " + scope.where;
+    callWhere += " " + scope.where;
     params.push(...scope.params);
+    const src = await callsUnion({ where: callWhere, params });
 
     const rows = await query(
       `SELECT
@@ -78,6 +60,7 @@ export async function GET(req) {
          u.username AS name,
          u.last_seen_at,
          COUNT(c.id) AS total_calls,
+         ${CALL_TYPE_SPLIT},
          SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
          SUM(CASE WHEN cs.name = 'Not Picked'   THEN 1 ELSE 0 END) AS not_picked,
          SUM(CASE WHEN cs.name = 'Wrong Number' THEN 1 ELSE 0 END) AS wrong_number,
@@ -91,12 +74,15 @@ export async function GET(req) {
          COUNT(DISTINCT DATE(c.called_at)) AS active_days,
          MAX(c.called_at) AS last_call_at
        FROM users u
-       LEFT JOIN calls c ON c.user_id = u.id ${joinExtra}
+       LEFT JOIN ${src.sql} c ON c.user_id = u.id
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
        WHERE u.role IN ('caller', 'user', 'agent')
        GROUP BY u.id, u.username, u.last_seen_at`,
-      params
+      src.params
     );
+    // Assigned / Completed / Pending (current state): Regular contacts +
+    // Unfiltered Contacts assigned to each caller.
+    const assignment = await assignmentCountsByCaller();
 
     // Numeric coercion + derived connect rate, then rank by connected calls
     // (the meaningful outcome), breaking ties on total volume.
@@ -110,6 +96,9 @@ export async function GET(req) {
           last_seen_at: r.last_seen_at,
           last_call_at: r.last_call_at,
           total_calls: total,
+          regular_calls: Number(r.regular_calls) || 0,
+          unfiltered_calls: Number(r.unfiltered_calls) || 0,
+          ...(assignment.get(Number(r.user_id)) || EMPTY_ASSIGNMENT),
           connected,
           connect_rate: connectRate(total, connected),
           not_picked: Number(r.not_picked) || 0,
@@ -132,12 +121,17 @@ export async function GET(req) {
       (t, r) => {
         t.callers += 1;
         t.total_calls += r.total_calls;
+        t.regular_calls += r.regular_calls;
+        t.unfiltered_calls += r.unfiltered_calls;
+        t.assigned += r.assigned;
+        t.completed += r.completed;
+        t.pending += r.pending;
         t.connected += r.connected;
         t.follow_ups += r.follow_ups;
         t.interested += r.interested;
         return t;
       },
-      { callers: 0, total_calls: 0, connected: 0, follow_ups: 0, interested: 0 }
+      { callers: 0, total_calls: 0, regular_calls: 0, unfiltered_calls: 0, assigned: 0, completed: 0, pending: 0, connected: 0, follow_ups: 0, interested: 0 }
     );
     totals.connect_rate = connectRate(totals.total_calls, totals.connected);
 
@@ -145,11 +139,12 @@ export async function GET(req) {
     // window. Grouping is done on the IST calendar day (calls timestamp is
     // stored in UTC), matching the rest of the app's date handling.
     const dayParams = [];
-    let dayWhere = "WHERE 1=1";
+    let dayWhere = "";
     if (dateFrom) { dayWhere += " AND DATE(c.called_at) >= ?"; dayParams.push(dateFrom); }
     if (dateTo) { dayWhere += " AND DATE(c.called_at) <= ?"; dayParams.push(dateTo); }
     dayWhere += " " + scope.where;
     dayParams.push(...scope.params);
+    const daySrc = await callsUnion({ where: dayWhere, params: dayParams });
     const istCalled = "CONVERT_TZ(c.called_at,'+00:00','+05:30')";
     const bucketExpr = granularity === "month" ? `DATE_FORMAT(${istCalled},'%Y-%m-01')`
       : granularity === "week" ? `DATE_SUB(DATE(${istCalled}), INTERVAL WEEKDAY(${istCalled}) DAY)`
@@ -157,20 +152,22 @@ export async function GET(req) {
     const dailyRows = await query(
       `SELECT ${bucketExpr} AS day,
               COUNT(*) AS total_calls,
+              ${CALL_TYPE_SPLIT},
               SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
               COUNT(DISTINCT c.user_id) AS active_callers
-         FROM calls c
+         FROM ${daySrc.sql} c
          LEFT JOIN call_statuses cs ON cs.id = c.status_id
          JOIN users u ON u.id = c.user_id AND u.role IN ('caller','user','agent')
-         ${dayWhere}
         GROUP BY day
         ORDER BY day DESC
         LIMIT ${granularity === "month" ? 24 : granularity === "week" ? 52 : 60}`,
-      dayParams
+      daySrc.params
     );
     const daily = dailyRows.map((d) => ({
       day: d.day,
       total_calls: Number(d.total_calls) || 0,
+      regular_calls: Number(d.regular_calls) || 0,
+      unfiltered_calls: Number(d.unfiltered_calls) || 0,
       connected: Number(d.connected) || 0,
       active_callers: Number(d.active_callers) || 0,
     }));

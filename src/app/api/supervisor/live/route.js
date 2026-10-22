@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { LIVE_THRESHOLD_SECONDS } from "@/lib/supervisor";
+import { ensureUnfilteredCallLogSchema } from "@/lib/unfilteredContacts";
 
 export async function GET() {
   try {
@@ -11,6 +12,7 @@ export async function GET() {
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     }
 
+    await ensureUnfilteredCallLogSchema();
     const users = await query(
       `SELECT
          u.id, u.username, u.role, u.last_seen_at, u.is_active,
@@ -18,7 +20,9 @@ export async function GET() {
            SELECT MAX(c.called_at)
            FROM calls c
            WHERE c.user_id = u.id
-         ) AS last_call_at
+         ) AS last_regular_call_at,
+         -- Unfiltered Calls count as calling activity too.
+         (SELECT MAX(l.created_at) FROM unfiltered_call_logs l WHERE l.caller_id = u.id) AS last_unfiltered_call_at
        FROM users u
        WHERE u.is_active = 1
          AND u.role IN ('caller','user','agent')
@@ -26,7 +30,9 @@ export async function GET() {
     );
 
     const now = Date.now();
-    const result = users.map((u) => {
+    const result = users.map((row) => {
+      const { last_regular_call_at: r, last_unfiltered_call_at: f, ...rest } = row;
+      const u = { ...rest, last_call_at: !r ? f || null : !f ? r : (new Date(f) > new Date(r) ? f : r) };
       const lastSeenMs = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
       const lastCallMs = u.last_call_at ? new Date(u.last_call_at).getTime() : 0;
       const secondsSinceSeen = lastSeenMs ? Math.floor((now - lastSeenMs) / 1000) : null;

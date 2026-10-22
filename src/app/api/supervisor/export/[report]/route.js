@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { callsUnion, CALL_TYPE_SPLIT } from "@/lib/allCalls";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
 import { PdfHeader, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
@@ -108,26 +109,29 @@ async function buildCallersReport({ date_from, date_to, user } = {}) {
   // Geo scope goes the same place, for the same reason: a WHERE-clause scope
   // would evaluate against a NULL district_id for a zero-call user (unmatched
   // LEFT JOIN) and incorrectly drop them from the report entirely.
+  // Regular + Unfiltered Calls (lib/allCalls); date + scope applied inside it.
   const params = [];
-  let joinExtra = "";
-  if (date_from) { joinExtra += " AND DATE(c.called_at) >= ?"; params.push(date_from); }
-  if (date_to)   { joinExtra += " AND DATE(c.called_at) <= ?"; params.push(date_to); }
+  let callWhere = "";
+  if (date_from) { callWhere += " AND DATE(c.called_at) >= ?"; params.push(date_from); }
+  if (date_to)   { callWhere += " AND DATE(c.called_at) <= ?"; params.push(date_to); }
   const scope = scopeFilterSync(user, "c", { cols: ["zone_id", "district_id", "assembly_id"] });
-  joinExtra += " " + scope.where;
+  callWhere += " " + scope.where;
   params.push(...scope.params);
+  const src = await callsUnion({ where: callWhere, params });
   const rows = await query(
     `SELECT u.username AS name,
             COUNT(c.id) AS total_calls,
+            ${CALL_TYPE_SPLIT},
             SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
             SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END) AS follow_ups,
             ROUND(AVG(GREATEST(COALESCE(c.duration_seconds, 0), 0)), 0) AS avg_dur
        FROM users u
-       LEFT JOIN calls c ON c.user_id = u.id ${joinExtra}
+       LEFT JOIN ${src.sql} c ON c.user_id = u.id
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
       WHERE u.role IN ('caller','user','agent')
       GROUP BY u.id, u.username
       ORDER BY total_calls DESC`,
-    params
+    src.params
   );
   const range = date_from || date_to ? `  |  ${date_from || "…"} → ${date_to || "…"}` : "  |  All time";
   return {
@@ -136,6 +140,8 @@ async function buildCallersReport({ date_from, date_to, user } = {}) {
     columns: [
       { key: "name", label: "Caller", flex: 2 },
       { key: "total_calls", label: "Total", flex: 1 },
+      { key: "regular_calls", label: "Regular", flex: 1 },
+      { key: "unfiltered_calls", label: "Unfiltered", flex: 1 },
       { key: "connected", label: "Connected", flex: 1 },
       { key: "follow_ups", label: "Follow-ups", flex: 1 },
       { key: "avg_dur", label: "Avg dur (s)", flex: 1 },
@@ -146,19 +152,21 @@ async function buildCallersReport({ date_from, date_to, user } = {}) {
 
 async function buildAreasReport({ user } = {}) {
   const scope = districtScopeWhere(user);
+  const src = await callsUnion(); // Regular + Unfiltered Calls
   const rows = await query(
     `SELECT l.name AS area_name,
             COUNT(c.id) AS total_calls,
+            ${CALL_TYPE_SPLIT},
             SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
             SUM(CASE WHEN c.sentiment IN ('positive','supporter') THEN 1 ELSE 0 END) AS positive,
             SUM(CASE WHEN c.sentiment IN ('negative','opponent') THEN 1 ELSE 0 END) AS negative
        FROM locations l
-       LEFT JOIN calls c ON c.district_id = l.id
+       LEFT JOIN ${src.sql} c ON c.district_id = l.id
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
       WHERE l.type = 'district' ${scope.where}
       GROUP BY l.id, l.name
       ORDER BY total_calls DESC`,
-    scope.params
+    [...src.params, ...scope.params]
   );
   return {
     title: "District-Wise Calling Report",
@@ -166,6 +174,8 @@ async function buildAreasReport({ user } = {}) {
     columns: [
       { key: "area_name", label: "District", flex: 2 },
       { key: "total_calls", label: "Total", flex: 1 },
+      { key: "regular_calls", label: "Regular", flex: 1 },
+      { key: "unfiltered_calls", label: "Unfiltered", flex: 1 },
       { key: "connected", label: "Connected", flex: 1 },
       { key: "positive", label: "Positive", flex: 1 },
       { key: "negative", label: "Negative", flex: 1 },
@@ -176,23 +186,22 @@ async function buildAreasReport({ user } = {}) {
 
 async function buildSummaryReport({ user } = {}) {
   const scope = scopeFilterSync(user, "c", { cols: ["zone_id", "district_id", "assembly_id"] });
-  // buildCallersReport/buildAreasReport alias calls as `c` too; this query has
-  // no join to rename, so it aliases `calls` itself as `c` to match scope.where.
-  const [{ total }] = await query(
-    `SELECT COUNT(*) AS total FROM calls c WHERE DATE(c.called_at) = CURDATE() ${scope.where}`,
-    scope.params
+  // Today's Regular + Unfiltered Calls (lib/allCalls), scoped like the others.
+  const src = await callsUnion({ where: ` AND DATE(c.called_at) = CURDATE() ${scope.where}`, params: scope.params });
+  const [{ total, regular_calls: regular, unfiltered_calls: unfiltered }] = await query(
+    `SELECT COUNT(*) AS total, ${CALL_TYPE_SPLIT} FROM ${src.sql} c`,
+    src.params
   );
   const buckets = await query(
     `SELECT cs.name AS status_name, COUNT(c.id) AS count
-       FROM calls c
+       FROM ${src.sql} c
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
-      WHERE DATE(c.called_at) = CURDATE() ${scope.where}
       GROUP BY cs.name`,
-    scope.params
+    src.params
   );
   return {
     title: "Daily Calling Summary",
-    subtitle: `${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")} — Total: ${total} calls`,
+    subtitle: `${new Date().toLocaleDateString("en-GB").replace(/\//g, "-")} — Total: ${total} calls (Regular ${Number(regular) || 0} + Unfiltered ${Number(unfiltered) || 0})`,
     columns: [
       { key: "status_name", label: "Status", flex: 2 },
       { key: "count", label: "Count", flex: 1 },

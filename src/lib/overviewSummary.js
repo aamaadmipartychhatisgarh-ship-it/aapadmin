@@ -1,7 +1,9 @@
 import { query } from "@/lib/db";
+import { callsUnion, CALL_TYPE_SPLIT } from "@/lib/allCalls";
 
 // Shared builder for the Supervisor / State overview dashboards. Every metric is
-// calculated live from the calls table for the SELECTED report date/range,
+// calculated live from ALL calls — Regular + Unfiltered (lib/allCalls), each
+// call record once — for the SELECTED report date/range,
 // defaulting to TODAY. All date/time math is in the application timezone
 // (Asia/Kolkata, a fixed +05:30 with no DST); called_at is a UTC TIMESTAMP so we
 // CONVERT_TZ it consistently. Nothing is cached or a lifetime total.
@@ -27,12 +29,16 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
   const scopeWhere = scope?.where ? ` ${scope.where}` : "";
   const scopeParams = scope?.params ?? [];
 
-  let where = "WHERE 1=1";
-  const params = [];
-  if (from) { where += ` AND ${dateExpr} >= ?`; params.push(from); }
-  if (to)   { where += ` AND ${dateExpr} <= ?`; params.push(to); }
-  where += scopeWhere;
-  params.push(...scopeParams);
+  let callWhere = "";
+  const callParams = [];
+  if (from) { callWhere += ` AND ${dateExpr} >= ?`; callParams.push(from); }
+  if (to)   { callWhere += ` AND ${dateExpr} <= ?`; callParams.push(to); }
+  callWhere += scopeWhere;
+  callParams.push(...scopeParams);
+  // The date range + scope are applied inside the combined calls source; every
+  // query below reads `${src} c` with no further WHERE of its own.
+  const { sql: src, params } = await callsUnion({ where: callWhere, params: callParams });
+  const where = "WHERE 1=1";
 
   const n = (v) => Number(v) || 0;
 
@@ -40,6 +46,7 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
   const [agg] = await query(
     `SELECT
        COUNT(*)                            AS total,
+       ${CALL_TYPE_SPLIT},
        SUM(cs.name = 'Phone Picked')       AS connected,
        SUM(cs.name = 'Not Picked')         AS no_answer,
        SUM(cs.name = 'Switched Off')       AS switched_off,
@@ -47,13 +54,15 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
        SUM(cs.name = 'Wrong Number')       AS wrong_number,
        SUM(cs.name = 'Rudely Behaved')     AS rejected,
        SUM(c.follow_up_date IS NOT NULL)   AS follow_up
-     FROM calls c
+     FROM ${src} c
      LEFT JOIN call_statuses cs ON cs.id = c.status_id
      ${where}`,
     params
   );
   const tally = {
     total: n(agg?.total),
+    regular_calls: n(agg?.regular_calls),
+    unfiltered_calls: n(agg?.unfiltered_calls),
     connected: n(agg?.connected),
     no_answer: n(agg?.no_answer),
     switched_off: n(agg?.switched_off),
@@ -71,7 +80,7 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
   // ---- Calls over time (grouped by IST date across the range) ----
   const timelineRows = await query(
     `SELECT ${dateExpr} AS date, COUNT(*) AS count
-       FROM calls c ${where}
+       FROM ${src} c ${where}
       GROUP BY date ORDER BY date`,
     params
   );
@@ -81,7 +90,7 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
   //      range reaches today; a purely historical range shows all 24) ----
   const hourRows = await query(
     `SELECT HOUR(CONVERT_TZ(c.called_at,'+00:00','${IST}')) AS h, COUNT(*) AS n
-       FROM calls c ${where} GROUP BY h`,
+       FROM ${src} c ${where} GROUP BY h`,
     params
   );
   const includesToday = !to || String(to) >= today;
@@ -101,9 +110,10 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
   const topRows = await query(
     `SELECT u.id, u.username AS name, w.photo_url AS photo_url, w.position AS designation,
             COUNT(*) AS total,
+            ${CALL_TYPE_SPLIT},
             SUM(cs.name = 'Phone Picked') AS connected,
             SUM(c.follow_up_date IS NOT NULL) AS follow_ups
-       FROM calls c
+       FROM ${src} c
        JOIN users u ON u.id = c.user_id
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
        LEFT JOIN workers w ON w.user_id = u.id
@@ -118,7 +128,7 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
     const total = n(r.total), connected = n(r.connected);
     return {
       id: r.id, name: r.name, photo_url: r.photo_url || null, designation: r.designation || null,
-      total, connected, follow_ups: n(r.follow_ups),
+      total, regular_calls: n(r.regular_calls), unfiltered_calls: n(r.unfiltered_calls), connected, follow_ups: n(r.follow_ups),
       // Connected-call percentage; 0 when there are no attempts (never NaN/Infinity).
       connected_pct: total ? Math.round((connected / total) * 100) : 0,
     };

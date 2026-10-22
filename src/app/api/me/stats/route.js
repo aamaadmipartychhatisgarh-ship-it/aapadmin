@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
+import { callsUnion, CALL_TYPE_SPLIT } from "@/lib/allCalls";
 
 export async function GET() {
   try {
@@ -14,25 +15,25 @@ export async function GET() {
     // Switch), serve THAT caller's personal stats, not the admin's own.
     const { userId } = await resolveActingUserId(session);
 
+    // Regular + Unfiltered Calls (lib/allCalls) — each call record counted once.
+    const todaySrc = await callsUnion({ where: " AND c.user_id = ? AND DATE(c.called_at) = CURDATE()", params: [userId] });
     const [today] = await query(
-      `SELECT COUNT(*) AS total,
+      `SELECT COUNT(*) AS total, ${CALL_TYPE_SPLIT},
               SUM(CASE WHEN cs.name = 'Phone Picked' THEN 1 ELSE 0 END) AS connected,
               SUM(CASE WHEN c.is_follow_up_required = 1 THEN 1 ELSE 0 END) AS follow_ups,
               SUM(CASE WHEN c.sentiment IN ('positive','supporter') THEN 1 ELSE 0 END) AS interested
-         FROM calls c
-         LEFT JOIN call_statuses cs ON cs.id = c.status_id
-        WHERE c.user_id = ? AND DATE(c.called_at) = CURDATE()`,
-      [userId]
+         FROM ${todaySrc.sql} c
+         LEFT JOIN call_statuses cs ON cs.id = c.status_id`,
+      todaySrc.params
     );
 
+    const weekSrc = await callsUnion({ where: " AND c.user_id = ? AND c.called_at >= CURDATE() - INTERVAL 6 DAY", params: [userId] });
     const week = await query(
-      `SELECT DATE(called_at) AS day, COUNT(*) AS calls
-         FROM calls
-        WHERE user_id = ?
-          AND called_at >= CURDATE() - INTERVAL 6 DAY
-        GROUP BY DATE(called_at)
+      `SELECT DATE(c.called_at) AS day, COUNT(*) AS calls
+         FROM ${weekSrc.sql} c
+        GROUP BY DATE(c.called_at)
         ORDER BY day ASC`,
-      [userId]
+      weekSrc.params
     );
 
     const sentimentRows = await query(
@@ -46,13 +47,15 @@ export async function GET() {
     sentimentRows.forEach((r) => { sentiment[r.sentiment] = Number(r.n) || 0; });
 
     // Rank among standard callers by today's total calls
+    const rankSrc = await callsUnion({ where: " AND DATE(c.called_at) = CURDATE()" });
     const ranking = await query(
       `SELECT u.id, COUNT(c.id) AS n
          FROM users u
-         LEFT JOIN calls c ON c.user_id = u.id AND DATE(c.called_at) = CURDATE()
+         LEFT JOIN ${rankSrc.sql} c ON c.user_id = u.id
         WHERE u.role IN ('caller','user','agent')
         GROUP BY u.id
-        ORDER BY n DESC`
+        ORDER BY n DESC`,
+      rankSrc.params
     );
     const myRank = ranking.findIndex((r) => String(r.id) === String(userId)) + 1;
     const teamSize = ranking.length;
@@ -60,6 +63,8 @@ export async function GET() {
     return NextResponse.json({
       today: {
         total: Number(today?.total || 0),
+        regular: Number(today?.regular_calls || 0),
+        unfiltered: Number(today?.unfiltered_calls || 0),
         connected: Number(today?.connected || 0),
         follow_ups: Number(today?.follow_ups || 0),
         interested: Number(today?.interested || 0),

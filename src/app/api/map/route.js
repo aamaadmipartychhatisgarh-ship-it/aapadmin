@@ -5,6 +5,7 @@ import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 import { districtWorkerStats } from "@/lib/districtStats";
+import { callsUnion } from "@/lib/allCalls";
 
 // District-level map data: strength score + drill-down details per district,
 // grouped by zone. Scoped per role: zone-admins see their zone, etc.
@@ -33,21 +34,28 @@ export async function GET() {
     // removed) is intentionally NOT used here, so the Map, the Workers-by-
     // District treemap, Strength and Area Ranking all agree.
     const notWrong = (await notWrongNumberClause("ct")) + (await notPendingClause("ct"));
+    // Calls = Regular + Unfiltered (lib/allCalls); completion % likewise counts
+    // completed Regular contacts + completed Unfiltered Contacts of the district.
+    const src = await callsUnion({ where: " AND c.district_id IS NOT NULL" });
     const [rows, stats] = await Promise.all([
       query(
       `SELECT ld.id, ld.name,
               lz.name AS zone_name,
               (SELECT COUNT(*) FROM teams t WHERE t.location_id = ld.id) AS team_count,
-              (SELECT COUNT(*) FROM calls c WHERE c.district_id = ld.id) AS call_count,
+              COALESCE(cc.n, 0) AS call_count,
               (SELECT COUNT(*) FROM users u WHERE u.role='caller' AND u.home_district_id = ld.id) AS caller_count,
-              (SELECT ROUND(COALESCE(SUM(ct.is_completed) / NULLIF(COUNT(*), 0) * 100, 0))
-                 FROM contacts ct WHERE ct.district_id = ld.id${notWrong}) AS call_completion_pct
+              ROUND(COALESCE(
+                ((SELECT COALESCE(SUM(ct.is_completed), 0) FROM contacts ct WHERE ct.district_id = ld.id${notWrong})
+                 + (SELECT COUNT(*) FROM unfiltered_contacts uf WHERE uf.district_id = ld.id AND uf.completed_at IS NOT NULL))
+                / NULLIF((SELECT COUNT(*) FROM contacts ct WHERE ct.district_id = ld.id${notWrong})
+                 + (SELECT COUNT(*) FROM unfiltered_contacts uf WHERE uf.district_id = ld.id), 0) * 100, 0)) AS call_completion_pct
          FROM locations ld
+         LEFT JOIN (SELECT c.district_id, COUNT(*) AS n FROM ${src.sql} c GROUP BY c.district_id) cc ON cc.district_id = ld.id
          LEFT JOIN locations lls ON lls.id = ld.parent_id
          LEFT JOIN locations lz ON lz.id = lls.parent_id
         WHERE ld.type = 'district' ${districtFilter}
         ORDER BY lz.name, ld.name`,
-        dParams
+        [...src.params, ...dParams]
       ),
       districtWorkerStats(session),
     ]);
