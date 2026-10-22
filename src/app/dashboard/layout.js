@@ -142,6 +142,28 @@ function groupSocialMedia(items) {
   return [...rest.slice(0, insertAt), section, ...rest.slice(insertAt)];
 }
 
+// Audit Logs under Administration: the standalone Audit item (same route,
+// page and "audit" permission) becomes a child of the Administration entry.
+// A user with Audit but no Administration page gets an Administration section
+// with no page of its own holding just Audit Logs.
+const AUDIT_HREF = "/dashboard/admin/audit";
+const ADMINISTRATION_HREF = "/dashboard/admin/administration";
+function nestAuditUnderAdministration(items) {
+  const audit = items.find((i) => i.href === AUDIT_HREF && !(i.children && i.children.length));
+  if (!audit) return items;
+  const child = { name: "Audit Logs", href: AUDIT_HREF, icon: audit.icon };
+  const at = items.indexOf(audit);
+  const rest = items.filter((i) => i !== audit);
+  const adminIdx = rest.findIndex((i) => i.href === ADMINISTRATION_HREF);
+  if (adminIdx >= 0) {
+    const admin = rest[adminIdx];
+    const kids = (admin.children || []).filter((c) => c.href !== AUDIT_HREF);
+    return rest.map((i, k) => (k === adminIdx ? { ...admin, children: [...kids, child] } : i));
+  }
+  const section = { name: "Administration", href: "#administration", icon: UserCog, sectionOnly: true, children: [child] };
+  return [...rest.slice(0, at), section, ...rest.slice(at)];
+}
+
 export default function DashboardLayout({ children }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
@@ -496,6 +518,8 @@ export default function DashboardLayout({ children }) {
   // are moved into one "Social Media" section, placed where the first of them
   // was. Routes, pages and permissions are unchanged (navigation only).
   navItems = groupSocialMedia(navItems);
+  // Audit Logs lives under Administration (never a standalone main item).
+  navItems = nestAuditUnderAdministration(navItems);
 
   // Every role gets a profile link — appended once here instead of in each
   // branch above. It's not part of any navGroups.js GROUPS entry, so
