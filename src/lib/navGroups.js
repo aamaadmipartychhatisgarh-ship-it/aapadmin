@@ -69,7 +69,9 @@ export function primaryItems(items) {
   // carries its own children (e.g. Wrong Numbers → the "10+ Times" pages). A
   // curated parent must survive the sidebar shortening even when its own href
   // happens to sit inside a group, so its child pages stay reachable.
-  const ungrouped = items.filter((i) => !allGroupedHrefs.has(i.href) || (i.children && i.children.length));
+  // (c) any item marked `pinned` (a page that must stay a direct sidebar entry,
+  // e.g. Incomplete Designation, whose route is also in the People group).
+  const ungrouped = items.filter((i) => !allGroupedHrefs.has(i.href) || (i.children && i.children.length) || i.pinned);
   const primaries = GROUPS
     .map((g) => g.hrefs.map((h) => items.find((i) => i.href === h)).find(Boolean))
     .filter(Boolean);

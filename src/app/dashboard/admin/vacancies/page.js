@@ -202,11 +202,11 @@ export default function VacanciesPage() {
 
   return (
     <div className="max-w-[1500px] mx-auto">
-      {/* Back to the Designation section (its main link opens the first designation
-          page this user may access — same route as the sidebar entry). */}
-      <Link href="/dashboard/admin/designation" data-testid="back-to-designation"
+      {/* Back to Contacts (Designation Vacancies is also a Contacts tab; the
+          former Designation dropdown no longer exists). */}
+      <Link href="/dashboard/admin/contacts" data-testid="back-to-designation"
         className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-[#164FA3] mb-3">
-        <ArrowLeft size={16} /> Back to Designation
+        <ArrowLeft size={16} /> Back to Contacts
       </Link>
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">

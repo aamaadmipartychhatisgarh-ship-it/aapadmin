@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText, Info, BadgeCheck } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText, Info } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -252,14 +252,14 @@ export default function DashboardLayout({ children }) {
   const isUserAdmin = isAdmin(session);
   const isSupervisor = isSupervisorRole(session);
 
-  // Designation section — one sidebar parent grouping the designation pages
-  // (same routes/pages/permissions as before; each child keeps its own guard).
-  // Its own link /dashboard/admin/designation redirects to the first child the
-  // user may open.
-  const DESIGNATION_SECTION = { name: "Designation", href: "/dashboard/admin/designation", icon: BadgeCheck, children: [
-    { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle },
-    { name: "Designation Vacancies", href: "/dashboard/admin/vacancies", icon: UserCog },
-  ] };
+  // Designation pages — two DIRECT sidebar items (no Designation dropdown).
+  // Same routes/pages/permissions as before; each page keeps its own guard.
+  // `pinned` keeps them in the shortened admin sidebar (primaryItems) even
+  // though Incomplete Designation's route also belongs to the People group.
+  const DESIGNATION_ITEMS = [
+    { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle, pinned: true },
+    { name: "Designation Vacancies", href: "/dashboard/admin/vacancies", icon: UserCog, pinned: true },
+  ];
 
   // Per-admin-tier menu items. Higher tiers include more, lower tiers are
   // trimmed to operational tools relevant to their scope.
@@ -280,7 +280,7 @@ export default function DashboardLayout({ children }) {
       // Influencers — a STANDALONE page directly below Contacts (its own route and
       // "influencers" page-access key), NOT a Contacts child/tab.
       { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
-      DESIGNATION_SECTION,
+      ...DESIGNATION_ITEMS,
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
@@ -318,7 +318,7 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      DESIGNATION_SECTION,
+      ...DESIGNATION_ITEMS,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -344,7 +344,7 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      DESIGNATION_SECTION,
+      ...DESIGNATION_ITEMS,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -367,7 +367,7 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      DESIGNATION_SECTION,
+      ...DESIGNATION_ITEMS,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
       { name: "Caller Report", href: "/dashboard/admin/caller-report", icon: TrendingUp },
@@ -390,7 +390,7 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      DESIGNATION_SECTION,
+      ...DESIGNATION_ITEMS,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
       { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
       { name: "Complaints", href: "/dashboard/admin/complaints", icon: MessageSquare },
@@ -460,18 +460,14 @@ export default function DashboardLayout({ children }) {
       .filter((pg) => pg && !pg.tab && !pg.hideFromNav)
       .filter((pg) => (seen.has(pg.href) ? false : (seen.add(pg.href), true)))
       .map((pg) => ({ name: pg.label, href: pg.href, icon: PAGE_ICONS[pg.icon] || FileText }));
-    // Put a page-restricted user's designation pages under the same Designation
-    // section, listing only the children their grants allow (Incomplete
-    // Designation rides on the Contacts grant; Vacancies has its own key).
-    const allowedChildren = DESIGNATION_SECTION.children.filter((c) =>
-      c.href === "/dashboard/admin/vacancies" ? allowedPageKeys.includes("vacancies") : allowedPageKeys.includes("contacts"));
-    if (allowedChildren.length) {
-      const at = navItems.findIndex((i) => i.href === "/dashboard/admin/vacancies");
-      navItems = navItems.filter((i) => i.href !== "/dashboard/admin/vacancies");
-      const section = { ...DESIGNATION_SECTION, children: allowedChildren };
+    // A page-restricted user's designation pages are direct items too:
+    // Designation Vacancies comes from its own "vacancies" grant (listed above);
+    // Incomplete Designation rides on the Contacts grant, so it is added right
+    // after Contacts when that is granted.
+    if (allowedPageKeys.includes("contacts") && !navItems.some((i) => i.href === DESIGNATION_ITEMS[0].href)) {
       const contactsAt = navItems.findIndex((i) => i.href === "/dashboard/admin/contacts");
-      const insertAt = contactsAt >= 0 ? contactsAt + 1 : (at >= 0 ? at : navItems.length);
-      navItems = [...navItems.slice(0, insertAt), section, ...navItems.slice(insertAt)];
+      const insertAt = contactsAt >= 0 ? contactsAt + 1 : navItems.length;
+      navItems = [...navItems.slice(0, insertAt), DESIGNATION_ITEMS[0], ...navItems.slice(insertAt)];
     }
   }
 
