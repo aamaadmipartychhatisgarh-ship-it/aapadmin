@@ -190,3 +190,203 @@ export async function importUnfiltered({ parsed, fileName, userId }) {
     conn.release();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Assigned Calls — Unfiltered Contacts handed to existing CALLER accounts.
+// Stored on the unfiltered row itself (one assignee per record, so a number can
+// never be with two callers); regular contacts.assigned_to_user_id is never read
+// or written here. Completion is recorded by the caller (completed_at/by + the
+// existing call_statuses disposition).
+// ---------------------------------------------------------------------------
+let ensuredAssign = false;
+export async function ensureUnfilteredAssignmentSchema() {
+  if (ensuredAssign) return;
+  await ensureUnfilteredSchema();
+  const cols = await query(
+    `SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'unfiltered_contacts'`
+  );
+  const have = new Set(cols.map((r) => r.c));
+  const add = [
+    ["assigned_to_user_id", "INT NULL"],
+    ["assigned_at", "DATETIME NULL"],
+    ["assigned_by", "INT NULL"],
+    ["completed_at", "DATETIME NULL"],
+    ["completed_by", "INT NULL"],
+    ["call_status_id", "INT NULL"],
+    ["call_status_name", "VARCHAR(120) NULL"],
+    ["call_notes", "TEXT NULL"],
+  ].filter(([c]) => !have.has(c));
+  for (const [c, def] of add) {
+    // eslint-disable-next-line no-await-in-loop
+    await query(`ALTER TABLE unfiltered_contacts ADD COLUMN \`${c}\` ${def}`);
+  }
+  const idx = await query(
+    `SELECT INDEX_NAME AS i FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'unfiltered_contacts' AND INDEX_NAME = 'idx_unfiltered_assignee'`
+  );
+  if (!idx.length) await query("ALTER TABLE unfiltered_contacts ADD INDEX idx_unfiltered_assignee (assigned_to_user_id, completed_at)");
+  ensuredAssign = true;
+}
+
+// Eligible callers = existing, enabled CALLER accounts (no accounts are created).
+const ELIGIBLE_CALLERS_SQL = "SELECT id, username FROM users WHERE role = 'caller' AND is_active = 1";
+
+// A number that has since become a regular Contact is no longer callable here.
+// (NOT IN over a non-correlated subquery is materialized once; NULL phones are
+// excluded so NOT IN can never collapse to NULL.)
+const NOT_IN_CONTACTS = (alias) =>
+  `${alias}.phone_key NOT IN (SELECT ${last10Sql("ct.phone_number")} FROM contacts ct WHERE ct.phone_number IS NOT NULL AND ct.phone_number <> '')`;
+// Pending records whose assignee is no longer an enabled caller are the only
+// existing assignments eligible for reassignment.
+const ASSIGNEE_INELIGIBLE = (alias) =>
+  `${alias}.assigned_to_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM users ua WHERE ua.id = ${alias}.assigned_to_user_id AND ua.role = 'caller' AND ua.is_active = 1)`;
+// The assignment pool: not completed, still not a Contact, and either
+// unassigned or held by an ineligible (disabled / non-caller) account.
+const POOL_WHERE = (alias) =>
+  `${alias}.completed_at IS NULL AND ${NOT_IN_CONTACTS(alias)} AND (${alias}.assigned_to_user_id IS NULL OR (${ASSIGNEE_INELIGIBLE(alias)}))`;
+
+export async function unfilteredAssignmentOverview() {
+  await ensureUnfilteredAssignmentSchema();
+  const [[t], callers, rows] = await Promise.all([
+    query(
+      `SELECT COUNT(*) AS total,
+              SUM(u.completed_at IS NOT NULL) AS completed,
+              SUM(u.completed_at IS NULL AND ${NOT_IN_CONTACTS("u")}) AS callable,
+              SUM(${POOL_WHERE("u")}) AS available,
+              SUM(u.completed_at IS NULL AND ${NOT_IN_CONTACTS("u")} AND u.assigned_to_user_id IS NOT NULL AND (${ASSIGNEE_INELIGIBLE("u")})) AS reassignable,
+              SUM(u.completed_at IS NULL AND NOT (${NOT_IN_CONTACTS("u")})) AS now_contacts
+         FROM unfiltered_contacts u`
+    ),
+    query(`${ELIGIBLE_CALLERS_SQL} ORDER BY username`),
+    query(
+      `SELECT u.assigned_to_user_id AS user_id, us.username, us.role, us.is_active,
+              COUNT(*) AS assigned, SUM(u.completed_at IS NOT NULL) AS completed, SUM(u.completed_at IS NULL) AS pending
+         FROM unfiltered_contacts u LEFT JOIN users us ON us.id = u.assigned_to_user_id
+        WHERE u.assigned_to_user_id IS NOT NULL
+        GROUP BY u.assigned_to_user_id, us.username, us.role, us.is_active`
+    ),
+  ]);
+  const byId = new Map(rows.map((r) => [Number(r.user_id), r]));
+  const n = (v) => Number(v || 0);
+  // Every eligible caller (zero rows included), then any other account that
+  // still holds records (e.g. a disabled caller) so the totals always add up.
+  const summary = callers.map((c) => {
+    const r = byId.get(Number(c.id));
+    return { user_id: c.id, caller_name: c.username, eligible: true, assigned: n(r?.assigned), completed: n(r?.completed), pending: n(r?.pending) };
+  });
+  for (const r of rows) {
+    if (callers.some((c) => Number(c.id) === Number(r.user_id))) continue;
+    summary.push({ user_id: r.user_id, caller_name: r.username || `User #${r.user_id}`, eligible: false, assigned: n(r.assigned), completed: n(r.completed), pending: n(r.pending) });
+  }
+  return {
+    total: n(t.total),
+    callable: n(t.callable),
+    available: n(t.available),
+    reassignable: n(t.reassignable),
+    completed: n(t.completed),
+    now_contacts: n(t.now_contacts),
+    eligible_callers: callers.length,
+    callers: summary,
+  };
+}
+
+// Evenly Distribute: hand the whole pool to the eligible callers so this round's
+// counts differ by at most one; the remainder goes to the callers with the
+// fewest pending calls. One distribution at a time (named lock) inside a
+// transaction with the pool rows locked, and every UPDATE re-checks the pool
+// condition — a second click (or a concurrent request) finds nothing left and
+// assigns 0, never a duplicate.
+const DIST_LOCK = "aapadmin_unfiltered_distribute";
+export async function distributeUnfiltered({ byUserId }) {
+  await ensureUnfilteredAssignmentSchema();
+  const conn = await getPool().getConnection();
+  let locked = false;
+  try {
+    const [[lk]] = await conn.query("SELECT GET_LOCK(?, 30) AS ok", [DIST_LOCK]);
+    if (Number(lk?.ok) !== 1) throw Object.assign(new Error("A distribution is already running. Please try again in a moment."), { status: 409 });
+    locked = true;
+    await conn.beginTransaction();
+    const [callers] = await conn.query(
+      `SELECT us.id, us.username,
+              (SELECT COUNT(*) FROM unfiltered_contacts x WHERE x.assigned_to_user_id = us.id AND x.completed_at IS NULL) AS pending
+         FROM users us WHERE us.role = 'caller' AND us.is_active = 1
+        ORDER BY pending ASC, us.id ASC`
+    );
+    if (!callers.length) throw Object.assign(new Error("No active caller accounts to distribute to."), { status: 400 });
+    const [poolRows] = await conn.query(`SELECT u.id FROM unfiltered_contacts u WHERE ${POOL_WHERE("u")} ORDER BY u.id ASC FOR UPDATE`);
+    const ids = poolRows.map((r) => r.id);
+    const k = callers.length;
+    const base = Math.floor(ids.length / k);
+    const rem = ids.length % k;
+    const perCaller = [];
+    let at = 0;
+    let assigned = 0;
+    for (let i = 0; i < k; i++) {
+      const take = base + (i < rem ? 1 : 0);
+      const part = ids.slice(at, at + take);
+      at += take;
+      let done = 0;
+      for (let j = 0; j < part.length; j += CHUNK) {
+        const chunk = part.slice(j, j + CHUNK);
+        // eslint-disable-next-line no-await-in-loop
+        const [res] = await conn.query(
+          `UPDATE unfiltered_contacts u SET u.assigned_to_user_id = ?, u.assigned_at = NOW(), u.assigned_by = ?
+            WHERE u.id IN (${chunk.map(() => "?").join(",")}) AND ${POOL_WHERE("u")}`,
+          [callers[i].id, byUserId || null, ...chunk]
+        );
+        done += res.affectedRows || 0;
+      }
+      assigned += done;
+      perCaller.push({ user_id: callers[i].id, caller_name: callers[i].username, assigned_now: done });
+    }
+    await conn.commit();
+    return { pool: ids.length, assigned, callers: k, per_caller: perCaller };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    if (locked) await conn.query("SELECT RELEASE_LOCK(?)", [DIST_LOCK]).catch(() => {});
+    conn.release();
+  }
+}
+
+// Caller side: the caller's own assigned Unfiltered Calls.
+export async function myUnfilteredCalls(userId, { view = "pending" } = {}) {
+  await ensureUnfilteredAssignmentSchema();
+  const cond = view === "completed" ? "u.completed_at IS NOT NULL" : view === "all" ? "1=1" : "u.completed_at IS NULL";
+  const rows = await query(
+    `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation,
+            COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
+            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes
+       FROM unfiltered_contacts u
+       LEFT JOIN locations ld ON ld.id = u.district_id
+       LEFT JOIN locations la ON la.id = u.assembly_id
+      WHERE u.assigned_to_user_id = ? AND ${cond}
+      ORDER BY ${view === "completed" ? "u.completed_at DESC" : "u.assigned_at ASC, u.id ASC"}
+      LIMIT 500`,
+    [userId]
+  );
+  const [c] = await query(
+    `SELECT COUNT(*) AS assigned, SUM(completed_at IS NOT NULL) AS completed, SUM(completed_at IS NULL) AS pending
+       FROM unfiltered_contacts WHERE assigned_to_user_id = ?`,
+    [userId]
+  );
+  return { calls: rows, counts: { assigned: Number(c?.assigned || 0), completed: Number(c?.completed || 0), pending: Number(c?.pending || 0) } };
+}
+
+// Mark one of the caller's own calls completed with an existing call status.
+// Only the assignee can complete it, and only once (the WHERE re-checks both),
+// so a double-click or a stale tab can't complete it twice or for someone else.
+export async function completeUnfilteredCall({ id, userId, statusId, notes }) {
+  await ensureUnfilteredAssignmentSchema();
+  const [st] = await query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(statusId) || 0]);
+  if (!st) return { status: 400, message: "Choose a call status." };
+  const res = await query(
+    `UPDATE unfiltered_contacts SET completed_at = NOW(), completed_by = ?, call_status_id = ?, call_status_name = ?, call_notes = ?
+      WHERE id = ? AND assigned_to_user_id = ? AND completed_at IS NULL`,
+    [userId, st.id, st.name, notes ? String(notes).slice(0, 2000) : null, Number(id) || 0, userId]
+  );
+  if (res.affectedRows === 1) return { status: 200, message: "Call completed." };
+  const [row] = await query("SELECT assigned_to_user_id, completed_at FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
+  if (!row || Number(row.assigned_to_user_id) !== Number(userId)) return { status: 404, message: "This call is not assigned to you." };
+  return { status: 409, message: "This call is already completed." };
+}

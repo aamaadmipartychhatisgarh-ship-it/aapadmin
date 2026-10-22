@@ -49,6 +49,10 @@ export const PAGES = [
   // granted on its own. Admin roles by baseline (same as the Contacts page).
   { key: "unfiltered_contacts", label: "Unfiltered Contact", href: "/dashboard/admin/unfiltered-contacts", prefixes: ["/dashboard/admin/unfiltered-contacts"], icon: "Users",
     roles: [...ADMIN] },
+  // Unfiltered Calls — the caller's own Unfiltered Contacts assigned through
+  // Unfiltered Contact → Assigned Calls (call + mark completed).
+  { key: "unfiltered_calls", label: "Unfiltered Calls", href: "/dashboard/unfiltered-calls", prefixes: ["/dashboard/unfiltered-calls"], icon: "Headphones",
+    roles: [ROLES.CALLER] },
   { key: "vacancies", label: "Designation Vacancies", href: "/dashboard/admin/vacancies", prefixes: ["/dashboard/admin/vacancies"], icon: "UserCog",
     roles: [...OVERSIGHT] },
   { key: "wrong_numbers", label: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", prefixes: ["/dashboard/admin/wrong-numbers"], icon: "AlertCircle",

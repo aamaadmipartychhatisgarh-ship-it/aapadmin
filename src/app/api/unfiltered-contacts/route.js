@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { ensureUnfilteredSchema } from "@/lib/unfilteredContacts";
+import { ensureUnfilteredAssignmentSchema } from "@/lib/unfilteredContacts";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -16,7 +16,7 @@ export async function GET(req) {
     if (!(await pageAllowed(session, "unfiltered_contacts", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     }
-    await ensureUnfilteredSchema();
+    await ensureUnfilteredAssignmentSchema();
     const { searchParams } = new URL(req.url);
     const q = String(searchParams.get("q") || "").trim();
     const pageSize = Math.min(200, Math.max(1, Number(searchParams.get("pageSize")) || 50));
@@ -35,8 +35,9 @@ export async function GET(req) {
     const rows = await query(
       `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation, u.created_at,
               COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
-              b.file_name
+              b.file_name, au.username AS assigned_to, u.completed_at, u.call_status_name
          FROM unfiltered_contacts u
+         LEFT JOIN users au ON au.id = u.assigned_to_user_id
          LEFT JOIN locations ld ON ld.id = u.district_id
          LEFT JOIN locations la ON la.id = u.assembly_id
          LEFT JOIN unfiltered_import_batches b ON b.id = u.import_batch_id
