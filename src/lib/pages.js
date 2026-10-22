@@ -44,6 +44,11 @@ export const PAGES = [
     roles: [ROLES.CALLER] },
   { key: "contacts", label: "Contacts", href: "/dashboard/admin/contacts", prefixes: ["/dashboard/admin/contacts", "/dashboard/supervisor/contacts", "/dashboard/admin/contacts-hierarchy", "/dashboard/admin/contacts-incomplete", "/dashboard/admin/active-workers", "/dashboard/admin/repeat-off", "/dashboard/admin/photo-data"], icon: "UserCheck",
     roles: [...OVERSIGHT] },
+  // Unfiltered Contact — raw bulk-imported numbers in their own table
+  // (unfiltered_contacts), separate from Contacts; its own key so it can be
+  // granted on its own. Admin roles by baseline (same as the Contacts page).
+  { key: "unfiltered_contacts", label: "Unfiltered Contact", href: "/dashboard/admin/unfiltered-contacts", prefixes: ["/dashboard/admin/unfiltered-contacts"], icon: "Users",
+    roles: [...ADMIN] },
   { key: "vacancies", label: "Designation Vacancies", href: "/dashboard/admin/vacancies", prefixes: ["/dashboard/admin/vacancies"], icon: "UserCog",
     roles: [...OVERSIGHT] },
   { key: "wrong_numbers", label: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", prefixes: ["/dashboard/admin/wrong-numbers"], icon: "AlertCircle",

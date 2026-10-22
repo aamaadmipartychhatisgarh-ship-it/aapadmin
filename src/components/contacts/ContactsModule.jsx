@@ -1999,13 +1999,25 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
 // imported / updated / skipped / failed result with per-row failure reasons, or
 // the real backend error (modal stays open to retry). On success it refreshes
 // the contacts list via onImported().
+// Also reused by the Unfiltered Contact page: the optional props below change
+// only its wording, add a browser-side pre-check of the chosen file, and a
+// per-importer duplicate breakdown. Contacts passes none of them, so its import
+// modal is unchanged.
 // ---------------------------------------------------------------------------
-function ImportModal({ url, onClose, onImported }) {
+export function ImportModal({ url, onClose, onImported, title = "Import Contacts (Excel / CSV)", hint, addedLabel = "new contacts added", invalidLabel = "invalid rows", precheck, duplicateNote }) {
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [check, setCheck] = useState(null); // precheck(file) → { error?, info? }
   const inputRef = useRef(null);
+
+  async function pickFile(f) {
+    setError(""); setCheck(null); setFile(f || null);
+    if (f && precheck) {
+      try { setCheck(await precheck(f)); } catch { setCheck({ error: "Could not read the file. Use .xlsx, .xls, or .csv." }); }
+    }
+  }
 
   const fmtSize = (n) => {
     if (n == null) return "";
@@ -2015,7 +2027,7 @@ function ImportModal({ url, onClose, onImported }) {
   };
 
   async function doImport() {
-    if (!file || busy) return; // guard against double-submit
+    if (!file || busy || check?.error) return; // guard against double-submit / failed pre-check
     setBusy(true); setError(""); setResult(null);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2-min hard cap
@@ -2028,6 +2040,7 @@ function ImportModal({ url, onClose, onImported }) {
       // Rows that failed validation (missing name, etc.) — shown as detail.
       const failedRows = (Array.isArray(d.row_errors) ? d.row_errors : []).filter((e) => e.severity === "error");
       setResult({
+        raw: d,
         total: d.total_rows || 0,
         added: d.added ?? d.contacts_inserted ?? 0,
         duplicates: d.duplicates ?? 0,
@@ -2054,7 +2067,7 @@ function ImportModal({ url, onClose, onImported }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900">Import Contacts (Excel / CSV)</h2>
+          <h2 className="text-lg font-bold text-gray-900">{title}</h2>
           <button onClick={onClose} disabled={busy} className="text-gray-400 hover:text-gray-600 disabled:opacity-40"><X size={20} /></button>
         </div>
 
@@ -2062,14 +2075,13 @@ function ImportModal({ url, onClose, onImported }) {
           {!result ? (
             <>
               <p className="text-sm text-gray-500">
-                Accepted formats: <span className="font-medium text-gray-700">.xlsx, .xls, .csv</span>. Columns are matched
-                by header name (Name, Phone/Mobile, District, Assembly, Designation, Address…), in any order.
+                Accepted formats: <span className="font-medium text-gray-700">.xlsx, .xls, .csv</span>. {hint || "Columns are matched by header name (Name, Phone/Mobile, District, Assembly, Designation, Address…), in any order."}
               </p>
 
               <input
                 ref={inputRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                 className="hidden"
-                onChange={(e) => { setError(""); setFile(e.target.files?.[0] || null); }}
+                onChange={(e) => pickFile(e.target.files?.[0])}
               />
 
               {file ? (
@@ -2092,6 +2104,14 @@ function ImportModal({ url, onClose, onImported }) {
                 </button>
               )}
 
+              {check?.info && !check.error && (
+                <div className="bg-blue-50 border border-blue-100 text-blue-900 rounded-lg px-3 py-2.5 text-sm" data-testid="import-precheck">{check.info}</div>
+              )}
+              {check?.error && (
+                <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2.5 text-sm flex items-start gap-2" data-testid="import-precheck-error">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{check.error}</span>
+                </div>
+              )}
               {error && (
                 <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2.5 text-sm flex items-start gap-2">
                   <AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{error}</span>
@@ -2104,11 +2124,11 @@ function ImportModal({ url, onClose, onImported }) {
                 <div className="flex items-center gap-2 font-bold"><CheckCircle2 size={18} /> {result.added > 0 ? "Import completed successfully" : "Import completed — nothing new to add"}</div>
                 <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
                   <div className="text-gray-600"><span className="font-bold text-gray-900">{result.total}</span> total rows</div>
-                  <div className="text-gray-600"><span className="font-bold text-emerald-700">{result.added}</span> new contacts added</div>
+                  <div className="text-gray-600"><span className="font-bold text-emerald-700">{result.added}</span> {addedLabel}</div>
                   <div className="text-gray-600"><span className="font-bold text-gray-900">{result.duplicates}</span> duplicates skipped</div>
-                  <div className="text-gray-600"><span className={`font-bold ${result.invalid ? "text-red-600" : "text-gray-900"}`}>{result.invalid}</span> invalid rows</div>
+                  <div className="text-gray-600"><span className={`font-bold ${result.invalid ? "text-red-600" : "text-gray-900"}`}>{result.invalid}</span> {invalidLabel}</div>
                 </div>
-                {(result.duplicatesInFile > 0 || result.duplicatesExisting > 0) && (
+                {duplicateNote ? duplicateNote(result.raw) : (result.duplicatesInFile > 0 || result.duplicatesExisting > 0) && (
                   <div className="text-[11px] text-gray-400 mt-1.5">
                     Duplicates: {result.duplicatesExisting} already in the database, {result.duplicatesInFile} repeated in this file — existing contacts were left unchanged.
                   </div>
@@ -2144,7 +2164,7 @@ function ImportModal({ url, onClose, onImported }) {
           {!result ? (
             <>
               <button onClick={onClose} disabled={busy} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Cancel</button>
-              <button onClick={doImport} disabled={!file || busy} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-60 text-white rounded-lg font-semibold inline-flex items-center gap-2">
+              <button onClick={doImport} disabled={!file || busy || !!check?.error} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-60 text-white rounded-lg font-semibold inline-flex items-center gap-2">
                 {busy && <Loader2 size={15} className="animate-spin" />}{busy ? "Importing…" : "Import"}
               </button>
             </>
