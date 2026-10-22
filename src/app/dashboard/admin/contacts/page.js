@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Users as UsersIcon, Star, UserCheck, AlertCircle, UserCog } from "lucide-react";
+import { Loader2, Users as UsersIcon, Star, UserCheck, AlertCircle } from "lucide-react";
 import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
-import { usePageAccess } from "@/components/usePageAccess";
 import ContactsModule from "@/components/contacts/ContactsModule";
 import { WrongNumbersDashboard } from "@/app/dashboard/admin/wrong-numbers/page";
 
@@ -30,9 +29,6 @@ export default function Page() {
   // Role OR a Page-Access grant for this page (managed override).
   const { ready, allowed } = usePageGuard("contacts", isAdmin(session));
   const isSuper = normalizeRole(session?.user?.role) === ROLES.SUPER_ADMIN;
-  // Designation Vacancies is now a Contacts tab (its own page-access key still
-  // governs who sees it), no longer a standalone sidebar page.
-  const { has } = usePageAccess();
 
   // Which in-page tab is active ("all" contacts | "wrong" number). Seed from
   // ?tab=wrong so a direct link can open the Wrong Number tab.
@@ -69,9 +65,8 @@ export default function Page() {
         {/* Incomplete Designation is reached from the page's top navigation group
             (and the sidebar); it was removed from this tab bar to avoid showing the
             same entry twice on the Contacts page. */}
-        {(isSuper || has("vacancies")) && (
-          <Link href="/dashboard/admin/vacancies" className={tabCls(false)}><UserCog size={15} /> Designation Vacancies</Link>
-        )}
+        {/* Designation Vacancies is no longer part of Contacts — it is reached only
+            from its own sidebar entry / dedicated page. */}
       </div>
 
       {tab === "wrong"
