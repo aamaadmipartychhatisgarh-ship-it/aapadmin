@@ -122,6 +122,26 @@ const PAGE_ICONS = {
   Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star, Users, Vote, ShieldCheck,
 };
 
+// Sidebar "Social Media" section: Social Command + Media as its children (only
+// the ones present in `items`, in that order), replacing their top-level rows.
+// The section is a toggle with no page of its own (`sectionOnly`); its href is
+// just a stable key for the sidebar's saved layout.
+const SOCIAL_MEDIA_CHILDREN = ["/dashboard/social-management", "/dashboard/media"];
+function groupSocialMedia(items) {
+  const picked = SOCIAL_MEDIA_CHILDREN
+    .map((h) => items.find((i) => i.href === h && !(i.children && i.children.length)))
+    .filter(Boolean);
+  if (!picked.length) return items;
+  const at = items.findIndex((i) => picked.includes(i));
+  const rest = items.filter((i) => !picked.includes(i));
+  const section = {
+    name: "Social Media", href: "#social-media", icon: Share2, sectionOnly: true,
+    children: picked.map((i) => ({ name: i.name, href: i.href, icon: i.icon })),
+  };
+  const insertAt = items.slice(0, at).filter((i) => !picked.includes(i)).length;
+  return [...rest.slice(0, insertAt), section, ...rest.slice(insertAt)];
+}
+
 export default function DashboardLayout({ children }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
@@ -471,6 +491,12 @@ export default function DashboardLayout({ children }) {
     }
   }
 
+  // Social Media section — Social Command and Media are never standalone main
+  // items: whichever of the two this user's nav has (by role or Page Access)
+  // are moved into one "Social Media" section, placed where the first of them
+  // was. Routes, pages and permissions are unchanged (navigation only).
+  navItems = groupSocialMedia(navItems);
+
   // Every role gets a profile link — appended once here instead of in each
   // branch above. It's not part of any navGroups.js GROUPS entry, so
   // primaryItems() (which shortens the admin sidebar) keeps it as-is.
@@ -482,7 +508,7 @@ export default function DashboardLayout({ children }) {
   // Child pages (e.g. Designation → Incomplete Designation) are searchable too.
   const searchResults = q
     ? navItems.flatMap((item) => [item, ...(item.children || [])])
-        .filter((item, i, all) => item.name.toLowerCase().includes(q) && all.findIndex((x) => x.href === item.href) === i)
+        .filter((item, i, all) => !item.sectionOnly && item.name.toLowerCase().includes(q) && all.findIndex((x) => x.href === item.href) === i)
     : [];
 
   // Admins get a short sidebar (one primary page per section); other roles

@@ -54,7 +54,7 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
   const isExpanded = (item) => {
     if (!item?.children?.length) return false;
     if (item.href in expandedMap) return expandedMap[item.href];
-    return item.children.some((c) => pathname === c.href);
+    return item.children.some((c) => pathname === c.href || (item.sectionOnly && pathname?.startsWith(c.href + "/")));
   };
   const toggleExpand = (item) =>
     setExpandedMap((m) => ({ ...m, [item.href]: !isExpanded(item) }));
@@ -156,7 +156,7 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
         // Flat filtered results (no drag while searching). Child pages of a
         // collapsible parent are included so search still reaches them.
         [...groups.fav, ...groups.top, ...groups.main, ...groups.bottom]
-          .flatMap((href) => { const it = byHref[href]; return it ? [{ ...it, children: undefined }, ...(it.children || [])] : []; })
+          .flatMap((href) => { const it = byHref[href]; return it ? [...(it.sectionOnly ? [] : [{ ...it, children: undefined }]), ...(it.children || [])] : []; })
           .filter((it) => it.name.toLowerCase().includes(query))
           .map((it) => <NavLink key={it.href} item={it} isActive={pathname === it.href} onNavigate={onNavigate} />)
       ) : loaded ? (
@@ -194,14 +194,19 @@ function NavLink({ item, isActive, onNavigate, locked, innerRef, style, dragAttr
   const hasChildren = children.length > 0;
   // Keep the parent highlighted (without the strong active bar) while one of
   // its child pages is open, so the group reads as the current section.
-  const childActive = hasChildren && children.some((c) => pathname === c.href);
+  const childActive = hasChildren && children.some((c) => pathname === c.href || (item.sectionOnly && pathname?.startsWith(c.href + "/")));
+  // A section-only parent (e.g. "Social Media") has no page of its own: the whole
+  // row just expands / collapses its child pages.
+  const Row = item.sectionOnly ? "button" : Link;
+  const rowProps = item.sectionOnly
+    ? { type: "button", onClick: () => onToggleExpand?.(), "aria-expanded": !!expanded, "data-testid": "nav-section" }
+    : { href: item.href, onClick: onNavigate };
   return (
     <div ref={innerRef} style={style} className="relative group/navitem">
       <div className="relative">
-        <Link
-          href={item.href}
-          onClick={onNavigate}
-          className={`flex items-center gap-3 px-6 py-3 transition-all ${
+        <Row
+          {...rowProps}
+          className={`${item.sectionOnly ? "w-full text-left " : ""}flex items-center gap-3 px-6 py-3 transition-all ${
             isActive
               ? "bg-[#1d4c94] text-white border-l-4 border-white font-semibold"
               : childActive
@@ -211,7 +216,11 @@ function NavLink({ item, isActive, onNavigate, locked, innerRef, style, dragAttr
         >
           <Icon size={20} className={isActive || childActive ? "text-white" : "text-blue-200"} />
           <span className="flex-1 truncate">{item.name}</span>
-          {hasChildren && (
+          {hasChildren && (item.sectionOnly ? (
+            <span className="shrink-0 mr-4 p-0.5 text-blue-200" aria-hidden="true">
+              <ChevronDown size={16} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
+            </span>
+          ) : (
             <button
               type="button"
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleExpand?.(); }}
@@ -221,9 +230,9 @@ function NavLink({ item, isActive, onNavigate, locked, innerRef, style, dragAttr
             >
               <ChevronDown size={16} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
             </button>
-          )}
+          ))}
           {locked && <Lock size={13} className="text-blue-300/70 shrink-0" />}
-        </Link>
+        </Row>
         {/* Drag handle (hover) */}
         {dragListeners && (
           <button
@@ -241,7 +250,7 @@ function NavLink({ item, isActive, onNavigate, locked, innerRef, style, dragAttr
         <div className="bg-black/10">
           {children.map((ch) => {
             const CIcon = ch.icon;
-            const cActive = pathname === ch.href;
+            const cActive = pathname === ch.href || (item.sectionOnly && pathname?.startsWith(ch.href + "/"));
             return (
               <Link
                 key={ch.href}
