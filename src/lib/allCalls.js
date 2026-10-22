@@ -32,6 +32,15 @@ const COLS = [
   "duration_seconds", "is_follow_up_required", "follow_up_date", "is_vip",
 ];
 
+// Text columns come from different tables whose collations can differ between
+// deployments (e.g. MySQL 8 creates new tables as utf8mb4_0900_ai_ci while older
+// tables are utf8mb4_unicode_ci / general_ci). UNION ALL refuses to combine
+// implicitly different collations ("Illegal mix of collations for operation
+// 'UNION'"), so every text column is given ONE explicit collation in both branches.
+export const CALLS_COLLATION = "utf8mb4_unicode_ci";
+const TEXT_COLS = new Set(["person_name", "phone_number", "sentiment", "remarks"]);
+const txt = (expr) => (expr === "NULL" ? "NULL" : `CONVERT(${expr} USING utf8mb4) COLLATE ${CALLS_COLLATION}`);
+
 let colsPromise;
 function callColumns() {
   if (!colsPromise) {
@@ -50,17 +59,17 @@ export async function callsUnion({ where = "", params = [] } = {}) {
   // unified column (call_type, reach_key…) while conditions on real `calls`
   // columns still reach the base table and its indexes.
   const regular = `SELECT c.* FROM (
-      SELECT c.id AS id, 'regular' AS call_type, NULL AS unfiltered_contact_id,
-             CONCAT('c', COALESCE(${reg("contact_id")}, CONCAT('x', c.id))) AS reach_key,
-             ${COLS.map((k) => `${reg(k)} AS ${k}`).join(", ")}
+      SELECT c.id AS id, ${txt("'regular'")} AS call_type, NULL AS unfiltered_contact_id,
+             ${txt(`CONCAT('c', COALESCE(${reg("contact_id")}, CONCAT('x', c.id)))`)} AS reach_key,
+             ${COLS.map((k) => `${TEXT_COLS.has(k) ? txt(reg(k)) : reg(k)} AS ${k}`).join(", ")}
         FROM calls c
     ) c WHERE 1=1 ${where}`;
   const unfiltered = `SELECT c.* FROM (
-      SELECT -l.id AS id, 'unfiltered' AS call_type, uc.id AS unfiltered_contact_id, CONCAT('u', uc.id) AS reach_key,
-             NULL AS contact_id, uc.person_name AS person_name, uc.phone_number AS phone_number, NULL AS sentiment,
+      SELECT -l.id AS id, ${txt("'unfiltered'")} AS call_type, uc.id AS unfiltered_contact_id, ${txt("CONCAT('u', uc.id)")} AS reach_key,
+             NULL AS contact_id, ${txt("uc.person_name")} AS person_name, ${txt("uc.phone_number")} AS phone_number, NULL AS sentiment,
              l.status_id AS status_id, l.created_at AS called_at, l.caller_id AS user_id,
              uc.district_id AS district_id, uc.assembly_id AS assembly_id, lls.parent_id AS zone_id, ld.parent_id AS lok_sabha_id,
-             NULL AS designation_id, l.remarks AS remarks, l.duration_seconds AS duration_seconds,
+             NULL AS designation_id, ${txt("l.remarks")} AS remarks, l.duration_seconds AS duration_seconds,
              0 AS is_follow_up_required, NULL AS follow_up_date, 0 AS is_vip
         FROM unfiltered_call_logs l
         JOIN unfiltered_contacts uc ON uc.id = l.unfiltered_contact_id

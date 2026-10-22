@@ -233,8 +233,12 @@ const ELIGIBLE_CALLERS_SQL = "SELECT id, username FROM users WHERE role = 'calle
 // A number that has since become a regular Contact is no longer callable here.
 // (NOT IN over a non-correlated subquery is materialized once; NULL phones are
 // excluded so NOT IN can never collapse to NULL.)
+// Both sides get one explicit collation: contacts and unfiltered_contacts may
+// have different table collations on a deployment (cross-table string
+// comparison would otherwise fail with "Illegal mix of collations").
+const KEY_COLL = "utf8mb4_unicode_ci";
 const NOT_IN_CONTACTS = (alias) =>
-  `${alias}.phone_key NOT IN (SELECT ${last10Sql("ct.phone_number")} FROM contacts ct WHERE ct.phone_number IS NOT NULL AND ct.phone_number <> '')`;
+  `CONVERT(${alias}.phone_key USING utf8mb4) COLLATE ${KEY_COLL} NOT IN (SELECT CONVERT(${last10Sql("ct.phone_number")} USING utf8mb4) COLLATE ${KEY_COLL} FROM contacts ct WHERE ct.phone_number IS NOT NULL AND ct.phone_number <> '')`;
 // Pending records whose assignee is no longer an enabled caller are the only
 // existing assignments eligible for reassignment.
 const ASSIGNEE_INELIGIBLE = (alias) =>
