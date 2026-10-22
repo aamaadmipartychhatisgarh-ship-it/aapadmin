@@ -59,8 +59,8 @@ const SUPERVISOR_NAV = [
   // visible the moment a Supervisor logs in. Same route and "pending_contacts"
   // Page-Access key as before; Admin menus are unchanged.
   { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
-  // Influencers — a STANDALONE page directly below Contacts (its own route and
-  // "influencers" page-access key, baseline for Supervisors), NOT a Contacts child.
+  // Influencers — its own route and "influencers" page-access key (baseline for
+  // Supervisors); shown inside Contacts by nestInfluencersUnderContacts().
   { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
   { name: "Tasks", href: "/dashboard/tasks", icon: ClipboardList },
   { name: "Leader Assessment", href: "/dashboard/leader-assessment", icon: Gauge },
@@ -161,6 +161,28 @@ function nestAuditUnderAdministration(items) {
     return rest.map((i, k) => (k === adminIdx ? { ...admin, children: [...kids, child] } : i));
   }
   const section = { name: "Administration", href: "#administration", icon: UserCog, sectionOnly: true, children: [child] };
+  return [...rest.slice(0, at), section, ...rest.slice(at)];
+}
+
+// Influencers inside Contacts: the standalone Influencers item (same route,
+// page and "influencers" permission) becomes a child of the user's Contacts
+// entry (admin or supervisor Contacts). A user with Influencers but no
+// Contacts page gets a Contacts section with no page of its own holding it.
+const INFLUENCERS_HREF = "/dashboard/admin/influencers";
+const CONTACTS_HREFS = ["/dashboard/admin/contacts", "/dashboard/supervisor/contacts"];
+function nestInfluencersUnderContacts(items) {
+  const inf = items.find((i) => i.href === INFLUENCERS_HREF && !(i.children && i.children.length));
+  if (!inf) return items;
+  const child = { name: inf.name, href: INFLUENCERS_HREF, icon: inf.icon };
+  const at = items.indexOf(inf);
+  const rest = items.filter((i) => i !== inf);
+  const cIdx = rest.findIndex((i) => CONTACTS_HREFS.includes(i.href));
+  if (cIdx >= 0) {
+    const c = rest[cIdx];
+    const kids = (c.children || []).filter((k) => k.href !== INFLUENCERS_HREF);
+    return rest.map((i, k) => (k === cIdx ? { ...c, children: [...kids, child] } : i));
+  }
+  const section = { name: "Contacts", href: "#contacts", icon: UserCheck, sectionOnly: true, children: [child] };
   return [...rest.slice(0, at), section, ...rest.slice(at)];
 }
 
@@ -319,8 +341,8 @@ export default function DashboardLayout({ children }) {
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
-      // Influencers — a STANDALONE page directly below Contacts (its own route and
-      // "influencers" page-access key), NOT a Contacts child/tab.
+      // Influencers — its own route and "influencers" page-access key; shown
+      // inside Contacts by nestInfluencersUnderContacts().
       { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
       ...DESIGNATION_ITEMS,
       { name: "Call Records", href: "/dashboard/admin/calls", icon: Database },
@@ -520,6 +542,8 @@ export default function DashboardLayout({ children }) {
   navItems = groupSocialMedia(navItems);
   // Audit Logs lives under Administration (never a standalone main item).
   navItems = nestAuditUnderAdministration(navItems);
+  // Influencers lives inside Contacts (never a standalone main item).
+  navItems = nestInfluencersUnderContacts(navItems);
 
   // Every role gets a profile link — appended once here instead of in each
   // branch above. It's not part of any navGroups.js GROUPS entry, so
