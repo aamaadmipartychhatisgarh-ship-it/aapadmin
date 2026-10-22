@@ -133,6 +133,9 @@ export async function buildVacancyDataset(session, filters = {}) {
         status: r.status || (r.filled ? "filled" : "vacant"),
         review_people: r.review_people || [],
         person_names: r.person_names,
+        // The assigned person(s) of a FILED position (from the contact's own
+        // designation assignment) — shown display-only on Designation Vacancies.
+        holders: (r.people || []).map((p) => ({ contact_id: p.id, name: p.person_name, mobile: p.phone_number || null })),
         hierarchy_incomplete: hierarchyIncomplete,
         ...anc,
       });

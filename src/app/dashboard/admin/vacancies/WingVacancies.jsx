@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, Filter, X } from "lucide-react";
 import { wingShortLabel } from "@/lib/wingLabel";
-import VacancyTable, { fromWingRow } from "./VacancyTable";
+import VacancyTable, { fromWingRow, CategorySwitch } from "./VacancyTable";
 
 // Wing Designation Vacancies — President / Prabhari / General Secretary of each
 // Wing at State → Lok Sabha → District → Assembly (GET /api/vacancies/wings).
@@ -98,7 +98,7 @@ export default function WingVacancies() {
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
         <Card label="Total Positions" value={c.total} tone="brand" />
-        <Card label="Filled" value={c.filled} tone="green" />
+        <Card label="Filed" value={c.filled} tone="green" />
         <Card label="Vacant" value={c.vacant} tone="amber" />
         <Card label="Needs Review" value={c.review} tone="red" />
         <Card label="Not Configured" value={c.not_configured} tone="gray" />
@@ -121,12 +121,13 @@ export default function WingVacancies() {
             <option value="">All designations</option>
             {(data?.filters?.roles || []).map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
           </select>
-          <select className={sel} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
-            <option value="">Vacant &amp; needs review</option>
-            <option value="vacant">Vacant only</option>
-            <option value="review">Needs review only</option>
-            <option value="filled">Filled only</option>
-          </select>
+          {status !== "filled" && (
+            <select className={sel} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
+              <option value="">Vacant &amp; needs review</option>
+              <option value="vacant">Vacant only</option>
+              <option value="review">Needs review only</option>
+            </select>
+          )}
           <select className={sel} value={lokSabhaId} onChange={(e) => { setLokSabhaId(e.target.value); setDistrictId(""); setAssemblyId(""); }} aria-label="Lok Sabha">
             <option value="">All Lok Sabha</option>
             {locs.lok_sabha.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -151,7 +152,7 @@ export default function WingVacancies() {
           <table className="w-full text-sm min-w-[560px]" data-testid="wing-summary">
             <thead><tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
               <th className="px-4 py-2.5 font-semibold">Wing</th><th className="px-4 py-2.5 font-semibold text-right">Total</th>
-              <th className="px-4 py-2.5 font-semibold text-right">Filled</th><th className="px-4 py-2.5 font-semibold text-right">Vacant</th>
+              <th className="px-4 py-2.5 font-semibold text-right">Filed</th><th className="px-4 py-2.5 font-semibold text-right">Vacant</th>
               <th className="px-4 py-2.5 font-semibold text-right">Review</th>
             </tr></thead>
             <tbody className="divide-y divide-gray-100">
@@ -175,12 +176,16 @@ export default function WingVacancies() {
 
       {/* Vacancy list */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-          <h2 className="text-sm font-bold text-gray-900">Wing Vacancy List</h2>
+        <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
+          <CategorySwitch filed={status === "filled"} vacantCount={(c.vacant || 0) + (c.review || 0)} filedCount={c.filled || 0}
+            onChange={(k) => setStatus(k === "filed" ? "filled" : "")} />
+          {status === "filled" && <span className="text-xs text-gray-500">Assigned Wing designations — display only on this page.</span>}
           {data?.capped && <span className="ml-auto text-xs text-amber-600">Showing the first {data.vacancies.length} rows — narrow the filters to see more.</span>}
         </div>
         <VacancyTable
           rows={(data?.vacancies || []).map(fromWingRow)}
+          mode={status === "filled" ? "filed" : "vacant"}
+          emptyText={status === "filled" ? "No filed Wing designations for these filters." : "No vacant Wing designations for these filters."}
           loading={loading}
           err={err}
           errorText="Wing vacancies could not be calculated — no positions are shown."

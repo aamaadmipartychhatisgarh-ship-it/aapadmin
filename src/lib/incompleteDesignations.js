@@ -155,7 +155,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   let peopleRows;
   if (level === "state") {
     peopleRows = await query(
-      `SELECT 0 AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name,
+      `SELECT 0 AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name, c.phone_number,
               COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
               lac.name AS assembly_name
          FROM contacts c
@@ -171,7 +171,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   } else {
     const levelIdExpr = LEVEL_ID_EXPR[level];
     peopleRows = await query(
-      `SELECT ${levelIdExpr} AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name,
+      `SELECT ${levelIdExpr} AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name, c.phone_number,
               COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
               lac.name AS assembly_name,
               c.lok_sabha_id AS raw_lok_sabha_id, c.district_id AS raw_district_id, c.assembly_id AS raw_assembly_id
@@ -253,7 +253,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     const key = `${loc}:${nm}`;
     if (!bucket.has(key)) bucket.set(key, []);
     // assembly_name = the worker's OWN saved Assembly (contacts.assembly_id), or null.
-    bucket.get(key).push({ id: r.contact_id, person_name: r.person_name, photo_url: r.photo_url, assembly_name: r.assembly_name || null });
+    bucket.get(key).push({ id: r.contact_id, person_name: r.person_name, phone_number: r.phone_number || null, photo_url: r.photo_url, assembly_name: r.assembly_name || null });
   }
 
   // Where could an unmapped holder belong? Narrowed by the most specific VALID

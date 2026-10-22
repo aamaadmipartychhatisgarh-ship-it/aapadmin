@@ -10,7 +10,7 @@ import {
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
 import WingVacancies from "./WingVacancies";
-import VacancyTable, { fromMainRow } from "./VacancyTable";
+import VacancyTable, { fromMainRow, CategorySwitch } from "./VacancyTable";
 
 const BRAND = "#164FA3";
 // Default filters: Main Organisation (designations of no other Wing) at State level.
@@ -88,7 +88,14 @@ export default function VacanciesPage() {
   const [assemblyId, setAssemblyId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [designationId, setDesignationId] = useState("");
-  const [statusF, setStatusF] = useState(""); // '', filled, vacant
+  const [statusF, setStatusF] = useState(""); // '', vacant, review (Vacant Designation) | filled (Filed Designation)
+  // Two categories: Vacant Designation (vacant + needs review, with the existing
+  // reminder actions) and Filed Designation (assigned, display-only).
+  const filedView = statusF === "filled";
+  const showCategory = (k) => {
+    if (k === "filed") { setStatusF("filled"); setReminderF(""); setResponsibleF(""); }
+    else setStatusF("");
+  };
   const [reminderF, setReminderF] = useState("");
   const [responsibleF, setResponsibleF] = useState("");
 
@@ -237,7 +244,7 @@ export default function VacanciesPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 mb-4">
         <StatCard label="Total Positions" value={c.total} tone="brand" />
-        <StatCard label="Filled" value={c.filled} tone="green" />
+        <StatCard label="Filed" value={c.filled} tone="green" />
         <StatCard label="Vacant" value={c.vacant} tone="amber" />
         {/* Not vacant: a holder of the designation exists but their location is
             missing/invalid, so the position can't be confirmed either way. */}
@@ -281,11 +288,12 @@ export default function VacanciesPage() {
             <option value="">All Designations{data?.filters?.designations ? ` (${data.filters.designations.length})` : ""}</option>
             {(data?.filters?.designations || []).map((d) => <option key={d.level + d.id} value={d.id}>{d.name}{level ? "" : ` · ${d.level_label}`}</option>)}
           </select>
-          <select className={selCls} value={statusF} onChange={(e) => setStatusF(e.target.value)}>
+          {/* Vacant-only filters (status detail, reminders, responsible person). */}
+          {!filedView && (<>
+          <select className={selCls} value={statusF} onChange={(e) => setStatusF(e.target.value)} aria-label="Vacant status">
             <option value="">Vacant &amp; needs review</option>
             <option value="vacant">Vacant only</option>
             <option value="review">Needs review only</option>
-            <option value="filled">Filled only</option>
           </select>
           <select className={selCls} value={reminderF} onChange={(e) => setReminderF(e.target.value)}>
             <option value="">All reminder status</option>
@@ -297,6 +305,7 @@ export default function VacanciesPage() {
             <option value="">All responsible persons</option>
             {(data?.filters?.responsibles || []).map((r) => <option key={r.contact_id} value={r.contact_id}>{r.name}</option>)}
           </select>
+          </>)}
           {anyFilter && (
             <button onClick={clearFilters} className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-700 self-center">
               <X size={13} /> Clear filters
@@ -313,7 +322,7 @@ export default function VacanciesPage() {
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
           <MapPin size={16} style={{ color: BRAND }} />
           <h2 className="text-sm font-bold text-gray-900">Hierarchy-wise Vacancy Summary</h2>
-          <span className="ml-auto text-xs text-gray-400">Total · Filled · Vacant · Review · Vacant %</span>
+          <span className="ml-auto text-xs text-gray-400">Total · Filed · Vacant · Review · Vacant %</span>
         </div>
         <div className="overflow-x-auto max-h-72 overflow-y-auto">
           <table className="w-full text-sm min-w-[720px]">
@@ -323,7 +332,7 @@ export default function VacanciesPage() {
                 <th className="px-4 py-2.5 font-semibold">Location</th>
                 <th className="px-4 py-2.5 font-semibold">Under</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Total</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Filled</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Filed</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Vacant</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Review</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Vacant %</th>
@@ -353,8 +362,9 @@ export default function VacanciesPage() {
 
       {/* Vacancy list */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-          <h2 className="text-sm font-bold text-gray-900">Vacancy List</h2>
+        <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
+          <CategorySwitch filed={filedView} vacantCount={(c.vacant || 0) + (c.review || 0)} filedCount={c.filled || 0} onChange={showCategory} />
+          {filedView && <span className="text-xs text-gray-500">Assigned designations — display only on this page.</span>}
           {data?.wing_positions_skipped > 0 && (
             <button onClick={() => switchTab("wings")} className="text-xs text-violet-700 hover:underline" data-testid="wing-positions-note">
               Wing President / Prabhari / General Secretary posts are listed in the Wings tab →
@@ -364,6 +374,8 @@ export default function VacanciesPage() {
         </div>
         <VacancyTable
           rows={(data?.vacancies || []).map(fromMainRow)}
+          mode={filedView ? "filed" : "vacant"}
+          emptyText={filedView ? "No filed designations for these filters." : "No vacant designations for these filters."}
           loading={loading}
           err={err}
           renderContactExtra={(l) => l.reminder ? (

@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
-import { Loader2, CheckCircle2, MapPin, Phone } from "lucide-react";
+import { Loader2, CheckCircle2, MapPin, Phone, Lock } from "lucide-react";
 import { wingShortLabel } from "@/lib/wingLabel";
 
 // ONE layout for Designation Vacancies (Main Organisation) and Wing Vacancies.
@@ -42,6 +42,8 @@ export function fromMainRow(r) {
     designation: r.designation_name, designation_sub: null,
     status: r.status,
     holders: r.status === "filled" ? String(r.person_names || "").split(",").map((x) => x.trim()).filter(Boolean) : [],
+    // Assigned person(s) of a Filed position, display-only.
+    holder_people: r.status === "filled" ? (r.holders || []).map((h) => ({ contact_id: h.contact_id, name: h.name, designation: r.designation_name, mobile: h.mobile || null })) : [],
     review_people: r.review_people || [],
     lines,
   };
@@ -70,6 +72,7 @@ export function fromWingRow(r) {
     designation: r.role_label, designation_sub: r.designation_name,
     status: r.status,
     holders: (r.holders || []).map((h) => h.name),
+    holder_people: r.status === "filled" ? (r.holders || []).map((h) => ({ contact_id: h.contact_id, name: h.name, designation: h.designation || r.designation_name, mobile: h.mobile || null })) : [],
     review_people: r.review_people || [],
     lines,
     path: r.path,
@@ -90,7 +93,7 @@ function sortRows(rows) {
 }
 
 export function StatusChip({ status }) {
-  if (status === "filled") return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200"><span className="w-1.5 h-1.5 rounded-full bg-green-500" />Filled</span>;
+  if (status === "filled") return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200"><span className="w-1.5 h-1.5 rounded-full bg-green-500" />Filed</span>;
   if (status === "review") return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200" title="A holder exists but their location or Wing mapping is incomplete"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Needs review</span>;
   return <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-300"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />VACANT</span>;
 }
@@ -99,8 +102,13 @@ const ROW_ACCENT = { vacant: "border-l-amber-400", review: "border-l-red-400", f
 const dash = <span className="text-gray-300">—</span>;
 const areaSuffix = (a) => (a && a !== "State" ? ` (${a})` : "");
 
+// Filed rows are DISPLAY-ONLY on this page: no reminder / edit / delete actions.
+function ReadOnlyBadge() {
+  return <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400" data-testid="vac-readonly" title="Filed designations are display-only on this page"><Lock size={10} />Display only</span>;
+}
+
 function StatusDetail({ row }) {
-  if (row.status === "filled") return <div className="mt-1 text-[11px] text-gray-500">Held by {row.holders.join(", ") || "—"}</div>;
+  if (row.status === "filled") return <div><ReadOnlyBadge /></div>;
   if (row.status === "review") {
     return (row.review_people || []).map((p) => (
       <div key={p.contact_id} className="mt-1 text-[11px] text-gray-600"><span className="font-medium text-gray-900">{p.person_name}</span> — {p.reason}</div>
@@ -119,7 +127,10 @@ function groupTrail(r) {
     .filter((x, i, a) => x && a.indexOf(x) === i).join(" · ");
 }
 
-export default function VacancyTable({ rows, loading, err, showWing = true, renderContactExtra, emptyText = "No positions for these filters.", errorText = "Vacancies could not be calculated — no positions are shown." }) {
+// mode "vacant" (default): Vacant Designation columns (responsible person +
+// actions). mode "filed": Filed Designation columns (assigned person, display-only).
+export default function VacancyTable({ rows, loading, err, showWing = true, renderContactExtra, mode = "vacant", emptyText = "No positions for these filters.", errorText = "Vacancies could not be calculated — no positions are shown." }) {
+  const filed = mode === "filed";
   const sorted = sortRows(rows || []);
   const groups = [];
   for (const r of sorted) {
@@ -130,9 +141,26 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
   const cols = showWing ? 10 : 9;
   const counts = (g) => {
     const v = g.rows.filter((x) => x.status === "vacant").length, rv = g.rows.filter((x) => x.status === "review").length, f = g.rows.filter((x) => x.status === "filled").length;
-    return [v && `${v} vacant`, rv && `${rv} needs review`, f && `${f} filled`].filter(Boolean).join(" · ");
+    return [v && `${v} vacant`, rv && `${rv} needs review`, f && `${f} filed`].filter(Boolean).join(" · ");
+  };
+  // Filed mode: the assigned person(s) — name, designation, mobile — as plain text.
+  const Holders = ({ row, field }) => {
+    const hp = row.holder_people || [];
+    if (!hp.length) return field === "name" ? <span className="text-xs text-gray-500">{row.holders.join(", ") || "—"}</span> : dash;
+    return (
+      <div className="space-y-1.5">
+        {hp.map((h, i) => (
+          <div key={h.contact_id || i} className="h-8 flex items-center gap-2 whitespace-nowrap" data-testid="holder-line">
+            {field === "name" && <span className="font-semibold text-gray-900">{h.name}</span>}
+            {field === "designation" && <span className="text-xs text-gray-700">{h.designation || "—"}</span>}
+            {field === "contact" && (h.mobile ? <span className="font-mono text-xs text-gray-700">{h.mobile}</span> : <span className="text-xs text-gray-400">No mobile</span>)}
+          </div>
+        ))}
+      </div>
+    );
   };
   const Lines = ({ row, field }) => {
+    if (row.status === "filled") return <Holders row={row} field={field} />;
     if (row.status !== "vacant" || !row.lines.length) return dash;
     return (
       <div className="space-y-1.5">
@@ -172,10 +200,10 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
               <th className="px-3 py-3 font-semibold min-w-[130px]">District</th>
               <th className="px-3 py-3 font-semibold min-w-[130px]">Assembly</th>
               {showWing && <th className="px-3 py-3 font-semibold">Wing</th>}
-              <th className="px-3 py-3 font-semibold min-w-[180px]">Vacant Designation</th>
+              <th className="px-3 py-3 font-semibold min-w-[180px]">{filed ? "Filed Designation" : "Vacant Designation"}</th>
               <th className="px-3 py-3 font-semibold">Status</th>
-              <th className="px-3 py-3 font-semibold">Responsible Person</th>
-              <th className="px-3 py-3 font-semibold">Responsible Person&apos;s Designation</th>
+              <th className="px-3 py-3 font-semibold">{filed ? "Assigned Person" : "Responsible Person"}</th>
+              <th className="px-3 py-3 font-semibold">{filed ? "Assigned Person\u2019s Designation" : "Responsible Person\u2019s Designation"}</th>
               <th className="px-3 py-3 font-semibold">Contact</th>
             </tr>
           </thead>
@@ -237,6 +265,17 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
                   <StatusChip status={r.status} />
                 </div>
                 <StatusDetail row={r} />
+                {r.status === "filled" && (r.holder_people || []).length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Assigned</div>
+                    {r.holder_people.map((h, i) => (
+                      <div key={h.contact_id || i} className="text-xs" data-testid="holder-line">
+                        <span className="font-semibold text-gray-900">{h.name}</span>
+                        <span className="text-gray-500"> · {h.mobile || "No mobile"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {r.status === "vacant" && r.lines.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-gray-100 space-y-1.5">
                     <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Responsible</div>
@@ -263,5 +302,24 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
         ))}
       </div>
     </>
+  );
+}
+
+// Vacant Designation ↔ Filed Designation switch (both tabs). A position is in
+// exactly one category: Filed when a valid person is assigned, else Vacant
+// (including "needs review", where no valid assignment exists yet).
+export function CategorySwitch({ filed, vacantCount, filedCount, onChange }) {
+  const btn = (k, label, n, active) => (
+    <button key={k} role="tab" aria-selected={active} data-testid={`vac-category-${k}`} onClick={() => onChange(k)}
+      className={`h-8 px-3 rounded-md text-sm font-semibold inline-flex items-center gap-1.5 ${active ? "bg-[#164FA3] text-white" : "text-gray-600 hover:bg-gray-50"}`}>
+      {label}
+      <span className={`text-[11px] font-bold px-1.5 rounded-full ${active ? "bg-white/20" : "bg-gray-100 text-gray-600"}`}>{n}</span>
+    </button>
+  );
+  return (
+    <div role="tablist" aria-label="Designation category" className="inline-flex border border-gray-200 rounded-lg p-0.5 bg-white">
+      {btn("vacant", "Vacant Designation", vacantCount, !filed)}
+      {btn("filed", "Filed Designation", filedCount, filed)}
+    </div>
   );
 }
