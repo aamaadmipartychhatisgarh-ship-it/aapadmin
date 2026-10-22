@@ -351,12 +351,13 @@ export async function distributeUnfiltered({ byUserId }) {
 
 // Caller side: the caller's own assigned Unfiltered Calls.
 export async function myUnfilteredCalls(userId, { view = "pending" } = {}) {
-  await ensureUnfilteredAssignmentSchema();
+  await ensureUnfilteredCallLogSchema();
   const cond = view === "completed" ? "u.completed_at IS NOT NULL" : view === "all" ? "1=1" : "u.completed_at IS NULL";
   const rows = await query(
     `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation,
             COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
-            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes
+            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes,
+            (SELECT COUNT(*) FROM unfiltered_call_logs l WHERE l.unfiltered_contact_id = u.id) AS attempts
        FROM unfiltered_contacts u
        LEFT JOIN locations ld ON ld.id = u.district_id
        LEFT JOIN locations la ON la.id = u.assembly_id
@@ -373,20 +374,86 @@ export async function myUnfilteredCalls(userId, { view = "pending" } = {}) {
   return { calls: rows, counts: { assigned: Number(c?.assigned || 0), completed: Number(c?.completed || 0), pending: Number(c?.pending || 0) } };
 }
 
-// Mark one of the caller's own calls completed with an existing call status.
-// Only the assignee can complete it, and only once (the WHERE re-checks both),
-// so a double-click or a stale tab can't complete it twice or for someone else.
-export async function completeUnfilteredCall({ id, userId, statusId, notes }) {
+// ---------------------------------------------------------------------------
+// Unfiltered call records — every disposition a caller logs from My Workspace
+// (Unfiltered Calls) is saved here against the UNFILTERED contact. Kept apart
+// from the regular `calls` table, so the two call types never mix.
+// ---------------------------------------------------------------------------
+let ensuredLogs = false;
+export async function ensureUnfilteredCallLogSchema() {
+  if (ensuredLogs) return;
   await ensureUnfilteredAssignmentSchema();
-  const [st] = await query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(statusId) || 0]);
-  if (!st) return { status: 400, message: "Choose a call status." };
-  const res = await query(
-    `UPDATE unfiltered_contacts SET completed_at = NOW(), completed_by = ?, call_status_id = ?, call_status_name = ?, call_notes = ?
-      WHERE id = ? AND assigned_to_user_id = ? AND completed_at IS NULL`,
-    [userId, st.id, st.name, notes ? String(notes).slice(0, 2000) : null, Number(id) || 0, userId]
+  await query(
+    `CREATE TABLE IF NOT EXISTS unfiltered_call_logs (
+       id INT AUTO_INCREMENT PRIMARY KEY,
+       unfiltered_contact_id INT NOT NULL,
+       caller_id INT NOT NULL,
+       logged_by INT NULL,
+       status_id INT NULL,
+       status_name VARCHAR(120) NULL,
+       remarks TEXT NULL,
+       duration_seconds INT NULL,
+       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       KEY idx_ucl_contact (unfiltered_contact_id),
+       KEY idx_ucl_caller (caller_id, created_at)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
-  if (res.affectedRows === 1) return { status: 200, message: "Call completed." };
-  const [row] = await query("SELECT assigned_to_user_id, completed_at FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
-  if (!row || Number(row.assigned_to_user_id) !== Number(userId)) return { status: 404, message: "This call is not assigned to you." };
-  return { status: 409, message: "This call is already completed." };
+  ensuredLogs = true;
+}
+
+// Same completion rule as a regular call (api/calls): these outcomes finish the
+// contact; any other status (Not Picked, Busy, Switched Off…) is an attempt and
+// the call stays pending for a retry.
+export const UNFILTERED_FINAL_STATUSES = ["Phone Picked", "Wrong Number", "Rudely Behaved"];
+
+// Log a disposition for one of the acting caller's OWN pending Unfiltered Calls.
+// The row is locked for the check + write, so it can't be logged against
+// someone else's record, after completion, or completed twice.
+export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, remarks, durationSeconds }) {
+  await ensureUnfilteredCallLogSchema();
+  const [st] = await query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(statusId) || 0]);
+  if (!st) return { status: 400, message: "Please pick a status." };
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [[row]] = await conn.query("SELECT id, assigned_to_user_id, completed_at FROM unfiltered_contacts WHERE id = ? FOR UPDATE", [Number(id) || 0]);
+    if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) { await conn.rollback(); return { status: 404, message: "This call is not assigned to you." }; }
+    if (row.completed_at) { await conn.rollback(); return { status: 409, message: "This call is already completed." }; }
+    const notes = remarks ? String(remarks).slice(0, 2000) : null;
+    const dur = Math.max(0, Math.min(86400, Math.round(Number(durationSeconds) || 0)));
+    const [ins] = await conn.query(
+      `INSERT INTO unfiltered_call_logs (unfiltered_contact_id, caller_id, logged_by, status_id, status_name, remarks, duration_seconds)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, callerId, loggedBy || callerId, st.id, st.name, notes, dur]
+    );
+    const final = UNFILTERED_FINAL_STATUSES.includes(st.name);
+    await conn.query(
+      `UPDATE unfiltered_contacts
+          SET call_status_id = ?, call_status_name = ?, call_notes = ?,
+              completed_at = CASE WHEN ? THEN NOW() ELSE NULL END,
+              completed_by = CASE WHEN ? THEN ? ELSE NULL END
+        WHERE id = ?`,
+      [st.id, st.name, notes, final ? 1 : 0, final ? 1 : 0, callerId, row.id]
+    );
+    await conn.commit();
+    return { status: 200, message: final ? "Saved — call completed." : "Saved — kept pending for a retry.", completed: final, log_id: ins.insertId };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+// Previous attempts on one Unfiltered Contact — only for its assigned caller.
+export async function unfilteredCallHistory({ id, callerId }) {
+  await ensureUnfilteredCallLogSchema();
+  const [row] = await query("SELECT assigned_to_user_id FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
+  if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) return null;
+  return query(
+    `SELECT l.id, l.status_name, l.remarks, l.duration_seconds, l.created_at, us.username AS agent_name
+       FROM unfiltered_call_logs l LEFT JOIN users us ON us.id = l.caller_id
+      WHERE l.unfiltered_contact_id = ? ORDER BY l.id DESC`,
+    [Number(id)]
+  );
 }

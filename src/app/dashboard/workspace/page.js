@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Phone, MapPin, ChevronRight, Play, Square, X, ListChecks, Users, Loader2, CheckCircle2, History, Pencil, Calendar, Clock, Star, MessageSquare, Search, Plus, UserRound, Flag, Check, Activity } from "lucide-react";
@@ -15,6 +15,7 @@ import { MultiSelect } from "@/components/MultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
 import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
+import UnfilteredWorkspace from "./UnfilteredWorkspace";
 
 // Friendly labels for who assigned a contact.
 const ROLE_LABELS = { super_admin: "Super Admin", supervisor: "Supervisor", caller: "Caller" };
@@ -123,6 +124,25 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [submissionsKey, setSubmissionsKey] = useState(0); // bump to refresh "My submitted contacts"
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
+  // Regular Calls ↔ Unfiltered Calls. Kept in the URL (?calls=unfiltered) so a
+  // refresh / shared link reopens the same list. The two lists never mix: the
+  // Unfiltered view has its own data, APIs and call records.
+  const [callType, setCallType] = useState("regular");
+  const [unfCounts, setUnfCounts] = useState(null); // null = not available to this user
+  const [unfBusy, setUnfBusy] = useState(false); // an Unfiltered Call is in progress
+  useEffect(() => {
+    try { if (new URLSearchParams(window.location.search).get("calls") === "unfiltered") setCallType("unfiltered"); } catch {}
+    fetch("/api/unfiltered-calls?view=pending", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.counts) setUnfCounts(d.counts); }).catch(() => {});
+  }, []);
+  const switchCallType = useCallback((t) => {
+    setCallType(t);
+    try {
+      const u = new URL(window.location.href);
+      if (t === "unfiltered") u.searchParams.set("calls", "unfiltered"); else u.searchParams.delete("calls");
+      window.history.replaceState(null, "", u.toString());
+    } catch {}
+  }, []);
   const [activeStatus, setActiveStatus] = useState(null); // users.active_status (this caller's) — editable here
   const [savingActiveStatus, setSavingActiveStatus] = useState(false);
   // Worker Status of the contact currently on the call (contacts.active_status —
@@ -719,7 +739,45 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // selected/deselected like any other option in the multi-select.
   const designationOptions = [...designations.map((d) => ({ id: String(d.id), name: d.name })), { id: "none", name: "No Designation" }];
 
+  // While a call of one type is in progress, the other type is locked so a live
+  // call (and its regular-contact lock) is never left behind unseen.
+  const regularCount = queue.assigned_total ?? queue.assigned.length;
+  const callTypeToggle = unfCounts && (
+    <div className="flex flex-wrap items-center gap-3">
+      <div role="tablist" aria-label="Call type" className="inline-flex bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
+        {[
+          ["regular", "Regular Calls", regularCount, !!unfBusy],
+          ["unfiltered", "Unfiltered Calls", unfCounts.pending, !!active],
+        ].map(([k, label, n, locked]) => (
+          <button key={k} role="tab" aria-selected={callType === k} data-testid={`calltype-${k}`}
+            onClick={() => callType !== k && !locked && switchCallType(k)}
+            disabled={callType !== k && locked}
+            title={callType !== k && locked ? "Finish or cancel the current call first" : undefined}
+            className={`h-9 px-4 rounded-lg text-sm font-semibold inline-flex items-center gap-2 disabled:opacity-50 ${callType === k ? "bg-[#164FA3] text-white" : "text-gray-600 hover:bg-gray-50"}`}>
+            {label}
+            <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${callType === k ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"}`}>{n}</span>
+          </button>
+        ))}
+      </div>
+      <span className="text-xs text-gray-500" data-testid="calltype-label">
+        Showing <strong className="text-gray-800">{callType === "unfiltered" ? "Unfiltered Calls" : "Regular Calls"}</strong>
+        {callType === "unfiltered" ? " — Unfiltered Contacts assigned to you." : " — contacts assigned from the Contact page."}
+      </span>
+    </div>
+  );
+
+  if (callType === "unfiltered" && unfCounts) {
+    return (
+      <div className="space-y-4">
+        {callTypeToggle}
+        <UnfilteredWorkspace statuses={statuses} onCounts={setUnfCounts} onBusy={setUnfBusy} />
+      </div>
+    );
+  }
+
   return (
+    <div className="space-y-4">
+    {callTypeToggle}
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
       {/* LEFT: queue */}
       <div className="lg:col-span-1 space-y-4">
@@ -1418,6 +1476,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
           onSaved={() => { setShowAddContact(false); setMessage("Contact submitted for Supervisor approval."); setSubmissionsKey((k) => k + 1); }}
         />
       )}
+    </div>
     </div>
   );
 }
