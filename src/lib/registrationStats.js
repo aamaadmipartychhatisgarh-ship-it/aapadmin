@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSchema";
 import { UNCONTACTED_FIRST_SQL } from "@/lib/registrationContactAction";
+import { ensureConvertSchema, isConvertEligible } from "@/lib/registrationConvert";
 
 // Server-side aggregation for the Voter & Worker Registration dashboard. Every
 // number is computed in SQL (COUNT / GROUP BY) so the client never pulls raw rows
@@ -256,6 +257,7 @@ export function defaultPeopleSort(personType) {
 
 export async function getPeoplePage(filters = {}) {
   await ensureRegistrationSchema();
+  await ensureConvertSchema(); // converted_contact_id / converted_at on each row
   const page = Math.max(1, Number(filters.page) || 1);
   const pageSize = Math.min(200, Math.max(1, Number(filters.pageSize) || 25));
   const offset = (page - 1) * pageSize;
@@ -276,7 +278,9 @@ export async function getPeoplePage(filters = {}) {
     f.params
   );
   return {
-    people: rows,
+    // convert_eligible: the SAME rule the convert API enforces (Worker, counted,
+    // rated 6/10+, not yet converted) — drives the "Convert to Contact" button.
+    people: rows.map((r) => ({ ...r, convert_eligible: isConvertEligible(r) })),
     total: Number(total || 0),
     page,
     pageSize,

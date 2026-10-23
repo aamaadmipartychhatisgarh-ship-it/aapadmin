@@ -6,9 +6,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   BarChart3, Check, ChevronLeft, ChevronRight, Copy, Download, FileText, Link2, Loader2,
   MessageCircle, Pencil, Plus, RefreshCw, Search, Settings2, Shield, Trash2, Trophy,
-  UserPlus, Users, Vote, X,
+  UserPlus, Users, Vote, X, UserCheck,
 } from "lucide-react";
-import { isTopAdmin, isCaller, isSuperAdmin, canManageRegistration } from "@/lib/permissions";
+import { isTopAdmin, isCaller, isSuperAdmin, canManageRegistration, isAdmin } from "@/lib/permissions";
+import { usePageAccess } from "@/components/usePageAccess";
 import { usePageGuard } from "@/components/usePageGuard";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -175,6 +176,10 @@ export default function RegistrationApp() {
   // mirrors what the server enforces. Delete stays Super-Admin only (as the API).
   const canManage = canManageRegistration(session);
   const canDelete = isSuperAdmin(session);
+  // "Convert to Contact" needs the right to create Contacts (admin role or the
+  // Contacts page grant) — the convert API enforces the same rule.
+  const { has: hasPage } = usePageAccess();
+  const canConvert = isAdmin(session) || hasPage("contacts");
 
   const [tab, setTab] = useState("people");
   // Honor ?tab=people|workers|dashboard so the caller "Voter Registration" /
@@ -339,7 +344,7 @@ export default function RegistrationApp() {
 
       {tab === "dashboard" && canManage && <DashboardTab filterQs={filterQs} onWard={setWard} onError={setErr} />}
       {tab === "workers" && <WorkersTab filterQs={filterQs} campaignId={campaignId} campaigns={campaigns} onError={setErr} canDelete={canDelete} />}
-      {tab === "people" && <PeopleTab filterQs={filterQs} onError={setErr} canDelete={canDelete} />}
+      {tab === "people" && <PeopleTab filterQs={filterQs} onError={setErr} canDelete={canDelete} canConvert={canConvert} />}
     </div>
   );
 }
@@ -970,7 +975,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
 }
 
 // ------------------------------------------------------------- REGISTRATIONS
-function PeopleTab({ filterQs, onError, canDelete = false }) {
+function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false }) {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
@@ -1004,6 +1009,27 @@ function PeopleTab({ filterQs, onError, canDelete = false }) {
   }, [qs, page, onError]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Convert an eligible Worker to a Contact. The button is disabled while the
+  // request runs (no double submit); the server re-checks everything and never
+  // creates a second Contact for the same registration.
+  const [converting, setConverting] = useState(null); // registration id in flight
+  async function convertToContact(p) {
+    if (converting) return;
+    if (!confirm(`Convert ${p.name} (${p.mobile || "no mobile"}) to a Contact?\nThe registration is kept and linked to the new Contact.`)) return;
+    setConverting(p.id);
+    try {
+      const r = await fetch(`/api/registration/people/${p.id}/convert`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { setOkMsg(d.message || "Converted to Contact."); setTimeout(() => setOkMsg(""), 3500); }
+      else onError(d.message || "Could not convert to Contact.");
+      load(); // reflect the server's converted status either way
+    } catch {
+      onError("Could not convert to Contact — network error.");
+    } finally {
+      setConverting(null);
+    }
+  }
 
   async function setRowStatus(id, next) {
     try {
@@ -1142,6 +1168,17 @@ function PeopleTab({ filterQs, onError, canDelete = false }) {
                   {/* Edit (full record) + Delete — aligned to the right of the row.
                       Edit updates the SAME record (same id) and preserves the photo. */}
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                    {p.converted_contact_id ? (
+                      <span className="inline-flex items-center gap-1 mr-1 text-[11px] font-semibold px-2 py-1 rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200"
+                            title={`Converted${p.converted_at ? ` on ${new Date(p.converted_at).toLocaleString("en-IN")}` : ""} — Contact #${p.converted_contact_id}`} data-testid="converted-badge">
+                        <UserCheck size={12} />Converted · Contact #{p.converted_contact_id}
+                      </span>
+                    ) : p.convert_eligible && canConvert ? (
+                      <button onClick={() => convertToContact(p)} disabled={!!converting} data-testid="convert-btn"
+                              className="inline-flex items-center gap-1 mr-1 text-[11px] font-semibold px-2 py-1 rounded-md text-white disabled:opacity-60" style={{ background: BRAND }}>
+                        {converting === p.id ? <Loader2 size={12} className="animate-spin" /> : <UserCheck size={12} />}Convert to Contact
+                      </button>
+                    ) : null}
                     <button onClick={() => setEditing(p)} title="Edit registration" aria-label={`Edit ${p.name}`}
                             className="p-1.5 rounded-md hover:bg-blue-50 text-[#164FA3]"><Pencil size={15} /></button>
                     {canDelete && <button onClick={() => setConfirmDel(p)} title="Delete registration" aria-label={`Delete ${p.name}`}

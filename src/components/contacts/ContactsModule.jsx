@@ -1149,9 +1149,22 @@ export default function ContactsModule({ session, mode }) {
                   <td className="px-4 py-3 font-medium text-gray-900">
                     <div className="flex items-center gap-2.5">
                       <Avatar name={c.person_name} src={c.photo_url} size={32} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[11px]" />
+                      <div className="min-w-0">
                       <button onClick={() => setViewingContact(c)} className="hover:underline hover:text-[#164FA3] text-left" title="View details">
                         {c.person_name}
                       </button>
+                      {/* Created by "Convert to Contact" on a Worker registration —
+                          linked permanently to that Registration (contacts.source_registration_id). */}
+                      {c.source_registration_id ? (
+                        <span
+                          title={`Converted from Worker & Voter Registration #${c.source_registration_id}`}
+                          data-testid="converted-from-registration"
+                          className="block w-fit mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-200 whitespace-nowrap"
+                        >
+                          Converted from Registrations · #{c.source_registration_id}
+                        </span>
+                      ) : null}
+                      </div>
                       {/* Approved caller submission — stays identifiable after approval. */}
                       {c.approval_status === "approved" && (
                         <span
