@@ -7,6 +7,8 @@ import { logAudit } from "@/lib/audit";
 import { notPendingClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter } from "@/lib/supervisorScope";
 import { ensureRfaSchema, RFA_STATUSES } from "@/lib/rfa";
+import { ensureQualificationColumns } from "@/lib/contactQualification";
+import { ensureVehicleColumn } from "@/lib/contactVehicle";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
@@ -19,16 +21,29 @@ export async function GET(req) {
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     if (!isSuperAdmin(session)) return NextResponse.json({ message: "Forbidden" }, { status: 403, headers: NO_STORE });
     await ensureRfaSchema();
+    // Qualification / Vehicle are lazily-added Contact columns — make sure they exist.
+    await ensureQualificationColumns().catch(() => {});
+    await ensureVehicleColumn().catch(() => {});
     const status = new URL(req.url).searchParams.get("status") || "";
     const where = RFA_STATUSES.includes(status) ? "WHERE r.status = ?" : "";
     const rows = await query(
+      // Everything about the Contact is read LIVE from the linked contacts row (never
+      // copied onto the review), with the same geography derivation as the Contact
+      // List: district → Lok Sabha → Zone, the contact's own zone / Lok Sabha winning.
       `SELECT r.*, c.person_name, c.phone_number, c.address, c.photo_url,
+              c.qualification, c.education_level, c.vehicle,
               la.name AS assembly_name, ld.name AS district_name,
+              COALESCE(cls.name, lls.name) AS lok_sabha_name,
+              COALESCE(cz.name, lz.name) AS zone_name,
               (SELECT d.name FROM designations d WHERE d.id = c.designation_id) AS designation_name
          FROM contact_rfa_reviews r
          LEFT JOIN contacts c ON c.id = r.contact_id
          LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations lls ON lls.id = ld.parent_id
+         LEFT JOIN locations lz ON lz.id = lls.parent_id
+         LEFT JOIN locations cz ON cz.id = c.zone_id
+         LEFT JOIN locations cls ON cls.id = c.lok_sabha_id
          ${where}
         ORDER BY r.id DESC LIMIT 1000`,
       where ? [status] : []

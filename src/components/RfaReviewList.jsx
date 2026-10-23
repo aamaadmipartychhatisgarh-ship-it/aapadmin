@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, X, Loader2, Phone, ClipboardCheck } from "lucide-react";
+import { Check, X, Loader2, ClipboardCheck } from "lucide-react";
+import { qualificationLabel } from "@/lib/qualificationOptions";
+import { vehicleLabel } from "@/lib/vehicleOptions";
 
 const TABS = ["Pending", "Approved", "Rejected"];
 const CHIP = { Pending: "bg-amber-50 text-amber-700 border-amber-200", Approved: "bg-emerald-50 text-emerald-700 border-emerald-200", Rejected: "bg-red-50 text-red-700 border-red-200" };
@@ -64,25 +66,37 @@ export default function RfaReviewList({ compact = false }) {
       </div>
       {err && <div className="px-4 py-2 text-sm text-red-700 bg-red-50">{err}</div>}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[760px]">
+        <table className="w-full text-sm min-w-[1100px]">
           <thead className="bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-500">
             <tr>
-              <th className="px-4 py-2 font-semibold">Contact</th>
-              <th className="px-4 py-2 font-semibold">Designation / Area</th>
+              <th className="px-4 py-2 font-semibold">Contact Name</th>
+              <th className="px-4 py-2 font-semibold">Phone Number</th>
+              <th className="px-4 py-2 font-semibold">Qualification</th>
+              <th className="px-4 py-2 font-semibold">Assembly</th>
+              <th className="px-4 py-2 font-semibold">District</th>
+              <th className="px-4 py-2 font-semibold">Lok Sabha</th>
+              <th className="px-4 py-2 font-semibold">Zone</th>
+              <th className="px-4 py-2 font-semibold">Vehicle</th>
               <th className="px-4 py-2 font-semibold">Submitted By (Supervisor-2)</th>
               <th className="px-4 py-2 font-semibold">Status</th>
               <th className="px-4 py-2 font-semibold text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {rows.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">{compact ? "No RfA reviews pending." : `No ${tab.toLowerCase()} RfA reviews.`}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">{compact ? "No RfA reviews pending." : `No ${tab.toLowerCase()} RfA reviews.`}</td></tr>}
             {rows.map((r) => (
               <tr key={r.id} data-testid="rfa-row">
                 <td className="px-4 py-2.5 align-top">
-                  <div className="font-medium text-gray-900">{r.person_name || `Contact #${r.contact_id}`}</div>
-                  <div className="text-xs text-gray-500 inline-flex items-center gap-1"><Phone size={10} /> {r.phone_number || "—"}</div>
+                  <div className="font-medium text-gray-900" data-testid="rfa-name">{r.person_name || `Contact #${r.contact_id} (no longer exists)`}</div>
+                  {r.designation_name && <div className="text-xs text-gray-500">{r.designation_name}</div>}
                 </td>
-                <td className="px-4 py-2.5 align-top text-gray-700">{[r.designation_name, r.assembly_name, r.district_name].filter(Boolean).join(" · ") || "—"}</td>
+                <td className="px-4 py-2.5 align-top text-gray-700 font-mono text-xs whitespace-nowrap" data-testid="rfa-phone">{r.phone_number || "—"}</td>
+                <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-qualification">{qualificationLabel(r.qualification, r.education_level) || "—"}</td>
+                <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-assembly">{r.assembly_name || "—"}</td>
+                <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-district">{r.district_name || "—"}</td>
+                <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-lok-sabha">{r.lok_sabha_name || "—"}</td>
+                <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-zone">{r.zone_name || "—"}</td>
+                <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-vehicle">{vehicleLabel(r.vehicle) || "—"}</td>
                 <td className="px-4 py-2.5 align-top"><div className="text-gray-900">{r.submitted_by_name || "—"}</div><div className="text-[11px] text-gray-400">{fmt(r.submitted_at)}</div></td>
                 <td className="px-4 py-2.5 align-top">
                   <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${CHIP[r.status] || ""}`}>{r.status}</span>
