@@ -6,7 +6,11 @@ import { useRouter } from "next/navigation";
 import {
   Star, Search, Plus, Filter, Eye, Pencil, Trash2, X, ChevronLeft, ChevronRight,
   Loader2, Shield, Phone, MapPin, Save, ArrowLeft, Users, CheckCircle2, Camera, ImagePlus,
+  Upload, Download, FileSpreadsheet,
 } from "lucide-react";
+import * as XLSX from "xlsx";
+import { ImportModal } from "@/components/contacts/ContactsModule";
+import { INFLUENCER_IMPORT_FIELDS, mapInfluencerHeaders, validInfluencerPhone, influencerPhoneKey } from "@/lib/influencerColumns";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
 import PartySelect, { usePartyMaster, PartyLogo } from "@/components/PartySelect";
@@ -101,6 +105,7 @@ export default function InfluencersPage() {
   const [viewRow, setViewRow] = useState(null);
   const [deleteRow, setDeleteRow] = useState(null);
   const [stats, setStats] = useState(null); // { totals, assemblies } — live dashboard
+  const [showImport, setShowImport] = useState(false);
 
   // Debounce the search box.
   useEffect(() => {
@@ -231,6 +236,16 @@ export default function InfluencersPage() {
     );
   }
 
+  // The list's current search + filters, for the export links.
+  const exportQs = (format) => {
+    const p = new URLSearchParams({ format });
+    if (debounced.trim()) p.set("search", debounced.trim());
+    if (fStatus) p.set("status", fStatus);
+    if (fAssembly) p.set("assembly_id", fAssembly);
+    if (fRating) p.set("potential_rating", fRating);
+    return p.toString();
+  };
+
   return (
     <div className="max-w-[1400px] mx-auto">
       {/* Header */}
@@ -242,14 +257,47 @@ export default function InfluencersPage() {
             <p className="text-sm text-gray-500">Live participation — Total, Joined, Pending, Cancelled</p>
           </div>
         </div>
-        <button
-          onClick={() => { setEditId(null); setEditRecord(null); setMode("form"); }}
-          className="inline-flex items-center gap-2 h-10 px-4 rounded-lg text-white text-sm font-semibold shadow-sm"
-          style={{ background: BRAND }}
-        >
-          <Plus size={17} /> Add Influencer
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Bulk import (CSV / Excel) and export of the CURRENT search + filters. */}
+          <button onClick={() => setShowImport(true)} data-testid="influencer-import"
+            className="inline-flex items-center gap-2 h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            <Upload size={16} /> Import
+          </button>
+          <a href={`/api/influencers/export?${exportQs("csv")}`} data-testid="influencer-export-csv"
+            className="inline-flex items-center gap-2 h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            <Download size={16} /> Export CSV
+          </a>
+          <a href={`/api/influencers/export?${exportQs("xlsx")}`} data-testid="influencer-export-xlsx"
+            className="inline-flex items-center gap-2 h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50">
+            <FileSpreadsheet size={16} /> Export Excel
+          </a>
+          <button
+            onClick={() => { setEditId(null); setEditRecord(null); setMode("form"); }}
+            className="inline-flex items-center gap-2 h-10 px-4 rounded-lg text-white text-sm font-semibold shadow-sm"
+            style={{ background: BRAND }}
+          >
+            <Plus size={17} /> Add Influencer
+          </button>
+        </div>
       </div>
+
+      {showImport && (
+        <ImportModal
+          url="/api/influencers/import"
+          title="Import Influencers (Excel / CSV)"
+          hint={<>Name and Phone are required; other columns (Assembly, Party, Status, Joined By Phone…) are optional. <a href="/api/influencers/import?template=1" className="font-semibold text-[#164FA3] hover:underline" data-testid="influencer-template">Download template</a>. Phones already in Influencers are skipped, never overwritten.</>}
+          addedLabel="successfully imported"
+          invalidLabel="invalid records"
+          precheck={precheckInfluencerFile}
+          duplicateNote={(d) => (d?.duplicates > 0 ? (
+            <div className="text-[11px] text-gray-500 mt-1.5" data-testid="influencer-dup-note">
+              Duplicate / skipped: {d.duplicates_existing} already in Influencers, {d.duplicates_in_file} repeated in this file — existing records were left unchanged.
+            </div>
+          ) : null)}
+          onClose={() => setShowImport(false)}
+          onImported={() => { setPage(1); loadList(); loadStats(); }}
+        />
+      )}
 
       {/* Live summary cards — Total = Joined + Pending + Cancelled */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
@@ -999,4 +1047,28 @@ function PhotoUpload({ value, name, onChange }) {
       <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
     </div>
   );
+}
+
+// Browser-side check of the chosen file (the server re-validates every row):
+// required columns present, and a preview of rows with a missing / invalid Name or
+// Phone and phones repeated within the file.
+async function precheckInfluencerFile(file) {
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
+  const idx = mapInfluencerHeaders(rows[0] || []);
+  const missing = INFLUENCER_IMPORT_FIELDS.filter((f) => f.required && idx[f.key] === undefined).map((f) => f.label);
+  if (missing.length) return { error: `Missing required column(s): ${missing.join(", ")}. Download the template for the expected headings.` };
+  let total = 0, bad = 0, repeated = 0;
+  const seen = new Set();
+  for (const r of rows.slice(1)) {
+    if (!r || r.every((c) => String(c ?? "").trim() === "")) continue;
+    total++;
+    const name = String(r[idx.name] ?? "").trim();
+    const phone = String(r[idx.phone] ?? "").trim();
+    if (!name || !validInfluencerPhone(phone)) { bad++; continue; }
+    const k = influencerPhoneKey(phone);
+    if (seen.has(k)) repeated++; else seen.add(k);
+  }
+  if (!total) return { error: "The sheet has no data rows." };
+  return { info: `${total} row(s) found${bad ? `, ${bad} with a missing / invalid Name or Phone (will be skipped)` : ""}${repeated ? `, ${repeated} repeated phone(s) in the file (will be skipped)` : ""}. Other checks (assembly, status, duplicates already saved) run on import.` };
 }

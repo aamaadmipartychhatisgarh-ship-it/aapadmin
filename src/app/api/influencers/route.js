@@ -7,7 +7,8 @@ import {
   ensureInfluencerSchema, getInfluencerColumns, normalizeStatus, resolveAssemblyHierarchy,
   POTENTIAL_RATINGS, STATUSES, NEXT_ACTIONS, ECONOMIC_STATUSES, JOINED_BY_COLUMNS } from "@/lib/influencerSchema";
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
-import { resolveContactCard, resolveContactByPhone, resolveContactCardsBatch, resolveWorkersByPhones } from "@/lib/contactCard";
+import { resolveContactCard, resolveContactByPhone } from "@/lib/contactCard";
+import { influencerListWhere, enrichJoinedBy, INFLUENCER_SORTS, createdBySelect } from "@/lib/influencerIO";
 
 // Access to the Influencer module is governed by the "influencers" page key
 // (Super Admin + Supervisor by baseline, plus anyone granted it in Page Access).
@@ -26,14 +27,9 @@ const META = {
   economicStatuses: ECONOMIC_STATUSES,
 };
 
-// Whitelisted sort columns → never interpolate a raw client string into SQL.
-const SORT_COLS = {
-  newest: "created_at DESC",
-  oldest: "created_at ASC",
-  name_az: "name ASC",
-  name_za: "name DESC",
-  updated: "updated_at DESC",
-};
+// Whitelisted sort columns → never interpolate a raw client string into SQL
+// (shared with the export: lib/influencerIO).
+const SORT_COLS = INFLUENCER_SORTS;
 
 // GET /api/influencers               → paginated list (search + filters)
 // GET /api/influencers?meta=1         → option sets for the form/filters
@@ -112,23 +108,8 @@ export async function GET(req) {
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10) || 20));
     const offset = (page - 1) * pageSize;
 
-    const where = [];
-    const params = [];
-    const search = (searchParams.get("search") || "").trim();
-    if (search) {
-      where.push("(name LIKE ? OR phone LIKE ? OR assembly_name LIKE ? OR responsible_person LIKE ?)");
-      const like = `%${search}%`;
-      params.push(like, like, like, like);
-    }
-    const status = (searchParams.get("status") || "").trim();
-    if (status) { where.push("status = ?"); params.push(status); }
-    const assemblyId = (searchParams.get("assembly_id") || "").trim();
-    if (assemblyId) { where.push("assembly_id = ?"); params.push(assemblyId); }
-    const rating = (searchParams.get("potential_rating") || "").trim();
-    if (rating) { where.push("potential_rating = ?"); params.push(rating); }
-    const nextAction = (searchParams.get("next_action") || "").trim();
-    if (nextAction) { where.push("next_action = ?"); params.push(nextAction); }
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    // Search + filters — the same WHERE the export uses (lib/influencerIO).
+    const { whereSql, params } = influencerListWhere(searchParams);
 
     const orderBy = SORT_COLS[searchParams.get("sort")] || SORT_COLS.newest;
 
@@ -159,9 +140,7 @@ export async function GET(req) {
     // created_by is feature-detected: on an older influencers table that predates
     // the column, referencing it would 500 BOTH list queries (while stats, which
     // never touches it, still works — exactly this failure's shape).
-    const createdBySel = cols.has("created_by")
-      ? "(SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name"
-      : "NULL AS created_by_name";
+    const createdBySel = await createdBySelect();
     const simpleList = () => query(
       `SELECT influencers.*, ${createdBySel}
          FROM influencers ${whereSql} ORDER BY ${orderBy} LIMIT ${pageSize} OFFSET ${offset}`,
@@ -169,61 +148,9 @@ export async function GET(req) {
     );
     const rows = await simpleList();
     // Resolve Joined By for the WHOLE page in a couple of BATCHED, set-based
-    // queries (contacts by id+phone, workers by phone) instead of N sequential
-    // per-row lookups — the per-row version held a DB connection for the length
-    // of the page and, under load on shared hosting, could exhaust the pool and
-    // stall the whole app. The resolution precedence is unchanged (and matches the
-    // edit card): the linked contact's designation → else the phone-matched
-    // contact → else the phone-matched worker's position. Non-fatal: a failure
-    // leaves the stored name in place rather than erroring the list.
-    const ten = (v) => { const d = String(v ?? "").replace(/\D/g, ""); return d.length >= 10 ? d.slice(-10) : null; };
-    const jbIds = [];
-    const jbPhones = [];
-    for (const r of rows) {
-      if (r.joined_by_contact_id) jbIds.push(Number(r.joined_by_contact_id));
-      const t = ten(r.joined_by_phone);
-      if (t) jbPhones.push(t);
-    }
-    let byId = new Map();
-    let byPhone = new Map();
-    let workerByPhone = new Map();
-    if (jbIds.length || jbPhones.length) {
-      try {
-        const res = await resolveContactCardsBatch({ ids: jbIds, phones10: jbPhones });
-        byId = res.byId;
-        byPhone = res.byPhone;
-        workerByPhone = await resolveWorkersByPhones(jbPhones);
-      } catch (e) {
-        console.error("[influencer] batched Joined-By resolve failed:", e?.sqlMessage || e?.message || e);
-      }
-    }
-    for (const r of rows) {
-      const t = ten(r.joined_by_phone);
-      // 1) stored contact link (authoritative), 2) phone-matched contact when the
-      // link is bare or absent, 3) phone-matched worker for Worker-only people.
-      let card = r.joined_by_contact_id ? byId.get(Number(r.joined_by_contact_id)) : null;
-      if ((!card || !card.designation_name) && t) {
-        const bp = byPhone.get(t);
-        if (bp && (bp.designation_name || !card)) card = bp;
-      }
-      const worker = (!card || !card.designation_name) && t ? workerByPhone.get(t) : null;
-      if (card) {
-        r.joined_by_name = card.person_name || r.joined_by_name || null;
-        r.joined_by_photo = card.photo_url || null;
-        r.joined_by_mobile = card.phone_number || r.joined_by_phone || null;
-        r.joined_by_designation = card.designation_name || (worker ? (String(worker.position || "").trim() || null) : null);
-        r.joined_by_assembly = card.assembly_name || null;
-      } else if (worker) {
-        r.joined_by_name = worker.name || r.joined_by_name || null;
-        r.joined_by_photo = worker.photo_url || null;
-        r.joined_by_mobile = worker.mobile || r.joined_by_phone || null;
-        r.joined_by_designation = String(worker.position || "").trim() || null;
-      } else {
-        // No linked person resolved — keep the stored name, show the saved phone.
-        r.joined_by_mobile = r.joined_by_phone || null;
-        r.joined_by_designation = null;
-      }
-    }
+    // queries (shared with the export — lib/influencerIO enrichJoinedBy). The
+    // resolution precedence is unchanged and matches the edit card. Non-fatal.
+    await enrichJoinedBy(rows);
     const influencers = rows.map(shape);
 
     return NextResponse.json(
