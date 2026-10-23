@@ -19,6 +19,7 @@ import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { callerZoneAccess, zoneContactClause } from "@/lib/callerZoneScope";
+import { ensureRfaSchema, RFA_STATUS_SQL } from "@/lib/rfa";
 
 // Cached feature-detect: does contacts.photo_verified exist yet? The Photo Update
 // Count reflects RETRIEVABLE photos (not just a populated field) once recovery has
@@ -74,6 +75,7 @@ export async function GET(req) {
     // The multi-designation join table must exist before the list query reads it.
     await ensureContactDesignationsSchema();
     await ensureContactWingsSchema();
+    await ensureRfaSchema();
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status"); // all | pending | done | assigned | pool
@@ -298,6 +300,7 @@ export async function GET(req) {
               -- The contact's Wings (saved tags, Master-Data names) as a CSV, for
               -- the list display and to preload the edit form's Wings dropdown.
               ${WINGS_SQL} AS wings,
+              ${RFA_STATUS_SQL} AS rfa_status,
               ${submittedBySql}
               -- Resolve the photo EXACTLY like the has_photo count condition:
               -- NULLIF(TRIM(...)) so an empty-string c.photo_url falls back to the

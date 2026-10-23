@@ -11,6 +11,7 @@ import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
+import { ensureRfaSchema, RFA_STATUS_SQL } from "@/lib/rfa";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
@@ -41,6 +42,7 @@ export async function GET(req) {
     }
     await ensureContactDesignationsSchema();
     await ensureContactWingsSchema();
+    await ensureRfaSchema();
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
@@ -184,6 +186,7 @@ export async function GET(req) {
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
               ${WINGS_SQL} AS wings,
+              ${RFA_STATUS_SQL} AS rfa_status,
               -- Resolve the photo EXACTLY like the has_photo count condition
               -- (NULLIF(TRIM(...))), so an empty-string c.photo_url falls back to
               -- the worker photo instead of returning '' — otherwise a contact

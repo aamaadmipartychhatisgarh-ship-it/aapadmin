@@ -194,6 +194,10 @@ export const PAGES = [
   // the page-access system — never by a hidden nav or client guard alone.
   { key: "influencers", label: "Influencers", href: "/dashboard/admin/influencers", prefixes: ["/dashboard/admin/influencers"], icon: "Star",
     roles: [ROLES.SUPER_ADMIN, ROLES.SUPERVISOR] },
+  // RfA Review List — contacts a Supervisor-2 submitted for Review for Announce.
+  // Super Admin only; every /api/rfa review route re-checks the role server-side.
+  { key: "rfa", label: "RfA Review", href: "/dashboard/admin/rfa", prefixes: ["/dashboard/admin/rfa"], icon: "Check",
+    roles: [ROLES.SUPER_ADMIN], hideFromAccess: true },
   // Voter & Worker Registration — the public link drive. State-level by baseline
   // (the drive is run centrally), and grantable to anyone else through Page
   // Access; every /api/registration route re-checks this key server-side. The

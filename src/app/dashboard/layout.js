@@ -340,6 +340,8 @@ export default function DashboardLayout({ children }) {
         { name: "Unfiltered Contact", href: "/dashboard/admin/unfiltered-contacts", icon: Users },
         // Caller-submitted contacts awaiting review (same page Supervisors use).
         { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
+        // Contacts a Supervisor-2 submitted for Review for Announce (Super Admin only).
+        { name: "RfA Review", href: "/dashboard/admin/rfa", icon: ClipboardList },
       ] },
       // Influencers — its own route and "influencers" page-access key; shown
       // inside Contacts by nestInfluencersUnderContacts().

@@ -17,7 +17,7 @@ import { wingShortLabel } from "@/lib/wingLabel";
 import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
 import { CONTACT_EXPORT_COLUMNS } from "@/lib/contactExportColumns";
 import PersonDetailModal from "@/components/PersonDetailModal";
-import { isCaller, isSuperAdmin, normalizeRole, ROLES } from "@/lib/permissions";
+import { isCaller, isSuperAdmin, isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -1233,6 +1233,9 @@ export default function ContactsModule({ session, mode }) {
                     <button onClick={() => setTaskFor(c)} className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded-lg font-medium">
                       <ClipboardList size={14} /> Task
                     </button>
+                    {/* Review for Announce (RfA): a Supervisor-2 submits the contact to the
+                        Super Admin's RfA Review List. Other roles only see the status. */}
+                    <RfaControl contact={c} canSubmit={mode === "supervisor" && isSupervisorRole(session)} onDone={(m) => { setMessage(m); load(); }} onFail={setError} />
                     {/* Generate (or reuse) a Worker & Voter Registration link for this
                         Contact — uses the Contact's existing name/phone/photo; the
                         worker row keeps the stable contact_id (admin only). */}
@@ -2187,5 +2190,47 @@ export function ImportModal({ url, onClose, onImported, title = "Import Contacts
         </div>
       </div>
     </div>
+  );
+}
+
+
+// Review for Announce (RfA) — button for a Supervisor-2, status chip for everyone
+// else. Pending/Approved disable the button (the backend refuses duplicates too);
+// Rejected allows a resubmission.
+const RFA_CHIP = {
+  Pending: "bg-amber-50 text-amber-700 border-amber-200",
+  Approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  Rejected: "bg-red-50 text-red-700 border-red-200",
+};
+function RfaControl({ contact, canSubmit, onDone, onFail }) {
+  const [busy, setBusy] = useState(false);
+  const st = contact.rfa_status || null;
+  async function submit() {
+    if (busy) return; // repeated clicks while the request is in flight
+    setBusy(true);
+    try {
+      const r = await fetch("/api/rfa", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contact_id: contact.id }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) onDone?.(`${contact.person_name} submitted for Review for Announce (RfA).`);
+      else onFail?.(d.message || "Could not submit for RfA.");
+      if (r.status === 409) onDone?.(null);
+    } catch { onFail?.("Could not submit for RfA."); }
+    finally { setBusy(false); }
+  }
+  const chip = st ? (
+    <span data-testid="rfa-status" title={`RfA review: ${st}`} className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap ${RFA_CHIP[st] || ""}`}>RfA · {st}</span>
+  ) : null;
+  if (!canSubmit) return chip ? <span className="mr-1">{chip}</span> : null;
+  if (st === "Pending" || st === "Approved") {
+    return <button disabled data-testid="rfa-button" title={`Already submitted — RfA ${st}`} className="inline-flex items-center gap-1 text-xs text-gray-400 px-2 py-1 rounded-lg font-medium cursor-not-allowed">RfA {st === "Pending" ? "Pending" : "Approved"}</button>;
+  }
+  return (
+    <>
+      {st === "Rejected" && <span className="mr-1">{chip}</span>}
+      <button onClick={submit} disabled={busy} data-testid="rfa-button"
+        className="inline-flex items-center gap-1 text-xs text-violet-700 hover:bg-violet-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">
+        {busy ? <Loader2 size={14} className="animate-spin" /> : null} {st === "Rejected" ? "Resubmit RfA" : "Review for Announce (RfA)"}
+      </button>
+    </>
   );
 }

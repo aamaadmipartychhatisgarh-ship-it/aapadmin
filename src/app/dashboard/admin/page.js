@@ -8,6 +8,7 @@ import { isAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import SummaryDashboard from "@/components/SummaryDashboard";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
 import AssemblyBreakdown from "@/components/AssemblyBreakdown";
+import RfaReviewList from "@/components/RfaReviewList";
 
 // State/Zone/District/Assembly Overview — now a single tabbed page: the daily
 // calling KPIs (Overview), the full chart suite (Analytics, merged in from the
@@ -136,6 +137,10 @@ export default function AdminDashboard() {
         </div>
         {reportLinks.length > 0 && <ReportJumpDropdown links={reportLinks} router={router} />}
       </div>
+
+      {/* RfA Review List — contacts a Supervisor-2 submitted for Review for Announce
+          (Super Admin only; the /api/rfa routes enforce it). */}
+      {canonical === ROLES.SUPER_ADMIN && <RfaReviewList compact />}
 
       {/* Organizational strength — always visible above the tabs, since this
           (not calling volume) is the primary thing the org tracks. */}
