@@ -2204,6 +2204,7 @@ const RFA_CHIP = {
 };
 function RfaControl({ contact, canSubmit, onDone, onFail }) {
   const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState(null); // { loading } | { review } | { error } — read-only reason popup
   const st = contact.rfa_status || null;
   async function submit() {
     if (busy) return; // repeated clicks while the request is in flight
@@ -2217,20 +2218,54 @@ function RfaControl({ contact, canSubmit, onDone, onFail }) {
     } catch { onFail?.("Could not submit for RfA."); }
     finally { setBusy(false); }
   }
+  // Fetch the Super Admin's latest saved review fresh on every open (read-only).
+  async function showReason() {
+    setDetail({ loading: true });
+    try {
+      const r = await fetch(`/api/rfa/contact/${contact.id}`, { cache: "no-store" });
+      const d = await r.json().catch(() => ({}));
+      setDetail(r.ok ? { review: d.review } : { error: d.message || "Could not load the review." });
+    } catch { setDetail({ error: "Could not load the review." }); }
+  }
   const chip = st ? (
     <span data-testid="rfa-status" title={`RfA review: ${st}`} className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap ${RFA_CHIP[st] || ""}`}>RfA · {st}</span>
   ) : null;
   if (!canSubmit) return chip ? <span className="mr-1">{chip}</span> : null;
-  if (st === "Pending" || st === "Correct") {
-    return <button disabled data-testid="rfa-button" title={`Already submitted — RfA ${st}`} className="inline-flex items-center gap-1 text-xs text-gray-400 px-2 py-1 rounded-lg font-medium cursor-not-allowed">RfA {st}</button>;
+  if (st === "Pending") {
+    return <button disabled data-testid="rfa-button" title="Already submitted — RfA Pending" className="inline-flex items-center gap-1 text-xs text-gray-400 px-2 py-1 rounded-lg font-medium cursor-not-allowed">RfA Pending</button>;
+  }
+  if (st === "Correct") {
+    return <span data-testid="rfa-verdict-correct" title="Super Admin marked this contact Correct" className="inline-flex items-center gap-1 text-xs text-emerald-700 px-2 py-1 font-medium">✅ RfA Correct</span>;
   }
   return (
     <>
-      {st === "Incorrect" && <span className="mr-1">{chip}</span>}
+      {st === "Incorrect" && (
+        <button onClick={showReason} data-testid="rfa-verdict-incorrect" title="Marked Incorrect by Super Admin — click to see the reason"
+          className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium">❌ Incorrect</button>
+      )}
       <button onClick={submit} disabled={busy} data-testid="rfa-button"
         className="inline-flex items-center gap-1 text-xs text-violet-700 hover:bg-violet-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">
         {busy ? <Loader2 size={14} className="animate-spin" /> : null} {st === "Incorrect" ? "Resubmit RfA" : "Review for Announce (RfA)"}
       </button>
+      {detail && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 text-left" onClick={() => setDetail(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 whitespace-normal" onClick={(e) => e.stopPropagation()} data-testid="rfa-reason-modal">
+            <h3 className="text-base font-bold text-gray-900">❌ Marked Incorrect</h3>
+            <p className="text-sm text-gray-500 mt-0.5">{contact.person_name}</p>
+            {detail.loading && <div className="py-6 text-center"><Loader2 className="animate-spin inline text-gray-400" size={18} /></div>}
+            {detail.error && <p className="mt-3 text-sm text-red-600">{detail.error}</p>}
+            {detail.review && (
+              <div className="mt-3">
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Reason from Super Admin</div>
+                <p className="text-sm text-gray-800 whitespace-pre-wrap break-words rounded-lg bg-red-50 border border-red-100 px-3 py-2" data-testid="rfa-reason-text">{detail.review.remark || "No reason was recorded."}</p>
+                <p className="text-[11px] text-gray-400 mt-2">{detail.review.reviewed_by_name ? `Reviewed by ${detail.review.reviewed_by_name}` : "Reviewed"}{detail.review.reviewed_at ? ` · ${new Date(detail.review.reviewed_at).toLocaleString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}` : ""}</p>
+                <p className="text-[11px] text-gray-400 mt-1">Fix the contact's details, then use “Resubmit RfA”.</p>
+              </div>
+            )}
+            <div className="flex justify-end mt-4"><button onClick={() => setDetail(null)} className="h-9 px-4 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">Close</button></div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
