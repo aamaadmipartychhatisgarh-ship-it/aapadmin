@@ -2195,12 +2195,12 @@ export function ImportModal({ url, onClose, onImported, title = "Import Contacts
 
 
 // Review for Announce (RfA) — button for a Supervisor-2, status chip for everyone
-// else. Pending/Approved disable the button (the backend refuses duplicates too);
-// Rejected allows a resubmission.
+// else. Pending/Correct disable the button (the backend refuses duplicates too);
+// Incorrect allows a resubmission.
 const RFA_CHIP = {
   Pending: "bg-amber-50 text-amber-700 border-amber-200",
-  Approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  Rejected: "bg-red-50 text-red-700 border-red-200",
+  Correct: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  Incorrect: "bg-red-50 text-red-700 border-red-200",
 };
 function RfaControl({ contact, canSubmit, onDone, onFail }) {
   const [busy, setBusy] = useState(false);
@@ -2221,15 +2221,15 @@ function RfaControl({ contact, canSubmit, onDone, onFail }) {
     <span data-testid="rfa-status" title={`RfA review: ${st}`} className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap ${RFA_CHIP[st] || ""}`}>RfA · {st}</span>
   ) : null;
   if (!canSubmit) return chip ? <span className="mr-1">{chip}</span> : null;
-  if (st === "Pending" || st === "Approved") {
-    return <button disabled data-testid="rfa-button" title={`Already submitted — RfA ${st}`} className="inline-flex items-center gap-1 text-xs text-gray-400 px-2 py-1 rounded-lg font-medium cursor-not-allowed">RfA {st === "Pending" ? "Pending" : "Approved"}</button>;
+  if (st === "Pending" || st === "Correct") {
+    return <button disabled data-testid="rfa-button" title={`Already submitted — RfA ${st}`} className="inline-flex items-center gap-1 text-xs text-gray-400 px-2 py-1 rounded-lg font-medium cursor-not-allowed">RfA {st}</button>;
   }
   return (
     <>
-      {st === "Rejected" && <span className="mr-1">{chip}</span>}
+      {st === "Incorrect" && <span className="mr-1">{chip}</span>}
       <button onClick={submit} disabled={busy} data-testid="rfa-button"
         className="inline-flex items-center gap-1 text-xs text-violet-700 hover:bg-violet-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">
-        {busy ? <Loader2 size={14} className="animate-spin" /> : null} {st === "Rejected" ? "Resubmit RfA" : "Review for Announce (RfA)"}
+        {busy ? <Loader2 size={14} className="animate-spin" /> : null} {st === "Incorrect" ? "Resubmit RfA" : "Review for Announce (RfA)"}
       </button>
     </>
   );

@@ -13,7 +13,7 @@ import { ensureVehicleColumn } from "@/lib/contactVehicle";
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
 
-// GET /api/rfa?status=Pending|Approved|Rejected — the Super Admin's RfA Review
+// GET /api/rfa?status=Pending|Correct|Incorrect — the Super Admin's RfA Review
 // List (every submission, newest first) + per-status counts.
 export async function GET(req) {
   try {
@@ -49,7 +49,7 @@ export async function GET(req) {
       where ? [status] : []
     );
     const counts = await query("SELECT status, COUNT(*) AS n FROM contact_rfa_reviews GROUP BY status");
-    const byStatus = { Pending: 0, Approved: 0, Rejected: 0 };
+    const byStatus = { Pending: 0, Correct: 0, Incorrect: 0 };
     for (const c of counts) byStatus[c.status] = Number(c.n) || 0;
     return NextResponse.json({ reviews: rows, counts: byStatus }, { headers: NO_STORE });
   } catch (err) {
@@ -62,7 +62,7 @@ export async function GET(req) {
 // Backend rules (the UI button is only a convenience):
 //   • role must be supervisor (anyone else → 403)
 //   • the Contact must be live and inside the supervisor's own territory
-//   • at most ONE active (Pending/Approved) review per Contact — enforced by the
+//   • at most ONE active (Pending/Correct) review per Contact — enforced by the
 //     UNIQUE active_contact_id key, so concurrent / repeated requests create one row
 export async function POST(req) {
   try {

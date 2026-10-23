@@ -4,13 +4,14 @@ import { query } from "@/lib/db";
 // reviews it. One table, one row per submission:
 //   contact_id             → the Contact (never copied)
 //   submitted_by_user_id   → the submitting Supervisor-2 (+ a name snapshot)
-//   status                 → Pending → Approved | Rejected
-//   active_contact_id      → equals contact_id while the review is Pending or
-//                            Approved, NULL once Rejected. UNIQUE, so the database
-//                            itself refuses a second active review for a Contact
-//                            (repeated clicks / concurrent requests); a Rejected
-//                            Contact frees the slot and may be resubmitted.
-export const RFA_STATUSES = ["Pending", "Approved", "Rejected"];
+//   status                 → Pending → Correct | Incorrect (the Super Admin's verdict on the
+//                            submitted contact information; Incorrect needs a reason)
+//   active_contact_id      → equals contact_id while the review is Pending or Correct,
+//                            NULL once Incorrect. UNIQUE, so the database itself
+//                            refuses a second active review for a Contact (repeated
+//                            clicks / concurrent requests); an Incorrect Contact frees
+//                            the slot and may be resubmitted.
+export const RFA_STATUSES = ["Pending", "Correct", "Incorrect"];
 let ensured = false;
 export async function ensureRfaSchema() {
   if (ensured) return;
@@ -33,6 +34,10 @@ export async function ensureRfaSchema() {
        KEY idx_rfa_submitter (submitted_by_user_id)
      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  // One-time rename of the earlier verdict labels (Approved → Correct, Rejected →
+  // Incorrect). Same rows, same ids, same active_contact_id; a no-op once migrated.
+  await query("UPDATE contact_rfa_reviews SET status = 'Correct' WHERE status = 'Approved'");
+  await query("UPDATE contact_rfa_reviews SET status = 'Incorrect' WHERE status = 'Rejected'");
   ensured = true;
 }
 

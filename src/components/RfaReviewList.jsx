@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, X, Loader2, ClipboardCheck } from "lucide-react";
+import { Loader2, ClipboardCheck, AlertCircle } from "lucide-react";
 import { qualificationLabel } from "@/lib/qualificationOptions";
 import { vehicleLabel } from "@/lib/vehicleOptions";
 
-const TABS = ["Pending", "Approved", "Rejected"];
-const CHIP = { Pending: "bg-amber-50 text-amber-700 border-amber-200", Approved: "bg-emerald-50 text-emerald-700 border-emerald-200", Rejected: "bg-red-50 text-red-700 border-red-200" };
+const TABS = ["Pending", "Correct", "Incorrect"];
+const CHIP = { Pending: "bg-amber-50 text-amber-700 border-amber-200", Correct: "bg-emerald-50 text-emerald-700 border-emerald-200", Incorrect: "bg-red-50 text-red-700 border-red-200" };
 function fmt(v) {
   const d = v ? new Date(v) : null;
   return d && !isNaN(d) ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(d) : "—";
@@ -15,7 +15,7 @@ function fmt(v) {
 
 // Super Admin's RfA Review List — contacts submitted for Review for Announce by a
 // Supervisor-2. `compact` (dashboard panel) shows only the Pending queue + a link to
-// the full page; the full page has Pending / Approved / Rejected tabs.
+// the full page; the full page has Pending / Correct / Incorrect tabs.
 export default function RfaReviewList({ compact = false }) {
   const [tab, setTab] = useState("Pending");
   const [data, setData] = useState(null);
@@ -30,17 +30,30 @@ export default function RfaReviewList({ compact = false }) {
   }, [tab, compact]);
   useEffect(() => { load(); }, [load]);
 
-  async function decide(row, status) {
-    let remark = "";
-    if (status === "Rejected") { remark = window.prompt(`Reason for rejecting ${row.person_name} (optional):`, "") ?? null; if (remark === null) return; }
+  // "Incorrect" opens a reason box first (mandatory); "Correct" saves straight away.
+  const [incFor, setIncFor] = useState(null); // review row awaiting a reason
+  const [reason, setReason] = useState("");
+  const [reasonErr, setReasonErr] = useState("");
+
+  async function decide(row, status, remark = "") {
     setBusyId(row.id); setErr("");
     try {
       const r = await fetch(`/api/rfa/${row.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, remark }) });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) setErr(d.message || "Could not update the review.");
+      if (!r.ok) {
+        if (status === "Incorrect" && r.status === 400) { setReasonErr(d.message || "A reason is required."); return false; }
+        setErr(d.message || "Could not update the review.");
+      }
       await load();
+      return r.ok;
     } catch { setErr("Could not update the review."); }
     finally { setBusyId(null); }
+    return false;
+  }
+  async function submitIncorrect() {
+    if (!reason.trim()) { setReasonErr("Please enter the reason this contact is Incorrect."); return; }
+    setReasonErr("");
+    if (await decide(incFor, "Incorrect", reason.trim())) { setIncFor(null); setReason(""); }
   }
 
   if (!data) return <div className="py-6 text-center text-gray-400">{err || <Loader2 className="animate-spin inline" size={18} />}</div>;
@@ -100,13 +113,14 @@ export default function RfaReviewList({ compact = false }) {
                 <td className="px-4 py-2.5 align-top"><div className="text-gray-900">{r.submitted_by_name || "—"}</div><div className="text-[11px] text-gray-400">{fmt(r.submitted_at)}</div></td>
                 <td className="px-4 py-2.5 align-top">
                   <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${CHIP[r.status] || ""}`}>{r.status}</span>
-                  {r.status !== "Pending" && <div className="text-[11px] text-gray-400 mt-0.5">{r.reviewed_by_name} · {fmt(r.reviewed_at)}{r.review_remark ? ` — ${r.review_remark}` : ""}</div>}
+                  {r.status !== "Pending" && <div className="text-[11px] text-gray-400 mt-0.5">{r.reviewed_by_name} · {fmt(r.reviewed_at)}</div>}
+                  {r.status !== "Pending" && r.review_remark && <div className={`text-xs mt-0.5 max-w-[240px] whitespace-pre-wrap break-words ${r.status === "Incorrect" ? "text-red-700" : "text-gray-600"}`} data-testid="rfa-remark">{r.status === "Incorrect" ? "Reason: " : "Remark: "}{r.review_remark}</div>}
                 </td>
                 <td className="px-4 py-2.5 align-top text-right whitespace-nowrap">
                   {r.status === "Pending" && (
                     <>
-                      <button onClick={() => decide(r, "Approved")} disabled={busyId === r.id} data-testid="rfa-approve" className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50"><Check size={14} /> Approve</button>
-                      <button onClick={() => decide(r, "Rejected")} disabled={busyId === r.id} data-testid="rfa-reject" className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50"><X size={14} /> Reject</button>
+                      <button onClick={() => decide(r, "Correct")} disabled={busyId === r.id} data-testid="rfa-correct" title="Mark Correct" className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">✅ Correct</button>
+                      <button onClick={() => { setIncFor(r); setReason(""); setReasonErr(""); }} disabled={busyId === r.id} data-testid="rfa-incorrect" title="Mark Incorrect (reason required)" className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">❌ Incorrect</button>
                     </>
                   )}
                 </td>
@@ -115,6 +129,22 @@ export default function RfaReviewList({ compact = false }) {
           </tbody>
         </table>
       </div>
+      {incFor && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setIncFor(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()} data-testid="rfa-incorrect-dialog">
+            <h3 className="text-base font-bold text-gray-900 flex items-center gap-2"><AlertCircle size={18} className="text-red-600" /> Mark Incorrect</h3>
+            <p className="text-sm text-gray-500 mt-1">{incFor.person_name || `Contact #${incFor.contact_id}`} — tell the supervisor what is wrong.</p>
+            <label className="block text-xs font-medium text-gray-500 mt-3 mb-1">Remark / Reason <span className="text-red-500">*</span></label>
+            <textarea value={reason} onChange={(e) => { setReason(e.target.value); if (reasonErr) setReasonErr(""); }} rows={3} autoFocus data-testid="rfa-reason"
+              className="w-full rounded-lg border border-gray-200 text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-red-300" placeholder="e.g. Phone number is wrong" />
+            {reasonErr && <p className="text-xs text-red-600 mt-1" data-testid="rfa-reason-error">{reasonErr}</p>}
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setIncFor(null)} className="h-9 px-4 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={submitIncorrect} disabled={busyId === incFor.id} data-testid="rfa-incorrect-submit" className="h-9 px-4 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60">Save as Incorrect</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,10 +9,12 @@ import { ensureRfaSchema } from "@/lib/rfa";
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
 
-// PATCH /api/rfa/[id] { status: "Approved" | "Rejected", remark? } — Super Admin
-// decides a Pending review. Approved keeps the Contact's active slot (no new
-// submission); Rejected releases it so the Contact can be submitted again. The
-// UPDATE only matches a still-Pending row, so a double decision changes nothing.
+// PATCH /api/rfa/[id] { status: "Correct" | "Incorrect", remark } — Super Admin's
+// verdict on a Pending review. Correct keeps the Contact's active slot (no new
+// submission); Incorrect REQUIRES a non-empty remark/reason (400 otherwise, nothing
+// saved) and releases the slot so the Contact can be submitted again. The UPDATE
+// only matches a still-Pending row, so a repeated verdict changes nothing and never
+// creates another record.
 export async function PATCH(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
@@ -23,11 +25,12 @@ export async function PATCH(req, { params }) {
     const rid = parseInt(id, 10);
     const body = await req.json().catch(() => ({}));
     const status = body?.status;
-    if (!Number.isInteger(rid) || rid <= 0 || !["Approved", "Rejected"].includes(status)) return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
+    if (!Number.isInteger(rid) || rid <= 0 || !["Correct", "Incorrect"].includes(status)) return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
     const remark = String(body?.remark ?? "").trim().slice(0, 1000) || null;
+    if (status === "Incorrect" && !remark) return NextResponse.json({ message: "A reason is required to mark this contact Incorrect." }, { status: 400, headers: NO_STORE });
     const res = await query(
       `UPDATE contact_rfa_reviews
-          SET status = ?, active_contact_id = ${status === "Rejected" ? "NULL" : "active_contact_id"},
+          SET status = ?, active_contact_id = ${status === "Incorrect" ? "NULL" : "active_contact_id"},
               reviewed_by_user_id = ?, reviewed_by_name = ?, reviewed_at = NOW(), review_remark = ?
         WHERE id = ? AND status = 'Pending'`,
       [status, session.user.id, String(session.user.name || session.user.username || "").slice(0, 150) || null, remark, rid]
