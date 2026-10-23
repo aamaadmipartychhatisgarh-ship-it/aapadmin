@@ -247,6 +247,13 @@ export async function validate(d) {
     const ir = Number(d.influencer_rating);
     if (!Number.isInteger(ir) || ir < 1 || ir > 10) return "Influencer Rating must be a whole number from 1 to 10.";
   }
+  // Assigned Supervisor-2, when provided, must be an active supervisor user.
+  if (d.assigned_supervisor_id != null && String(d.assigned_supervisor_id).trim() !== "") {
+    const sid = parseInt(d.assigned_supervisor_id, 10);
+    const rows = Number.isInteger(sid) && sid > 0
+      ? await query("SELECT id FROM users WHERE id = ? AND role = 'supervisor' AND is_active = 1", [sid]) : [];
+    if (!rows.length) return "Select a valid Supervisor-2.";
+  }
   // Follow-up Date, when provided, must be a real YYYY-MM-DD calendar date.
   if (d.follow_up_date != null && String(d.follow_up_date).trim() !== "" && !isoDateOrNull(d.follow_up_date)) {
     return "Enter a valid Follow-up Date.";
@@ -309,7 +316,13 @@ export async function coerce(d, prior = null) {
   // responsible_person) are intentionally OMITTED, so the dynamic INSERT/UPDATE
   // never touches them — existing historical values are preserved. follow_up_date
   // is written again (the form loads and re-sends it, so a saved date is kept).
+  // Only written when the caller sent the field, so a client that doesn't know
+  // about the assignment (older form, import) can never wipe it.
+  const sup = "assigned_supervisor_id" in d
+    ? { assigned_supervisor_id: parseInt(d.assigned_supervisor_id, 10) > 0 ? parseInt(d.assigned_supervisor_id, 10) : null }
+    : {};
   return {
+    ...sup,
     name: String(d.name).trim().slice(0, 150),
     phone: s(d.phone, 30),
     photo_url: s(d.photo_url, 512),

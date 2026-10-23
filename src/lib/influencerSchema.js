@@ -111,6 +111,9 @@ export async function ensureInfluencerSchema() {
     // (potential_rating ENUM) in the form. Added lazily; potential_rating is
     // RETAINED so historical values are preserved, though the form no longer writes it.
     await ensureColumn("influencer_rating", "INT NULL");
+    // Supervisor-2 assigned to follow up this influencer (users.id, role supervisor).
+    // Drives the "Tomorrow Follow-up" dashboard reminder.
+    await ensureColumn("assigned_supervisor_id", "INT NULL");
     if (!hadJoinDate) {
       // One-time migration of pre-existing statuses into Pending / Joined / Cancelled.
       // Names, assemblies, Added By and every other detail are untouched.

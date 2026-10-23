@@ -104,9 +104,13 @@ export async function enrichJoinedBy(rows) {
 
 export async function createdBySelect() {
   const cols = await getInfluencerColumns();
-  return cols.has("created_by")
+  const by = cols.has("created_by")
     ? "(SELECT username FROM users u WHERE u.id = influencers.created_by) AS created_by_name"
     : "NULL AS created_by_name";
+  const sup = cols.has("assigned_supervisor_id")
+    ? "(SELECT username FROM users s WHERE s.id = influencers.assigned_supervisor_id) AS assigned_supervisor_name"
+    : "NULL AS assigned_supervisor_name";
+  return `${by}, ${sup}`;
 }
 
 // ---------------------------------------------------------------- EXPORT ---
@@ -130,7 +134,7 @@ export const INFLUENCER_EXPORT_COLUMNS = [
   ["Joined By", (r) => r.joined_by_name], ["Joined By Phone", (r) => r.joined_by_mobile || r.joined_by_phone],
   ["Joined By Designation", (r) => r.joined_by_designation],
   ["Next Action", (r) => r.next_action], ["Follow-up Date", (r) => d10(r.follow_up_date)],
-  ["Remark", (r) => r.remark], ["Added By", (r) => r.created_by_name], ["Added On", (r) => d10(r.created_at)],
+  ["Remark", (r) => r.remark], ["Supervisor-2", (r) => r.assigned_supervisor_name], ["Added By", (r) => r.created_by_name], ["Added On", (r) => d10(r.created_at)],
 ];
 
 // ---------------------------------------------------------------- IMPORT ---

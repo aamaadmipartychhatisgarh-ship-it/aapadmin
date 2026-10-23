@@ -15,6 +15,7 @@ import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
 import PartySelect, { usePartyMaster, PartyLogo } from "@/components/PartySelect";
 import { RatingScale, RatingBadge } from "@/components/KaryakartaRating";
+import InfluencerFollowUpReminders from "@/components/InfluencerFollowUpReminders";
 
 // Colour used across the dashboard.
 const BRAND = "#164FA3";
@@ -29,7 +30,7 @@ const BLANK = {
   social_media: "", team_size: "", social_reach: "",
   economic_status: "", influencer_rating: "",
   status: "Pending", join_date: "", cancelled_date: "", cancellation_remark: "", remark: "",
-  follow_up_date: "",
+  follow_up_date: "", assigned_supervisor_id: "",
 };
 
 // The three canonical participation statuses → chip colour.
@@ -298,6 +299,10 @@ export default function InfluencersPage() {
           </button>
         </div>
       </div>
+
+      {/* "Tomorrow Follow-up" reminders for the signed-in Supervisor-2 (the API returns
+          nothing for anyone else, so this renders nothing for other users). */}
+      <div className="mb-4 empty:hidden"><InfluencerFollowUpReminders /></div>
 
       {showImport && (
         <ImportModal
@@ -593,6 +598,7 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
         join_date: record.join_date ? String(record.join_date).slice(0, 10) : "",
         cancelled_date: record.cancelled_date ? String(record.cancelled_date).slice(0, 10) : "",
         follow_up_date: record.follow_up_date ? String(record.follow_up_date).slice(0, 10) : "",
+        assigned_supervisor_id: record.assigned_supervisor_id != null ? String(record.assigned_supervisor_id) : "",
       });
       savedJbPhone.current = String(record.joined_by_phone || "");
       jbSkipOnce.current = true;
@@ -644,6 +650,12 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
   // whenever the Assembly changes so stale values from a previous pick are
   // replaced. `null` = still loading; empty fields = "Not mapped".
   const [loc, setLoc] = useState(null);
+  // Supervisor-2 choices for the assignment dropdown.
+  const [supervisors, setSupervisors] = useState([]);
+  useEffect(() => {
+    fetch("/api/influencers/supervisors", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { supervisors: [] })).then((d) => setSupervisors(d.supervisors || [])).catch(() => {});
+  }, []);
   useEffect(() => {
     const aid = f.assembly_id;
     if (!aid) { setLoc(null); return; }
@@ -845,6 +857,13 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
                      onChange={(e) => set("follow_up_date", e.target.value)} className={inputCls} data-testid="followup-input" />
               <p className="text-[11px] text-gray-400 mt-1">When to follow up with this influencer next. Leave blank if not needed.</p>
             </Field>
+            <Field label="Assigned Supervisor-2">
+              <select value={f.assigned_supervisor_id || ""} onChange={(e) => set("assigned_supervisor_id", e.target.value)} className={inputCls} data-testid="supervisor-select">
+                <option value="">Not assigned</option>
+                {supervisors.map((s) => <option key={s.id} value={s.id}>{s.username}</option>)}
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">This supervisor sees a “Tomorrow Follow-up” reminder on their dashboard the day before the Follow-up Date.</p>
+            </Field>
           </Grid>
           {/* General remark — participation / follow-up / communication / joining
               notes. Free multiline; saved with the record and shown on view/edit. */}
@@ -959,6 +978,7 @@ function ViewModal({ row, meta, onClose, onEdit }) {
             {row.status === "Joined" && <ViewInline label="Join Date" value={fmtJoinDate(row.join_date)} />}
             {row.status === "Cancelled" && <ViewInline label="Cancelled Date" value={fmtJoinDate(row.cancelled_date)} />}
             <ViewInline label="Follow-up Date" value={row.follow_up_date ? fmtJoinDate(row.follow_up_date) : "Not set"} />
+            <ViewInline label="Supervisor-2" value={row.assigned_supervisor_name || "Not assigned"} />
           </div>
           {row.status === "Cancelled" && <ViewBlock label="Cancellation Reason" value={row.cancellation_remark} />}
           <ViewBlock label="Remark" value={row.remark} />

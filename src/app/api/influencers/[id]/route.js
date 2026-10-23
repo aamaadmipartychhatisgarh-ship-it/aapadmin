@@ -35,6 +35,10 @@ export async function GET(_req, { params }) {
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [iid]);
     if (!row) return NextResponse.json({ message: "Influencer not found." }, { status: 404, headers: NO_STORE });
     const shaped = shape(row);
+    if (shaped.assigned_supervisor_id) {
+      const [s] = await query("SELECT username FROM users WHERE id = ?", [shaped.assigned_supervisor_id]);
+      shaped.assigned_supervisor_name = s?.username || null;
+    }
     // Resolve the linked "Joined By" contact LIVE (never a stored copy), so edits to
     // that contact are always reflected. A since-deleted contact resolves to null.
     if (shaped.joined_by_contact_id) {

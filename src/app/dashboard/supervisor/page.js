@@ -5,6 +5,7 @@ import SupervisorGuard from "@/components/SupervisorGuard";
 import SummaryDashboard from "@/components/SummaryDashboard";
 import CallerPerformanceView from "@/components/CallerPerformanceView";
 import SentimentView from "@/components/SentimentView";
+import InfluencerFollowUpReminders from "@/components/InfluencerFollowUpReminders";
 import { LayoutDashboard, TrendingUp, MessageSquare } from "lucide-react";
 
 export default function SupervisorOverview() {
@@ -30,6 +31,9 @@ function Body() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {/* "Tomorrow Follow-up" influencers assigned to this supervisor (hidden when none). */}
+      <InfluencerFollowUpReminders />
+
       {/* Native-style tab switcher (matches the dashboard's existing tabs). */}
       <div className="flex items-center gap-1 border-b border-gray-200 -mb-px overflow-x-auto">
         {TABS.map((t) => {
