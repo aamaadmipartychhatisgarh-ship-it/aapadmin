@@ -9,6 +9,7 @@ import {
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 import { resolveContactCard, resolveContactByPhone } from "@/lib/contactCard";
 import { influencerListWhere, enrichJoinedBy, INFLUENCER_SORTS, createdBySelect } from "@/lib/influencerIO";
+import { isoDateOrNull } from "@/lib/influencerColumns";
 
 // Access to the Influencer module is governed by the "influencers" page key
 // (Super Admin + Supervisor by baseline, plus anyone granted it in Page Access).
@@ -246,6 +247,10 @@ export async function validate(d) {
     const ir = Number(d.influencer_rating);
     if (!Number.isInteger(ir) || ir < 1 || ir > 10) return "Influencer Rating must be a whole number from 1 to 10.";
   }
+  // Follow-up Date, when provided, must be a real YYYY-MM-DD calendar date.
+  if (d.follow_up_date != null && String(d.follow_up_date).trim() !== "" && !isoDateOrNull(d.follow_up_date)) {
+    return "Enter a valid Follow-up Date.";
+  }
   // Assembly, when provided, must be a real assembly in the master data.
   if (d.assembly_id != null && String(d.assembly_id).trim() !== "") {
     const rows = await query("SELECT id, name FROM locations WHERE id = ? AND type = 'assembly'", [d.assembly_id]);
@@ -301,8 +306,9 @@ export async function coerce(d, prior = null) {
   // (influence_position, key_activities, political_journey, contested_election,
   // election_*, org_social_activity, economic_profile, potential_areas,
   // expected_contribution, potential_remarks, next_action, action_remarks,
-  // follow_up_date, responsible_person) are intentionally OMITTED, so the dynamic
-  // INSERT/UPDATE never touches them — existing historical values are preserved.
+  // responsible_person) are intentionally OMITTED, so the dynamic INSERT/UPDATE
+  // never touches them — existing historical values are preserved. follow_up_date
+  // is written again (the form loads and re-sends it, so a saved date is kept).
   return {
     name: String(d.name).trim().slice(0, 150),
     phone: s(d.phone, 30),
@@ -335,6 +341,8 @@ export async function coerce(d, prior = null) {
     ...jb,
     // Free multiline remark (participation / follow-up / communication / joining …).
     remark: s(d.remark),
+    // Follow-up Date (validated above); blank clears it.
+    follow_up_date: isoDateOrNull(d.follow_up_date),
     // Participation
     status: normalizeStatus(d.status),
     ...participationFields(normalizeStatus(d.status), d, prior),

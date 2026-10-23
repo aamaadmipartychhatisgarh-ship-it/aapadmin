@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ImportModal } from "@/components/contacts/ContactsModule";
-import { INFLUENCER_IMPORT_FIELDS, mapInfluencerHeaders, validInfluencerPhone, influencerPhoneKey } from "@/lib/influencerColumns";
+import { INFLUENCER_IMPORT_FIELDS, mapInfluencerHeaders, validInfluencerPhone, influencerPhoneKey, isoDateOrNull } from "@/lib/influencerColumns";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
 import PartySelect, { usePartyMaster, PartyLogo } from "@/components/PartySelect";
@@ -29,6 +29,7 @@ const BLANK = {
   social_media: "", team_size: "", social_reach: "",
   economic_status: "", influencer_rating: "",
   status: "Pending", join_date: "", cancelled_date: "", cancellation_remark: "", remark: "",
+  follow_up_date: "",
 };
 
 // The three canonical participation statuses → chip colour.
@@ -46,6 +47,15 @@ function fmtJoinDate(v) {
   if (!y || !m || !d) return "—";
   const dt = new Date(y, m - 1, d);
   return isNaN(dt.getTime()) ? "—" : new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(dt);
+}
+// Follow-up Date filter → list/export query params (the server re-validates them).
+function addFollowUpParams(p, mode, on, from, to) {
+  if (mode === "none") p.set("follow_up", "none");
+  else if (mode === "on" && on) p.set("follow_up_date", on);
+  else if (mode === "range") {
+    if (from) p.set("follow_up_from", from);
+    if (to) p.set("follow_up_to", to);
+  }
 }
 function ratingLabel(meta, value) {
   return meta?.potentialRatings?.find((r) => r.value === value)?.label || "—";
@@ -96,6 +106,11 @@ export default function InfluencersPage() {
   const [fStatus, setFStatus] = useState("");
   const [fAssembly, setFAssembly] = useState("");
   const [fRating, setFRating] = useState("");
+  // Follow-up Date filter: "" any | "on" a specific day | "range" from–to | "none" not set.
+  const [fFuMode, setFFuMode] = useState("");
+  const [fFuOn, setFFuOn] = useState("");
+  const [fFuFrom, setFFuFrom] = useState("");
+  const [fFuTo, setFFuTo] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
 
@@ -133,6 +148,7 @@ export default function InfluencersPage() {
       if (fStatus) p.set("status", fStatus);
       if (fAssembly) p.set("assembly_id", fAssembly);
       if (fRating) p.set("potential_rating", fRating);
+      addFollowUpParams(p, fFuMode, fFuOn, fFuFrom, fFuTo);
       const r = await fetch(`/api/influencers?${p.toString()}`, { cache: "no-store" });
       if (r.status === 403) { setErr("You do not have access to this module."); setRows([]); setTotal(0); return; }
       if (!r.ok) throw new Error("load failed");
@@ -146,7 +162,7 @@ export default function InfluencersPage() {
     } finally {
       setLoading(false);
     }
-  }, [canAccess, page, pageSize, debounced, fStatus, fAssembly, fRating]);
+  }, [canAccess, page, pageSize, debounced, fStatus, fAssembly, fRating, fFuMode, fFuOn, fFuFrom, fFuTo]);
 
   // Live dashboard counts (overall + per-assembly), recomputed from the DB.
   const loadStats = useCallback(async () => {
@@ -173,6 +189,7 @@ export default function InfluencersPage() {
     }
   }
   const [editRecord, setEditRecord] = useState(null);
+  function clearFollowUp() { setFFuMode(""); setFFuOn(""); setFFuFrom(""); setFFuTo(""); }
 
   async function doDelete() {
     if (!deleteRow) return;
@@ -224,7 +241,7 @@ export default function InfluencersPage() {
             // into local state (Bug Fix §4). Because it is persisted, it also survives
             // refresh, logout/login, paging and filtering. (No manual loadList here —
             // that would fetch with the pre-reset filter closure and could race.)
-            setSearch(""); setDebounced(""); setFStatus(""); setFAssembly(""); setFRating(""); setPage(1);
+            setSearch(""); setDebounced(""); setFStatus(""); setFAssembly(""); setFRating(""); clearFollowUp(); setPage(1);
             setMode("list");
           } else {
             // EDIT keeps the current view; refetch from the backend so the change shows.
@@ -243,6 +260,7 @@ export default function InfluencersPage() {
     if (fStatus) p.set("status", fStatus);
     if (fAssembly) p.set("assembly_id", fAssembly);
     if (fRating) p.set("potential_rating", fRating);
+    addFollowUpParams(p, fFuMode, fFuOn, fFuFrom, fFuTo);
     return p.toString();
   };
 
@@ -374,9 +392,34 @@ export default function InfluencersPage() {
             {(meta?.potentialRatings || []).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
         </div>
-        {(fStatus || fAssembly || fRating || search) && (
+        {/* Follow-up Date — a specific day, a from–to range, or records without one. */}
+        <div className="flex flex-wrap items-center gap-2 mt-3" data-testid="followup-filter">
+          <span className="text-xs font-medium text-gray-500">Follow-up Date</span>
+          <select value={fFuMode} onChange={(e) => { setFFuMode(e.target.value); setPage(1); }} data-testid="followup-mode"
+            className="h-9 rounded-lg border border-gray-200 text-sm px-2 text-gray-700">
+            <option value="">Any</option>
+            <option value="on">On a date</option>
+            <option value="range">Date range</option>
+            <option value="none">Not set</option>
+          </select>
+          {fFuMode === "on" && (
+            <input type="date" min="1900-01-01" max="2100-12-31" value={fFuOn} onChange={(e) => { setFFuOn(e.target.value); setPage(1); }}
+              data-testid="followup-on" className="h-9 rounded-lg border border-gray-200 text-sm px-2 text-gray-700" />
+          )}
+          {fFuMode === "range" && (
+            <>
+              <input type="date" min="1900-01-01" max="2100-12-31" value={fFuFrom} onChange={(e) => { setFFuFrom(e.target.value); setPage(1); }}
+                data-testid="followup-from" aria-label="Follow-up from" className="h-9 rounded-lg border border-gray-200 text-sm px-2 text-gray-700" />
+              <span className="text-xs text-gray-400">to</span>
+              <input type="date" min="1900-01-01" max="2100-12-31" value={fFuTo} onChange={(e) => { setFFuTo(e.target.value); setPage(1); }}
+                data-testid="followup-to" aria-label="Follow-up to" className="h-9 rounded-lg border border-gray-200 text-sm px-2 text-gray-700" />
+              {fFuFrom && fFuTo && fFuFrom > fFuTo && <span className="text-xs text-red-600">“From” is after “To” — no records will match.</span>}
+            </>
+          )}
+        </div>
+        {(fStatus || fAssembly || fRating || search || fFuMode) && (
           <button
-            onClick={() => { setSearch(""); setFStatus(""); setFAssembly(""); setFRating(""); setPage(1); }}
+            onClick={() => { setSearch(""); setFStatus(""); setFAssembly(""); setFRating(""); clearFollowUp(); setPage(1); }}
             className="mt-3 text-xs font-medium text-gray-500 hover:text-gray-700 inline-flex items-center gap-1"
           >
             <X size={13} /> Clear filters
@@ -396,15 +439,16 @@ export default function InfluencersPage() {
                 <th className="px-4 py-3 font-semibold">Mobile Number</th>
                 <th className="px-4 py-3 font-semibold">Party</th>
                 <th className="px-4 py-3 font-semibold">Joined By</th>
+                <th className="px-4 py-3 font-semibold whitespace-nowrap">Follow-up Date</th>
                 <th className="px-4 py-3 font-semibold">Remark</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
+                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-gray-400">
+                <tr><td colSpan={7} className="px-4 py-16 text-center text-gray-400">
                   <Users size={30} className="mx-auto mb-2 opacity-40" />
                   No influencers found.
                 </td></tr>
@@ -456,6 +500,7 @@ export default function InfluencersPage() {
                       </div>
                     ) : <span className="text-gray-400">—</span>}
                   </td>
+                  <td className="px-4 py-3 text-gray-700 whitespace-nowrap" data-testid="followup-cell">{fmtJoinDate(r.follow_up_date)}</td>
                   {/* The influencer's own saved Remark — shown in full, line breaks
                       kept and long words wrapped (read-only here). */}
                   <td className="px-4 py-3 align-top text-gray-700 text-sm min-w-[200px] max-w-[380px]">
@@ -547,6 +592,7 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
         remark: record.remark || "",
         join_date: record.join_date ? String(record.join_date).slice(0, 10) : "",
         cancelled_date: record.cancelled_date ? String(record.cancelled_date).slice(0, 10) : "",
+        follow_up_date: record.follow_up_date ? String(record.follow_up_date).slice(0, 10) : "",
       });
       savedJbPhone.current = String(record.joined_by_phone || "");
       jbSkipOnce.current = true;
@@ -625,6 +671,10 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
     // this too, so a client bypass is still rejected.
     if (f.status === "Cancelled" && !String(f.cancellation_remark || "").trim()) {
       setError("Please enter a cancellation reason/remark before saving."); return;
+    }
+    // Follow-up Date must be a real date (the date picker can hold a partial entry).
+    if (String(f.follow_up_date || "").trim() && !isoDateOrNull(f.follow_up_date)) {
+      setError("Enter a valid Follow-up Date."); return;
     }
     setSaving(true);
     try {
@@ -789,6 +839,13 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
               </Field>
             )}
           </Grid>
+          <Grid>
+            <Field label="Follow-up Date">
+              <input type="date" min="1900-01-01" max="2100-12-31" value={(f.follow_up_date || "").slice(0, 10)}
+                     onChange={(e) => set("follow_up_date", e.target.value)} className={inputCls} data-testid="followup-input" />
+              <p className="text-[11px] text-gray-400 mt-1">When to follow up with this influencer next. Leave blank if not needed.</p>
+            </Field>
+          </Grid>
           {/* General remark — participation / follow-up / communication / joining
               notes. Free multiline; saved with the record and shown on view/edit. */}
           <Field label="Remark">
@@ -901,6 +958,7 @@ function ViewModal({ row, meta, onClose, onEdit }) {
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             {row.status === "Joined" && <ViewInline label="Join Date" value={fmtJoinDate(row.join_date)} />}
             {row.status === "Cancelled" && <ViewInline label="Cancelled Date" value={fmtJoinDate(row.cancelled_date)} />}
+            <ViewInline label="Follow-up Date" value={row.follow_up_date ? fmtJoinDate(row.follow_up_date) : "Not set"} />
           </div>
           {row.status === "Cancelled" && <ViewBlock label="Cancellation Reason" value={row.cancellation_remark} />}
           <ViewBlock label="Remark" value={row.remark} />

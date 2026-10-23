@@ -24,6 +24,7 @@ export const INFLUENCER_IMPORT_FIELDS = [
   { key: "join_date", label: "Join Date", aliases: ["join date", "joined date", "joining date"] },
   { key: "cancelled_date", label: "Cancelled Date", aliases: ["cancelled date", "cancellation date"] },
   { key: "cancellation_remark", label: "Cancellation Remark", aliases: ["cancellation remark", "cancellation reason"] },
+  { key: "follow_up_date", label: "Follow-up Date", aliases: ["follow-up date", "follow up date", "followup date", "follow-up", "follow up", "next follow-up date", "next follow up date"] },
   { key: "joined_by_phone", label: "Joined By Phone", aliases: ["joined by phone", "joined by mobile", "joined by"] },
   { key: "remark", label: "Remark", aliases: ["remark", "remarks"] },
 ];
@@ -47,6 +48,17 @@ export function influencerPhoneKey(v) {
   const d = String(v ?? "").replace(/\D/g, "");
   if (!d) return null;
   return d.length >= 10 ? d.slice(-10) : d;
+}
+
+// A stored calendar date: exactly YYYY-MM-DD, a real day, year 1900–2100.
+// Returns the normalized string, or null when it is not one.
+export function isoDateOrNull(v) {
+  const m = String(v ?? "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [y, mo, d] = [+m[1], +m[2], +m[3]];
+  if (y < 1900 || y > 2100) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d ? m[0] : null;
 }
 
 // A phone the Influencer module accepts (same rule as its form: 7–15 digits).

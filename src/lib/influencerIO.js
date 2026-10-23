@@ -2,7 +2,7 @@ import { query } from "@/lib/db";
 import { resolveContactCardsBatch, resolveWorkersByPhones } from "@/lib/contactCard";
 import { getInfluencerColumns, STATUSES, ECONOMIC_STATUSES } from "@/lib/influencerSchema";
 import { norm, resolveLoc, ASSEMBLY_ALIASES } from "@/lib/workerImport";
-import { INFLUENCER_IMPORT_FIELDS, mapInfluencerHeaders, influencerPhoneKey, validInfluencerPhone } from "@/lib/influencerColumns";
+import { INFLUENCER_IMPORT_FIELDS, mapInfluencerHeaders, influencerPhoneKey, validInfluencerPhone, isoDateOrNull } from "@/lib/influencerColumns";
 
 // Shared by the Influencer list (GET /api/influencers), its export and its bulk
 // import, so all three apply the SAME filters, show the SAME Joined By and follow
@@ -34,6 +34,18 @@ export function influencerListWhere(searchParams) {
   if (rating) { where.push("potential_rating = ?"); params.push(rating); }
   const nextAction = (searchParams.get("next_action") || "").trim();
   if (nextAction) { where.push("next_action = ?"); params.push(nextAction); }
+  // Follow-up Date: an exact day (follow_up_date), an inclusive range
+  // (follow_up_from / follow_up_to, either end optional) or follow_up=none for
+  // records without one. Malformed dates are ignored, never interpolated.
+  const fuOn = isoDateOrNull(searchParams.get("follow_up_date"));
+  const fuFrom = isoDateOrNull(searchParams.get("follow_up_from"));
+  const fuTo = isoDateOrNull(searchParams.get("follow_up_to"));
+  if (searchParams.get("follow_up") === "none") where.push("follow_up_date IS NULL");
+  else if (fuOn) { where.push("follow_up_date = ?"); params.push(fuOn); }
+  else {
+    if (fuFrom) { where.push("follow_up_date >= ?"); params.push(fuFrom); }
+    if (fuTo) { where.push("follow_up_date <= ?"); params.push(fuTo); }
+  }
   return { whereSql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }
 
@@ -166,7 +178,7 @@ export async function parseInfluencerSheet(rows) {
     else if (!validInfluencerPhone(phone)) reasons.push("Invalid phone number");
     const d = { name, phone };
     for (const f of INFLUENCER_IMPORT_FIELDS) {
-      if (["name", "phone", "assembly", "status", "economic_status", "join_date", "cancelled_date"].includes(f.key)) continue;
+      if (["name", "phone", "assembly", "status", "economic_status", "join_date", "cancelled_date", "follow_up_date"].includes(f.key)) continue;
       const v = str(row, f.key);
       if (v !== "") d[f.key] = v;
     }
@@ -185,9 +197,10 @@ export async function parseInfluencerSheet(rows) {
       const hit = ECONOMIC_STATUSES.find((s) => s.toLowerCase() === eco.toLowerCase());
       if (hit) d.economic_status = hit; else reasons.push(`Invalid economic status "${eco}"`);
     }
-    for (const k of ["join_date", "cancelled_date"]) {
+    const DATE_LABEL = { join_date: "join", cancelled_date: "cancelled", follow_up_date: "follow-up" };
+    for (const k of ["join_date", "cancelled_date", "follow_up_date"]) {
       const r = toIsoDate(get(row, k));
-      if (!r.ok) reasons.push(`Invalid ${k === "join_date" ? "join" : "cancelled"} date`); else if (r.value) d[k] = r.value;
+      if (!r.ok) reasons.push(`Invalid ${DATE_LABEL[k]} date`); else if (r.value) d[k] = r.value;
     }
     if (reasons.length) {
       invalid++;

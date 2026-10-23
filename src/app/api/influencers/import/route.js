@@ -33,7 +33,7 @@ export async function GET() {
     name: "Ramesh Kumar", phone: "9876543210", assembly: "Abhanpur", address: "Ward 4, Abhanpur", age: "45", caste: "",
     current_party: "INC", party_years: "10", political_position: "Sarpanch", org_position: "", associated_since: "2015",
     social_media: "", team_size: "50", social_reach: "", economic_status: "Middle", influencer_rating: "7",
-    status: "Pending", join_date: "", cancelled_date: "", cancellation_remark: "", joined_by_phone: "", remark: "",
+    status: "Pending", join_date: "", cancelled_date: "", cancellation_remark: "", follow_up_date: "2026-11-15", joined_by_phone: "", remark: "",
   };
   const ws = XLSX.utils.aoa_to_sheet([head, INFLUENCER_IMPORT_FIELDS.map((f) => sample[f.key] ?? "")]);
   ws["!cols"] = head.map((h) => ({ wch: Math.max(12, h.length + 2) }));
