@@ -420,12 +420,17 @@ function DashboardTab({ filterQs, onWard, onError }) {
         <RankTable
           title="Worker-wise Performance"
           subtitle={`Top ${Math.min(200, data.workers.length)}`}
-          exportHref={`/api/registration/export?${filterQs({ report: "workers" })}`}
-          head={["Rank", "Worker Name", "Mobile", "Workers", "Voters", "Total"]}
+          exportHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200 })}`}
+          pdfHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200, format: "pdf" })}`}
+          testId="worker-performance"
+          head={["Rank", "Worker Name", "Mobile", "Zone", "Assembly", "Workers", "Voters", "Total"]}
           rows={data.workers.map((w) => [
             <RankBadge key="r" rank={w.rank} />,
             <span key="n" className="font-semibold text-gray-900">{w.name}<span className="block text-[11px] font-normal text-gray-400 font-mono">{w.worker_code}</span></span>,
-            w.mobile || "—", w.new_workers, w.voters,
+            w.mobile || "—",
+            // Zone / Assembly from the worker's Contact record ("—" when unknown).
+            w.zone_name || "—", w.assembly_name || "—",
+            w.new_workers, w.voters,
             <span key="t" className="font-bold text-gray-900">{w.total}</span>,
           ])}
           empty="No workers yet — add them in the Workers & Links tab."
@@ -483,18 +488,27 @@ function AssemblyRegistrationGraph({ assemblies }) {
   );
 }
 
-function RankTable({ title, subtitle, head, rows, empty, exportHref }) {
+function RankTable({ title, subtitle, head, rows, empty, exportHref, pdfHref, testId }) {
   return (
-    <div className={cardCls}>
+    <div className={cardCls} data-testid={testId}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <div>
           <h3 className="text-sm font-bold text-gray-900">{title}</h3>
           <p className="text-xs text-gray-500">{subtitle}</p>
         </div>
-        {exportHref ? (
-          <a href={exportHref} className="text-xs font-semibold inline-flex items-center gap-1.5 text-gray-600 hover:text-gray-900">
-            <Download size={14} />CSV
-          </a>
+        {exportHref || pdfHref ? (
+          <div className="flex items-center gap-3">
+            {exportHref ? (
+              <a href={exportHref} data-testid="export-csv" className="text-xs font-semibold inline-flex items-center gap-1.5 text-gray-600 hover:text-gray-900">
+                <Download size={14} />CSV
+              </a>
+            ) : null}
+            {pdfHref ? (
+              <a href={pdfHref} data-testid="export-pdf" className="text-xs font-semibold inline-flex items-center gap-1.5 text-gray-600 hover:text-gray-900">
+                <FileText size={14} />Export PDF
+              </a>
+            ) : null}
+          </div>
         ) : null}
       </div>
       <div className="overflow-x-auto">

@@ -46,7 +46,7 @@ const styles = StyleSheet.create({
   footer: { position: "absolute", bottom: 14, left: 18, right: 18, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#888" },
 });
 
-function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto }) {
+function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols = COLS }) {
   const u = ensureFonts() ? { fontFamily: FONT_FAMILY } : {};
   const T = (style, children, extra = {}) => React.createElement(Text, { style: [u, ...[].concat(style)], ...extra }, children);
   return React.createElement(Document, { title },
@@ -56,11 +56,11 @@ function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto }) {
       T(styles.subtitle, subtitle),
       criteria?.length ? React.createElement(View, { style: styles.criteria }, criteria.map((c, i) => T(styles.chip, cleanPdfText(c), { key: i }))) : null,
       // Column headings repeat on every page.
-      React.createElement(View, { style: styles.headerRow, fixed: true }, COLS.map((c) => T([styles.hcell, { flex: c.flex }], c.label, { key: c.key }))),
+      React.createElement(View, { style: styles.headerRow, fixed: true }, cols.map((c) => T([styles.hcell, { flex: c.flex }], c.label, { key: c.key }))),
       rows.length === 0
         ? T(styles.empty, "No records to export for the current selection.")
         : rows.map((r, i) => React.createElement(View, { key: r.id ?? i, wrap: false, style: i % 2 ? [styles.row, styles.rowAlt] : styles.row },
-            COLS.map((c) => T([styles.cell, { flex: c.flex }, c.bold ? styles.bold : null].filter(Boolean), c.get(r, i), { key: c.key })))),
+            cols.map((c) => T([styles.cell, { flex: c.flex }, c.bold ? styles.bold : null].filter(Boolean), c.get(r, i), { key: c.key })))),
       React.createElement(View, { style: styles.footer, fixed: true },
         T([], "Aam Aadmi Party, Chhattisgarh — Worker & Voter Registration"),
         T([], null, { render: ({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}` }))
@@ -80,6 +80,30 @@ export async function buildRegistrationPdf(rows, { title = "Registrations", crit
   const subtitle = `${list.length} record${list.length === 1 ? "" : "s"} (${workers} worker${workers === 1 ? "" : "s"} · ${list.length - workers} voter${list.length - workers === 1 ? "" : "s"}) · exported ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}`;
   const headerPhoto = await loadPdfHeaderPhoto();
   return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows: list, title, subtitle, criteria, headerPhoto }));
+}
+
+// Worker-wise Performance (the dashboard ranking) — the same columns as its CSV,
+// in the dashboard's ranking order; Zone / Assembly come from the worker's Contact.
+const WORKER_PERF_COLS = [
+  { key: "rank", label: "Rank", flex: 0.45, get: (r) => String(r.rank) },
+  { key: "name", label: "Worker Name", flex: 1.6, get: (r) => dash(r.name), bold: true },
+  { key: "mobile", label: "Mobile", flex: 0.95, get: (r) => dash(r.mobile) },
+  { key: "code", label: "Worker ID", flex: 0.9, get: (r) => dash(r.worker_code) },
+  { key: "zone", label: "Zone", flex: 1.0, get: (r) => dash(r.zone_name) },
+  { key: "asm", label: "Assembly", flex: 1.2, get: (r) => dash(r.assembly_name) },
+  { key: "ward", label: "Ward", flex: 0.7, get: (r) => dash(r.ward_number) },
+  { key: "booth", label: "Area / Booth", flex: 1.0, get: (r) => dash(r.area_booth) },
+  { key: "w", label: "Workers Added", flex: 0.75, get: (r) => String(r.new_workers ?? 0) },
+  { key: "v", label: "Voters Added", flex: 0.75, get: (r) => String(r.voters ?? 0) },
+  { key: "t", label: "Total", flex: 0.55, get: (r) => String(r.total ?? 0), bold: true },
+  { key: "st", label: "Link Status", flex: 0.7, get: (r) => dash(r.status) },
+];
+
+export async function buildWorkerPerformancePdf(rows, { criteria = [] } = {}) {
+  const title = "Worker-wise Performance";
+  const subtitle = `${rows.length} worker${rows.length === 1 ? "" : "s"} · ranked by total registrations · exported ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}`;
+  const headerPhoto = await loadPdfHeaderPhoto();
+  return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows, title, subtitle, criteria, headerPhoto, cols: WORKER_PERF_COLS }));
 }
 
 export function registrationPdfFilename(prefix = "AAP_Registrations") {

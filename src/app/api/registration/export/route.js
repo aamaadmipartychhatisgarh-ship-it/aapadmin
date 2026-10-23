@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
 import { defaultPeopleSort, getPeoplePage, getWorkerRanking, getBlockRanking } from "@/lib/registrationStats";
 import { peopleScopeCond, workerScopeCond } from "@/lib/registrationScope";
-import { buildRegistrationPdf, registrationPdfFilename } from "@/lib/registrationPdf";
+import { buildRegistrationPdf, buildWorkerPerformancePdf, registrationPdfFilename } from "@/lib/registrationPdf";
 import { isCaller } from "@/lib/permissions";
 
 // CSV export of whatever the dashboard is currently showing:
 //   ?report=registrations  every person + the worker who added them (default)
-//   ?report=workers        worker-wise performance (Top 200)
+//   ?report=workers        worker-wise performance — the same ranked list the
+//                          dashboard shows (Top worker_limit, default 200), with
+//                          Zone / Assembly from the worker's Contact; &format=pdf too
 //   ?report=blocks         block-wise (Area/Booth) performance (Top 100)
 //   &format=pdf            (registrations only) the same filtered, scoped list as a PDF
 // The SAME filters as the on-screen view are applied, so an export always matches
@@ -52,10 +54,22 @@ export async function GET(req) {
     let csv;
     let filename;
     if (report === "workers") {
-      const rows = await getWorkerRanking({ ...f, limit: 500, workerScope });
+      // Exactly the rows the dashboard's Worker-wise Performance shows: same
+      // filters, same scope, same ranking order and the same Top-N limit.
+      const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("worker_limit") || "200", 10) || 200));
+      const rows = await getWorkerRanking({ ...f, limit, workerScope });
+      if (searchParams.get("format") === "pdf") {
+        const criteria = describeFilters(searchParams, session).filter((c) => !/^(Type|Source|Status):/.test(c));
+        criteria.push(`Top ${limit}`);
+        const buf = await buildWorkerPerformancePdf(rows, { criteria });
+        return new NextResponse(new Uint8Array(buf), {
+          status: 200,
+          headers: { ...NO_STORE, "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${registrationPdfFilename("AAP_Worker_Performance")}"` },
+        });
+      }
       csv = toCsv(
-        ["Rank", "Worker Name", "Mobile", "Worker ID", "Ward", "Area/Booth", "Workers Added", "Voters Added", "Total", "Link Status"],
-        rows.map((r) => [r.rank, r.name, r.mobile, r.worker_code, r.ward_number, r.area_booth, r.new_workers, r.voters, r.total, r.status])
+        ["Rank", "Worker Name", "Mobile", "Worker ID", "Zone", "Assembly", "Ward", "Area/Booth", "Workers Added", "Voters Added", "Total", "Link Status"],
+        rows.map((r) => [r.rank, r.name, r.mobile, r.worker_code, r.zone_name || "", r.assembly_name || "", r.ward_number, r.area_booth, r.new_workers, r.voters, r.total, r.status])
       );
       filename = `AAP_Worker_Performance_${stamp}.csv`;
     } else if (report === "blocks" || report === "wards") {

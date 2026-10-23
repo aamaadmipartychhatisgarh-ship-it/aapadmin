@@ -2,6 +2,8 @@ import { query } from "@/lib/db";
 import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSchema";
 import { UNCONTACTED_FIRST_SQL } from "@/lib/registrationContactAction";
 import { ensureConvertSchema, isConvertEligible } from "@/lib/registrationConvert";
+import { phoneKey, last10Sql } from "@/lib/phone";
+import { notPendingClause } from "@/lib/contactExtras";
 
 // Server-side aggregation for the Voter & Worker Registration dashboard. Every
 // number is computed in SQL (COUNT / GROUP BY) so the client never pulls raw rows
@@ -154,15 +156,65 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
   // Rank is the position in this ordering; offset keeps it correct when paging.
   // A worker generated FROM a Contact carries that Contact's id + live photo/name,
   // so the roster (Workers Link) shows the same Contact photo without a re-upload.
+  const loc = await workerContactLocations(rows);
   return rows.map((r, i) => ({
     rank: off + i + 1,
     id: r.id, name: r.name, mobile: r.mobile, worker_code: r.worker_code,
+    // Zone / Assembly from the worker's Contact record (see workerContactLocations).
+    zone_name: loc.get(r.id)?.zone_name || null,
+    assembly_name: loc.get(r.id)?.assembly_name || null,
+    location_contact_id: loc.get(r.id)?.contact_id || null,
     ward_number: r.ward_number, area_booth: r.area_booth, status: r.status, token: r.token,
     contact_id: r.contact_id || null,
     photo_url: r.contact_photo_url || null,
     contact_name: r.contact_name || null,
     voters: Number(r.voters), new_workers: Number(r.new_workers), total: Number(r.total),
   }));
+}
+
+// Zone + Assembly of each worker, read from the Contact page's own record and
+// shown exactly as the Contact List shows them (Zone = the contact's zone, else
+// the one above its district; Assembly = the contact's assembly). Matched by:
+//   1. reg_workers.contact_id — the worker↔Contact link (workers generated from a
+//      Contact carry it), else
+//   2. the worker's mobile (last 10 digits) when it belongs to EXACTLY ONE live
+//      contact. Never by name. No match / no location → null ("—" on screen).
+// Returns Map<worker id, { zone_name, assembly_name, contact_id }>.
+async function workerContactLocations(rows) {
+  const out = new Map();
+  if (!rows.length) return out;
+  const LOC_SELECT = `c.id, COALESCE(cz.name, lz.name) AS zone_name, la.name AS assembly_name
+         FROM contacts c
+         LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations lls ON lls.id = ld.parent_id
+         LEFT JOIN locations lz ON lz.id = lls.parent_id
+         LEFT JOIN locations cz ON cz.id = c.zone_id
+         LEFT JOIN locations la ON la.id = c.assembly_id`;
+  const ids = [...new Set(rows.map((r) => r.contact_id).filter(Boolean).map(Number))];
+  const byId = new Map();
+  if (ids.length) {
+    for (const c of await query(`SELECT ${LOC_SELECT} WHERE c.id IN (${ids.map(() => "?").join(",")})`, ids)) byId.set(Number(c.id), c);
+  }
+  // Workers without a (still existing) linked Contact: unique match by mobile.
+  const pending = rows.filter((r) => !(r.contact_id && byId.has(Number(r.contact_id))));
+  const keys = [...new Set(pending.map((r) => phoneKey(r.mobile)).filter((k) => k && k.length === 10))];
+  const byKey = new Map();
+  if (keys.length) {
+    const live = await notPendingClause("c");
+    const found = await query(
+      `SELECT ${LOC_SELECT.replace("c.id,", `c.id, ${last10Sql("c.phone_number")} AS k,`)}
+        WHERE ${last10Sql("c.phone_number")} IN (${keys.map(() => "?").join(",")})${live}`,
+      keys
+    );
+    const count = new Map();
+    for (const c of found) count.set(c.k, (count.get(c.k) || 0) + 1);
+    for (const c of found) if (count.get(c.k) === 1) byKey.set(c.k, c);
+  }
+  for (const r of rows) {
+    const c = (r.contact_id && byId.get(Number(r.contact_id))) || byKey.get(phoneKey(r.mobile));
+    if (c) out.set(r.id, { zone_name: c.zone_name || null, assembly_name: c.assembly_name || null, contact_id: Number(c.id) });
+  }
+  return out;
 }
 
 export async function countWorkers({ campaignId, ward, search, workerScope } = {}) {
