@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { ImportModal } from "@/components/contacts/ContactsModule";
+import { DUPLICATE_PHONE_MESSAGE } from "@/lib/influencerMessages";
 import { INFLUENCER_IMPORT_FIELDS, mapInfluencerHeaders, validInfluencerPhone, influencerPhoneKey, isoDateOrNull } from "@/lib/influencerColumns";
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
@@ -231,6 +232,7 @@ export default function InfluencersPage() {
         meta={meta}
         assemblies={assemblies}
         record={editId ? editRecord : null}
+        onOpenExisting={(id) => openEdit(id)}
         onCancel={() => { setMode("list"); setEditId(null); setEditRecord(null); }}
         onSaved={(opts) => {
           setEditId(null); setEditRecord(null);
@@ -562,11 +564,16 @@ export default function InfluencersPage() {
 // ---------------------------------------------------------------------------
 // Add / Edit form
 // ---------------------------------------------------------------------------
-function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
+function InfluencerForm({ meta, assemblies, record, onCancel, onSaved, onOpenExisting }) {
   const editing = !!record;
   const [f, setF] = useState(BLANK);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Duplicate phone: the OTHER influencer already holding this number ({id,name,phone}),
+  // from the live pre-check or the server's 409; + the read-only view of that record.
+  const [dup, setDup] = useState(null);
+  const [dupView, setDupView] = useState(null);
+  const [dupBusy, setDupBusy] = useState(false);
 
   // "Joined By" — the resolved existing Contact (live link) and lookup status.
   const [joinedBy, setJoinedBy] = useState(null); // compact contact card | null
@@ -619,6 +626,36 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
   }, [record]);
 
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  // Live duplicate-phone pre-check (debounced). The record's OWN unchanged number is
+  // never checked; the server re-validates on save regardless.
+  useEffect(() => {
+    const key = influencerPhoneKey(f.phone);
+    if (!key || key.length < 7 || (record && key === influencerPhoneKey(record.phone))) { setDup(null); return; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/influencers/phone-check?phone=${encodeURIComponent(f.phone)}${record ? `&exclude_id=${record.id}` : ""}`, { cache: "no-store" });
+        const d = r.ok ? await r.json() : null;
+        if (alive) setDup(d?.duplicate || null);
+      } catch { /* the save re-checks on the server */ }
+    }, 350);
+    return () => { alive = false; clearTimeout(t); };
+  }, [f.phone, record]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bring the duplicate warning (next to the Phone field) into view after a blocked save.
+  const showDup = () => setTimeout(() => document.querySelector('[data-testid="duplicate-phone"]')?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+
+  async function viewExisting() {
+    if (!dup) return;
+    setDupBusy(true);
+    try {
+      const r = await fetch(`/api/influencers/${dup.id}`, { cache: "no-store" });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.influencer) setDupView(d.influencer); else setError("Could not open the existing influencer.");
+    } catch { setError("Could not open the existing influencer."); }
+    finally { setDupBusy(false); }
+  }
 
   // Look up the "Joined By" contact from the entered phone (debounced). A valid
   // 10-digit number searches Contacts; a hit links the EXISTING contact (id) and
@@ -684,6 +721,9 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
     if (f.status === "Cancelled" && !String(f.cancellation_remark || "").trim()) {
       setError("Please enter a cancellation reason/remark before saving."); return;
     }
+    // A number already registered as an Influencer cannot be saved again (the server
+    // enforces this too — this just avoids the round trip).
+    if (dup) { setError(DUPLICATE_PHONE_MESSAGE); showDup(); return; }
     // Follow-up Date must be a real date (the date picker can hold a partial entry).
     if (String(f.follow_up_date || "").trim() && !isoDateOrNull(f.follow_up_date)) {
       setError("Enter a valid Follow-up Date."); return;
@@ -697,6 +737,7 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
       const d = await r.json().catch(() => ({}));
       // Only treat it as saved when the API confirms it AND returns the persisted
       // record — never show success on a failed insert (Bug Fix §2, §7).
+      if (r.status === 409 && d.duplicate) { setDup(d.duplicate); showDup(); }
       if (!r.ok || !d.influencer) { setError(d.message || "Could not save. Please try again."); setSaving(false); return; }
       onSaved({ created: !editing, influencer: d.influencer });
     } catch {
@@ -717,6 +758,8 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
 
       {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{error}</div>}
 
+      {dupView && <ViewModal row={dupView} meta={meta} onClose={() => setDupView(null)} onEdit={() => { const id = dupView.id; setDupView(null); onOpenExisting?.(id); }} />}
+
       <form onSubmit={submit} className="space-y-5">
         {/* Profile Details */}
         <Section title="Profile Details">
@@ -728,7 +771,17 @@ function InfluencerForm({ meta, assemblies, record, onCancel, onSaved }) {
               <input value={f.name} onChange={(e) => set("name", e.target.value)} className={inputCls} placeholder="Full name" />
             </Field>
             <Field label="Phone">
-              <input value={f.phone} onChange={(e) => set("phone", e.target.value)} className={inputCls} placeholder="Contact number" />
+              <input value={f.phone} onChange={(e) => { set("phone", e.target.value); if (error === DUPLICATE_PHONE_MESSAGE) setError(""); }}
+                className={`${inputCls} ${dup ? "border-red-300 focus:border-red-400" : ""}`} placeholder="Contact number" data-testid="influencer-phone" />
+              {dup && (
+                <div className="mt-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" data-testid="duplicate-phone">
+                  <div className="font-semibold">{DUPLICATE_PHONE_MESSAGE}</div>
+                  <button type="button" onClick={viewExisting} disabled={dupBusy} data-testid="view-existing-influencer"
+                    className="mt-1 inline-flex items-center gap-1 font-semibold text-[#164FA3] hover:underline disabled:opacity-60">
+                    {dupBusy ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />} View existing influencer{dup.name ? ` — ${dup.name}` : ""}
+                  </button>
+                </div>
+              )}
             </Field>
             <Field label="Assembly Name">
               <select value={f.assembly_id} onChange={(e) => set("assembly_id", e.target.value)} className={inputCls}>

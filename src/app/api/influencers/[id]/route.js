@@ -6,6 +6,8 @@ import { query } from "@/lib/db";
 import { ensureInfluencerSchema, getInfluencerColumns } from "@/lib/influencerSchema";
 import { resolveContactCard, compactContactCard } from "@/lib/contactCard";
 import { validate, coerce, shape, assertJoinedByStorable } from "../route";
+import { findInfluencerByPhone, duplicatePhoneBody } from "@/lib/influencerPhone";
+import { influencerPhoneKey } from "@/lib/influencerColumns";
 
 // Every handler here is gated by the "influencers" page key (Super Admin +
 // Supervisor by baseline, plus Page-Access grants), verified server-side (403
@@ -79,13 +81,30 @@ export async function PUT(req, { params }) {
     // exist on the table, so a never-migrated column is skipped rather than causing
     // an "Unknown column" 500 (mirrors the create path).
     const cols = await getInfluencerColumns();
+    // Duplicate phone: only when the number was actually CHANGED to one that
+    // normalizes differently. An unchanged number is never flagged (and its stored
+    // key is left alone — a legacy duplicate keeps working), while a change onto
+    // another influencer's number is refused (409) and nothing is saved.
+    const phoneChanged = influencerPhoneKey(v.phone) !== influencerPhoneKey(existing.phone);
+    if (!phoneChanged) delete v.phone_key;
+    else {
+      const dup = await findInfluencerByPhone(v.phone, iid);
+      if (dup) return NextResponse.json(duplicatePhoneBody(dup), { status: 409, headers: NO_STORE });
+    }
     const names = Object.keys(v).filter((k) => cols.has(k));
     if (!names.length) throw new Error("influencers table is missing expected columns");
     assertJoinedByStorable(v, cols);
-    await query(
-      `UPDATE influencers SET ${names.map((n) => `\`${n}\`=?`).join(", ")} WHERE id=?`,
-      [...names.map((n) => v[n]), iid]
-    );
+    try {
+      await query(
+        `UPDATE influencers SET ${names.map((n) => `\`${n}\`=?`).join(", ")} WHERE id=?`,
+        [...names.map((n) => v[n]), iid]
+      );
+    } catch (e) {
+      if (e?.code === "ER_DUP_ENTRY" && /phone_key/.test(e?.message || "")) {
+        return NextResponse.json(duplicatePhoneBody(await findInfluencerByPhone(v.phone, iid)), { status: 409, headers: NO_STORE });
+      }
+      throw e;
+    }
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [iid]);
     if (!row) throw new Error("update reported success but the record could not be read back");
     const shaped = shape(row);

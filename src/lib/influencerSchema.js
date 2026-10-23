@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { influencerPhoneKey } from "@/lib/influencerColumns";
 
 // Schema for the Super-Admin-only Influencer module. One table holds the full
 // structured profile; multi-value fields (key activities) are stored as a JSON
@@ -114,6 +115,13 @@ export async function ensureInfluencerSchema() {
     // Supervisor-2 assigned to follow up this influencer (users.id, role supervisor).
     // Drives the "Tomorrow Follow-up" dashboard reminder.
     await ensureColumn("assigned_supervisor_id", "INT NULL");
+    // Normalized phone (influencerPhoneKey) with a UNIQUE index: the database itself
+    // refuses a second influencer with the same number (repeated clicks / concurrent
+    // requests). NULL = no phone, or a LEGACY duplicate that pre-dates the rule — NULLs
+    // don't collide, so existing data is never touched or rejected.
+    await ensureColumn("phone_key", "VARCHAR(20) NULL");
+    await backfillPhoneKeys();
+    await ensurePhoneKeyIndex();
     if (!hadJoinDate) {
       // One-time migration of pre-existing statuses into Pending / Joined / Cancelled.
       // Names, assemblies, Added By and every other detail are untouched.
@@ -135,6 +143,31 @@ export async function ensureInfluencerSchema() {
   } catch (e) {
     console.error("[influencer] ensure schema:", e?.message || e);
   }
+}
+
+// Give every influencer that has a phone but no key its key, oldest first; when two
+// legacy rows share a number only the first gets the key (the rest stay NULL).
+async function backfillPhoneKeys() {
+  try {
+    const todo = await query("SELECT id, phone FROM influencers WHERE phone_key IS NULL AND phone IS NOT NULL AND phone <> '' ORDER BY id ASC");
+    if (!todo.length) return;
+    const taken = new Set((await query("SELECT phone_key FROM influencers WHERE phone_key IS NOT NULL")).map((r) => r.phone_key));
+    for (const r of todo) {
+      const k = influencerPhoneKey(r.phone);
+      if (!k || taken.has(k)) continue;
+      taken.add(k);
+      // eslint-disable-next-line no-await-in-loop
+      await query("UPDATE influencers SET phone_key = ? WHERE id = ? AND phone_key IS NULL", [k, r.id]);
+    }
+  } catch (e) { console.error("[influencer] backfill phone_key:", e?.message || e); }
+}
+async function ensurePhoneKeyIndex() {
+  try {
+    const have = await query(
+      `SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'influencers' AND INDEX_NAME = 'uq_influencers_phone_key' LIMIT 1`
+    );
+    if (!have.length) await query("ALTER TABLE influencers ADD UNIQUE KEY uq_influencers_phone_key (phone_key)");
+  } catch (e) { if (!/duplicate key name/i.test(e?.message || "")) console.error("[influencer] phone_key index:", e?.message || e); }
 }
 
 // Add a column to `influencers` only if it doesn't already exist. A successful

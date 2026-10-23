@@ -102,11 +102,23 @@ export async function POST(req) {
       const record = { ...(await coerce(c.d)), created_by: session.user.id || null };
       assertJoinedByStorable(record, cols);
       const names = Object.keys(record).filter((k) => cols.has(k));
-      // eslint-disable-next-line no-await-in-loop
-      await conn.query(
-        `INSERT INTO influencers (${names.map((n) => `\`${n}\``).join(", ")}) VALUES (${names.map(() => "?").join(",")})`,
-        names.map((n) => record[n])
-      );
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await conn.query(
+          `INSERT INTO influencers (${names.map((n) => `\`${n}\``).join(", ")}) VALUES (${names.map(() => "?").join(",")})`,
+          names.map((n) => record[n])
+        );
+      } catch (e) {
+        // Same number saved by someone else a moment ago (manual add) — the UNIQUE
+        // phone_key refused it: count as an existing duplicate, never overwrite.
+        if (e?.code === "ER_DUP_ENTRY" && /phone_key/.test(e?.message || "")) {
+          existing.add(c.key);
+          dupExisting++;
+          rowErrors.push({ row: c.row, name: c.d.name, mobile: c.d.phone, severity: "duplicate", reasons: ["Phone already exists in Influencers — existing record left unchanged"] });
+          continue;
+        }
+        throw e;
+      }
       existing.add(c.key);
       added++;
     }

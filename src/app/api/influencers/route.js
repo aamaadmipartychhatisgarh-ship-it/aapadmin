@@ -9,7 +9,8 @@ import {
 import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 import { resolveContactCard, resolveContactByPhone } from "@/lib/contactCard";
 import { influencerListWhere, enrichJoinedBy, INFLUENCER_SORTS, createdBySelect } from "@/lib/influencerIO";
-import { isoDateOrNull } from "@/lib/influencerColumns";
+import { isoDateOrNull, influencerPhoneKey } from "@/lib/influencerColumns";
+import { findInfluencerByPhone, duplicatePhoneBody } from "@/lib/influencerPhone";
 
 // Access to the Influencer module is governed by the "influencers" page key
 // (Super Admin + Supervisor by baseline, plus anyone granted it in Page Access).
@@ -196,10 +197,22 @@ export async function POST(req) {
       throw new Error("influencers table is missing expected columns");
     }
     assertJoinedByStorable(record, cols);
-    const res = await query(
-      `INSERT INTO influencers (${names.map((n) => `\`${n}\``).join(", ")}) VALUES (${names.map(() => "?").join(",")})`,
-      names.map((n) => record[n])
-    );
+    // Duplicate phone → refuse (409) and point at the existing record; nothing is
+    // saved or overwritten. The UNIQUE phone_key index below is the race-proof backstop.
+    const dup = await findInfluencerByPhone(record.phone);
+    if (dup) return NextResponse.json(duplicatePhoneBody(dup), { status: 409, headers: NO_STORE });
+    let res;
+    try {
+      res = await query(
+        `INSERT INTO influencers (${names.map((n) => `\`${n}\``).join(", ")}) VALUES (${names.map(() => "?").join(",")})`,
+        names.map((n) => record[n])
+      );
+    } catch (e) {
+      if (e?.code === "ER_DUP_ENTRY" && /phone_key/.test(e?.message || "")) {
+        return NextResponse.json(duplicatePhoneBody(await findInfluencerByPhone(record.phone)), { status: 409, headers: NO_STORE });
+      }
+      throw e;
+    }
     // Read the row back so a fake success is impossible: if the INSERT didn't
     // persist, there is no row and we surface a real error instead of "saved".
     const [row] = await query("SELECT * FROM influencers WHERE id = ?", [res.insertId]);
@@ -325,6 +338,7 @@ export async function coerce(d, prior = null) {
     ...sup,
     name: String(d.name).trim().slice(0, 150),
     phone: s(d.phone, 30),
+    phone_key: influencerPhoneKey(d.phone),
     photo_url: s(d.photo_url, 512),
     address: s(d.address),
     assembly_id: h.assembly_id, assembly_name: h.assembly_name,
