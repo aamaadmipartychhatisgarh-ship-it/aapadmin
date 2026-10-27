@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Plus, X } from "lucide-react";
 
 // The Designation + Wing field of the Add / Edit Contact forms: ONE row = ONE Designation paired
@@ -9,21 +10,33 @@ import { Plus, X } from "lucide-react";
 // designations: the Designation master (each with .wings / .wing); wingMaster: /api/wings entries.
 const sel = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white";
 
-export default function DesignationWingRows({ rows, onChange, designations = [], wingMaster = [] }) {
+export default function DesignationWingRows({ rows, onChange, designations: designationsProp = [], wingMaster = [] }) {
+  // The Designation options ALWAYS come from Master Data (/api/designations): the list the form was given, re-read
+  // whenever a Wing is changed so a designation added / re-mapped / disabled in Master Data shows up without reopening.
+  const [fresh, setFresh] = useState(null);
+  const designations = fresh || designationsProp;
+  const reload = () => fetch("/api/designations", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.designations) setFresh(d.designations); return d?.designations || null; }).catch(() => null);
   const mainLc = new Set(wingMaster.filter((w) => w.is_main).map((w) => String(w.name).trim().toLowerCase()));
   const wings = wingMaster.filter((w) => !w.is_main);
   // The Main Wing's name comes from Master Data (Administration -> Master Data -> Wing) - never a hardcoded list. While the
   // master is still loading (or unavailable) the blank option reads "Main (no Wing)" so a selection is always possible.
   const mainLabel = wingMaster.find((w) => w.is_main)?.name || (wingMaster.length ? "Main Wing" : "Main (no Wing)");
   const wingsOf = (d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).map((w) => String(w).trim().toLowerCase());
+  // Is this designation mapped to the Wing? A named Wing: the designation lists it. The Main Wing (blank): the designation
+  // has no Wing at all, or lists the Main Wing (also when it is shared with other Wings). One that belongs ONLY to other
+  // Wings is never offered.
+  const inWing = (d, wingLc) => {
+    const dw = wingsOf(d);
+    return wingLc ? dw.includes(wingLc) : (dw.length === 0 || dw.some((x) => mainLc.has(x)));
+  };
   const optionsFor = (row, idx) => {
     const taken = new Set(rows.filter((_, i) => i !== idx).map((r) => String(r.designation_id || "")).filter(Boolean));
     const w = String(row.wing || "").trim().toLowerCase();
     return designations.filter((d) => {
       if (taken.has(String(d.id))) return false;
       if (String(d.id) === String(row.designation_id)) return true; // keep the saved choice visible
-      const dw = wingsOf(d);
-      return w ? dw.includes(w) : dw.every((x) => mainLc.has(x));    // Main = no Wing, or the main Wing only
+      if (d.enabled === 0) return false;                             // switched off in Master Data
+      return inWing(d, w);
     });
   };
   const set = (idx, patch) => onChange(rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -39,11 +52,14 @@ export default function DesignationWingRows({ rows, onChange, designations = [],
               <select className={sel} aria-label={`Wing ${idx + 1}`} data-testid="dw-wing" value={r.wing || ""} title={r.wing || mainLabel}
                 onChange={(e) => {
                   const wing = e.target.value;
-                  // Changing the Wing clears only THIS row's designation when it doesn't belong to the new Wing.
-                  const d = designations.find((x) => String(x.id) === String(r.designation_id));
                   const w = wing.trim().toLowerCase();
-                  const ok = !d || (w ? wingsOf(d).includes(w) : wingsOf(d).every((x) => mainLc.has(x)));
-                  set(idx, { wing, designation_id: ok ? r.designation_id : "" });
+                  // Changing the Wing clears only THIS row's designation, and only when it is no longer mapped to the new Wing.
+                  const apply = (list) => {
+                    const d = list.find((x) => String(x.id) === String(r.designation_id));
+                    set(idx, { wing, designation_id: !d || inWing(d, w) ? r.designation_id : "" });
+                  };
+                  apply(designations);
+                  reload().then((list) => { const d = list?.find((x) => String(x.id) === String(r.designation_id)); if (d && !inWing(d, w)) apply(list); });   // refresh the options from Master Data
                 }}>
                 <option value="">{mainLabel}</option>
                 {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{w.name}</option>)}

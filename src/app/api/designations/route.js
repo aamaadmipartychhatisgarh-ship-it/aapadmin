@@ -74,6 +74,11 @@ export async function GET(req) {
     // Every wing of each designation (one entry can carry many); `wing` stays the first.
     const wingsMap = await wingsMapFor(designations);
     for (const d of designations) d.wings = wingsMap.get(d.id) || [];
+    // `enabled` (Master Data on/off switch) so pickers can leave disabled designations out; additive field.
+    if (await hasDesignationColumn("enabled")) {
+      const en = new Map((await query("SELECT id, enabled FROM designations")).map((r) => [r.id, r.enabled]));
+      for (const d of designations) d.enabled = en.get(d.id) == null ? 1 : Number(en.get(d.id));
+    }
     return Response.json({ designations }, { status: 200 });
   } catch (error) {
     console.error("Error fetching designations:", error);
