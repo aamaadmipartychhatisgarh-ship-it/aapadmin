@@ -165,6 +165,8 @@ export default function ZoneContactsPage() {
           <MapPin size={14} /> {zone?.zone_name ? `Zone: ${zone.zone_name}` : "No Zone assigned"}
         </span>
         <span className="text-sm text-gray-500" data-testid="zc-total">{loading ? "…" : `${Number(total).toLocaleString("en-IN")} contact${total === 1 ? "" : "s"}`}</span>
+        {/* Go to Page — at the top with the page controls (moved up from the pager under the table). */}
+        {totalPages > 1 && <span className="ml-auto"><ZoneGoToPage pageCount={totalPages} onPage={setPage} disabled={loading} placement="down" /></span>}
       </div>
 
       {!loading && !zone?.zone_id && !err && (
@@ -278,7 +280,6 @@ export default function ZoneContactsPage() {
           <span className="inline-flex gap-2">
             <button type="button" aria-label="Previous page" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))} className="h-8 px-2 rounded-md border border-gray-200 disabled:opacity-40"><ChevronLeft size={15} /></button>
             <button type="button" aria-label="Next page" disabled={page >= totalPages || loading} onClick={() => setPage((p) => p + 1)} className="h-8 px-2 rounded-md border border-gray-200 disabled:opacity-40"><ChevronRight size={15} /></button>
-            {totalPages > 1 && <ZoneGoToPage pageCount={totalPages} onPage={setPage} disabled={loading} />}
           </span>
         </div>
       </div>
@@ -294,7 +295,7 @@ export default function ZoneContactsPage() {
 // setPage, so the search, filters, sort and page size in `qs` are untouched. Invalid
 // entries (empty, non-numeric, decimal, negative, zero, out of range) show a message and
 // never navigate.
-function ZoneGoToPage({ pageCount, onPage, disabled }) {
+function ZoneGoToPage({ pageCount, onPage, disabled, placement = "up" }) {
   const [open, setOpen] = useState(false);
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
@@ -330,7 +331,7 @@ function ZoneGoToPage({ pageCount, onPage, disabled }) {
       <button type="button" onClick={() => { setOpen((o) => !o); setErr(""); setVal(""); }} disabled={disabled} data-testid="zc-goto-btn"
         className="h-8 px-2.5 rounded-md border border-gray-200 text-xs font-medium disabled:opacity-40">Go to Page</button>
       {open && (
-        <div className="absolute right-0 bottom-full mb-2 z-30 w-60 rounded-xl border border-gray-200 bg-white shadow-lg p-3 text-left" data-testid="zc-goto-box" role="dialog" aria-label="Go to page">
+        <div className={`absolute right-0 ${placement === "down" ? "top-full mt-2" : "bottom-full mb-2"} z-30 w-60 rounded-xl border border-gray-200 bg-white shadow-lg p-3 text-left`} data-testid="zc-goto-box" role="dialog" aria-label="Go to page">
           <label className="block text-xs font-medium text-gray-500 mb-1">Page number (1–{pageCount.toLocaleString()})</label>
           <input autoFocus value={val} inputMode="numeric" data-testid="zc-goto-input" placeholder={`e.g. ${Math.min(pageCount, 25)}`}
             onChange={(e) => { setVal(e.target.value); if (err) setErr(""); }}

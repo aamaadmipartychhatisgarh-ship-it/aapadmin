@@ -1100,18 +1100,22 @@ export default function ContactsModule({ session, mode }) {
         </div>
       )}
 
-      {!loading && contacts.length > 0 && (
+      {((!loading && contacts.length > 0) || total > pageSize) && (
         <div className="flex items-center gap-3 flex-wrap text-sm">
-          {selectedIds.size > 0 && (
+          {!loading && selectedIds.size > 0 && (
             <span className="font-semibold text-[#164FA3]">{selectedIds.size.toLocaleString()} selected</span>
           )}
-          {total > contacts.length && (
+          {!loading && total > contacts.length && (
             <button onClick={selectAllMatching} disabled={selectingAll} className="text-[#164FA3] font-medium hover:underline disabled:opacity-50">
               {selectingAll ? "Selecting…" : `Select all ${total.toLocaleString()} matching filters`}
             </button>
           )}
-          {selectedIds.size > 0 && (
+          {!loading && selectedIds.size > 0 && (
             <button onClick={clearSelection} className="text-gray-500 font-medium hover:underline">Clear selection</button>
+          )}
+          {/* Go to Page — at the TOP, next to the list controls (it used to sit in the pager below the table). */}
+          {total > pageSize && (
+            <span className="ml-auto"><GoToPage page={page} pageCount={Math.max(1, Math.ceil(total / pageSize))} onPage={setPage} disabled={loading} placement="down" /></span>
           )}
         </div>
       )}
@@ -1453,7 +1457,6 @@ function Pagination({ total, page, pageSize, onPage, onPageSize, loading }) {
         })}
         <button onClick={() => onPage(page + 1)} disabled={page >= pageCount || loading}
           className="px-2.5 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next</button>
-        <GoToPage page={page} pageCount={pageCount} onPage={onPage} disabled={loading} />
       </div>
       )}
     </div>
@@ -2307,7 +2310,7 @@ function RfaControl({ contact, canSubmit, onDone, onFail }) {
 // "Go to Page" — a small popover next to Prev/Next: type a page number, OK jumps straight
 // there through the same onPage the other controls use, so the search, filters, sort and
 // page size stay exactly as they are. Nothing is sent for an invalid entry.
-function GoToPage({ page, pageCount, onPage, disabled }) {
+function GoToPage({ page, pageCount, onPage, disabled, placement = "up" }) {
   const [open, setOpen] = useState(false);
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
@@ -2343,7 +2346,7 @@ function GoToPage({ page, pageCount, onPage, disabled }) {
       <button type="button" onClick={() => { setOpen((o) => !o); setErr(""); setVal(""); }} disabled={disabled} data-testid="goto-page-btn"
         className="px-2.5 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Go to Page</button>
       {open && (
-        <div className="absolute right-0 bottom-full mb-2 z-30 w-60 rounded-xl border border-gray-200 bg-white shadow-lg p-3" data-testid="goto-page-box" role="dialog" aria-label="Go to page">
+        <div className={`absolute right-0 ${placement === "down" ? "top-full mt-2" : "bottom-full mb-2"} z-30 w-60 rounded-xl border border-gray-200 bg-white shadow-lg p-3`} data-testid="goto-page-box" role="dialog" aria-label="Go to page">
           <label className="block text-xs font-medium text-gray-500 mb-1">Page number (1–{pageCount.toLocaleString()})</label>
           <input autoFocus value={val} inputMode="numeric" data-testid="goto-page-input" placeholder={`e.g. ${Math.min(pageCount, 25)}`}
             onChange={(e) => { setVal(e.target.value); if (err) setErr(""); }}
