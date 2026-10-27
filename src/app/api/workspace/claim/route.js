@@ -207,6 +207,8 @@ export async function POST(req) {
           // an empty/blank stored value counts as "no photo", so it falls through
           // to the worker photo instead of showing a blank avatar).
           photo_url: String(row.photo_url ?? "").trim() || String(nameRows[0]?.photo_url ?? "").trim() || null,
+          // The primary is the first of the contact's designation set (the join table is the authority).
+          designation_id: dsgIds ? Number(String(dsgIds).split(",")[0]) : row.designation_id,
           designation_ids: dsgIds || (row.designation_id ? String(row.designation_id) : ""),
           locked_by_user_id: userId,
         },

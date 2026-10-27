@@ -136,20 +136,28 @@ export async function designationsForGeneralEdit(contactId, data, canClear) {
   const cur = hasSet ? curIds : curIds.slice(0, 1);
   const next = hasSet ? parseDesignationIds(data.designation_ids) : parseDesignationIds([data.designation_id]);
   const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
-  const result = (ids) => ids;
+  // The single dropdown changes only the PRIMARY: the contact's other designations (and their Wings) stay.
+  const result = (ids) => (hasSet ? ids : (ids.length ? [...new Set([...ids, ...curIds.slice(1)])] : curIds.slice(1)));
   if (same(next, cur)) return { skip: true };                       // already exactly this
   const prevKey = hasSet ? "designation_ids_prev" : "designation_id_prev";
   if (prevKey in data) {
     const prev = parseDesignationIds(hasSet ? data[prevKey] : [data[prevKey]]);
     if (same(next, prev)) return { skip: true };                    // the user did not change it: stale copy
-    if (!same(prev, cur)) return { skip: true, conflict: true };    // changed by someone else since the form opened
-    if (!next.length) return canClear ? { ids: [] } : { skip: true }; // deliberate clear — managers only
+    // The form's baseline may be the legacy `contacts.designation_id` (what the Caller card carries) while the
+    // join table is the authority; either one matching what the form was opened with is NOT a foreign change.
+    const legacy = c?.designation_id ? [c.designation_id] : [];
+    const baselineOk = same(prev, cur) || (!hasSet && same(prev, legacy));
+    if (!baselineOk) return { skip: true, conflict: true };         // changed by someone else since the form opened
+    if (!next.length) return canClear ? { ids: result([]) } : { skip: true }; // deliberate clear — managers only
   } else if (!next.length) {
     return { skip: true };                                          // a blank with no baseline never clears
   }
   if (next.length) {
-    const found = await query(`SELECT id FROM designations WHERE id IN (${next.map(() => "?").join(",")})`, next);
+    const found = await query(`SELECT id, name, enabled FROM designations WHERE id IN (${next.map(() => "?").join(",")})`, next);
     if (found.length !== next.length) return { error: "That designation does not exist." };
+    // A switched-off (Master Data) designation can't be newly given; one the contact already holds stays as is.
+    const off = found.find((d) => d.enabled != null && Number(d.enabled) === 0 && !curIds.includes(d.id));
+    if (off) return { error: `"${off.name}" is switched off in Master Data and cannot be assigned.` };
   }
   return { ids: result(next) };
 }
