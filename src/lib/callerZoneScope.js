@@ -18,30 +18,12 @@ import { callerOwnsContact } from "@/lib/callerContactAccess";
 // Page-access key for the caller's Contacts page (lib/pages.js).
 export const CALLER_ZONE_CONTACTS_PAGE = "zone_contacts";
 
-// Contacts that belong to a Zone. Contacts are keyed almost entirely by
-// district_id, so a contact belongs to the Zone when its district sits under the
-// Zone (directly or via a Lok Sabha) — the SAME relationship the caller's work
-// queue uses (assignmentRules.zoneMatch). A contact with no district still
-// belongs when its own Zone / Lok Sabha / Assembly does. No Zone → no contacts.
+// Contacts that belong to a Zone — exactly the Zone the Contact Page shows for the
+// contact (its own Zone, else its district's Zone; see assignmentRules.zoneMatch),
+// so the caller's list can never drift from the Contact Page. No Zone → no contacts.
 export function zoneContactClause(zoneId, alias = "c") {
   if (!zoneId) return { where: "AND 1 = 0", params: [] };
-  const c = alias ? `${alias}.` : "";
-  const byDistrict = zoneMatch(zoneId, alias); // " AND c.district_id IN (...)"
-  const districtPart = byDistrict.where.replace(/^\s*AND\s+/, "");
-  return {
-    where: `AND (
-      ${districtPart}
-      OR (${c}district_id IS NULL AND (
-        ${c}zone_id = ?
-        OR ${c}lok_sabha_id IN (SELECT ls.id FROM locations ls WHERE ls.type = 'lok_sabha' AND ls.parent_id = ?)
-        OR ${c}assembly_id IN (
-          SELECT a.id FROM locations a
-            JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
-           WHERE d.parent_id = ? OR d.parent_id IN (SELECT ls.id FROM locations ls WHERE ls.type = 'lok_sabha' AND ls.parent_id = ?))
-      ))
-    )`,
-    params: [...byDistrict.params, zoneId, zoneId, zoneId, zoneId],
-  };
+  return zoneMatch(zoneId, alias);
 }
 
 // For a CALLER with access to the Zone Contacts page: { zoneId } (zoneId may be

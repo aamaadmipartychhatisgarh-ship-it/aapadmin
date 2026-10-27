@@ -38,17 +38,22 @@ export function parseIds(csv) {
   return [...new Set(String(csv).split(",").map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))];
 }
 
-// Constrain contacts to a caller's home zone: districts directly under the
-// zone, or under a lok_sabha under the zone. Returns { where, params } (an
-// AND-fragment) or an empty match when no zone is set.
+// Constrain contacts to a Zone using the Contact Page's own definition of a
+// contact's Zone (the same COALESCE the Contact List / export shows in its Zone
+// column): the contact's OWN Zone when one is set, otherwise the Zone its district
+// belongs to (district → Lok Sabha → Zone). Reading both from the contacts row at
+// query time means a contact whose Zone is edited on the Contact Page moves to the
+// new Zone's callers immediately. Returns { where, params } (an AND-fragment) or an
+// empty match when no zone is set.
 export function zoneMatch(zoneId, alias = "c") {
   if (!zoneId) return { where: "", params: [] };
   const c = alias ? `${alias}.` : "";
   return {
-    where: ` AND ${c}district_id IN (
-      SELECT d.id FROM locations d WHERE d.type = 'district'
-        AND (d.parent_id = ?
-             OR d.parent_id IN (SELECT ls.id FROM locations ls WHERE ls.type = 'lok_sabha' AND ls.parent_id = ?)))`,
+    where: ` AND (${c}zone_id = ?
+      OR (${c}zone_id IS NULL AND ${c}district_id IN (
+        SELECT d.id FROM locations d
+          JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+         WHERE d.type = 'district' AND ls.parent_id = ?)))`,
     params: [zoneId, zoneId],
   };
 }
