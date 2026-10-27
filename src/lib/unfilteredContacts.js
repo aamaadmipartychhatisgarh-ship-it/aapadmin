@@ -898,3 +898,13 @@ export async function deleteUnfilteredContacts({ ids = [], allMatching = false, 
     conn.release();
   }
 }
+
+// Release (no log) of one Unfiltered Call: validates that it is the caller's own, still-pending call. It changes
+// nothing - like the Regular Calls release, no log row is written and the assignment is kept; the call stays
+// in the caller's queue.
+export async function releaseUnfilteredCall({ id, callerId }) {
+  const [row] = await query("SELECT id, assigned_to_user_id, completed_at FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
+  if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) return { status: 404, message: "This call is not assigned to you." };
+  if (row.completed_at) return { status: 409, message: "This call is already completed." };
+  return { status: 200, message: "Released without logging." };
+}

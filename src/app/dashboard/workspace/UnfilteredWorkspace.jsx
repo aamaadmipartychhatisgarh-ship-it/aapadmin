@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight, Pencil } from "lucide-react";
+import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight, Pencil, X } from "lucide-react";
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -185,6 +185,26 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     } finally {
       submitLock.current = false;
       setSubmitting(false);
+    }
+  }
+
+  // Release (no log): let go of the current call without logging it - same as Regular Calls. Nothing is saved on the call;
+  // it stays in the queue, and is not offered as "next" again this session.
+  async function releaseNoLog() {
+    if (!active || submitting || submitLock.current) return;
+    submitLock.current = true; setSubmitting(true); setError("");
+    try {
+      const r = await fetch(`/api/unfiltered-calls/${active.id}/release`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.message || "Could not release the call."); if (r.status === 404 || r.status === 409) { setActive(null); load(); } return; }
+      attemptedRef.current.add(active.id);
+      setActive(null);
+      await load("pending");
+      setMessage("Call released without logging. It stays in your queue.");
+    } catch {
+      setError("Could not release the call. Please try again.");
+    } finally {
+      submitLock.current = false; setSubmitting(false);
     }
   }
 
@@ -444,6 +464,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                 </div>
               </div>
               <div className="flex items-center justify-between gap-3 mt-5 flex-wrap">
+                <button onClick={releaseNoLog} disabled={submitting} data-testid="uw-release" className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center gap-2"><X size={16} /> Release (no log)</button>
                 <button onClick={() => { setActive(null); setError(""); }} disabled={submitting} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                 <button onClick={submit} disabled={submitting} data-testid="uw-save"
                   className="px-6 py-2.5 bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white font-semibold rounded-xl flex items-center gap-2">
