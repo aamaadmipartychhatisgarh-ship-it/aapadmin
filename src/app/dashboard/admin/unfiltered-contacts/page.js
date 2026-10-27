@@ -176,6 +176,33 @@ export default function UnfilteredContactsPage() {
   const [refreshKey, setRefreshKey] = useState(0); // re-reads Assigned Calls after an import
   const [unassigning, setUnassigning] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [callers, setCallers] = useState([]);
+  useEffect(() => {
+    if (!ready || !allowed) return;
+    fetch("/api/unfiltered-contacts/assignments", { cache: "no-store" }).then((r) => r.json())
+      .then((d) => setCallers((d.callers || []).filter((c) => c.eligible))).catch(() => {});
+  }, [ready, allowed, refreshKey]);
+
+  async function assignTo(r, callerId) {
+    if (unassigning || !callerId) return;
+    const target = callers.find((c) => String(c.user_id) === String(callerId));
+    if (r.assigned_to && !window.confirm(`Reassign ${r.person_name || r.phone_key} from ${r.assigned_to} to ${target?.caller_name}? It will leave ${r.assigned_to}'s list. The contact's details and call history are kept.`)) return;
+    setUnassigning(r.id); setNotice(null);
+    try {
+      const res = await fetch(`/api/unfiltered-contacts/${r.id}/assignment`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caller_id: Number(callerId), expected_caller_id: r.assigned_to_user_id || 0 }),
+      });
+      const d = await res.json().catch(() => ({}));
+      setNotice({ err: !res.ok, text: res.ok ? `${r.person_name || r.phone_key}: ${d.message}` : (d.message || "Could not assign the contact.") });
+      await load();
+      setRefreshKey((k) => k + 1);
+    } catch {
+      setNotice({ err: true, text: "Could not assign the contact — network error." });
+    } finally {
+      setUnassigning(null);
+    }
+  }
 
   async function removeAssignment(r) {
     if (unassigning) return;
@@ -293,6 +320,13 @@ export default function UnfilteredContactsPage() {
                   <td className="px-4 py-2 text-xs whitespace-nowrap" data-testid="unfiltered-assignee">
                     {r.assigned_to ? <span className="font-medium text-gray-800">{r.assigned_to}</span> : <span className="text-gray-400">Unassigned</span>}
                     {r.assigned_to && <div className={r.completed_at ? "text-emerald-700" : "text-amber-700"}>{r.completed_at ? `Completed${r.call_status_name ? ` · ${r.call_status_name}` : ""}` : "Pending"}</div>}
+                    {!r.completed_at && (
+                      <select value="" onChange={(e) => assignTo(r, e.target.value)} disabled={unassigning === r.id || !callers.length} aria-label="Assign to caller" data-testid="unfiltered-assign-select"
+                        className="mt-1 block max-w-[150px] border border-gray-200 rounded px-1 py-0.5 text-[11px] bg-white">
+                        <option value="">{r.assigned_to ? "Reassign to…" : "Assign to…"}</option>
+                        {callers.filter((c) => String(c.user_id) !== String(r.assigned_to_user_id)).map((c) => <option key={c.user_id} value={c.user_id}>{c.caller_name}</option>)}
+                      </select>
+                    )}
                     {r.assigned_to && (
                       <button type="button" onClick={() => removeAssignment(r)} disabled={unassigning === r.id} data-testid="unfiltered-unassign"
                         className="mt-1 text-[11px] font-semibold text-red-600 hover:underline disabled:opacity-50">

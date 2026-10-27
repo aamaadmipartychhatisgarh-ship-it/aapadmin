@@ -751,3 +751,38 @@ export async function removeUnfilteredAssignment({ id, expectedCallerId = null }
     conn.release();
   }
 }
+
+// Assign (or reassign) ONE Unfiltered Contact to a selected, active Caller. The assignee is a single
+// column on the row, so a contact can only ever be mapped to one caller - repeating the operation
+// (same caller) is a no-op, and a reassignment replaces the previous caller in the same locked
+// write (the old caller's list loses it immediately). Only the assignment columns change: the
+// contact's details, its linked Contact and the call history (kept against the callers who made the
+// calls) are untouched. `expectedCallerId` (optional) guards against a stale screen: it must still
+// be the current assignee (use 0 for "expected unassigned").
+export async function assignUnfilteredToCaller({ id, callerId, expectedCallerId = undefined, byUserId = null }) {
+  await ensureUnfilteredCallLogSchema();
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [[caller]] = await conn.query("SELECT id, username FROM users WHERE id = ? AND role = 'caller' AND is_active = 1", [Number(callerId) || 0]);
+    if (!caller) { await conn.rollback(); return { status: 400, message: "Please select an active Caller." }; }
+    const [[row]] = await conn.query(`SELECT u.id, u.assigned_to_user_id, u.completed_at, (${NOT_IN_CONTACTS("u")}) AS not_contact FROM unfiltered_contacts u WHERE u.id = ? FOR UPDATE`, [Number(id) || 0]);
+    if (!row) { await conn.rollback(); return { status: 404, message: "Unfiltered contact not found." }; }
+    const cur = row.assigned_to_user_id == null ? 0 : Number(row.assigned_to_user_id);
+    if (expectedCallerId !== undefined && Number(expectedCallerId) !== cur) {
+      await conn.rollback();
+      return { status: 409, message: "This contact's assignment has changed. Please refresh and try again." };
+    }
+    if (cur === Number(caller.id)) { await conn.rollback(); return { status: 200, message: `Already assigned to ${caller.username}.`, no_change: true, caller_id: caller.id, previous_caller_id: cur || null }; }
+    if (row.completed_at) { await conn.rollback(); return { status: 409, message: "This call is already completed and cannot be reassigned." }; }
+    if (!Number(row.not_contact)) { await conn.rollback(); return { status: 409, message: "This number is already a regular Contact and is no longer callable here." }; }
+    await conn.query("UPDATE unfiltered_contacts SET assigned_to_user_id = ?, assigned_at = NOW(), assigned_by = ? WHERE id = ?", [caller.id, byUserId || null, row.id]);
+    await conn.commit();
+    return { status: 200, message: cur ? `Reassigned to ${caller.username}.` : `Assigned to ${caller.username}.`, caller_id: caller.id, caller_name: caller.username, previous_caller_id: cur || null };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
