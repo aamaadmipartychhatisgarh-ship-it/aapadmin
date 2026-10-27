@@ -8,7 +8,8 @@ import {
 } from "@/lib/registrationSchema";
 import { readRegSession, resolveCampaignWorkerById } from "@/lib/regLinkAuth";
 import { blockBelongsToAssembly } from "@/lib/politicalLocation";
-import { phoneKey } from "@/lib/phone";
+import { phoneKey, last10Sql } from "@/lib/phone";
+import { ALREADY_A_WORKER, findExistingWorker, findContactByPhoneKey, withNamedLock, regPhoneKey } from "@/lib/registrationMatch";
 import { isMobileVerified, consumeVerification, otpConfigured } from "@/lib/registrationOtp";
 import { toPublicRegistrationPhoto, fromPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
 
@@ -421,48 +422,61 @@ export async function submitPublicRegistration(req, token) {
     // The registration form has no Designation field: any designation_id sent is
     // ignored, so registering never assigns a designation or starts an approval.
 
-    // One mobile number is one person per drive. A repeat is reported plainly
-    // (with who first registered them) instead of silently creating a duplicate
-    // that would inflate a worker's ranking.
-    const [dupe] = await query(
-      `SELECT p.id, w.name AS worker_name
-         FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worker_id
-        WHERE p.campaign_id = ? AND p.mobile = ? AND p.status = 'active' LIMIT 1`,
-      [link.campaign_id, mobile]
-    );
-    if (dupe) {
+    // One mobile number is one person per drive - matched on the NORMALISED number (last 10 digits), so a
+    // different formatting of the same number cannot slip through. A repeat is reported plainly (with who
+    // first registered them) instead of silently creating a duplicate that would inflate a worker's ranking.
+    const key = regPhoneKey(mobile) || mobile;
+    const locked = await withNamedLock(`regp:${link.campaign_id}:${key}`, async () => {
+      const [dupe] = await query(
+        `SELECT p.id, w.name AS worker_name
+           FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worker_id
+          WHERE p.campaign_id = ? AND ${last10Sql("p.mobile")} = ? AND p.status = 'active' LIMIT 1`,
+        [link.campaign_id, key]
+      );
+      if (dupe) return { dupe };
+      // Someone who wants to become a Worker but already IS one (karyakarta / Worker record / Contact linked
+      // to a Worker) is not registered a second time.
+      if (personType === "worker") {
+        const w = await findExistingWorker(link.campaign_id, key);
+        if (w) return { alreadyWorker: true };
+      }
+      // Mobile verification, when the drive demands it. The proof is looked up in the database against THIS
+      // number - never taken from a "verified: true" the client sent.
+      let verificationId = null;
+      const needsOtp = !!link.otp_required && (await otpConfigured());
+      if (needsOtp) {
+        verificationId = await isMobileVerified(mobile);
+        if (!verificationId) return { otpMissing: true };
+      }
+      // A Contact already holding this number is LINKED (reg_people.contact_id) - no second contact is created
+      // and the Contact's own details are never overwritten by what was typed here.
+      const contact = await findContactByPhoneKey(key);
+      const insertCols = `campaign_id, worker_id, person_type, name, mobile, address, assembly_id, assembly_name,
+          ward_number, ward_name, block_id, area_booth, wants_worker, worker_rating, photo_url,
+          mobile_verified, status, source_ip, registered_at, contact_id`;
+      const insertArgs = [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
+         assemblyId, assemblyName, ward, wardName, blockId, areaBooth, wantsWorker, workerRating, photoUrl,
+         verificationId ? 1 : 0, ip, regNow(), contact?.id || null];
+      await query(`INSERT INTO reg_people (${insertCols}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?)`, insertArgs);
+      return { verificationId, contactId: contact?.id || null };
+    });
+    if (locked.busy) {
+      return NextResponse.json({ message: "Another entry for this number is being saved. Please try again in a moment." }, { status: 409, headers: NO_STORE });
+    }
+    const out = locked.value;
+    if (out.dupe) {
       return NextResponse.json(
-        { message: `This mobile number is already registered${dupe.worker_name ? ` (added by ${dupe.worker_name})` : ""}.`, duplicate: true },
+        { message: `This mobile number is already registered${out.dupe.worker_name ? ` (added by ${out.dupe.worker_name})` : ""}.`, duplicate: true },
         { status: 409, headers: NO_STORE }
       );
     }
-
-    // Mobile verification, when the drive demands it. The proof is looked up in
-    // the database against THIS number — never taken from a "verified: true"
-    // the client sent, which would make the whole step decorative.
-    let verificationId = null;
-    const needsOtp = !!link.otp_required && (await otpConfigured());
-    if (needsOtp) {
-      verificationId = await isMobileVerified(mobile);
-      if (!verificationId) {
-        return NextResponse.json(
-          { message: "Please verify the mobile number first.", otp_required: true },
-          { status: 403, headers: NO_STORE }
-        );
-      }
+    if (out.alreadyWorker) {
+      return NextResponse.json({ message: ALREADY_A_WORKER, duplicate: true, already_worker: true }, { status: 409, headers: NO_STORE });
     }
-
-    const insertCols = `campaign_id, worker_id, person_type, name, mobile, address, assembly_id, assembly_name,
-          ward_number, ward_name, block_id, area_booth, wants_worker, worker_rating, photo_url,
-          mobile_verified, status, source_ip, registered_at`;
-    const insertArgs = [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
-       assemblyId, assemblyName, ward, wardName, blockId, areaBooth, wantsWorker, workerRating, photoUrl,
-       verificationId ? 1 : 0, ip, regNow()];
-
-    await query(
-      `INSERT INTO reg_people (${insertCols}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?)`,
-      insertArgs
-    );
+    if (out.otpMissing) {
+      return NextResponse.json({ message: "Please verify the mobile number first.", otp_required: true }, { status: 403, headers: NO_STORE });
+    }
+    const verificationId = out.verificationId;
     // Spend the proof so one verification cannot be replayed to push a second
     // person through on the same number.
     await consumeVerification(verificationId);
@@ -523,8 +537,8 @@ export async function updateOwnRegistration(req, token) {
     const v = checked.v;
 
     const [dupe] = await query(
-      "SELECT id FROM reg_people WHERE campaign_id = ? AND mobile = ? AND status = 'active' AND id <> ? LIMIT 1",
-      [link.campaign_id, v.mobile, id]
+      `SELECT id FROM reg_people WHERE campaign_id = ? AND ${last10Sql("mobile")} = ? AND status = 'active' AND id <> ? LIMIT 1`,
+      [link.campaign_id, regPhoneKey(v.mobile) || v.mobile, id]
     );
     if (dupe) return NextResponse.json({ message: "This mobile number is already registered.", duplicate: true }, { status: 409, headers: NO_STORE });
 

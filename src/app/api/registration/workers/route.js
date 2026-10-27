@@ -7,6 +7,7 @@ import { phoneKey, last10Sql } from "@/lib/phone";
 import { getWorkerRanking, countWorkers } from "@/lib/registrationStats";
 import { workerScopeCond } from "@/lib/registrationScope";
 import { buildRegCredentials } from "@/lib/regCredentials";
+import { ALREADY_A_WORKER, findExistingWorker, findContactByPhoneKey, withNamedLock } from "@/lib/registrationMatch";
 
 // A worker link is an OTP-gated login (the karyakarta signs in with THIS mobile
 // to use their link), so it MUST carry a usable number — a link created without
@@ -98,41 +99,67 @@ export async function POST(req) {
       const name = cred.username.slice(0, 160); // tidied Name = username
       if (!mobile) { skipped.push({ name, mobile: String(e.mobile || "").trim() || null, reason: "needs a valid 10-digit mobile number" }); continue; }
       const passwordHash = await bcrypt.hash(cred.password, 10);
+      const resetCreds = d.reset_credentials === true;
 
-      // One account per mobile within a drive: re-generating for the SAME person
-      // UPDATES their credentials rather than creating a duplicate. Match on the
-      // last 10 digits so an older-format stored number still dedups.
-      const [sameMobile] = await query(`SELECT id FROM reg_workers WHERE campaign_id = ? AND ${last10Sql("mobile")} = ? LIMIT 1`, [campaignId, mobile]);
-      // Username (= Name) must be unique within the drive: a different person with
-      // the same name is REJECTED so two accounts never share one login identity.
-      const [sameName] = await query(
-        `SELECT id FROM reg_workers WHERE campaign_id = ? AND username = ? ${sameMobile ? "AND id <> ?" : ""} LIMIT 1`,
-        sameMobile ? [campaignId, name, sameMobile.id] : [campaignId, name]
-      );
-      if (sameName) { skipped.push({ name, mobile, reason: "a different karyakarta with this name already exists" }); continue; }
+      // Everything from the duplicate check to the insert runs under a per-(drive, normalised mobile)
+      // lock, so two simultaneous submissions of the same number can never both pass the check; the
+      // UNIQUE (drive, mobile) key is the final backstop.
+      const outcome = await withNamedLock(`regw:${campaignId}:${mobile}`, async () => {
+        // ALREADY A WORKER (matched on the normalised mobile): a karyakarta of this drive, a field Worker
+        // record, or a Contact linked to a Worker. Never a second Worker for the same person. (An explicit
+        // reset_credentials request re-issues the login of THIS drive's existing karyakarta instead.)
+        const existingWorker = await findExistingWorker(campaignId, mobile);
+        if (existingWorker && !(resetCreds && existingWorker.kind === "karyakarta")) return { already: true };
+        const sameMobile = existingWorker?.kind === "karyakarta" ? { id: existingWorker.id } : null;
 
-      let workerId;
-      if (sameMobile) {
-        // Re-generating a password resets its 3-month validity from now (§6).
-        await query(
-          `UPDATE reg_workers SET name = ?, username = ?, password_hash = ?, password_set_at = NOW(), status = 'active' WHERE id = ?`,
-          [name, name, passwordHash, sameMobile.id]
+        // Username (= Name) must be unique within the drive: a different person with the same name is
+        // REJECTED so two accounts never share one login identity.
+        const [sameName] = await query(
+          `SELECT id FROM reg_workers WHERE campaign_id = ? AND username = ? ${sameMobile ? "AND id <> ?" : ""} LIMIT 1`,
+          sameMobile ? [campaignId, name, sameMobile.id] : [campaignId, name]
         );
-        workerId = sameMobile.id;
-      } else {
-        const res = await query(
-          `INSERT INTO reg_workers (campaign_id, name, mobile, token, username, password_hash, password_set_at, ward_number, area_booth, created_by)
-           VALUES (?,?,?,?,?,?,NOW(),?,?,?)`,
-          [campaignId, name, mobile, newLinkToken(), name, passwordHash, clip(e.ward_number, 60), clip(e.area_booth, 160), session?.user?.id || null]
-        );
-        workerId = res.insertId;
-        // The User ID is derived from the immutable row id — assigned once, never regenerated.
-        await query(`UPDATE reg_workers SET worker_code = ? WHERE id = ?`, [workerCodeFor(name, workerId), workerId]);
-      }
-      const [row] = await query(`SELECT id, campaign_id, name, mobile, worker_code, username, status FROM reg_workers WHERE id = ?`, [workerId]);
-      created.push({ ...row, credentials: { username: cred.username, password: cred.password }, updated: !!sameMobile });
+        if (sameName) return { nameClash: true };
+
+        let workerId;
+        try {
+          if (sameMobile) {
+            // Explicit credential reset: re-issue the password (its 3-month validity restarts, §6).
+            await query(
+              `UPDATE reg_workers SET name = ?, username = ?, password_hash = ?, password_set_at = NOW(), status = 'active' WHERE id = ?`,
+              [name, name, passwordHash, sameMobile.id]
+            );
+            workerId = sameMobile.id;
+          } else {
+            // A matching Contact (a person already in the Contact List who is not yet a Worker) is LINKED
+            // by contact_id - no second contact is created and its data is not touched.
+            const contact = await findContactByPhoneKey(mobile);
+            const res = await query(
+              `INSERT INTO reg_workers (campaign_id, name, mobile, token, username, password_hash, password_set_at, ward_number, area_booth, created_by, contact_id)
+               VALUES (?,?,?,?,?,?,NOW(),?,?,?,?)`,
+              [campaignId, name, mobile, newLinkToken(), name, passwordHash, clip(e.ward_number, 60), clip(e.area_booth, 160), session?.user?.id || null, contact?.id || null]
+            );
+            workerId = res.insertId;
+            // The User ID is derived from the immutable row id — assigned once, never regenerated.
+            await query(`UPDATE reg_workers SET worker_code = ? WHERE id = ?`, [workerCodeFor(name, workerId), workerId]);
+          }
+        } catch (err) {
+          if (err?.code === "ER_DUP_ENTRY") return /username/i.test(err.sqlMessage || err.message || "") ? { nameClash: true } : { already: true };
+          throw err;
+        }
+        return { workerId, updated: !!sameMobile };
+      });
+      if (outcome.busy) { skipped.push({ name, mobile, reason: "another request for this number is in progress — try again" }); continue; }
+      const res = outcome.value;
+      if (res.already) { skipped.push({ name, mobile, reason: ALREADY_A_WORKER, already_worker: true }); continue; }
+      if (res.nameClash) { skipped.push({ name, mobile, reason: "a different karyakarta with this name already exists" }); continue; }
+      const [row] = await query(`SELECT id, campaign_id, name, mobile, worker_code, username, status, contact_id FROM reg_workers WHERE id = ?`, [res.workerId]);
+      created.push({ ...row, credentials: { username: cred.username, password: cred.password }, updated: res.updated });
     }
 
+    // A single worker who is already a Worker is a clear, exact validation error (not a silent skip).
+    if (!created.length && entries.length === 1 && skipped[0]?.already_worker) {
+      return NextResponse.json({ message: ALREADY_A_WORKER, already_worker: true, skipped }, { status: 409, headers: NO_STORE });
+    }
     return NextResponse.json({ created, skipped, count: created.length }, { status: 201, headers: NO_STORE });
   } catch (e) {
     console.error("[registration] workers POST error:", e);

@@ -21,7 +21,7 @@ export async function POST(req, { params }) {
     }
     const { id } = await params;
     const r = await convertRegistrationToContact({ registrationId: id, userId: session.user.id });
-    if (r.status === 201) {
+    if (r.status === 201 || r.status === 200) {
       await logAudit(session, {
         action: "registration.convert_to_contact", entityType: "reg_people", entityId: Number(id),
         details: { contact_id: r.contact_id },

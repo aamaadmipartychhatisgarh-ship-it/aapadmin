@@ -853,6 +853,22 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
   // from the Contacts/registration photo store, matched by mobile only. null =
   // nothing found (no photo shown). The admin never re-uploads it.
   const [photoHit, setPhotoHit] = useState(null);
+  // Live duplicate check on the normalised mobile: "Already a Worker" blocks the save (the server re-checks);
+  // an existing Contact that is not a Worker is just linked.
+  const [match, setMatch] = useState(null);
+  useEffect(() => {
+    const digits = (form.mobile || "").replace(/\D/g, "");
+    if (mode !== "single" || digits.length < 10 || !drive) { setMatch(null); return undefined; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/registration/workers/check?mobile=${encodeURIComponent(digits.slice(-10))}&campaign_id=${drive}`, { cache: "no-store" });
+        const d = await r.json().catch(() => ({}));
+        if (alive) setMatch(r.ok ? d : null);
+      } catch { if (alive) setMatch(null); }
+    }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [form.mobile, mode, drive]);
   useEffect(() => {
     const digits = (form.mobile || "").replace(/\D/g, "");
     if (digits.length < 10) { setPhotoHit(null); return; }
@@ -963,6 +979,8 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
           <input className={inputCls} placeholder="Worker name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <input className={inputCls} placeholder="Mobile number *" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+          {match?.already_worker && <p className="text-xs font-semibold text-red-600 mt-1" data-testid="already-worker">Already a Worker</p>}
+          {!match?.already_worker && match?.contact && <p className="text-xs text-emerald-700 mt-1" data-testid="contact-link-note">Existing contact: {match.contact.name} — will be linked, no duplicate contact is created.</p>}
           <input className={inputCls} placeholder="Ward no." value={form.ward_number} onChange={(e) => setForm({ ...form, ward_number: e.target.value })} />
           <input className={inputCls} placeholder="Area / Booth" value={form.area_booth} onChange={(e) => setForm({ ...form, area_booth: e.target.value })} />
           {/* Existing photo for this mobile, fetched automatically (§1) — shown, not
@@ -987,7 +1005,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
 
       <div className="flex justify-end gap-2 mt-3">
         <button onClick={onClose} className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>Cancel</button>
-        <button onClick={save} disabled={saving} className={`${btnCls} text-white`} style={{ background: BRAND }}>
+        <button onClick={save} disabled={saving || (mode === "single" && !!match?.already_worker)} className={`${btnCls} text-white`} style={{ background: BRAND }}>
           {saving ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}Create credentials
         </button>
       </div>

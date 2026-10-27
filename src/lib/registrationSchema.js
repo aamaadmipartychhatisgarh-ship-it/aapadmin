@@ -242,6 +242,11 @@ export async function ensureRegistrationSchema() {
     // by id — the reliable key — while ward_name keeps the readable label.
     await ensureColumn("reg_people", "block_id", "INT NULL");
     await ensureIndex("reg_people", "idx_reg_people_block", "block_id");
+    // The EXISTING Contact this registration was matched to by its normalised phone number (linked, never
+    // duplicated, never overwritten). NULL = no matching Contact. Not the same as converted_contact_id,
+    // which marks a Contact CREATED / adopted through "Convert to Contact".
+    await ensureColumn("reg_people", "contact_id", "INT NULL");
+    await ensureIndex("reg_people", "idx_reg_people_contact", "contact_id");
 
     ensured = true;
   } catch (e) {

@@ -90,8 +90,18 @@ export async function convertRegistrationToContact({ registrationId, userId }) {
       `SELECT id, person_name FROM contacts WHERE ${last10Sql("phone_number")} = ?${notRejected} LIMIT 1`, [mobile]
     );
     if (dups.length) {
-      await conn.rollback();
-      return fail(409, `A contact with this mobile number already exists (${dups[0].person_name || "Contact"} #${dups[0].id}). It was not converted again.`, { existing_contact_id: dups[0].id });
+      // The person already IS a Contact: LINK this registration to it - no second contact is created and the
+      // Contact's own data is left exactly as it is (only its empty registration back-link is filled).
+      const existingId = dups[0].id;
+      const [[taken]] = await conn.query("SELECT id FROM reg_people WHERE converted_contact_id = ? AND id <> ? LIMIT 1", [existingId, p.id]);
+      if (taken) {
+        await conn.rollback();
+        return fail(409, `A contact with this mobile number already exists (${dups[0].person_name || "Contact"} #${existingId}) and is already linked to another registration. It was not converted again.`, { existing_contact_id: existingId });
+      }
+      await conn.query("UPDATE reg_people SET converted_contact_id = ?, contact_id = ?, converted_at = NOW(), converted_by = ? WHERE id = ? AND converted_contact_id IS NULL", [existingId, existingId, userId || null, p.id]);
+      await conn.query("UPDATE contacts SET source_registration_id = ? WHERE id = ? AND source_registration_id IS NULL", [p.id, existingId]);
+      await conn.commit();
+      return { status: 200, message: `Linked to the existing contact ${dups[0].person_name || ""} (#${existingId}) — no new contact was created.`, contact_id: existingId, linked_existing: true };
     }
     // Location: the registration's Assembly (+ its District / Lok Sabha / Zone
     // above it) and Block (stored on contacts as ward_id, the Block level).
