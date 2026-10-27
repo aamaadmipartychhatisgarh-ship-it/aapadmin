@@ -130,6 +130,11 @@ export async function PUT(req, { params }) {
       // dedicated photo endpoint.
       sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]);
     }
+    // Same as the bulk Distribute: a (re)assigned / returned contact leaves the previous caller's queue.
+    if ("assigned_to_user_id" in data) {
+      if (existingColumns.has("locked_by_user_id")) sets.push("locked_by_user_id = NULL");
+      if (existingColumns.has("locked_at")) sets.push("locked_at = NULL");
+    }
     if ("assigned_to_user_id" in data && existingColumns.has("assigned_at")) {
       sets.push(data.assigned_to_user_id ? "assigned_at = NOW()" : "assigned_at = NULL");
     }

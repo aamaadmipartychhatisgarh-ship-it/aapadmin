@@ -11,6 +11,7 @@ import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { isContactNotInterested } from "@/lib/contactExtras";
 import { isContactRepeatOff } from "@/lib/repeatOff";
+import { assignSingleContact } from "@/lib/contactAssign";
 import { resolveContactCard } from "@/lib/contactCard";
 import { syncContactDesignations, designationsForGeneralEdit } from "@/lib/contactDesignations";
 import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
@@ -188,11 +189,24 @@ export async function PUT(req, { params }) {
     // even when only another field changed (e.g. designation). Drop it when it's
     // unchanged so an unrelated edit doesn't needlessly restamp assigned_at /
     // assigned_by — keeping behavior identical to the supervisor route.
-    if (isAdminTier && "assigned_to_user_id" in data) {
-      const [cur] = await query("SELECT assigned_to_user_id FROM contacts WHERE id = ?", [id]);
-      const current = cur?.assigned_to_user_id ?? null;
-      const incoming = data.assigned_to_user_id || null;
-      if (String(current ?? "") === String(incoming ?? "")) delete data.assigned_to_user_id;
+    // ASSIGNMENT goes through the SAME logic as the bulk Distribute (lib/contactAssign): the assignee must
+    // be an active caller, Wrong Number / pending / Not Interested / 10+ Switch-Off contacts are refused, the
+    // row is locked, the previous caller's lock is cleared and assigned_at / assigned_by are stamped. Who may
+    // assign is also the bulk rule: an admin OR a user granted the Contacts page.
+    let assignedNow = false;
+    if ("assigned_to_user_id" in data) {
+      const canAssign = await pageAllowed(session, "contacts", isAdminTier);
+      if (canAssign) {
+        const ar = await assignSingleContact(session, id, data.assigned_to_user_id || null);
+        if (ar.status !== 200) return NextResponse.json({ message: ar.message }, { status: ar.status });
+        assignedNow = !!ar.changed && !!ar.assigned_to_user_id;
+        delete data.assigned_to_user_id;
+        if (Object.keys(data).length === 0) {
+          return NextResponse.json({ ok: true, assignment: ar.message, contact: await resolveContactCard(id) });
+        }
+      } else {
+        delete data.assigned_to_user_id; // not allowed to assign: ignored, as before
+      }
     }
 
     // Block/Ward is entered as free text in My Workplace. Resolve the typed name
@@ -323,15 +337,13 @@ export async function PUT(req, { params }) {
     if ("wings" in data) await syncContactWings(id, data.wings);
     await applyRowWings(id, rowsRes.rows);
 
-    if (isAdminTier && "assigned_to_user_id" in data && data.assigned_to_user_id) {
-      emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
-    }
+
     // Zone moved? Visibility itself is computed live from the contact's Zone (callers'
     // Zone lists update on the next request); an assignment to a caller of the OLD Zone
     // is released so it also leaves that caller's work queue.
     let releasedFrom = null;
     const zoneAfter = await contactEffectiveZoneId(id);
-    if (String(zoneBefore ?? "") !== String(zoneAfter ?? "") && !(isAdminTier && data.assigned_to_user_id)) {
+    if (String(zoneBefore ?? "") !== String(zoneAfter ?? "") && !assignedNow) {
       releasedFrom = await releaseOutOfZoneAssignment(session, id, zoneAfter);
     }
     // Return the FULLY-RESOLVED record (all *_name display fields, assigned-to

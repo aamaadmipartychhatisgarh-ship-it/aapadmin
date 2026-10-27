@@ -756,7 +756,8 @@ export default function ContactsModule({ session, mode }) {
       body: JSON.stringify({ assigned_to_user_id: userId || null }),
     });
     if (!r.ok) { const d = await r.json().catch(() => ({})); setError(d.message || "Assign failed"); }
-    load();
+    else { setError(""); setMessage(userId ? "Contact assigned." : "Contact returned to the pool."); }
+    load(); loadCounts();
   }
 
   if (scopeLoading) {
