@@ -1,7 +1,6 @@
 "use client";
 
 import { Plus, X } from "lucide-react";
-import { wingShortLabel } from "@/lib/wingLabel";
 
 // The Designation + Wing field of the Add / Edit Contact forms: ONE row = ONE Designation paired
 // with ITS Wing ("Main Organisation" or a Master-Data Wing). "Add Designation" inserts another
@@ -13,7 +12,9 @@ const sel = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white
 export default function DesignationWingRows({ rows, onChange, designations = [], wingMaster = [] }) {
   const mainLc = new Set(wingMaster.filter((w) => w.is_main).map((w) => String(w.name).trim().toLowerCase()));
   const wings = wingMaster.filter((w) => !w.is_main);
-  const mainLabel = wingMaster.find((w) => w.is_main)?.name || "Main Organisation";
+  // The Main Wing's name comes from Master Data (Administration -> Master Data -> Wing) - never a hardcoded list. While the
+  // master is still loading (or unavailable) the blank option reads "Main (no Wing)" so a selection is always possible.
+  const mainLabel = wingMaster.find((w) => w.is_main)?.name || (wingMaster.length ? "Main Wing" : "Main (no Wing)");
   const wingsOf = (d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).map((w) => String(w).trim().toLowerCase());
   const optionsFor = (row, idx) => {
     const taken = new Set(rows.filter((_, i) => i !== idx).map((r) => String(r.designation_id || "")).filter(Boolean));
@@ -31,36 +32,36 @@ export default function DesignationWingRows({ rows, onChange, designations = [],
   return (
     <div className="space-y-2" data-testid="designation-wing-rows">
       {rows.map((r, idx) => (
-        <div key={idx} className="flex items-center gap-2" data-testid="designation-wing-row">
-          <div className="flex-1 min-w-0">
-            {idx === 0 && <label className="block text-xs font-semibold text-gray-500 mb-1">Wing</label>}
-            <select className={sel} aria-label={`Wing ${idx + 1}`} data-testid="dw-wing" value={r.wing || ""}
-              onChange={(e) => {
-                const wing = e.target.value;
-                // Changing the Wing clears only THIS row's designation when it doesn't belong to the new Wing.
-                const d = designations.find((x) => String(x.id) === String(r.designation_id));
-                const w = wing.trim().toLowerCase();
-                const ok = !d || (w ? wingsOf(d).includes(w) : wingsOf(d).every((x) => mainLc.has(x)));
-                set(idx, { wing, designation_id: ok ? r.designation_id : "" });
-              }}>
-              <option value="">{mainLabel}</option>
-              {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{wingShortLabel(w.name)}</option>)}
-            </select>
+        <div key={idx} className="grid grid-cols-[1fr_auto] gap-2 items-start border border-gray-100 rounded-xl p-2.5 bg-gray-50/60" data-testid="designation-wing-row">
+          <div className="space-y-2 min-w-0">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Wing{idx === 0 ? "" : ` ${idx + 1}`}</label>
+              <select className={sel} aria-label={`Wing ${idx + 1}`} data-testid="dw-wing" value={r.wing || ""} title={r.wing || mainLabel}
+                onChange={(e) => {
+                  const wing = e.target.value;
+                  // Changing the Wing clears only THIS row's designation when it doesn't belong to the new Wing.
+                  const d = designations.find((x) => String(x.id) === String(r.designation_id));
+                  const w = wing.trim().toLowerCase();
+                  const ok = !d || (w ? wingsOf(d).includes(w) : wingsOf(d).every((x) => mainLc.has(x)));
+                  set(idx, { wing, designation_id: ok ? r.designation_id : "" });
+                }}>
+                <option value="">{mainLabel}</option>
+                {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{w.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Designation{idx === 0 ? "" : ` ${idx + 1}`}</label>
+              <select className={sel} aria-label={`Designation ${idx + 1}`} data-testid="dw-designation" value={r.designation_id ? String(r.designation_id) : ""}
+                onChange={(e) => set(idx, { designation_id: e.target.value ? Number(e.target.value) : "" })}>
+                <option value="">Select designation…</option>
+                {optionsFor(r, idx).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="flex-[1.4] min-w-0">
-            {idx === 0 && <label className="block text-xs font-semibold text-gray-500 mb-1">Designation</label>}
-            <select className={sel} aria-label={`Designation ${idx + 1}`} data-testid="dw-designation" value={r.designation_id ? String(r.designation_id) : ""}
-              onChange={(e) => set(idx, { designation_id: e.target.value ? Number(e.target.value) : "" })}>
-              <option value="">Select designation…</option>
-              {optionsFor(r, idx).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          </div>
-          <div className={idx === 0 ? "pt-5" : ""}>
-            <button type="button" onClick={() => onChange(rows.length > 1 ? rows.filter((_, i) => i !== idx) : [{ designation_id: "", wing: "" }])}
-              className="h-9 w-9 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50" aria-label={`Remove row ${idx + 1}`} data-testid="dw-remove" title="Remove this row">
-              <X size={15} />
-            </button>
-          </div>
+          <button type="button" onClick={() => onChange(rows.length > 1 ? rows.filter((_, i) => i !== idx) : [{ designation_id: "", wing: "" }])}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50" aria-label={`Remove row ${idx + 1}`} data-testid="dw-remove" title="Remove this row">
+            <X size={15} />
+          </button>
         </div>
       ))}
       <button type="button" onClick={() => onChange([...rows, { designation_id: "", wing: "" }])} data-testid="dw-add"
