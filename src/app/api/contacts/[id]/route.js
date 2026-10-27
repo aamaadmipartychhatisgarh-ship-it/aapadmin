@@ -15,6 +15,8 @@ import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
 import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
+import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
+import { deleteLocalUpload } from "@/lib/uploadCleanup";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { callerOwnsContact } from "@/lib/callerContactAccess";
@@ -218,7 +220,7 @@ export async function PUT(req, { params }) {
 
     // Descriptive + geographic details anyone with edit rights may change.
     const DETAIL_FIELDS = ["qualification", "education_level", "vehicle", 
-      "person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id", "photo_url",
+      "person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id",
       "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id", "booth_id",
     ];
     // Queue assignment + completion state stay admin-only (not "contact details").
@@ -236,7 +238,6 @@ export async function PUT(req, { params }) {
       // the pointer here, so the contact stops showing a photo whose blob still
       // exists. Setting/removing a photo goes through the dedicated
       // /api/contacts/[id]/photo endpoint; a blank value here means "leave it".
-      if (f === "photo_url" && (data[f] == null || data[f] === "")) continue;
       sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]);
     }
     // Stamp assigned_at whenever the owner changes, so stale-reclaim can tell how
@@ -249,6 +250,16 @@ export async function PUT(req, { params }) {
     if (isAdminTier && "assigned_to_user_id" in data && existingColumns.has("assigned_by_user_id")) {
       if (data.assigned_to_user_id) { sets.push("assigned_by_user_id = ?"); vals.push(session.user.id); }
       else { sets.push("assigned_by_user_id = NULL"); }
+    }
+    // PHOTO: a general edit never changes the photo, except to attach one just uploaded in
+    // the same form (and never reverting a newer photo from a stale form) — see
+    // photoForGeneralEdit. Setting/removing a photo otherwise goes through the photo endpoint.
+    let photoSet = null, photoIgnored = false, oldPhotoForCleanup = null;
+    if ("photo_url" in data && existingColumns.has("photo_url")) {
+      const [curPhoto] = await query("SELECT photo_url FROM contacts WHERE id = ?", [id]);
+      const pd = await photoForGeneralEdit(data, curPhoto?.photo_url);
+      photoSet = pd.set; photoIgnored = pd.ignored;
+      if (photoSet) { sets.push("photo_url = ?"); vals.push(photoSet); oldPhotoForCleanup = curPhoto?.photo_url || null; }
     }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
     // Audit stamp: record WHEN this contact was last edited, so a persistence
@@ -279,9 +290,10 @@ export async function PUT(req, { params }) {
     // A new/re-uploaded photo went in with this edit — mark it verified-available
     // (its bytes are in the durable store) so Photo Data / the count reflect it
     // immediately, and it is never treated as a dead reference.
-    if ("photo_url" in data && data.photo_url) {
+    if (photoSet) {
       await ensurePhotoVerifiedColumn();
       await query("UPDATE contacts SET photo_verified = 1 WHERE id = ?", [id]).catch(() => {});
+      if (oldPhotoForCleanup && oldPhotoForCleanup !== photoSet) await deleteLocalUpload(oldPhotoForCleanup);
     }
 
     // Sync the full designation set (add/remove keeps the rest; empty clears).
@@ -305,7 +317,7 @@ export async function PUT(req, { params }) {
     // username, resolved photo) — the exact shape the list renders — so the
     // client replaces its row with fresh data and never shows a stale name.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}) });
+    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}), ...(photoIgnored ? { photo_ignored: true } : {}) });
   } catch (err) {
     console.error("contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

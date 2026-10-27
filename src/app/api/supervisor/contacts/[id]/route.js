@@ -12,6 +12,9 @@ import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDup
 import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
+import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
+import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
+import { deleteLocalUpload } from "@/lib/uploadCleanup";
 
 // Supervisor-scoped mirror of PUT /api/contacts/[id] — assign/reassign a
 // contact and edit its details, but ONLY within the supervisor's own
@@ -42,7 +45,7 @@ async function getContactColumns() {
 // Rather than add a second scope check against the requested new values,
 // geography simply isn't editable here — a supervisor can relocate/reassign
 // WHO owns a contact, not WHERE it lives.
-const DETAIL_FIELDS = ["person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id", "photo_url"];
+const DETAIL_FIELDS = ["person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id"];
 
 export async function PUT(req, { params }) {
   try {
@@ -116,7 +119,6 @@ export async function PUT(req, { params }) {
       // /api/contacts/[id]: an unrelated edit submitting an empty photo_url would
       // otherwise wipe a photo whose blob still exists. Clearing goes through the
       // dedicated photo endpoint.
-      if (f === "photo_url" && (data[f] == null || data[f] === "")) continue;
       sets.push(`${f} = ?`); vals.push(data[f] === "" ? null : data[f]);
     }
     if ("assigned_to_user_id" in data && existingColumns.has("assigned_at")) {
@@ -125,6 +127,19 @@ export async function PUT(req, { params }) {
     if ("assigned_to_user_id" in data && existingColumns.has("assigned_by_user_id")) {
       if (data.assigned_to_user_id) { sets.push("assigned_by_user_id = ?"); vals.push(session.user.id); }
       else { sets.push("assigned_by_user_id = NULL"); }
+    }
+    // PHOTO: a general edit never changes the photo, except to attach one just uploaded in the same
+    // form, and never reverting a newer photo from a stale form (see photoForGeneralEdit). The
+    // contact is read through the same territory scope as the UPDATE below.
+    let photoSet = null, photoIgnored = false, oldPhotoForCleanup = null;
+    if ("photo_url" in data && existingColumns.has("photo_url")) {
+      const sc = supervisorScopeFilter(session.user, "c");
+      const [curPhoto] = await query(`SELECT c.photo_url FROM contacts c WHERE c.id = ? ${sc.where}`, [id, ...sc.params]);
+      if (curPhoto) {
+        const pd = await photoForGeneralEdit(data, curPhoto.photo_url);
+        photoSet = pd.set; photoIgnored = pd.ignored;
+        if (photoSet) { sets.push("photo_url = ?"); vals.push(photoSet); oldPhotoForCleanup = curPhoto.photo_url || null; }
+      }
     }
     if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
     // Audit stamp (feature-detected) — when this contact was last edited.
@@ -161,6 +176,11 @@ export async function PUT(req, { params }) {
     if ("assigned_to_user_id" in data && data.assigned_to_user_id) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
     }
+    if (photoSet) {
+      await ensurePhotoVerifiedColumn();
+      await query("UPDATE contacts SET photo_verified = 1 WHERE id = ?", [id]).catch(() => {});
+      if (oldPhotoForCleanup && oldPhotoForCleanup !== photoSet) await deleteLocalUpload(oldPhotoForCleanup);
+    }
     if (designationIds !== null) await syncContactDesignations(id, designationIds);
     // Wings (Master-Data names): present → full replace, empty clears, absent → untouched.
     // The contact was already confirmed to be inside this supervisor's territory above.
@@ -168,7 +188,7 @@ export async function PUT(req, { params }) {
     await logAudit(session, { action: "contact.update", entityType: "contact", entityId: id, details: { supervisor: true, fields: Object.keys(data) } });
     // Fully-resolved record (all display names) so the client shows fresh data.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated });
+    return NextResponse.json({ ok: true, contact: updated, ...(photoIgnored ? { photo_ignored: true } : {}) });
   } catch (err) {
     console.error("supervisor contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

@@ -1672,7 +1672,10 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
       vehicle: form.vehicle || "",
       designation_ids: form.designation_ids || [], // full multi-designation set
       wings: form.wings || [], // full wing-tag set (add/remove keeps the rest)
-      photo_url: form.photo_url || null,
+      // The photo is only sent when a NEW one was picked in this form, together with the photo the
+      // form was opened with — the server then attaches it only if the contact still has that one,
+      // so a stale form can never revert a photo that was replaced meanwhile.
+      ...((form.photo_url || "") !== (contact.photo_url || "") && form.photo_url ? { photo_url: form.photo_url, photo_url_prev: contact.photo_url || null } : {}),
       ...(canEditGeo ? {
         zone_id: form.zone_id || null,
         lok_sabha_id: form.lok_sabha_id || null,

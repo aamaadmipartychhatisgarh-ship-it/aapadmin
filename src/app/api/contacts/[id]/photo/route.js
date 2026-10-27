@@ -9,6 +9,8 @@ import { hasContactPhotoColumn, hasContactPhotoUpdatedAtColumn } from "@/lib/con
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
 import { callerOwnsContact } from "@/lib/callerContactAccess";
+import { validateContactPhotoUrl } from "@/lib/contactPhotoUrl";
+import { logAudit } from "@/lib/audit";
 
 // POST /api/contacts/[id]/photo  { photo_url }
 // Saves a profile photo directly on the contact (contacts.photo_url) — no
@@ -48,7 +50,7 @@ export async function POST(req, { params }) {
     if (!(await hasContactPhotoColumn())) {
       return NextResponse.json({ message: "Contact photos are not enabled on this deployment yet." }, { status: 400 });
     }
-    const { photo_url } = await req.json();
+    const { photo_url } = await req.json().catch(() => ({}));
 
     // PHOTO PERSISTENCE RULE (spec): a Caller may upload/replace a photo but must
     // NOT be able to remove it — only a Supervisor/Admin may delete it, and it
@@ -63,6 +65,10 @@ export async function POST(req, { params }) {
         { status: 403 }
       );
     }
+    // A new photo must be one this app stored (never an arbitrary string / external URL /
+    // file that does not exist — that would leave a dangling reference).
+    const checked = await validateContactPhotoUrl(photo_url);
+    if (checked.error) return NextResponse.json({ message: checked.error }, { status: checked.transient ? 503 : 400 });
 
     const [prev] = await query("SELECT photo_url FROM contacts WHERE id = ?", [id]);
     const oldPhoto = prev?.photo_url || null;
@@ -82,6 +88,7 @@ export async function POST(req, { params }) {
     await ensurePhotoVerifiedColumn();
     await query("UPDATE contacts SET photo_verified = ? WHERE id = ?", [photo_url ? 1 : 0, id]).catch(() => {});
 
+    logAudit(session, { action: removing ? "contact.photo_remove" : "contact.photo_set", entityType: "contact", entityId: String(id), details: { photo_url: photo_url || null, previous: oldPhoto } });
     return NextResponse.json({ ok: true, photo_url: photo_url || null });
   } catch (err) {
     console.error("contact photo error:", err);
