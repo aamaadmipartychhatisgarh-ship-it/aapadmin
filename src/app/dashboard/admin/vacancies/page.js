@@ -13,9 +13,9 @@ import WingVacancies from "./WingVacancies";
 import VacancyTable, { fromMainRow, CategorySwitch } from "./VacancyTable";
 
 const BRAND = "#164FA3";
-// Default filters: Main Organisation (designations of no other Wing) at State level.
-// Must match MAIN_WING_FILTER in lib/vacancyDashboard.
-const MAIN_WING = "__main__";
+// Default filters: every Wing (all Master Data designations), all levels. "__main__" must match
+// MAIN_WING_FILTER in lib/vacancyDashboard.
+const MAIN_WING = "";
 const DEFAULT_LEVEL = ""; // all levels - the combined list spans every level
 
 function fmtDateTime(v) {
@@ -79,8 +79,8 @@ export default function VacanciesPage() {
   const [toast, setToast] = useState(null);
 
   // Filters
-  // Default view: Main Organisation at State level (the page opens on it, and
-  // returns to it on refresh / Clear) — no need to pick them by hand.
+  // Default view: All Wings, all levels, Filled + Vacant (the page opens on it, and
+  // returns to it on refresh / Clear) — straight from Master Data.
   const [wing, setWing] = useState(MAIN_WING);
   const [level, setLevel] = useState(DEFAULT_LEVEL);
   const [lokSabhaId, setLokSabhaId] = useState("");
@@ -264,7 +264,7 @@ export default function VacanciesPage() {
               chosen Wing, Level and area (from the server), and a parent change
               clears a Designation that no longer applies. */}
           <select className={selCls} aria-label="Wing" value={wing} onChange={(e) => { setWing(e.target.value); setDesignationId(""); }}>
-            {(data?.filters?.wings || [{ key: MAIN_WING, label: "Main Organisation" }]).map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+            {(data?.filters?.wings || [{ key: "", label: "All Wings" }]).map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
           </select>
           <select className={selCls} aria-label="Level" value={level} onChange={(e) => { setLevel(e.target.value); setDesignationId(""); }}>
             <option value="">All levels</option>
@@ -373,6 +373,11 @@ export default function VacanciesPage() {
             <button onClick={() => switchTab("wings")} className="text-xs text-violet-700 hover:underline" data-testid="wing-positions-note">
               Wing President / Prabhari / General Secretary posts are listed in the Wings tab →
             </button>
+          )}
+          {(data?.master_not_listed || []).length > 0 && (
+            <span className="text-xs text-gray-500" data-testid="master-not-listed" title={data.master_not_listed.map((d) => `${d.name} (${d.level || "no level"})`).join(", ")}>
+              {data.master_not_listed.length} Master Data designation{data.master_not_listed.length === 1 ? "" : "s"} without an organisational Level {data.master_not_listed.length === 1 ? "is" : "are"} not listed.
+            </span>
           )}
           {data?.capped && <span className="ml-auto text-xs text-amber-600">Showing the first {data.vacancies.length} rows — narrow the filters to see more.</span>}
         </div>

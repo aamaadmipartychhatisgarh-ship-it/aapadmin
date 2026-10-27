@@ -101,6 +101,9 @@ export async function buildVacancyDataset(session, filters = {}) {
   // A named Wing's own President / Prabhari / General Secretary positions come from
   // the Wing engine (same status + Wing responsible person as the Wings tab).
   const wingRecord = wingNorm ? wingMaster.find((w) => normW(w.name) === wingNorm && Number(w.is_main) !== 1) : null;
+  // The Wing engine's positions are merged for a named Wing AND, with no Wing filter ("All Wings"),
+  // for every configured Wing - so the one list covers all Wings straight from Master Data.
+  const includeWingEngine = !isMain && (!wingNorm || !!wingRecord);
 
   // 1) Pull every (location × designation) row for each scanned level, tagged with
   //    ancestry, and keep the level-designation lists for the filter dropdowns.
@@ -116,7 +119,9 @@ export async function buildVacancyDataset(session, filters = {}) {
     if (data.capped) throw new Error(`Too many ${LEVEL_LABEL[level]} designation holders to compute vacancies safely`);
     for (const u of data.unmapped_holders || []) if (!wingPositions.has(u.designation_id)) unmappedHolders.push({ ...u, level, level_label: LEVEL_LABEL[level] });
     for (const r of data.rows) {
-      if (wingPositions.has(r.designation_id)) { if (!f.wing) wingPositionsSkipped++; continue; }
+      // Wing President / Prabhari / General Secretary posts come from the Wing engine below (one
+      // entry per Wing x level x location), so they are skipped here and never listed twice.
+      if (wingPositions.has(r.designation_id)) { if (isMain) wingPositionsSkipped++; continue; }
       const anc = ancestryOf(index, level, r.location_id);
       // A real location whose parent chain is broken in the master (e.g. an
       // assembly with no district) — still a position, flagged for the data check.
@@ -143,8 +148,8 @@ export async function buildVacancyDataset(session, filters = {}) {
     }
   }
 
-  if (wingRecord) {
-    const wd = await buildWingVacancyDataset(session, { wing: wingRecord.name, level: f.level || undefined, status: "any" });
+  if (includeWingEngine) {
+    const wd = await buildWingVacancyDataset(session, { wing: wingRecord?.name, level: f.level || undefined, status: "any" });
     for (const p of wd.vacancies) if (levels.includes(p.level)) allRows.push(fromWingPosition(p));
   }
 
@@ -342,6 +347,16 @@ export async function buildVacancyDataset(session, filters = {}) {
       ORDER BY name`,
     validLevels
   );
+  // Enabled Master Data designations whose Level is not an organisational level scanned here (no level,
+  // or Zone): they have no State / Lok Sabha / District / Assembly / Block position to be filled or
+  // vacant, so they are reported rather than silently missing.
+  const notListed = await query(
+    `SELECT id, name, level FROM designations
+      WHERE (level IS NULL OR TRIM(level) = '' OR level NOT IN (${VACANCY_LEVELS.map(() => "?").join(",")}))
+        ${hasEnabled ? "AND (enabled = 1 OR enabled IS NULL)" : ""}
+      ORDER BY name`,
+    VACANCY_LEVELS
+  );
   const scopedUnmapped = unmappedHolders.filter((u) => !f.designationId || u.designation_id === f.designationId);
 
   // Cascading location options (by type) for the filter dropdowns.
@@ -377,6 +392,7 @@ export async function buildVacancyDataset(session, filters = {}) {
     vacancies: tableRows,
     capped,
     wing_positions_skipped: wingPositionsSkipped,
+    master_not_listed: notListed,
     designation_cleared: designationCleared,
     applied: { wing: f.wing, level: f.level, designation_id: f.designationId },
     hierarchy,
@@ -395,7 +411,7 @@ export async function buildVacancyDataset(session, filters = {}) {
       levels: VACANCY_LEVELS.map((l) => ({ key: l, label: LEVEL_LABEL[l] })),
       // Wing choices from the Wing master: Main Organisation first, then every
       // enabled Wing (one per name).
-      wings: [{ key: MAIN_WING_FILTER, label: wingMaster.find((w) => Number(w.is_main) === 1)?.name || "Main Organisation" },
+      wings: [{ key: "", label: "All Wings" }, { key: MAIN_WING_FILTER, label: wingMaster.find((w) => Number(w.is_main) === 1)?.name || "Main Organisation" },
         ...[...new Map(wingMaster.filter((w) => Number(w.is_main) !== 1 && (w.enabled == null || Number(w.enabled) === 1)).map((w) => [normW(w.name), w.name])).values()]
           .map((n) => ({ key: n, label: n }))],
     },
