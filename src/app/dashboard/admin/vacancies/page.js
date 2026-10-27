@@ -288,7 +288,13 @@ export default function VacanciesPage() {
           </select>
           <select className={selCls} aria-label="Designation" value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
             <option value="">All Designations{data?.filters?.designations ? ` (${data.filters.designations.length})` : ""}</option>
-            {(data?.filters?.designations || []).map((d) => <option key={d.level + d.id} value={d.id}>{d.name}{level ? "" : ` · ${d.level_label}`}</option>)}
+            {/* Grouped by organisational Level; within a Level the order is the Designation Master's Rank. */}
+            {level
+              ? (data?.filters?.designations || []).map((d) => <option key={d.level + d.id} value={d.id}>{d.name}</option>)
+              : [...new Set((data?.filters?.designations || []).map((d) => d.level))].map((lv) => (
+                <optgroup key={lv} label={(data.filters.designations.find((d) => d.level === lv) || {}).level_label}>
+                  {data.filters.designations.filter((d) => d.level === lv).map((d) => <option key={d.level + d.id} value={d.id}>{d.name}</option>)}
+                </optgroup>))}
           </select>
           {/* Vacant-only filters (status detail, reminders, responsible person). */}
           {!filedView && (<>

@@ -94,7 +94,8 @@ export async function buildVacancyDataset(session, filters = {}) {
   const wingNorm = f.wing && !isMain ? normW(f.wing) : null;
   const wingMatch = (wings) => {
     const ws = (wings || []).map(normW).filter(Boolean);
-    if (isMain) return ws.every((w) => mainNames.has(w));
+    // Main = no Wing at all, or mapped to the Main Wing (also when shared with other Wings).
+    if (isMain) return ws.length === 0 || ws.some((w) => mainNames.has(w));
     if (wingNorm) return ws.includes(wingNorm);
     return true;
   };
@@ -172,6 +173,11 @@ export async function buildVacancyDataset(session, filters = {}) {
     seenDes.add(k);
     designationOptions.push({ id: r.designation_id, name: r.designation_name, wing: r.designation_wing || null, wings: r.designation_wings || [], level: r.level, level_label: r.level_label });
   }
+  // Options follow the Designation Master order: organisational Level, then global Rank / Designation Order.
+  const hasRankCol = (await query("SHOW COLUMNS FROM designations LIKE 'rank'")).length > 0;
+  const optRank = new Map((await query(`SELECT id FROM designations ORDER BY ${hasRankCol ? "(`rank` IS NULL), `rank`, " : ""}(sort_order IS NULL), sort_order, name, id`)).map((r, i) => [r.id, i]));
+  const optLevel = (l) => { const i = VACANCY_LEVELS.indexOf(l); return i < 0 ? 99 : i; };
+  designationOptions.sort((a, b) => (optLevel(a.level) - optLevel(b.level)) || ((optRank.get(a.id) ?? 1e9) - (optRank.get(b.id) ?? 1e9)));
   // A Designation that is not valid for the current Wing / Level / area (e.g. left
   // over from before a parent filter changed) is ignored, never applied — so a stale
   // choice can't produce a wrong or empty list. The page clears it.
