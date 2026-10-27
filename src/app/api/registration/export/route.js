@@ -4,6 +4,8 @@ import { defaultPeopleSort, getPeoplePage, getWorkerRanking, getBlockRanking } f
 import { peopleScopeCond, workerScopeCond } from "@/lib/registrationScope";
 import { buildRegistrationPdf, buildWorkerPerformancePdf, registrationPdfFilename } from "@/lib/registrationPdf";
 import { isCaller } from "@/lib/permissions";
+import * as XLSX from "xlsx";
+import { visibleWorkerColumns } from "@/lib/workerPerformanceColumns";
 
 // CSV export of whatever the dashboard is currently showing:
 //   ?report=registrations  every person + the worker who added them (default)
@@ -67,10 +69,21 @@ export async function GET(req) {
           headers: { ...NO_STORE, "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${registrationPdfFilename("AAP_Worker_Performance")}"` },
         });
       }
-      csv = toCsv(
-        ["Rank", "Worker Name", "Mobile", "Worker ID", "Zone", "Assembly", "Ward", "Area/Booth", "Workers Added", "Voters Added", "Total", "Link Status"],
-        rows.map((r) => [r.rank, r.name, r.mobile, r.worker_code, r.zone_name || "", r.assembly_name || "", r.ward_number, r.area_booth, r.new_workers, r.voters, r.total, r.status])
-      );
+      // Columns = the dashboard table's (one shared configuration), for Excel and CSV alike.
+      const cols = visibleWorkerColumns();
+      if (searchParams.get("format") === "xlsx") {
+        const aoa = [cols.map((c) => c.label), ...rows.map((r) => cols.map((c) => c.value(r)))];
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws["!cols"] = cols.map((c) => ({ wch: Math.max(c.label.length + 2, c.key === "name" ? 30 : c.numeric ? 10 : 16) }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Worker Performance");
+        const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+        return new NextResponse(new Uint8Array(buf), {
+          status: 200,
+          headers: { ...NO_STORE, "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="AAP_Worker_Performance_${stamp}.xlsx"` },
+        });
+      }
+      csv = toCsv(cols.map((c) => c.label), rows.map((r) => cols.map((c) => c.value(r))));
       filename = `AAP_Worker_Performance_${stamp}.csv`;
     } else if (report === "blocks" || report === "wards") {
       // Block-wise (Area / Booth) performance — §9B. `wards` kept as an alias so any

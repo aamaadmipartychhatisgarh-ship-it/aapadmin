@@ -2,6 +2,7 @@ import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-p
 import React from "react";
 import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 import { ensureFonts, FONT_FAMILY, cleanPdfText } from "@/lib/pdf/generatePdf";
+import { visibleWorkerColumns } from "@/lib/workerPerformanceColumns";
 
 // PDF of Worker / Voter registration records — shared by the admin Registrations
 // list and a karyakarta's own "My Voters / My Workers" list. The CALLER decides
@@ -82,28 +83,15 @@ export async function buildRegistrationPdf(rows, { title = "Registrations", crit
   return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows: list, title, subtitle, criteria, headerPhoto }));
 }
 
-// Worker-wise Performance (the dashboard ranking) — the same columns as its CSV,
-// in the dashboard's ranking order; Zone / Assembly come from the worker's Contact.
-const WORKER_PERF_COLS = [
-  { key: "rank", label: "Rank", flex: 0.45, get: (r) => String(r.rank) },
-  { key: "name", label: "Worker Name", flex: 1.6, get: (r) => dash(r.name), bold: true },
-  { key: "mobile", label: "Mobile", flex: 0.95, get: (r) => dash(r.mobile) },
-  { key: "code", label: "Worker ID", flex: 0.9, get: (r) => dash(r.worker_code) },
-  { key: "zone", label: "Zone", flex: 1.0, get: (r) => dash(r.zone_name) },
-  { key: "asm", label: "Assembly", flex: 1.2, get: (r) => dash(r.assembly_name) },
-  { key: "ward", label: "Ward", flex: 0.7, get: (r) => dash(r.ward_number) },
-  { key: "booth", label: "Area / Booth", flex: 1.0, get: (r) => dash(r.area_booth) },
-  { key: "w", label: "Workers Added", flex: 0.75, get: (r) => String(r.new_workers ?? 0) },
-  { key: "v", label: "Voters Added", flex: 0.75, get: (r) => String(r.voters ?? 0) },
-  { key: "t", label: "Total", flex: 0.55, get: (r) => String(r.total ?? 0), bold: true },
-  { key: "st", label: "Link Status", flex: 0.7, get: (r) => dash(r.status) },
-];
+// Worker-wise Performance (the dashboard ranking): the columns come from the SAME configuration as the
+// dashboard table (lib/workerPerformanceColumns), so the PDF holds exactly the displayed columns.
+const workerPerfCols = () => visibleWorkerColumns().map((c) => ({ key: c.key, label: c.label, flex: c.pdfFlex || 1, bold: c.bold, get: (r) => dash(c.value(r)) }));
 
 export async function buildWorkerPerformancePdf(rows, { criteria = [] } = {}) {
   const title = "Worker-wise Performance";
   const subtitle = `${rows.length} worker${rows.length === 1 ? "" : "s"} · ranked by total registrations · exported ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}`;
   const headerPhoto = await loadPdfHeaderPhoto();
-  return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows, title, subtitle, criteria, headerPhoto, cols: WORKER_PERF_COLS }));
+  return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows, title, subtitle, criteria, headerPhoto, cols: workerPerfCols() }));
 }
 
 export function registrationPdfFilename(prefix = "AAP_Registrations") {

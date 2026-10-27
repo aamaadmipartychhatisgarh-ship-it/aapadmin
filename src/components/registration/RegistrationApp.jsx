@@ -1,5 +1,6 @@
 "use client";
 
+import { visibleWorkerColumns } from "@/lib/workerPerformanceColumns";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -420,19 +421,20 @@ function DashboardTab({ filterQs, onWard, onError }) {
         <RankTable
           title="Worker-wise Performance"
           subtitle={`Top ${Math.min(200, data.workers.length)}`}
-          exportHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200 })}`}
+          exportHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200, format: "xlsx" })}`}
+          exportLabel="Export Excel"
           pdfHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200, format: "pdf" })}`}
           testId="worker-performance"
-          head={["Rank", "Worker Name", "Mobile", "Zone", "Assembly", "Workers", "Voters", "Total"]}
-          rows={data.workers.map((w) => [
-            <RankBadge key="r" rank={w.rank} />,
-            <span key="n" className="font-semibold text-gray-900">{w.name}<span className="block text-[11px] font-normal text-gray-400 font-mono">{w.worker_code}</span></span>,
-            w.mobile || "—",
-            // Zone / Assembly from the worker's Contact record ("—" when unknown).
-            w.zone_name || "—", w.assembly_name || "—",
-            w.new_workers, w.voters,
-            <span key="t" className="font-bold text-gray-900">{w.total}</span>,
-          ])}
+          // Columns come from the shared configuration (lib/workerPerformanceColumns) - the same one the
+          // Excel and PDF exports use, so display and export can never drift apart.
+          head={visibleWorkerColumns().map((c) => c.label)}
+          rows={data.workers.map((w) => visibleWorkerColumns().map((c) => {
+            if (c.display === "rank") return <RankBadge key={c.key} rank={w.rank} />;
+            if (c.display === "name") return <span key={c.key} className="font-semibold text-gray-900">{w.name}<span className="block text-[11px] font-normal text-gray-400 font-mono">{w.worker_code}</span></span>;
+            if (c.display === "total") return <span key={c.key} className="font-bold text-gray-900">{c.value(w)}</span>;
+            const v = c.value(w);
+            return v === "" ? "—" : v;
+          }))}
           empty="No workers yet — add them in the Workers & Links tab."
         />
         <RankTable
@@ -488,7 +490,7 @@ function AssemblyRegistrationGraph({ assemblies }) {
   );
 }
 
-function RankTable({ title, subtitle, head, rows, empty, exportHref, pdfHref, testId }) {
+function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel = "CSV", pdfHref, testId }) {
   return (
     <div className={cardCls} data-testid={testId}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -500,7 +502,7 @@ function RankTable({ title, subtitle, head, rows, empty, exportHref, pdfHref, te
           <div className="flex items-center gap-3">
             {exportHref ? (
               <a href={exportHref} data-testid="export-csv" className="text-xs font-semibold inline-flex items-center gap-1.5 text-gray-600 hover:text-gray-900">
-                <Download size={14} />CSV
+                <Download size={14} />{exportLabel}
               </a>
             ) : null}
             {pdfHref ? (
