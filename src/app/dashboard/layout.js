@@ -83,8 +83,10 @@ const CALLER_NAV = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Log a Call", href: "/dashboard/calls/new", icon: PhoneCall },
   { name: "My Calls", href: "/dashboard/calls", icon: Database },
-  // Unfiltered Contacts assigned to this caller (Assigned Calls → Evenly Distribute).
-  { name: "Unfiltered Calls", href: "/dashboard/unfiltered-calls", icon: PhoneCall },
+  // "Unfiltered Calls" is intentionally not listed here any more (hidden from the Caller
+  // sidebar only). Its page (/dashboard/unfiltered-calls), APIs, data and the
+  // "unfiltered_calls" page key are unchanged — it stays reachable by URL and for any
+  // user granted the page through Page Access.
   // Every contact of the caller's assigned Zone, read-only (page key zone_contacts).
   { name: "Contacts", href: "/dashboard/zone-contacts", icon: Users },
   { name: "Complaints", href: "/dashboard/complaints", icon: MessageSquare },
