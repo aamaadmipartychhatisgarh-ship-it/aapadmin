@@ -34,6 +34,13 @@ export async function ensureContactDesignationsSchema() {
         WHERE c.designation_id IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM contact_designations cd WHERE cd.contact_id = c.id)`
     );
+    // Each designation row may be PAIRED with the Wing it is held under (NULL = not recorded /
+    // Main Organisation). Existing rows keep NULL, so nothing saved changes.
+    const wcol = await query("SHOW COLUMNS FROM contact_designations LIKE 'wing'");
+    if (!wcol.length) {
+      try { await query("ALTER TABLE contact_designations ADD COLUMN wing VARCHAR(120) NULL"); }
+      catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
+    }
     ensured = true;
   } catch (e) {
     console.error("[contacts] ensureContactDesignationsSchema:", e?.message || e);
@@ -58,10 +65,12 @@ export function parseDesignationIds(input) {
 export async function syncContactDesignations(contactId, ids) {
   await ensureContactDesignationsSchema();
   const wanted = parseDesignationIds(ids);
+  // A designation that stays keeps the Wing it is paired with.
+  const kept = new Map((await query(`SELECT designation_id, wing FROM contact_designations WHERE contact_id = ?`, [contactId])).map((r) => [Number(r.designation_id), r.wing]));
   await query(`DELETE FROM contact_designations WHERE contact_id = ?`, [contactId]);
   for (const d of wanted) {
     // eslint-disable-next-line no-await-in-loop
-    await query(`INSERT IGNORE INTO contact_designations (contact_id, designation_id) VALUES (?, ?)`, [contactId, d]);
+    await query(`INSERT IGNORE INTO contact_designations (contact_id, designation_id, wing) VALUES (?, ?, ?)`, [contactId, d, kept.get(d) ?? null]);
   }
   return wanted;
 }
@@ -71,6 +80,10 @@ export async function syncContactDesignations(contactId, ids) {
 //   • DESIGNATION_NAMES_SQL → comma-joined designation names (for display)
 export const DESIGNATION_IDS_SQL =
   `(SELECT GROUP_CONCAT(cd.designation_id ORDER BY cd.id) FROM contact_designations cd WHERE cd.contact_id = c.id)`;
+// "designationId:Wing" pairs ('|'-separated) for the combined Designation + Wing rows.
+export const DESIGNATION_PAIRS_SQL =
+  `(SELECT GROUP_CONCAT(CONCAT(cd.designation_id, ':', IFNULL(cd.wing, '')) ORDER BY cd.id SEPARATOR '|') FROM contact_designations cd WHERE cd.contact_id = c.id)`;
+export { parseDesignationPairs } from "@/lib/designationRows";
 // A person's multiple designations are concatenated in the Designation Master
 // order (sort_order, un-ordered last), NOT alphabetically — so the displayed role
 // list reads in the configured sequence everywhere it appears.

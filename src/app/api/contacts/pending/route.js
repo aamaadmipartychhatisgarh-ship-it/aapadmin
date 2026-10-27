@@ -10,6 +10,7 @@ import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
+import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
 import { ensureContactApprovalColumns, findRejectedContactByPhone } from "@/lib/contactExtras";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { logAudit } from "@/lib/audit";
@@ -39,6 +40,10 @@ export async function POST(req) {
     if (!person_name?.trim() || !phone_number?.trim()) {
       return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400, headers: NO_STORE });
     }
+    // Combined Designation + Wing rows (Add Contact): validated against Master Data and turned into the
+    // designation set / wing set below; each designation is then saved paired with its Wing.
+    const rowsRes = await prepareDesignationRows(data);
+    if (rowsRes.error) return NextResponse.json({ message: rowsRes.error }, { status: 400 });
     const designationIds = parseDesignationIds(data.designation_ids ?? (designation_id ? [designation_id] : []));
     const primaryDesignation = designationIds[0] || null;
     if (await phoneAlreadyRegistered(phone_number)) return duplicatePhoneResponse();
@@ -96,6 +101,7 @@ export async function POST(req) {
     }
     await syncContactDesignations(id, designationIds);
     await syncContactWings(id, data.wings);
+    await applyRowWings(id, rowsRes.rows);
     logAudit(session, { action: "contact.pending.create", entityType: "contact", entityId: id, details: { person_name: desired.person_name, phone_number: desired.phone_number, revived_rejected: !!rejectedId } });
     return NextResponse.json({ id, status: "pending", revived: !!rejectedId }, { status: 201, headers: NO_STORE });
   } catch (err) {

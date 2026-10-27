@@ -5,7 +5,8 @@ import { X, Phone, MapPin, Activity, Users as UsersIcon, User, Pencil, Loader2, 
 import { initialsOf } from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
-import WingMultiSelect from "@/components/WingMultiSelect";
+import DesignationWingRows from "@/components/contacts/DesignationWingRows";
+import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
 import { wingShortLabel } from "@/lib/wingLabel";
 import QualificationField from "@/components/contacts/QualificationField";
 import { qualificationLabel } from "@/lib/qualificationOptions";
@@ -221,11 +222,24 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
   const [districts, setDistricts] = useState([]);
   const [assemblies, setAssemblies] = useState([]);
   const [blocks, setBlocks] = useState([]);
-  const [wingOptions, setWingOptions] = useState([]); // [{value,label}] from Master Data
+  const [wingMaster, setWingMaster] = useState(null); // /api/wings entries (null = loading)
+  // Combined Designation + Wing rows, derived once the masters load; dwPrev = the rows the form opened with.
+  const [dwRows, setDwRows] = useState(null);
+  const [dwPrev, setDwPrev] = useState(null);
 
   useEffect(() => {
-    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) })))).catch(() => {});
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingMaster(d.wings || [])).catch(() => setWingMaster([]));
   }, []);
+  useEffect(() => {
+    if (dwRows || !wingMaster || !designations.length) return;
+    const designationWings = Object.fromEntries(designations.map((d) => [d.id, d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []]));
+    const rows = deriveRows({
+      pairs: parseDesignationPairs(contact.designation_pairs),
+      wings: String(contact.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
+      designationWings, mainNames: wingMaster.filter((w) => w.is_main).map((w) => w.name),
+    });
+    setDwPrev(rows); setDwRows(rows.length ? rows : [{ designation_id: "", wing: "" }]);
+  }, [dwRows, wingMaster, designations, contact]);
   useEffect(() => {
     if (!canEditGeo) return;
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
@@ -262,10 +276,9 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
     const body = {
       person_name: form.person_name.trim(),
       phone_number: form.phone_number.trim(),
-      designation_ids: form.designation_ids || [],
-      // The designation(s) this form was opened with: the server changes them only if the user did.
-      designation_ids_prev: emptyForm(contact, canEditGeo).designation_ids,
-      wings: form.wings || [],
+      // Designation + Wing rows, with the rows this form opened with: the server saves only what the
+      // user changed and never overwrites a combination changed meanwhile.
+      ...(dwRows && dwPrev ? { designation_rows: normalizeRows(dwRows), designation_rows_prev: dwPrev } : {}),
       address: form.address,
       // The address this form was opened with: the server writes the address only if the user
       // actually changed it (and nobody else did meanwhile), so editing another field never
@@ -297,9 +310,10 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       if (!r.ok) { setError(d.message || "Save failed"); if (r.status === 409) setPhoneDup(true); setSaving(false); return; }
       // Resolve display names client-side so the view + table update instantly
       // (fallback only — the server's d.contact is preferred below).
-      const desigNames = (form.designation_ids || [])
-        .map((id) => designations.find((x) => String(x.id) === String(id))?.name)
-        .filter(Boolean).join(", ");
+      const rowsNow = dwRows ? normalizeRows(dwRows) : null;
+      const desigNames = rowsNow
+        ? rowsNow.map((r) => designations.find((x) => String(x.id) === String(r.designation_id))?.name).filter(Boolean).join(", ")
+        : (form.designation_ids || []).map((id) => designations.find((x) => String(x.id) === String(id))?.name).filter(Boolean).join(", ");
       const caller = users.find((x) => String(x.id) === String(form.assigned_to_user_id));
       const zone = zones.find((x) => String(x.id) === String(form.zone_id));
       const ls = lokSabhas.find((x) => String(x.id) === String(form.lok_sabha_id));
@@ -308,8 +322,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       const merged = {
         ...contact, ...body, address_prev: undefined,
         // Keep wings in the CSV shape the view/list read (body carries an array).
-        wings: (form.wings || []).join(", "),
-        designation_name: desigNames || null,
+        ...(rowsNow ? { wings: [...new Set(rowsNow.map((r) => r.wing).filter(Boolean))].join(", "), designation_name: desigNames || null } : { wings: (form.wings || []).join(", "), designation_name: desigNames || null }),
         assigned_to_username: caller?.username || null,
         ...(canEditGeo ? {
           zone_name: zone?.name || (form.zone_id ? contact.zone_name : null),
@@ -346,17 +359,12 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         <Field label="Address" full><input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
         <div className="col-span-2"><QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} /></div>
         <div className="col-span-2"><VehicleField value={form.vehicle} onChange={(v) => setForm((f) => ({ ...f, vehicle: v }))} /></div>
-        {/* Wings — saved tags from Master Data, placed BEFORE Designation. */}
-        <Field label="Wings" full>
-          <WingMultiSelect options={wingOptions} value={form.wings} onChange={(set) => setForm({ ...form, wings: [...set] })} placeholder="Select wings…" />
-        </Field>
-        <Field label="Designation(s)" full>
-          <DesignationMultiSelect
-            options={(form.wings?.length
-              ? designations.filter((d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).some((w) => form.wings.includes(w)) || (form.designation_ids || []).map(String).includes(String(d.id)))
-              : designations)}
-            value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
-        </Field>
+        {/* Designation + Wing — one combined row per combination; "Add Designation" adds a row below. */}
+        <div className="col-span-2">
+          {dwRows ? (
+            <DesignationWingRows rows={dwRows} onChange={setDwRows} designations={designations} wingMaster={wingMaster || []} />
+          ) : <div className="text-xs text-gray-400">Loading designations…</div>}
+        </div>
         {canEditGeo && (
           <>
             <Field label="Zone">

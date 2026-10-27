@@ -12,6 +12,7 @@ import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDup
 import { resolveContactCard } from "@/lib/contactCard";
 import { syncContactDesignations, designationsForGeneralEdit } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
+import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
@@ -60,11 +61,16 @@ export async function PUT(req, { params }) {
     // Multi-designation (PROMPT 5): sync the join table below; keep the legacy
     // primary column aligned to the first id.
     // Written only when the user actually changed the designation(s) — see designationsForGeneralEdit.
-    let designationIds = null, designationConflict = false;
+    // Combined Designation + Wing rows: changed rows are validated against Master Data and mapped onto
+    // designation_ids / wings; an unedited (stale) copy or a conflicting change is ignored.
+    const hadRows = "designation_rows" in data;
+    const rowsRes = await prepareDesignationRows(data, { contactId: id, canClear: true });
+    if (rowsRes.error) return NextResponse.json({ message: rowsRes.error }, { status: 400 });
+    let designationIds = null, designationConflict = !!rowsRes.conflict;
     {
       const dres = await designationsForGeneralEdit(id, data, true);
       if (dres.error) return NextResponse.json({ message: dres.error }, { status: 400 });
-      designationConflict = !!dres.conflict;
+      designationConflict = designationConflict || !!dres.conflict;
       if (dres.skip) { delete data.designation_ids; delete data.designation_id; }
       else if (dres.ids) { designationIds = dres.ids; data.designation_id = dres.ids[0] || null; }
     }
@@ -156,10 +162,20 @@ export async function PUT(req, { params }) {
         if (photoSet) { sets.push("photo_url = ?"); vals.push(photoSet); oldPhotoForCleanup = curPhoto.photo_url || null; }
       }
     }
+    if (sets.length === 0 && rowsRes.rows) {
+      // Only the Designation / Wing rows changed: save them (inside this supervisor's territory).
+      const scr = supervisorScopeFilter(session.user, "c");
+      const [inScopeR] = await query(`SELECT c.id FROM contacts c WHERE c.id = ? ${scr.where}`, [id, ...scr.params]);
+      if (!inScopeR) return NextResponse.json({ message: "Contact not found or outside your territory." }, { status: 404 });
+      if (designationIds !== null) await syncContactDesignations(id, designationIds);
+      if ("wings" in data) await syncContactWings(id, data.wings);
+      await applyRowWings(id, rowsRes.rows);
+      return NextResponse.json({ ok: true, contact: await resolveContactCard(id) });
+    }
     if (sets.length === 0) {
       // Only an unchanged / protected Address or Photo was sent — a successful no-op (inside the
       // supervisor's territory), not an error.
-      if ("address" in data || "photo_url" in data || designationConflict || "designation_ids_prev" in data || "designation_id_prev" in data) {
+      if ("address" in data || "photo_url" in data || designationConflict || hadRows || "designation_ids_prev" in data || "designation_id_prev" in data) {
         const scn = supervisorScopeFilter(session.user, "c");
         const [inScope] = await query(`SELECT c.id FROM contacts c WHERE c.id = ? ${scn.where}`, [id, ...scn.params]);
         if (!inScope) return NextResponse.json({ message: "Contact not found or outside your territory." }, { status: 404 });
@@ -210,6 +226,7 @@ export async function PUT(req, { params }) {
     // Wings (Master-Data names): present → full replace, empty clears, absent → untouched.
     // The contact was already confirmed to be inside this supervisor's territory above.
     if ("wings" in data) await syncContactWings(id, data.wings);
+    await applyRowWings(id, rowsRes.rows);
     await logAudit(session, { action: "contact.update", entityType: "contact", entityId: id, details: { supervisor: true, fields: Object.keys(data) } });
     // Fully-resolved record (all display names) so the client shows fresh data.
     updated = await resolveContactCard(id);

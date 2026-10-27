@@ -16,8 +16,9 @@ import { ensureRfaSchema, RFA_STATUS_SQL } from "@/lib/rfa";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
-import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema, syncContactWings, WINGS_SQL } from "@/lib/contactWings";
+import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 
@@ -188,6 +189,7 @@ export async function GET(req) {
               la.name AS assembly_name,
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
+              ${DESIGNATION_PAIRS_SQL} AS designation_pairs,
               ${WINGS_SQL} AS wings,
               ${RFA_STATUS_SQL} AS rfa_status,
               -- Resolve the photo EXACTLY like the has_photo count condition
@@ -265,6 +267,10 @@ export async function POST(req) {
     if (!person_name?.trim() || !phone_number?.trim()) {
       return NextResponse.json({ message: "Name and mobile number are required." }, { status: 400 });
     }
+    // Combined Designation + Wing rows (Add Contact): validated against Master Data and turned into the
+    // designation set / wing set below; each designation is then saved paired with its Wing.
+    const rowsRes = await prepareDesignationRows(data);
+    if (rowsRes.error) return NextResponse.json({ message: rowsRes.error }, { status: 400 });
     const designationIds = parseDesignationIds(data.designation_ids ?? (designation_id ? [designation_id] : []));
     // Reject a duplicate mobile up front with a clear message (the uniq_phone
     // index is the race-safe backstop, surfaced via contactWriteError below).
@@ -364,6 +370,7 @@ export async function POST(req) {
     );
     await syncContactDesignations(res.insertId, designationIds);
     await syncContactWings(res.insertId, data.wings);
+    await applyRowWings(res.insertId, rowsRes.rows);
     await logAudit(session, { action: "contact.create", entityType: "contact", entityId: res.insertId, details: { supervisor: true, territory: territory?.level || null } });
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {

@@ -13,8 +13,9 @@ import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureC
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
-import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema, syncContactWings, WINGS_SQL } from "@/lib/contactWings";
+import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
@@ -300,6 +301,7 @@ export async function GET(req) {
               -- legacy designation. designation_ids (CSV) preloads the edit form.
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
+              ${DESIGNATION_PAIRS_SQL} AS designation_pairs,
               -- The contact's Wings (saved tags, Master-Data names) as a CSV, for
               -- the list display and to preload the edit form's Wings dropdown.
               ${WINGS_SQL} AS wings,
@@ -373,6 +375,10 @@ export async function POST(req) {
     // Multi-designation (PROMPT 5): accept designation_ids[]; the legacy single
     // designation_id is treated as one entry. The primary column keeps the FIRST
     // (or null when none) — no default is ever assigned.
+    // Combined Designation + Wing rows (Add Contact): validated against Master Data and turned into the
+    // designation set / wing set below; each designation is then saved paired with its Wing.
+    const rowsRes = await prepareDesignationRows(data);
+    if (rowsRes.error) return NextResponse.json({ message: rowsRes.error }, { status: 400 });
     const designationIds = parseDesignationIds(data.designation_ids ?? (designation_id ? [designation_id] : []));
     const primaryDesignation = designationIds[0] || null;
     // Reject a duplicate mobile up front with a clear message (the uniq_phone
@@ -429,6 +435,7 @@ export async function POST(req) {
     await syncContactDesignations(newId, designationIds);
     // Save the selected Wings (Master-Data names) against the new contact.
     await syncContactWings(newId, data.wings);
+    await applyRowWings(newId, rowsRes.rows);
     return NextResponse.json({ id: newId }, { status: 201 });
   } catch (err) {
     return contactWriteError(err, "contacts POST");

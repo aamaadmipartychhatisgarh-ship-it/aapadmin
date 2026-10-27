@@ -13,6 +13,8 @@ import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
 import WingMultiSelect from "@/components/WingMultiSelect";
+import DesignationWingRows from "@/components/contacts/DesignationWingRows";
+import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
 import { wingShortLabel } from "@/lib/wingLabel";
 import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
 import { CONTACT_EXPORT_COLUMNS } from "@/lib/contactExportColumns";
@@ -1591,6 +1593,11 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [wingOptions, setWingOptions] = useState([]); // [{value,label}] from Master Data
+  const [wingMaster, setWingMaster] = useState(null); // raw /api/wings entries (null = loading)
+  // Combined Designation + Wing rows: derived once the masters are loaded; rowsPrev is the baseline
+  // the form was opened with (the server saves only what changed from it).
+  const [dwRows, setDwRows] = useState(null);
+  const [dwPrev, setDwPrev] = useState(null);
   const [assemblies, setAssemblies] = useState([]);
   const [wards, setWards] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -1655,11 +1662,21 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
   // value shows; changing an upper level refetches and clears the lower ones.
   useEffect(() => {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
-    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) })))).catch(() => {});
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => { setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) }))); setWingMaster(d.wings || []); }).catch(() => setWingMaster([]));
     if (!canEditGeo) return;
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (dwRows || !wingMaster || !designations.length) return;
+    const designationWings = Object.fromEntries(designations.map((d) => [d.id, d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []]));
+    const rows = deriveRows({
+      pairs: parseDesignationPairs(contact.designation_pairs),
+      wings: String(contact.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
+      designationWings, mainNames: wingMaster.filter((w) => w.is_main).map((w) => w.name),
+    });
+    setDwPrev(rows); setDwRows(rows.length ? rows : [{ designation_id: "", wing: "" }]);
+  }, [dwRows, wingMaster, designations, contact]);
   useEffect(() => {
     if (!canEditGeo) return;
     const url = form.zone_id ? `/api/locations?parent_id=${form.zone_id}` : "/api/locations?type=lok_sabha";
@@ -1690,10 +1707,9 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
       qualification: form.qualification || "",
       education_level: form.qualification === "literate" ? (form.education_level || "") : "",
       vehicle: form.vehicle || "",
-      designation_ids: form.designation_ids || [], // full multi-designation set
-      // The designation(s) the form was opened with — the server changes them only if the user did.
-      designation_ids_prev: contactToForm(contact, canEditGeo).designation_ids,
-      wings: form.wings || [], // full wing-tag set (add/remove keeps the rest)
+      // Designation + Wing rows: sent with the rows the form was opened with; the server saves only
+      // what the user changed (and never overwrites a combination changed meanwhile).
+      ...(dwRows && dwPrev ? { designation_rows: normalizeRows(dwRows), designation_rows_prev: dwPrev } : {}),
       // The photo is only sent when a NEW one was picked in this form, together with the photo the
       // form was opened with — the server then attaches it only if the contact still has that one,
       // so a stale form can never revert a photo that was replaced meanwhile.
@@ -1765,20 +1781,10 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
         <input className={inp} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
         <VehicleField value={form.vehicle} onChange={(v) => setForm((f) => ({ ...f, vehicle: v }))} />
-        {/* Wings — saved tags from Master Data → Designation → Wing. Placed BEFORE
-            the Designation field; pre-loaded from the contact and editable. */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">Wings</label>
-          <WingMultiSelect options={wingOptions} value={form.wings} onChange={(set) => setForm({ ...form, wings: [...set] })} placeholder="Select wings…" />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">Designation(s)</label>
-          <DesignationMultiSelect
-            options={(form.wings?.length
-              ? designations.filter((d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).some((w) => form.wings.includes(w)) || (form.designation_ids || []).map(String).includes(String(d.id)))
-              : designations)}
-            value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
-        </div>
+        {/* Designation + Wing — one combined row per combination (Main Organisation or a Master-Data Wing). */}
+        {dwRows ? (
+          <DesignationWingRows rows={dwRows} onChange={setDwRows} designations={designations} wingMaster={wingMaster || []} />
+        ) : <div className="text-xs text-gray-400">Loading designations…</div>}
         {/* Location hierarchy — same field set, order and dependent cascade as
             Add Contact (Zone → Lok Sabha → District → Assembly → Block). Admins
             edit it freely; each existing value is pre-selected. */}
@@ -1846,7 +1852,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
   const districtLocked = !!(territory && territory.district); // district/assembly anchor → fixed
   const zoneLevel = !!(territory && territory.level === "zone"); // may pick a district in-zone
   const [form, setForm] = useState({
-    person_name: "", phone_number: "", address: "", designation_ids: [], photo_url: "",
+    person_name: "", phone_number: "", address: "", designation_rows: [{ designation_id: "", wing: "" }], photo_url: "",
     qualification: "", education_level: "", vehicle: "",
     // Full location hierarchy. For a supervisor the levels their territory fixes
     // are pre-filled (and shown locked); the rest cascade from what's chosen.
@@ -1864,8 +1870,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
   const [blocks, setBlocks] = useState([]);
   const [designations, setDesignations] = useState([]);
   // Wings (from Master Data) narrow the Designation choices below.
-  const [wingOptions, setWingOptions] = useState([]);
-  const [wingSel, setWingSel] = useState(() => new Set());
+  const [wingMaster, setWingMaster] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   // Highlights the mobile field when the server rejects a duplicate number.
@@ -1885,7 +1890,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
 
   useEffect(() => {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
-    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) })))).catch(() => {});
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingMaster(d.wings || [])).catch(() => {});
   }, []);
 
   // ----- Location cascade (Zone → Lok Sabha → District → Assembly → Block) ----
@@ -1926,8 +1931,8 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
     const r = await fetch(addUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Save the selected Wings (Master-Data names) alongside the contact fields.
-      body: JSON.stringify({ ...form, education_level: form.qualification === "literate" ? form.education_level : "", wings: [...wingSel] }),
+      // Each Designation + Wing row is saved as its own combination (validated against Master Data on the server).
+      body: JSON.stringify({ ...form, designation_rows: normalizeRows(form.designation_rows), education_level: form.qualification === "literate" ? form.education_level : "" }),
     });
     const data = await r.json().catch(() => ({}));
     // On any error the modal stays open with every field intact so the user can
@@ -1967,14 +1972,8 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
         <VehicleField value={form.vehicle} onChange={(v) => setForm((f) => ({ ...f, vehicle: v }))} />
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">Wing <span className="text-gray-400 font-normal">(optional — narrows the designations)</span></label>
-          <WingMultiSelect options={wingOptions} value={wingSel} onChange={setWingSel} placeholder="All wings" />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">Designation(s)</label>
-          <DesignationMultiSelect options={wingSel.size ? designations.filter((d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).some((w) => wingSel.has(w))) : designations} value={form.designation_ids} onChange={(ids) => setForm({ ...form, designation_ids: ids })} />
-        </div>
+        {/* Designation + Wing — one combined row per combination; "Add Designation" adds another row below. */}
+        <DesignationWingRows rows={form.designation_rows} onChange={(rows) => setForm({ ...form, designation_rows: rows })} designations={designations} wingMaster={wingMaster} />
         {/* Location hierarchy: Zone → Lok Sabha → District → Assembly → Block.
             Admin picks freely; a supervisor's territory-fixed levels are shown
             locked and only the levels below their anchor are selectable. */}

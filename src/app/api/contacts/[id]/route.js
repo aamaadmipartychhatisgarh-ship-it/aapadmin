@@ -13,6 +13,7 @@ import { isContactNotInterested } from "@/lib/contactExtras";
 import { isContactRepeatOff } from "@/lib/repeatOff";
 import { resolveContactCard } from "@/lib/contactCard";
 import { syncContactDesignations, designationsForGeneralEdit } from "@/lib/contactDesignations";
+import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
 import { syncContactWings } from "@/lib/contactWings";
 import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
@@ -162,11 +163,16 @@ export async function PUT(req, { params }) {
     // (designationsForGeneralEdit): an edit of another field never rewrites or clears them, a stale
     // form can't revert a newer designation, and removing all designations needs a deliberate
     // manager edit. The Caller workspace's single designation_id follows the same rule.
-    let designationIds = null, designationConflict = false;
+    // Combined Designation + Wing rows: changed rows are validated against Master Data and mapped onto
+    // designation_ids / wings; an unedited (stale) copy or a conflicting change is ignored.
+    const hadRows = "designation_rows" in data;
+    const rowsRes = await prepareDesignationRows(data, { contactId: id, canClear: canManage });
+    if (rowsRes.error) return NextResponse.json({ message: rowsRes.error }, { status: 400 });
+    let designationIds = null, designationConflict = !!rowsRes.conflict;
     {
       const dres = await designationsForGeneralEdit(id, data, canManage);
       if (dres.error) return NextResponse.json({ message: dres.error }, { status: 400 });
-      designationConflict = !!dres.conflict;
+      designationConflict = designationConflict || !!dres.conflict;
       if (dres.skip) { delete data.designation_ids; delete data.designation_id; }
       else if (dres.ids) { designationIds = dres.ids; data.designation_id = dres.ids[0] || null; } // primary mirrors first
     }
@@ -261,10 +267,17 @@ export async function PUT(req, { params }) {
       photoSet = pd.set; photoIgnored = pd.ignored;
       if (photoSet) { sets.push("photo_url = ?"); vals.push(photoSet); oldPhotoForCleanup = curPhoto?.photo_url || null; }
     }
+    if (sets.length === 0 && rowsRes.rows) {
+      // Only the Designation / Wing rows changed: save them and return the refreshed contact.
+      if (designationIds !== null) await syncContactDesignations(id, designationIds);
+      if ("wings" in data) await syncContactWings(id, data.wings);
+      await applyRowWings(id, rowsRes.rows);
+      return NextResponse.json({ ok: true, contact: await resolveContactCard(id) });
+    }
     if (sets.length === 0) {
       // Nothing to write because the only fields sent were an unchanged / protected Address or Photo
       // (see above) — that is a successful no-op, not an error. Return the current record.
-      if ("address" in data || "photo_url" in data || designationConflict || "designation_ids_prev" in data || "designation_id_prev" in data) {
+      if ("address" in data || "photo_url" in data || designationConflict || hadRows || "designation_ids_prev" in data || "designation_id_prev" in data) {
         return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
       }
       return NextResponse.json({ message: "No fields to update" }, { status: 400 });
@@ -308,6 +321,7 @@ export async function PUT(req, { params }) {
     // Sync the selected Wings (Master-Data names). Present → full replace (add or
     // remove keeps the rest; empty array clears). Absent → wings left untouched.
     if ("wings" in data) await syncContactWings(id, data.wings);
+    await applyRowWings(id, rowsRes.rows);
 
     if (isAdminTier && "assigned_to_user_id" in data && data.assigned_to_user_id) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });

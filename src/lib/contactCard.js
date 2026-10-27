@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL } from "@/lib/contactDesignations";
 import { WINGS_SQL, ensureContactWingsSchema } from "@/lib/contactWings";
 
 // Resolve ONE contact into the exact shape the Contacts list renders — every
@@ -24,6 +24,7 @@ export async function resolveContactCard(id) {
             -- (multi, PROMPT 5); falls back to the linked worker's position or
             -- the single legacy designation.
             COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
+            ${DESIGNATION_PAIRS_SQL} AS designation_pairs,
             ${DESIGNATION_IDS_SQL} AS designation_ids,
             COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
        FROM contacts c
