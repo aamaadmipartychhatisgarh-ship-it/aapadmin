@@ -319,14 +319,21 @@ export default function DashboardLayout({ children }) {
   const isUserAdmin = isAdmin(session);
   const isSupervisor = isSupervisorRole(session);
 
-  // Designation pages — two DIRECT sidebar items (no Designation dropdown).
-  // Same routes/pages/permissions as before; each page keeps its own guard.
-  // `pinned` keeps them in the shortened admin sidebar (primaryItems) whatever
-  // nav group their routes belong to.
-  const DESIGNATION_ITEMS = [
-    { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle, pinned: true },
-    { name: "Designation Vacancies", href: "/dashboard/admin/vacancies", icon: UserCog, pinned: true },
+  // Designation — ONE main sidebar item (no dropdown / submenu) that opens a landing page with
+  // two options: Designation Vacancies and Incomplete Designation (the existing pages, routes and
+  // permissions are unchanged; the landing page lists only the ones this user may open, and each
+  // page keeps its own guard). `pinned` keeps it in the shortened admin sidebar; `activeFor`
+  // keeps it highlighted on those pages; `searchAlso` keeps both pages findable in the header search.
+  const DESIGNATION_PAGES = [
+    { name: "Designation Vacancies", href: "/dashboard/admin/vacancies", icon: UserCog, key: "vacancies" },
+    { name: "Incomplete Designation", href: "/dashboard/admin/contacts-incomplete", icon: AlertCircle, key: "contacts" },
   ];
+  const designationItem = (keys) => ({
+    name: "Designation", href: "/dashboard/admin/designation", icon: UserCog, pinned: true,
+    activeFor: DESIGNATION_PAGES.map((d) => d.href),
+    searchAlso: DESIGNATION_PAGES.filter((d) => !keys || keys.includes(d.key)).map(({ name, href, icon }) => ({ name, href, icon })),
+  });
+  const DESIGNATION_ITEMS = [designationItem(null)];
 
   // Per-admin-tier menu items. Higher tiers include more, lower tiers are
   // trimmed to operational tools relevant to their scope.
@@ -529,14 +536,20 @@ export default function DashboardLayout({ children }) {
       .filter((pg) => pg && !pg.tab && !pg.hideFromNav)
       .filter((pg) => (seen.has(pg.href) ? false : (seen.add(pg.href), true)))
       .map((pg) => ({ name: pg.label, href: pg.href, icon: PAGE_ICONS[pg.icon] || FileText }));
-    // A page-restricted user's designation pages are direct items too:
-    // Designation Vacancies comes from its own "vacancies" grant (listed above);
-    // Incomplete Designation rides on the Contacts grant, so it is added right
-    // after Contacts when that is granted.
-    if (allowedPageKeys.includes("contacts") && !navItems.some((i) => i.href === DESIGNATION_ITEMS[0].href)) {
-      const contactsAt = navItems.findIndex((i) => i.href === "/dashboard/admin/contacts");
-      const insertAt = contactsAt >= 0 ? contactsAt + 1 : navItems.length;
-      navItems = [...navItems.slice(0, insertAt), DESIGNATION_ITEMS[0], ...navItems.slice(insertAt)];
+    // A page-restricted user gets the single Designation item when granted either of its pages:
+    // Designation Vacancies ("vacancies" grant) and/or Incomplete Designation (rides on the
+    // Contacts grant). It replaces the separate Vacancies entry, at that entry's place or right
+    // after Contacts.
+    if (allowedPageKeys.includes("contacts") || allowedPageKeys.includes("vacancies")) {
+      const vacHref = DESIGNATION_PAGES[0].href;
+      const di = designationItem(allowedPageKeys);
+      const vacAt = navItems.findIndex((i) => i.href === vacHref);
+      if (vacAt >= 0) navItems = navItems.map((i, k) => (k === vacAt ? di : i));
+      else {
+        const contactsAt = navItems.findIndex((i) => i.href === "/dashboard/admin/contacts");
+        const insertAt = contactsAt >= 0 ? contactsAt + 1 : navItems.length;
+        navItems = [...navItems.slice(0, insertAt), di, ...navItems.slice(insertAt)];
+      }
     }
   }
 
@@ -560,7 +573,7 @@ export default function DashboardLayout({ children }) {
   const q = searchQuery.trim().toLowerCase();
   // Child pages (e.g. Designation → Incomplete Designation) are searchable too.
   const searchResults = q
-    ? navItems.flatMap((item) => [item, ...(item.children || [])])
+    ? navItems.flatMap((item) => [item, ...(item.children || []), ...(item.searchAlso || [])])
         .filter((item, i, all) => !item.sectionOnly && item.name.toLowerCase().includes(q) && all.findIndex((x) => x.href === item.href) === i)
     : [];
 

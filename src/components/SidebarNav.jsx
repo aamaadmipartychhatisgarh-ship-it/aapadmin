@@ -37,6 +37,9 @@ function reconcile(items, prefs, lockedHref) {
   return { groups, byHref };
 }
 
+// Exact match, or (for items that declare `activeFor`) one of their related pages.
+const onItem = (item, pathname) => pathname === item.href || (item.activeFor || []).some((h) => pathname === h || pathname?.startsWith(h + "/"));
+
 export default function SidebarNav({ items, pathname, onNavigate }) {
   const lockedHref = items[0]?.href || null; // primary landing item is locked on top
   const lockedItem = items.find((i) => i.href === lockedHref) || null;
@@ -148,7 +151,7 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
 
       {/* Locked primary item (always on top, not draggable) */}
       {lockedItem && (!searching || lockedItem.name.toLowerCase().includes(query)) && (
-        <NavLink item={lockedItem} isActive={pathname === lockedItem.href} onNavigate={onNavigate} locked
+        <NavLink item={lockedItem} isActive={onItem(lockedItem, pathname)} onNavigate={onNavigate} locked
           pathname={pathname} expanded={isExpanded(lockedItem)} onToggleExpand={() => toggleExpand(lockedItem)} />
       )}
 
@@ -158,7 +161,7 @@ export default function SidebarNav({ items, pathname, onNavigate }) {
         [...groups.fav, ...groups.top, ...groups.main, ...groups.bottom]
           .flatMap((href) => { const it = byHref[href]; return it ? [...(it.sectionOnly ? [] : [{ ...it, children: undefined }]), ...(it.children || [])] : []; })
           .filter((it) => it.name.toLowerCase().includes(query))
-          .map((it) => <NavLink key={it.href} item={it} isActive={pathname === it.href} onNavigate={onNavigate} />)
+          .map((it) => <NavLink key={it.href} item={it} isActive={onItem(it, pathname)} onNavigate={onNavigate} />)
       ) : loaded ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           {/* Favourites + Pinned top */}
@@ -276,7 +279,7 @@ function NavLink({ item, isActive, onNavigate, locked, innerRef, style, dragAttr
 function SortableRow({ item, pathname, onNavigate, favorited, group, disabled, onPinTop, onPinBottom, onUnpin, onToggleFav, expanded, onToggleExpand }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.href, disabled });
   const [menuOpen, setMenuOpen] = useState(false);
-  const isActive = pathname === item.href;
+  const isActive = onItem(item, pathname);
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1, zIndex: isDragging ? 50 : "auto" };
 
   const kebab = (
