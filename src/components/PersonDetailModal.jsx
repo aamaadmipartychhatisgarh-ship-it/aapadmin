@@ -171,6 +171,9 @@ function ContactView({ contact: c }) {
       <MiniDetail icon={Hash} label="Qualification">{qualificationLabel(c?.qualification, c?.education_level) || "—"}</MiniDetail>
       <MiniDetail icon={Hash} label="Vehicle">{vehicleLabel(c?.vehicle) || "—"}</MiniDetail>
       <MiniDetail icon={UsersIcon} label="Assigned to">{c?.assigned_to_username || "Pool"}</MiniDetail>
+      {(c?.source === "unfiltered_calls" || c?.source_unfiltered_contact_id) && (
+        <MiniDetail icon={Hash} label="Source"><span data-testid="detail-source-unfiltered">Unfiltered Calls</span></MiniDetail>
+      )}
       <MiniDetail icon={Activity} label="Status">
         <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${c?.is_completed ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
           {c?.is_completed ? "Done" : "Pending"}

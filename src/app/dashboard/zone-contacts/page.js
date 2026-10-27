@@ -208,6 +208,9 @@ export default function ZoneContactsPage() {
                     <span className="inline-flex items-center gap-2">
                       <Avatar name={c.person_name} src={c.photo_url} size={28} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[10px]" />
                       <span className="font-medium text-gray-900">{c.person_name}</span>
+                      {(c.source === "unfiltered_calls" || c.source_unfiltered_contact_id) && (
+                        <span data-testid="from-unfiltered-calls" title="Added from Unfiltered Calls" className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap">Unfiltered Calls</span>
+                      )}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 font-mono text-xs text-gray-700">{c.phone_number}</td>

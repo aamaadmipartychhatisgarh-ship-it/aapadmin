@@ -134,6 +134,7 @@ export default function ContactsModule({ session, mode }) {
   const [assemblies, setAssemblies] = useState([]);
   const [assemblyIds, setAssemblyIds] = useState([]);
   const [assignedTo, setAssignedTo] = useState("");
+  const [sourceF, setSourceF] = useState(""); // "" = any source | "unfiltered_calls"
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -219,11 +220,11 @@ export default function ContactsModule({ session, mode }) {
   }, []);
 
   // Reload the page of results whenever a filter or the page number changes.
-  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, addedMode, addedOn, addedFrom, addedTo, page, pageSize, flagFilter, sortKey, sortDir]);
+  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, sourceF, addedMode, addedOn, addedFrom, addedTo, page, pageSize, flagFilter, sortKey, sortDir]);
   // Any filter change (not a page change) jumps back to page 1 and drops any
   // bulk selection — a selection made under one filter view shouldn't silently
   // carry over and get acted on under a different one.
-  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, search, flagFilter, addedMode, addedOn, addedFrom, addedTo]);
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, sourceF, search, flagFilter, addedMode, addedOn, addedFrom, addedTo]);
   // A SORT change re-orders the whole set, so jump to page 1 — but KEEP the
   // selection (it's tracked by id and stays valid regardless of order/page).
   useEffect(() => { setPage(1); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sortKey, sortDir]);
@@ -260,6 +261,7 @@ export default function ContactsModule({ session, mode }) {
     // caller + designation scope the list uses, so the badge count can never
     // differ from the actual filtered/pooled records.
     if (assignedTo) base.set("assigned_to", assignedTo);
+    if (sourceF) base.set("source", sourceF);
     base.set("page_size", "1");
     const fetchCount = async (status) => {
       const p = new URLSearchParams(base);
@@ -517,6 +519,7 @@ export default function ContactsModule({ session, mode }) {
     // designations above. A wing with no designations correctly matches nothing.
     if (wingSel.size) params.set("wings", [...wingSel].join(","));
     if (assignedTo) params.set("assigned_to", assignedTo);
+    if (sourceF) params.set("source", sourceF);
     // Added-date filter (sent to the list, the select-all ids call and the exports alike).
     if (addedMode === "single") { if (addedOn) params.set("added_on", addedOn); }
     else if (!addedRangeInvalid) {
@@ -925,6 +928,11 @@ export default function ContactsModule({ session, mode }) {
         <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">Any caller</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+        </select>
+        {/* Source — contacts that came from (or were updated from) Unfiltered Calls. */}
+        <select value={sourceF} onChange={(e) => setSourceF(e.target.value)} data-testid="source-filter" aria-label="Source" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">Any source</option>
+          <option value="unfiltered_calls">Source: Unfiltered Calls</option>
         </select>
         {/* Added date — contacts.created_at: one date or a start–end range. */}
         <div className="flex items-center gap-1.5 flex-wrap">

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sourceFilterClause, sourceSearchOr } from "@/lib/contactSource";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isSupervisorRole } from "@/lib/permissions";
@@ -52,8 +53,10 @@ export async function GET(req) {
     where += person.where;
     params.push(...person.params);
     if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
+    // Source filter (?source=unfiltered_calls): contacts that came from / were updated from Unfiltered Calls.
+    { const sf = await sourceFilterClause(searchParams.get("source"), "c"); where += sf.where; params.push(...sf.params); }
     if (search) {
-      where += " AND (c.person_name LIKE ? OR c.phone_number LIKE ?)";
+      where += ` AND (c.person_name LIKE ? OR c.phone_number LIKE ?${await sourceSearchOr(search, "c")})`;
       params.push(`%${search}%`, `%${search}%`);
     }
     // Added-date filter (contacts.created_at; single date or range, IST calendar days).
