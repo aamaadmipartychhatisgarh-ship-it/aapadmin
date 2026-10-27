@@ -10,10 +10,10 @@ import { isCaller } from "@/lib/permissions";
 // by the assemblies of the people they collected). A caller with NO territory
 // assigned gets NOTHING, never unrestricted access (spec §8).
 //
-// Territory is taken from the caller's existing scope fields (most specific first):
-// scope_assembly_id → that assembly; else scope_zone_id → every assembly under the
-// zone; else home_district_id → every assembly under the district. The assembly →
-// district → lok_sabha → zone chain is the standard `locations` hierarchy.
+// Territory = the caller's ASSIGNED ZONE (users.scope_zone_id, read fresh per request by the
+// registration guard): every assembly under the zone, via the standard `locations` hierarchy
+// assembly -> district -> lok_sabha -> zone. An assembly assignment can only narrow that to one
+// assembly inside the Zone.
 
 // Resolve the caller's allowed-assembly set to a SQL fragment that yields assembly
 // ids. Returns one of:
@@ -24,21 +24,18 @@ function callerAssemblyScope(session) {
   if (!session?.user) return { denied: true };
   if (!isCaller(session)) return { unrestricted: true };
   const u = session.user;
-  const asm = Number(u.scope_assembly_id) || null;
   const zone = Number(u.scope_zone_id) || null;
-  const dist = Number(u.home_district_id) || null;
-  if (asm) return { sql: "SELECT ? AS id", params: [asm] };
-  if (zone) {
-    return {
-      sql: `SELECT a.id FROM locations a
-              JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
-              JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
-             WHERE a.type = 'assembly' AND ls.parent_id = ?`,
-      params: [zone],
-    };
-  }
-  if (dist) return { sql: "SELECT id FROM locations WHERE type = 'assembly' AND parent_id = ?", params: [dist] };
-  return { denied: true };
+  // The assigned ZONE is the territory (no Zone = no registration data at all). An assembly assignment
+  // may narrow it, but only to an assembly INSIDE that Zone - never beyond it.
+  if (!zone) return { denied: true };
+  const asm = Number(u.scope_assembly_id) || null;
+  return {
+    sql: `SELECT a.id FROM locations a
+            JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
+            JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+           WHERE a.type = 'assembly' AND ls.parent_id = ?${asm ? " AND a.id = ?" : ""}`,
+    params: asm ? [zone, asm] : [zone],
+  };
 }
 
 // A BARE WHERE condition (no leading AND) restricting an aliased reg_people row to
@@ -54,12 +51,12 @@ export function peopleScopeCond(session, alias = "p") {
 // caller's view when the caller CREATED the link OR the worker has collected at
 // least one active person in the caller's territory (so a freshly-generated link
 // is still visible to its creator before anyone registers through it). "" for
-// unrestricted; own-links-only when the caller has no territory (never other zones).
+// unrestricted; nothing at all when the caller has no Zone.
 export function workerScopeCond(session, alias = "w") {
   const s = callerAssemblyScope(session);
   if (s.unrestricted) return { cond: "", params: [] };
   const uid = Number(session?.user?.id) || 0;
-  if (s.denied) return { cond: `${alias}.created_by = ?`, params: [uid] };
+  if (s.denied) return { cond: "1 = 0", params: [] };
   return {
     cond: `(${alias}.created_by = ? OR EXISTS (SELECT 1 FROM reg_people rp WHERE rp.worker_id = ${alias}.id AND rp.status = 'active' AND rp.assembly_id IN (${s.sql})))`,
     params: [uid, ...s.params],
@@ -84,9 +81,9 @@ export async function workerInCallerScope(session, workerId) {
   const s = callerAssemblyScope(session);
   if (s.unrestricted) return true;
   const uid = Number(session?.user?.id) || 0;
+  if (s.denied) return false;
   const own = await query("SELECT 1 FROM reg_workers WHERE id = ? AND created_by = ? LIMIT 1", [workerId, uid]);
   if (own.length) return true;
-  if (s.denied) return false;
   const rows = await query(
     `SELECT 1 FROM reg_people rp WHERE rp.worker_id = ? AND rp.status = 'active' AND rp.assembly_id IN (${s.sql}) LIMIT 1`,
     [workerId, ...s.params]

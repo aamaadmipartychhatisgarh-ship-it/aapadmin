@@ -170,7 +170,12 @@ export default function RegistrationApp() {
   const { data: session } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { ready, allowed } = usePageGuard("voter_registration", isTopAdmin(session) || isCaller(session));
+  const guard = usePageGuard("voter_registration", isTopAdmin(session) || isCaller(session));
+  const { has: hasModule } = usePageAccess();
+  // A Caller holds the module only with an assigned Zone - /api/my-pages resolves that fresh, so a caller
+  // without a Zone never gets the page (every other role keeps the existing guard result).
+  const { ready } = guard;
+  const allowed = isCaller(session) ? (guard.status === "authenticated" && hasModule("voter_registration")) : guard.allowed;
   // Callers hold the module to REGISTER and review people/karyakartas; drive
   // management (the Dashboard tab, the public-link switch) is for admins. The same
   // rule gates the APIs (requireRegistrationAccess({ manageOnly })), so this only
@@ -236,7 +241,7 @@ export default function RegistrationApp() {
         <div className="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow-sm p-8 text-center">
           <div className="w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto mb-4"><Shield size={26} /></div>
           <h2 className="text-lg font-bold text-gray-900">Access Denied</h2>
-          <p className="text-sm text-gray-500 mt-2">Worker &amp; Voter Registration is restricted to state-level administrators.</p>
+          <p className="text-sm text-gray-500 mt-2">Worker &amp; Voter Registration is available to administrators and to Callers with an assigned Zone.</p>
           <button onClick={() => router.push("/dashboard")} className={`${btnCls} mt-6 text-white`} style={{ background: BRAND }}>Back to Dashboard</button>
         </div>
       </div>

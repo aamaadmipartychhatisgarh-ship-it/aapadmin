@@ -519,6 +519,12 @@ export default function DashboardLayout({ children }) {
     navItems = CALLER_NAV;
   }
 
+  // A Caller's Worker / Voter Registration items show only while they hold the module (an assigned Zone;
+  // /api/my-pages resolves it fresh) - the pages and APIs enforce the same rule server-side.
+  if (!previewing && canonical === ROLES.CALLER && Array.isArray(allowedPageKeys) && !allowedPageKeys.includes("voter_registration")) {
+    navItems = navItems.filter((i) => !String(i.href).startsWith("/dashboard/admin/voter-registration"));
+  }
+
   // Page Access OVERRIDE — a page-restricted user (one the Super Admin has
   // assigned specific pages to) gets a sidebar of EXACTLY those pages, nothing
   // role-derived. Assigning "Page A" therefore shows only Page A; My Calls /

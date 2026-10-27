@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isTopAdmin, isSuperAdmin, isCaller, canManageRegistration } from "@/lib/permissions";
 export { canManageRegistration };
 import { pageAllowed } from "@/lib/pageAccess";
+import { query } from "@/lib/db";
 import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSchema";
 
 // Shared gate for every ADMIN-side Voter & Worker Registration route. The public
@@ -45,6 +46,15 @@ export async function requireRegistrationAccess({ superAdminOnly = false, manage
   }
   if (manageOnly && !canManageRegistration(session)) {
     return { error: NextResponse.json({ message: "Only administrators can manage the registration drive." }, { status: 403, headers: NO_STORE }) };
+  }
+
+  // A CALLER's territory is their assigned Zone, read fresh from the users table (the login token can be
+  // stale after an Admin assigns / moves / removes the Zone). Every route scopes through this session.
+  if (isCaller(session)) {
+    const [u] = await query("SELECT scope_zone_id, scope_assembly_id, home_district_id FROM users WHERE id = ?", [session.user.id]);
+    session.user.scope_zone_id = u?.scope_zone_id ?? null;
+    session.user.scope_assembly_id = u?.scope_assembly_id ?? null;
+    session.user.home_district_id = u?.home_district_id ?? null;
   }
 
   await ensureRegistrationSchema();

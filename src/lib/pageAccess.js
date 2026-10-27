@@ -317,6 +317,18 @@ export async function isPageRestricted(session, { strict = false } = {}) {
   return isUserManaged(session.user.id, { strict });
 }
 
+// WORKER & VOTER REGISTRATION for CALLERS is decided by ONE rule: the caller has an assigned Zone
+// (users.scope_zone_id, read FRESH from the users table - never from the login token - so assigning,
+// moving or removing a Zone applies on the next request). A caller with a Zone holds the module even
+// when Page Access manages their pages (the page is not offered in Page Access); a caller without a
+// Zone does not hold it, whatever their role baseline says. Every other role is untouched.
+export const REGISTRATION_PAGE_KEY = "voter_registration";
+export async function callerHasRegistrationZone(userId) {
+  if (!userId) return false;
+  const [u] = await query("SELECT scope_zone_id FROM users WHERE id = ?", [userId]);
+  return !!u?.scope_zone_id;
+}
+
 // Effective accessible page keys for a user.
 //   Super Admin  → every registered page.
 //   Managed      → EXACTLY the explicit grants (may be empty ⇒ no pages). New
@@ -327,10 +339,18 @@ export async function isPageRestricted(session, { strict = false } = {}) {
 export async function getEffectivePageKeys(userId, role, { strict = false } = {}) {
   const canonical = normalizeRole(role);
   if (isSuper(canonical)) return new Set(PAGE_KEYS);
+  let keys;
   if (await isUserManaged(userId, { strict })) {
-    return expandPageKeys([...(await getUserGrantKeys(userId, { strict }))]); // managed → grants only
+    keys = expandPageKeys([...(await getUserGrantKeys(userId, { strict }))]); // managed → grants only
+  } else {
+    keys = expandPageKeys(baselinePagesForRole(canonical));      // unmanaged → role baseline
   }
-  return expandPageKeys(baselinePagesForRole(canonical));        // unmanaged → role baseline
+  if (canonical === ROLES.CALLER) {
+    keys = new Set(keys);
+    keys.delete(REGISTRATION_PAGE_KEY);
+    if (await callerHasRegistrationZone(userId)) keys.add(REGISTRATION_PAGE_KEY);
+  }
+  return keys;
 }
 
 // Does this session's user have access to a given page key?
@@ -339,6 +359,7 @@ export async function userCanAccessPageKey(session, pageKey) {
   if (!isValidPageKey(pageKey)) return false;
   const role = roleOf(session);
   if (isSuper(role)) return true;
+  if (pageKey === REGISTRATION_PAGE_KEY && normalizeRole(role) === ROLES.CALLER) return callerHasRegistrationZone(session.user.id);
   if (await isUserManaged(session.user.id)) {
     return grantSetAllows(await getUserGrantKeys(session.user.id), pageKey); // managed → grants
   }
@@ -364,6 +385,7 @@ export async function pageAllowed(session, pageKey, roleOk) {
   if (!session?.user) return false;
   const role = roleOf(session);
   if (isSuper(role)) return true;
+  if (pageKey === REGISTRATION_PAGE_KEY && normalizeRole(role) === ROLES.CALLER) return callerHasRegistrationZone(session.user.id);
   if (await isUserManaged(session.user.id)) {
     return isValidPageKey(pageKey) && grantSetAllows(await getUserGrantKeys(session.user.id), pageKey);
   }
