@@ -831,6 +831,8 @@ export default function ContactsModule({ session, mode }) {
       {showImport && (
         <ImportModal
           url={cfg.importExcelUrl}
+          templateUrl="/api/contacts/import-edit/template"
+          hint="Columns are matched by heading — the template lists every contact field (Name, Mobile Number, Address, Qualification, Education Level, Vehicle, Designation, Wing, Zone, Lok Sabha, District, Assembly, Block, Photo URL, Assigned Caller, Status, Remarks…). Numbers already in Contacts are skipped; use Import Edit to update them."
           onClose={() => setShowImport(false)}
           onImported={() => load()}
         />
@@ -2056,7 +2058,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
 // per-importer duplicate breakdown. Contacts passes none of them, so its import
 // modal is unchanged.
 // ---------------------------------------------------------------------------
-export function ImportModal({ url, onClose, onImported, title = "Import Contacts (Excel / CSV)", hint, addedLabel = "new contacts added", invalidLabel = "invalid rows", precheck, duplicateNote }) {
+export function ImportModal({ url, onClose, onImported, title = "Import Contacts (Excel / CSV)", hint, addedLabel = "new contacts added", invalidLabel = "invalid rows", precheck, duplicateNote, templateUrl }) {
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -2129,6 +2131,9 @@ export function ImportModal({ url, onClose, onImported, title = "Import Contacts
               <p className="text-sm text-gray-500">
                 Accepted formats: <span className="font-medium text-gray-700">.xlsx, .xls, .csv</span>. {hint || "Columns are matched by header name (Name, Phone/Mobile, District, Assembly, Designation, Address…), in any order."}
               </p>
+              {templateUrl && (
+                <a href={templateUrl} data-testid="import-template" className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#164FA3] hover:underline"><Download size={13} /> Download the template (every contact field)</a>
+              )}
 
               <input
                 ref={inputRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"

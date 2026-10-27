@@ -2,6 +2,10 @@ import { query } from "@/lib/db";
 import { WORKER_TYPES } from "@/lib/workerTypes";
 import { norm, DISTRICT_ALIASES, ASSEMBLY_ALIASES } from "@/lib/cgGeoAliases";
 import { buildHeaderIndex } from "@/lib/importHeaders";
+import { splitNameList } from "@/lib/contactFieldConfig";
+import { parseQualificationCells, parseVehicleCell, parseStatusCell } from "@/lib/contactFieldParse";
+import { validateContactPhotoUrl } from "@/lib/contactPhotoUrl";
+import { validateRows } from "@/lib/contactDesignationRows";
 
 // Shared parse + validate logic for the Contacts Excel/CSV importer
 // (src/app/api/contacts/import-excel/route.js) — used by BOTH the dry-run
@@ -80,7 +84,9 @@ function resolveWorkerType(raw) {
 //               designation) which still import but are flagged so the
 //               admin can see and fix them via the error report
 //   summary     aggregate counts for the preview UI
-export async function parseAndValidateWorkbook(rows) {
+// opts.canAssign / opts.canSetStatus - as for Import Edit: the Assigned Caller / Status columns are applied only to
+// users who may do that on the Contacts page (otherwise reported as a warning and ignored).
+export async function parseAndValidateWorkbook(rows, opts = {}) {
   const headerIdx = buildHeaderIndex(rows[0]);
   if (headerIdx.name === undefined) {
     return { error: "Could not find a NAME column in the sheet." };
@@ -91,6 +97,13 @@ export async function parseAndValidateWorkbook(rows) {
   // skips worker/membership matching entirely — contacts still import normally.
   const workersExists = await hasWorkersTable();
   const membershipExists = workersExists && (await hasWorkersMembershipCol());
+  const [callerRows, desigMaster] = await Promise.all([
+    headerIdx.assigned_caller !== undefined ? query("SELECT id, username FROM users WHERE role = 'caller' AND (is_active IS NULL OR is_active = 1)") : Promise.resolve([]),
+    headerIdx.designation !== undefined ? query("SELECT id, name FROM designations") : Promise.resolve([]),
+  ]);
+  const callerByName = new Map(callerRows.map((r) => [String(r.username).trim().toLowerCase(), r.id]));
+  const desigKnown = new Set(desigMaster.map((d) => String(d.name).trim().toLowerCase()));
+  const desigIdByName = new Map(desigMaster.map((d) => [String(d.name).trim().toLowerCase(), d.id]));
   const [zoneRows, lokSabhaRows, districtRows, assemblyRows, wardRows, boothRows, workerRows, membershipRows, contactRows] = await Promise.all([
     query("SELECT id, name FROM locations WHERE type = 'zone'"),
     query("SELECT id, name FROM locations WHERE type = 'lok_sabha'"),
@@ -185,11 +198,63 @@ export async function parseAndValidateWorkbook(rows) {
     // old-format files with no Designation column keep defaulting to "Member"
     // with no per-row warning, matching the importer's historical behavior.
     let position = "Member";
+    let desigNames = null; // several KNOWN designations in one cell (e.g. an exported sheet)
     if (headerIdx.designation !== undefined) {
       const desig = String(get(row, "designation") || "").trim();
       if (!desig) { summary.missing_designation++; reasons.push("Missing designation"); }
-      else position = desig;
+      else {
+        position = desig;
+        const parts = [...new Set(splitNameList(desig, desigKnown))];
+        if (parts.length > 1 && parts.every((n) => desigKnown.has(n.toLowerCase()))) { desigNames = parts; position = parts[0]; }
+      }
     }
+    // ---- the Contact Edit form's remaining fields (soft: an invalid value is reported and skipped, the contact still imports)
+    const extra = {};
+    const cellOf = (f) => String(get(row, f) ?? "").trim();
+    if (headerIdx.remarks !== undefined && cellOf("remarks") && cellOf("remarks").toLowerCase() !== "[clear]") extra.remarks = cellOf("remarks").slice(0, 2000);
+    if (headerIdx.pincode !== undefined && cellOf("pincode")) { if (/^\d{6}$/.test(cellOf("pincode"))) extra.pincode = cellOf("pincode"); else reasons.push(`Invalid pincode "${cellOf("pincode")}" (6 digits) — ignored`); }
+    if (headerIdx.village_city !== undefined && cellOf("village_city")) extra.village = cellOf("village_city").slice(0, 100);
+    if (headerIdx.qualification !== undefined || headerIdx.education_level !== undefined) {
+      const q = parseQualificationCells(headerIdx.qualification !== undefined ? get(row, "qualification") : "", headerIdx.education_level !== undefined ? get(row, "education_level") : "");
+      if (q.error) reasons.push(`${q.error} — qualification ignored`);
+      else if (!q.unchanged && q.qualification) { extra.qualification = q.qualification; extra.education_level = q.education_level; }
+    }
+    if (headerIdx.vehicle !== undefined) {
+      const v = parseVehicleCell(get(row, "vehicle"));
+      if (v.error) reasons.push(`${v.error} — ignored`); else if (!v.unchanged && v.vehicle) extra.vehicle = v.vehicle;
+    }
+    if (headerIdx.photo_url !== undefined && cellOf("photo_url") && cellOf("photo_url").toLowerCase() !== "[clear]") {
+      const pv = await validateContactPhotoUrl(cellOf("photo_url"));
+      if (pv.error) reasons.push(`${pv.error} — photo ignored`); else extra.photo_url = pv.url;
+    }
+    if (headerIdx.assigned_caller !== undefined && cellOf("assigned_caller")) {
+      const cid = callerByName.get(cellOf("assigned_caller").toLowerCase());
+      if (!cid) reasons.push(`"${cellOf("assigned_caller")}" is not an active Caller — not assigned`);
+      else if (!opts.canAssign) reasons.push("You are not allowed to assign contacts — Assigned Caller ignored");
+      else extra.assigned_to_user_id = cid;
+    }
+    if (headerIdx.status !== undefined) {
+      const st = parseStatusCell(get(row, "status"));
+      if (st.error) reasons.push(`${st.error} — ignored`);
+      else if (!st.unchanged && st.is_completed === 1) { if (opts.canSetStatus) extra.is_completed = 1; else reasons.push("You are not allowed to set Status — ignored"); }
+    }
+    // Wing of each designation (aligned by position); needs designations that exist in Master Data.
+    let desigRows = null;
+    if (headerIdx.wing !== undefined && cellOf("wing") && headerIdx.designation !== undefined) {
+      const names = desigNames || (desigKnown.has(position.toLowerCase()) ? [position] : null);
+      if (!names) reasons.push("Wing ignored — the designation is not in Master Data yet");
+      else {
+        const wl = cellOf("wing").split(/[;,|]/).map((x) => x.trim());
+        if (wl.length < names.length) reasons.push(`Wing list has fewer entries than designations — Wing ignored`);
+        else {
+          const rowsW = names.map((n, i) => ({ designation_id: desigIdByName.get(n.toLowerCase()), wing: wl[i] && wl[i].toLowerCase() !== "main organisation" ? wl[i] : "" }));
+          const extras = wl.slice(names.length).filter((w) => w && w.toLowerCase() !== "main organisation").map((w) => ({ designation_id: null, wing: w }));
+          const vr = await validateRows([...rowsW, ...extras], []);
+          if (vr.error) reasons.push(`${vr.error} — Wing ignored`); else desigRows = vr.rows;
+        }
+      }
+    }
+    if (!desigRows && desigNames) desigRows = desigNames.map((n) => ({ designation_id: desigIdByName.get(n.toLowerCase()), wing: "" }));
 
     const workerType = headerIdx.worker_type !== undefined ? resolveWorkerType(get(row, "worker_type")) : null;
     if (headerIdx.worker_type !== undefined && get(row, "worker_type") && !workerType) {
@@ -224,7 +289,7 @@ export async function parseAndValidateWorkbook(rows) {
 
     validRows.push({
       row: rowNum, name, phone, phoneKey, zoneId, lokSabhaId, districtId, assemblyId, wardId, boothId, address,
-      position, workerType, membershipNo,
+      position, workerType, membershipNo, extra, desigRows,
     });
   }
 

@@ -14,6 +14,19 @@ export const COLUMN_MAP = {
   designation: ["designation", "position", "role", "padasthapana"],
   membership_no: ["membership no", "membership number", "membership_no", "member id", "member no"],
   worker_type: ["worker type", "type", "employment type"],
+  // The Contact Edit form's remaining fields, so the Import template / an exported sheet can be imported as is
+  // (headings come from the same registry as the export: lib/contactFieldConfig). "village" / "city" alone keep
+  // meaning "part of the address" above; only the exported "Village/City" heading is its own field.
+  remarks: ["remarks", "remark", "notes", "remarks/notes", "remarks / notes", "remarks notes"],
+  pincode: ["pincode", "pin code", "pin"],
+  village_city: ["village/city", "village / city", "village city"],
+  qualification: ["qualification", "education", "literacy"],
+  education_level: ["education level", "education_level", "level of education"],
+  vehicle: ["vehicle"],
+  wing: ["wing", "wings"],
+  photo_url: ["photo url", "photo_url", "photo"],
+  assigned_caller: ["assigned caller", "assigned_caller", "caller", "assigned to"],
+  status: ["status"],
 };
 
 export function buildHeaderIndex(headerRow) {

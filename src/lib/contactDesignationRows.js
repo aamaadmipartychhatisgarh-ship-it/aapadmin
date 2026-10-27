@@ -36,7 +36,7 @@ export async function currentRowsFor(contactId) {
 
 // Validate rows against Master Data. `existing` rows (already stored) are not re-validated, so a
 // legacy combination is never rejected just because it is re-saved.
-async function validateRows(rows, existing = []) {
+export async function validateRows(rows, existing = []) {
   const ids = rows.map((r) => r.designation_id).filter(Boolean);
   const ctx = await masterContext(ids);
   const known = new Map(ctx.designations.map((d) => [Number(d.id), d]));

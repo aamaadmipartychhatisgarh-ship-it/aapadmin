@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight } from "@/lib/permissions";
+import { isOversight, isAdmin } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
+import { ensureQualificationColumns } from "@/lib/contactQualification";
+import { ensureVehicleColumn } from "@/lib/contactVehicle";
+import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
+import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { getPool } from "@/lib/db";
 import * as XLSX from "xlsx";
 import { parseAndValidateWorkbook } from "@/lib/workerImport";
@@ -67,7 +72,12 @@ export async function POST(req) {
       return NextResponse.json({ message: "Sheet has no data rows." }, { status: 400 });
     }
 
-    const parsed = await parseAndValidateWorkbook(rows);
+    await ensureQualificationColumns().catch(() => {});
+    await ensureVehicleColumn().catch(() => {});
+    const parsed = await parseAndValidateWorkbook(rows, {
+      canAssign: await pageAllowed(session, "contacts", isAdmin(session)),
+      canSetStatus: isAdmin(session),
+    });
     if (parsed.error) {
       return NextResponse.json({ message: parsed.error }, { status: 400 });
     }
@@ -123,25 +133,64 @@ export async function POST(req) {
 
       const designationIds = await resolveDesignationIds(conn, toInsert.map((r) => r.position));
 
+      // Columns of the Contact Edit form beyond the original import set - written only where the table has them,
+      // and only for rows whose cells carried a valid value (everything else stays NULL / the column default).
+      const [colRows] = await conn.query("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'");
+      const have = new Set(colRows.map((r) => r.c));
+      const EXTRA = ["remarks", "pincode", "village", "qualification", "education_level", "vehicle", "photo_url", "is_completed", "assigned_to_user_id", "assigned_at", "assigned_by_user_id"].filter((c) => have.has(c));
+      const [[mx]] = await conn.query("SELECT COALESCE(MAX(id), 0) AS m FROM contacts");
+      const baseCols = ["person_name", "phone_number", "address", "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id", "booth_id", "designation_id"];
+      const allCols = [...baseCols, ...EXTRA];
+      const extraVal = (r, c) => {
+        const x = r.extra || {};
+        if (c === "is_completed") return x.is_completed ? 1 : 0;
+        if (c === "assigned_at") return x.assigned_to_user_id ? new Date() : null;
+        if (c === "assigned_by_user_id") return x.assigned_to_user_id ? session.user.id : null;
+        return x[c] ?? null;
+      };
+
       for (let i = 0; i < toInsert.length; i += INSERT_CHUNK) {
         const chunk = toInsert.slice(i, i + INSERT_CHUNK);
-        const placeholders = chunk.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(",");
+        const placeholders = chunk.map(() => `(${allCols.map(() => "?").join(",")})`).join(",");
         const vals = [];
         for (const r of chunk) {
           vals.push(
             r.name, r.phone, r.address, r.zoneId, r.lokSabhaId, r.districtId, r.assemblyId, r.wardId, r.boothId,
-            designationIds.get(String(r.position || "").trim()) || null
+            designationIds.get(String(r.position || "").trim()) || null,
+            ...EXTRA.map((c) => extraVal(r, c))
           );
         }
         // INSERT IGNORE (NOT ON DUPLICATE KEY UPDATE): only new rows are written;
         // an existing contact is never modified. `affectedRows` is the number
         // actually inserted, so the "added" count reflects real DB writes.
         const [res] = await conn.query(
-          `INSERT IGNORE INTO contacts (person_name, phone_number, address, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, booth_id, designation_id)
+          `INSERT IGNORE INTO contacts (${allCols.join(", ")})
            VALUES ${placeholders}`,
           vals
         );
         added += res.affectedRows || 0;
+      }
+
+      // Designation SET (several designations in one cell) and the Wing paired with each - only for the contacts this
+      // run just created (id above the pre-run maximum), so an existing contact is never touched.
+      const withRows = toInsert.filter((r) => r.desigRows && r.desigRows.length);
+      if (withRows.length) {
+        await ensureContactDesignationsSchema(); await ensureContactWingsSchema();
+        for (const r of withRows) {
+          // eslint-disable-next-line no-await-in-loop
+          const [[c]] = await conn.query("SELECT id FROM contacts WHERE phone_number = ? AND id > ? ORDER BY id LIMIT 1", [r.phone, mx.m]);
+          if (!c) continue;
+          const dRows = r.desigRows.filter((x) => x.designation_id);
+          for (const x of dRows) {
+            // eslint-disable-next-line no-await-in-loop
+            await conn.query("INSERT IGNORE INTO contact_designations (contact_id, designation_id, wing) VALUES (?, ?, ?)", [c.id, x.designation_id, x.wing || null]);
+          }
+          if (dRows[0]) await conn.query("UPDATE contacts SET designation_id = ? WHERE id = ?", [dRows[0].designation_id, c.id]);
+          for (const w of [...new Set(r.desigRows.map((x) => x.wing).filter(Boolean))]) {
+            // eslint-disable-next-line no-await-in-loop
+            await conn.query("INSERT IGNORE INTO contact_wings (contact_id, wing) VALUES (?, ?)", [c.id, w]);
+          }
+        }
       }
 
       await conn.commit();

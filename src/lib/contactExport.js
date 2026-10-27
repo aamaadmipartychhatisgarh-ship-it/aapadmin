@@ -5,7 +5,9 @@ import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@
 import React from "react";
 import { query } from "@/lib/db";
 import { photosToDataUris } from "@/lib/photoDataUri";
-import { DESIGNATION_NAMES_SQL } from "@/lib/contactDesignations";
+import { DESIGNATION_NAMES_SQL, ensureContactDesignationsSchema } from "@/lib/contactDesignations";
+import { ensureContactWingsSchema } from "@/lib/contactWings";
+import { qualificationLabel as qualOnly } from "@/lib/qualificationOptions";
 import { CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 
@@ -29,8 +31,20 @@ export async function fetchContactExportRows(where, params, orderBy) {
   // Same default as the on-screen list (photo first, then designation priority),
   // so an unsorted export matches the list exactly.
   const order = orderBy && String(orderBy).trim() ? orderBy : CONTACT_DEFAULT_ORDER_BY;
+  // The Wing columns read contact_designations.wing / contact_wings / designation_wings - make sure they exist.
+  await ensureContactDesignationsSchema();
+  await ensureContactWingsSchema();
   return query(
     `SELECT c.*,
+            lw.name AS block_name,
+            -- Wing of EACH designation, in the same order as the Designation column (its paired Wing, else the
+            -- Wing the contact already holds that the designation belongs to, else Main Organisation).
+            (SELECT GROUP_CONCAT(COALESCE(NULLIF(cdw.wing, ''),
+                      (SELECT cw.wing FROM contact_wings cw JOIN designation_wings dw ON dw.wing = cw.wing AND dw.designation_id = cdw.designation_id
+                        WHERE cw.contact_id = cdw.contact_id ORDER BY cw.id LIMIT 1), 'Main Organisation')
+                    ORDER BY (ddw.sort_order IS NULL), ddw.sort_order, ddw.name SEPARATOR ', ')
+               FROM contact_designations cdw JOIN designations ddw ON ddw.id = cdw.designation_id WHERE cdw.contact_id = c.id) AS aligned_wings,
+            (SELECT GROUP_CONCAT(cw2.wing ORDER BY cw2.id SEPARATOR ', ') FROM contact_wings cw2 WHERE cw2.contact_id = c.id) AS all_wings,
             w.photo_url AS worker_photo_url,
             u.username AS assigned_caller_name,
             COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
@@ -48,6 +62,7 @@ export async function fetchContactExportRows(where, params, orderBy) {
        LEFT JOIN locations cz ON cz.id = c.zone_id
        LEFT JOIN locations cls ON cls.id = c.lok_sabha_id
        LEFT JOIN locations la ON la.id = c.assembly_id
+       LEFT JOIN locations lw ON lw.id = c.ward_id
        LEFT JOIN designations dsg ON dsg.id = c.designation_id
        LEFT JOIN (
          SELECT contact_id, COUNT(*) AS total_calls, MAX(called_at) AS last_call_date
@@ -74,6 +89,15 @@ function fmt(v, dateOnly = false) {
   return dateOnly ? date : `${date} ${g("hour")}:${g("minute")}`;
 }
 
+// Designation order is the contact's list order; the aligned Wing list matches it 1:1. Wing tags the contact
+// holds that belong to no designation row are appended (so every saved Wing is exported).
+function wingCell(c) {
+  const aligned = String(c.aligned_wings || "").split(", ").filter(Boolean);
+  const have = new Set(aligned.map((w) => w.toLowerCase()));
+  const extra = String(c.all_wings || "").split(", ").filter((w) => w && !have.has(w.toLowerCase()));
+  return [...aligned, ...extra].join(", ");
+}
+
 function statusLabel(c) {
   if (c.is_completed) return "Done";
   if (c.assigned_to_user_id) return "Assigned";
@@ -90,15 +114,20 @@ const COLUMNS = [
   { key: "phone", header: "Mobile Number", width: 16, text: true, get: (c) => c.phone_number || "" },
   { key: "alt_phone", header: "Alternate Mobile", width: 16, text: true, get: (c) => c.alt_phone_number || c.alternate_mobile || "" },
   { key: "designation", header: "Designation", width: 20, get: (c) => c.designation_name || "" },
+  // Wing of each designation, same order; standalone Wing tags (no designation) follow.
+  { key: "wing", header: "Wing", width: 22, get: (c) => wingCell(c) },
   { key: "zone", header: "Zone", width: 15, get: (c) => c.zone_name || "" },
   { key: "lok_sabha", header: "Lok Sabha", width: 16, get: (c) => c.lok_sabha_name || "" },
   { key: "assembly", header: "Assembly", width: 18, get: (c) => c.assembly_name || "" },
   { key: "district", header: "District", width: 16, get: (c) => c.district_name || "" },
+  { key: "block", header: "Block", width: 18, get: (c) => c.block_name || "" },
   { key: "address", header: "Address", width: 30, get: (c) => c.address || "" },
   { key: "village", header: "Village/City", width: 18, get: (c) => c.village || "" },
   { key: "pincode", header: "Pincode", width: 11, text: true, get: (c) => c.pincode || "" },
   { key: "qualification", header: "Qualification", width: 22, get: (c) => qualificationLabel(c.qualification, c.education_level) },
+  { key: "education_level", header: "Education Level", width: 18, get: (c) => (c.qualification === "literate" ? (qualOnly("literate", c.education_level).split(" – ")[1] || "") : "") },
   { key: "vehicle", header: "Vehicle", width: 14, get: (c) => vehicleLabel(c.vehicle) },
+  { key: "photo_url", header: "Photo URL", width: 30, get: (c) => c.photo_url || "" },
   { key: "status", header: "Status", width: 12, get: (c) => statusLabel(c) },
   { key: "assigned_caller", header: "Assigned Caller", width: 18, get: (c) => c.assigned_caller_name || "" },
   { key: "assigned_supervisor", header: "Assigned Supervisor", width: 18, get: (c) => c.assigned_supervisor_name || "" },

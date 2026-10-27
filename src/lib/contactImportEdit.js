@@ -2,6 +2,13 @@ import { query, getPool } from "@/lib/db";
 import { normalizePhone, resolveLoc, DISTRICT_ALIASES, ASSEMBLY_ALIASES } from "@/lib/workerImport";
 import { norm } from "@/lib/cgGeoAliases";
 import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
+import { CONTACT_FIELDS, normHeader, splitNameList } from "@/lib/contactFieldConfig";
+import { validateContactPhotoUrl } from "@/lib/contactPhotoUrl";
+import { parseQualificationCells, parseVehicleCell, parseStatusCell } from "@/lib/contactFieldParse";
+import { EDUCATION_LEVELS } from "@/lib/qualificationOptions";
+import { currentRowsFor, validateRows } from "@/lib/contactDesignationRows";
+import { sameRows } from "@/lib/designationRows";
+import { assignSingleContact } from "@/lib/contactAssign";
 
 // "Import Edit" — update EXISTING contacts in bulk from a spreadsheet. It never
 // inserts a contact. A row is matched to ONE existing contact by Contact ID (preferred)
@@ -27,27 +34,21 @@ import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contac
 export const CLEAR_TOKEN = "[clear]";
 export const MAX_ROWS = 5000;
 
-// Header aliases (case/space/punctuation-insensitive).
+// Header aliases (case/space/punctuation-insensitive) - generated from the ONE field registry
+// (lib/contactFieldConfig) that the Export headings and the Import template also use. "New Phone" is the only
+// extra: with a Contact ID column the Phone column is the new value; without one it identifies the contact.
 const COLS = {
-  id: ["contact id", "contactid", "contact_id", "id", "sr id"],
-  phone: ["phone", "mobile", "phone number", "mobile number", "phone no", "mobile no", "contact number", "mobile no."],
+  ...Object.fromEntries(CONTACT_FIELDS.map((f) => [f.key, [normHeader(f.label), ...f.aliases]])),
   new_phone: ["new phone", "new mobile", "new phone number", "new mobile number", "updated phone", "updated mobile"],
-  name: ["name", "person name", "contact name", "full name", "new name"],
-  address: ["address", "new address"],
-  pincode: ["pincode", "pin code", "pin"],
-  // "Village/City" and "Remarks/Notes" are the Contact export's own headings, so an exported
-  // sheet can be edited and imported back as is.
-  village: ["village", "gram", "village/city", "village / city", "village city", "city"],
-  remarks: ["remarks", "remark", "notes", "remarks/notes", "remarks / notes", "remarks notes"],
-  designation: ["designation", "designations", "position", "role"],
-  district: ["district", "jila", "zila"],
-  assembly: ["assembly", "vidhansabha", "vidhan sabha", "assembly constituency"],
 };
 const CLEARABLE = new Set(["address", "pincode", "village", "remarks"]);
 const LABEL = {
   person_name: "Name", phone_number: "Phone", address: "Address", pincode: "Pincode", village: "Village",
   remarks: "Remarks", designation: "Designation", district_id: "District", assembly_id: "Assembly",
+  zone_id: "Zone", lok_sabha_id: "Lok Sabha", ward_id: "Block", qualification: "Qualification",
+  education_level: "Education Level", vehicle: "Vehicle", photo_url: "Photo", assigned_to_user_id: "Assigned Caller", is_completed: "Status",
 };
+const E_SHOW = Object.fromEntries(EDUCATION_LEVELS.map((e) => [e.value, e.label]));
 
 function headerIndex(headerRow) {
   const idx = {};
@@ -88,7 +89,9 @@ async function contactColumns() {
 
 // rows = XLSX sheet_to_json(header:1) array; scope = { where, params } over alias "c"
 // (extra AND-clause restricting which contacts the importer may touch) or null.
-export async function parseImportEdit(rows, scope = null) {
+// opts.canAssign  - may this user (re)assign a contact to a Caller (admin or Contacts grant) - "Assigned Caller" column
+// opts.canSetStatus - may this user set Pending / Done (admin) - "Status" column
+export async function parseImportEdit(rows, scope = null, opts = {}) {
   if (!Array.isArray(rows) || rows.length < 2) return { error: "The sheet has no data rows." };
   if (rows.length - 1 > MAX_ROWS) return { error: `Too many rows (${rows.length - 1}). Import Edit accepts up to ${MAX_ROWS} rows at a time.` };
   const idx = headerIndex(rows[0]);
@@ -103,21 +106,33 @@ export async function parseImportEdit(rows, scope = null) {
   // With a Contact ID column the Phone column is the NEW phone value; without one it is
   // the identifier and an optional "New Phone" column carries a replacement number.
   const phoneCol = byId ? idx.phone : idx.new_phone;
-  const editable = ["name", "address", "pincode", "village", "remarks", "designation", "district", "assembly"].filter((f) => idx[f] !== undefined);
+  const EDITABLE = ["name", "address", "pincode", "village", "remarks", "designation", "wing", "district", "assembly", "zone", "lok_sabha", "block", "qualification", "education_level", "vehicle", "photo_url", "assigned_caller", "status"];
+  if (idx.wing !== undefined && idx.designation === undefined) return { error: "The Wing column needs the Designation column next to it (each Wing belongs to the designation in the same position)." };
+  const editable = EDITABLE.filter((f) => idx[f] !== undefined);
   if (phoneCol !== undefined) editable.push("phone");
-  if (!editable.length) return { error: "No columns to update were found. Add at least one of: Name, Phone, Address, Pincode, Village, Remarks, Designation, District, Assembly." };
+  if (!editable.length) return { error: "No columns to update were found. Add at least one of: " + CONTACT_FIELDS.filter((f) => f.key !== "id").map((f) => f.label).join(", ") + "." };
 
   const have = await contactColumns();
   const maxLen = await columnLengths();
   const tooLong = (col, v) => maxLen.has(col) && String(v).length > maxLen.get(col);
-  const unsupported = editable.filter((f) => ({ pincode: "pincode", village: "village", remarks: "remarks", address: "address" }[f]) && !have.has(f));
+  const needCol = { pincode: "pincode", village: "village", remarks: "remarks", address: "address", qualification: "qualification", education_level: "education_level", vehicle: "vehicle", photo_url: "photo_url", zone: "zone_id", lok_sabha: "lok_sabha_id", block: "ward_id", status: "is_completed", assigned_caller: "assigned_to_user_id" };
+  const unsupported = editable.filter((f) => needCol[f] && !have.has(needCol[f]));
   if (unsupported.length) return { error: `This database has no column for: ${unsupported.join(", ")}.` };
 
-  const [districtRows, assemblyRows, desigRows] = await Promise.all([
+  const [districtRows, assemblyRows, desigRows, zoneRows, wardRows, callerRows] = await Promise.all([
     query("SELECT id, name, parent_id FROM locations WHERE type = 'district'"),
     query("SELECT id, name, parent_id FROM locations WHERE type = 'assembly'"),
     query("SELECT id, name FROM designations"),
+    query("SELECT id, name FROM locations WHERE type = 'zone'"),
+    query("SELECT id, name, parent_id FROM locations WHERE type = 'ward'"),
+    editable.includes("assigned_caller") ? query("SELECT id, username FROM users WHERE role = 'caller' AND (is_active IS NULL OR is_active = 1)") : Promise.resolve([]),
   ]);
+  const zoneByName = new Map(zoneRows.map((r) => [norm(r.name), r.id]));
+  const lsByName = new Map();
+  const wardByKey = new Map(wardRows.map((r) => [`${r.parent_id}|${norm(r.name)}`, r.id]));
+  const wardName = new Map(wardRows.map((r) => [r.id, r.name]));
+  const callerByName = new Map(callerRows.map((r) => [String(r.username).trim().toLowerCase(), r]));
+  const callerNameById = new Map();
   const districtByName = new Map(districtRows.map((r) => [norm(r.name), r.id]));
   const assemblyByName = new Map(assemblyRows.map((r) => [norm(r.name), r.id]));
   const assemblyParent = new Map(assemblyRows.map((r) => [r.id, r.parent_id]));
@@ -126,9 +141,15 @@ export async function parseImportEdit(rows, scope = null) {
   // in step when its district is changed — see the geography block below).
   const lsRows = await query("SELECT id, parent_id FROM locations WHERE type = 'lok_sabha'");
   const lsZone = new Map(lsRows.map((r) => [r.id, r.parent_id]));
+  const lsNameRows = await query("SELECT id, name FROM locations WHERE type = 'lok_sabha'");
+  for (const r of lsNameRows) lsByName.set(norm(r.name), r.id);
+  const lsName = new Map(lsNameRows.map((r) => [r.id, r.name]));
+  const zoneName = new Map(zoneRows.map((r) => [r.id, r.name]));
   const districtLs = new Map(districtRows.map((r) => [r.id, lsZone.has(r.parent_id) ? r.parent_id : null]));
   const assemblyName = new Map(assemblyRows.map((r) => [r.id, r.name]));
   const desigByName = new Map(desigRows.map((r) => [String(r.name).trim().toLowerCase(), r]));
+  const desigKnown = new Set(desigByName.keys());
+  const desigNameById = new Map(desigRows.map((r) => [r.id, r.name]));
 
   // ---- 1. identify (before any lookups) -------------------------------------------
   const parsed = [];
@@ -167,7 +188,7 @@ export async function parseImportEdit(rows, scope = null) {
   const liveIds = new Map(); // id -> contact row (in scope)
   const anyIds = new Set();  // id exists at all (scope-independent) → tells "unmatched" from "out of scope"
   const byPhone = new Map(); // last10 -> [contact rows in scope]
-  const cols = ["c.id", "c.person_name", "c.phone_number", ...["address", "pincode", "village", "remarks", "designation_id", "district_id", "assembly_id", "zone_id", "lok_sabha_id", "ward_id"].filter((f) => have.has(f)).map((f) => `c.${f}`)];
+  const cols = ["c.id", "c.person_name", "c.phone_number", ...["address", "pincode", "village", "remarks", "designation_id", "district_id", "assembly_id", "zone_id", "lok_sabha_id", "ward_id", "qualification", "education_level", "vehicle", "photo_url", "assigned_to_user_id", "is_completed"].filter((f) => have.has(f)).map((f) => `c.${f}`)];
   const ids = [...new Set(parsed.filter((r) => r.ident?.kind === "id").map((r) => r.ident.value))];
   if (ids.length) {
     for (let i = 0; i < ids.length; i += 500) {
@@ -288,18 +309,102 @@ export async function parseImportEdit(rows, scope = null) {
           rec.changes.push({ field: f, label: LABEL[f], from: before ?? "", to: to === null ? "(cleared)" : to, cleared: to === null });
         }
       } else if (f === "designation") {
+        // Designation (+ the Wing of each, aligned by position). The contact's designation set becomes exactly the
+        // listed names; a Wing cell pairs each designation with its Wing (extra Wings beyond the designations are
+        // standalone Wing tags). Blank cells leave everything as it is; a retained designation keeps its Wing when
+        // the Wing cell is blank.
         const v = cellStr(get(f));
         if (!v) continue;
         if (isClear(v)) { rec.errors.push("Designation cannot be cleared"); continue; }
-        const names = [...new Set(v.split(/[;,|]/).map((s) => s.trim()).filter(Boolean))];
+        const names = [...new Set(splitNameList(v, desigKnown))];
         const found = names.map((n) => desigByName.get(n.toLowerCase()));
         const missing = names.filter((_, i) => !found[i]);
         if (missing.length) { rec.errors.push(`Unknown designation: ${missing.join(", ")}`); continue; }
         const idsNew = found.map((d) => d.id);
-        const before = (curDesig.get(cur.id) || []).map((d) => d.id);
-        if (before.length === idsNew.length && before.every((x) => idsNew.includes(x))) continue; // same set
+        const wcell = idx.wing !== undefined ? cellStr(rec.raw[idx.wing]) : "";
+        let curRows = (await currentRowsFor(cur.id)).rows;
+        // A contact holding only the legacy primary designation_id IS holding that designation (as the list / export show).
+        if (!curRows.some((r) => r.designation_id) && cur.designation_id) curRows = [{ designation_id: cur.designation_id, wing: "" }, ...curRows];
+        let target;
+        if (wcell) {
+          if (isClear(wcell)) { rec.errors.push("Wing cannot be cleared here — set it to Main Organisation instead"); continue; }
+          const wl = wcell.split(/[;,|]/).map((x) => x.trim()).filter((x, i, arr) => x !== "" || i < names.length);
+          if (wl.length < names.length) { rec.errors.push(`Wing list has ${wl.length} entr${wl.length === 1 ? "y" : "ies"} but there ${names.length === 1 ? "is 1 designation" : `are ${names.length} designations`} — give one Wing per designation (Main Organisation for none)`); continue; }
+          const mainLc = "main organisation";
+          const rowsT = idsNew.map((id, i) => ({ designation_id: id, wing: wl[i] && wl[i].toLowerCase() !== mainLc ? wl[i] : "" }));
+          const extras = wl.slice(names.length).filter(Boolean).filter((w) => w.toLowerCase() !== mainLc).map((w) => ({ designation_id: null, wing: w }));
+          target = [...rowsT, ...(extras.length ? extras : curRows.filter((r) => !r.designation_id))];
+        } else {
+          // keep each retained designation's current Wing; keep standalone Wing tags
+          target = [...idsNew.map((id) => ({ designation_id: id, wing: curRows.find((r) => r.designation_id === id)?.wing || "" })), ...curRows.filter((r) => !r.designation_id)];
+        }
+        if (sameRows(target, curRows)) continue; // same set + Wings
+        const vr = await validateRows(target, curRows);
+        if (vr.error) { rec.errors.push(vr.error); continue; }
         newDesigIds = idsNew;
-        rec.changes.push({ field: "designation", label: LABEL.designation, from: (curDesig.get(cur.id) || []).map((d) => d.name).join(", "), to: found.map((d) => d.name).join(", ") });
+        rec.desig_rows = vr.rows;
+        rec.changes.push({
+          field: "designation", label: LABEL.designation,
+          from: curRows.filter((r) => r.designation_id).map((r) => `${desigNameById.get(r.designation_id) || r.designation_id}${r.wing ? ` (${r.wing})` : ""}`).join(", "),
+          to: vr.rows.filter((r) => r.designation_id).map((r) => `${desigNameById.get(r.designation_id)}${r.wing ? ` (${r.wing})` : ""}`).join(", "),
+        });
+      } else if (f === "wing") {
+        continue; // handled together with Designation above
+      } else if (f === "qualification" || f === "education_level") {
+        if (rec._qDone) continue;
+        rec._qDone = true;
+        const qr = parseQualificationCells(idx.qualification !== undefined ? rec.raw[idx.qualification] : "", idx.education_level !== undefined ? rec.raw[idx.education_level] : "", cur);
+        if (qr.unchanged) continue;
+        if (qr.error) { rec.errors.push(qr.error); continue; }
+        const cq = cur.qualification || null, ce = cur.education_level || null;
+        if (qr.qualification !== cq) {
+          rec.update.qualification = qr.qualification;
+          rec.changes.push({ field: "qualification", label: LABEL.qualification, from: cq || "", to: qr.qualification === null ? "(cleared)" : qr.qualification, cleared: qr.qualification === null });
+        }
+        if (qr.education_level !== ce) {
+          rec.update.education_level = qr.education_level;
+          rec.changes.push({ field: "education_level", label: LABEL.education_level, from: ce ? E_SHOW[ce] || ce : "", to: qr.education_level === null ? "(cleared)" : E_SHOW[qr.education_level] || qr.education_level, cleared: false });
+        }
+      } else if (f === "vehicle") {
+        const vr = parseVehicleCell(get(f));
+        if (vr.unchanged) continue;
+        if (vr.error) { rec.errors.push(vr.error); continue; }
+        if ((cur.vehicle || null) !== vr.vehicle) {
+          rec.update.vehicle = vr.vehicle;
+          rec.changes.push({ field: "vehicle", label: LABEL.vehicle, from: cur.vehicle || "", to: vr.vehicle === null ? "(cleared)" : vr.vehicle, cleared: vr.vehicle === null });
+        }
+      } else if (f === "photo_url") {
+        const v = cellStr(get(f));
+        if (!v) continue;                                              // blank never removes the photo
+        if (isClear(v)) { rec.errors.push("A photo cannot be removed by import"); continue; }
+        if (v === (cur.photo_url || "")) continue;
+        const pv = await validateContactPhotoUrl(v);
+        if (pv.error) { rec.errors.push(pv.error); continue; }
+        rec.update.photo_url = pv.url;
+        rec.changes.push({ field: "photo_url", label: LABEL.photo_url, from: cur.photo_url || "", to: pv.url });
+      } else if (f === "assigned_caller") {
+        const v = cellStr(get(f));
+        if (!v) continue;                                              // blank never unassigns
+        if (isClear(v)) { rec.errors.push("Assigned Caller cannot be cleared by import"); continue; }
+        const caller = callerByName.get(v.toLowerCase());
+        if (!caller) { rec.errors.push(`"${v}" is not an active Caller`); continue; }
+        if (String(cur.assigned_to_user_id ?? "") === String(caller.id)) continue;
+        if (!opts.canAssign) { rec.errors.push("You are not allowed to assign contacts to a Caller"); continue; }
+        rec.assign_to = caller.id;
+        rec.changes.push({ field: "assigned_to_user_id", label: LABEL.assigned_to_user_id, from: cur.assigned_to_user_id ? (callerRows.find((c) => c.id === cur.assigned_to_user_id)?.username || `#${cur.assigned_to_user_id}`) : "", to: caller.username });
+      } else if (f === "status") {
+        const sr = parseStatusCell(get(f));
+        if (sr.unchanged) continue;
+        if (sr.error) { rec.errors.push(sr.error); continue; }
+        if (Number(cur.is_completed || 0) === sr.is_completed) continue;
+        if (!opts.canSetStatus) { rec.errors.push("You are not allowed to change a contact's Status"); continue; }
+        rec.update.is_completed = sr.is_completed;
+        rec.changes.push({ field: "is_completed", label: LABEL.is_completed, from: cur.is_completed ? "Done" : "Pending", to: sr.is_completed ? "Done" : "Pending" });
+      } else if (f === "zone" || f === "lok_sabha" || f === "block") {
+        const v = cellStr(get(f));
+        if (!v) continue;
+        if (isClear(v)) { rec.errors.push(`${LABEL[f === "zone" ? "zone_id" : f === "lok_sabha" ? "lok_sabha_id" : "ward_id"]} cannot be cleared`); continue; }
+        rec[`_${f}`] = v;
       } else if (f === "district" || f === "assembly") {
         const v = cellStr(get(f));
         if (!v) continue;
@@ -308,6 +413,7 @@ export async function parseImportEdit(rows, scope = null) {
       }
     }
     // Geography: resolve district / assembly together so they stay consistent.
+    const hadDistrict = !!rec._district;
     if (rec._district || rec._assembly) {
       const did = rec._district ? resolveLoc(norm(rec._district), districtByName, DISTRICT_ALIASES) : null;
       const aid = rec._assembly ? resolveLoc(norm(rec._assembly), assemblyByName, ASSEMBLY_ALIASES) : null;
@@ -327,7 +433,7 @@ export async function parseImportEdit(rows, scope = null) {
           const assemblyChanges = aid && String(cur.assembly_id ?? "") !== String(aid);
           if (districtChanges && !aid && cur.assembly_id && assemblyParent.get(cur.assembly_id) !== newDistrict) {
             rec.errors.push(`This contact's Assembly (${assemblyName.get(cur.assembly_id) || cur.assembly_id}) is not in district "${districtName.get(newDistrict)}". Add an Assembly column for it, or change it on the Contact Page — nothing was changed.`);
-          } else if (assemblyChanges && cur.ward_id) {
+          } else if (assemblyChanges && cur.ward_id && !rec._block) {
             rec.errors.push("This contact has a Block under its current Assembly, which would no longer match. Change the Assembly on the Contact Page so the Block can be re-selected — nothing was changed.");
           }
           if (aid && have.has("assembly_id") && String(cur.assembly_id ?? "") !== String(aid)) {
@@ -353,10 +459,47 @@ export async function parseImportEdit(rows, scope = null) {
         }
       }
     }
-    delete rec._district; delete rec._assembly;
+    // Zone / Lok Sabha / Block (own values on the contact). Each must exist and be consistent with the level above.
+    if (!rec.errors.length && (rec._zone || rec._lok_sabha || rec._block)) {
+      // The Zone / Lok Sabha a contact SHOWS is its own value, else the one its district belongs to. A cell that just
+      // repeats that shown value (an exported sheet with only another column edited) is not a change and is ignored -
+      // it must never conflict with, or override, an edit of the District etc. in the same row.
+      const effLsCur0 = cur.lok_sabha_id || districtLs.get(cur.district_id) || null;
+      const effZoneCur0 = cur.zone_id || (effLsCur0 ? lsZone.get(effLsCur0) : null) || null;
+      let zid = rec._zone ? zoneByName.get(norm(rec._zone)) : null;
+      let lid = rec._lok_sabha ? lsByName.get(norm(rec._lok_sabha)) : null;
+      if (rec._zone && !zid) rec.errors.push(`Unknown zone "${rec._zone}"`);
+      if (rec._lok_sabha && !lid) rec.errors.push(`Unknown Lok Sabha "${rec._lok_sabha}"`);
+      if (zid && String(zid) === String(effZoneCur0)) zid = null;
+      if (lid && String(lid) === String(effLsCur0)) lid = null;
+      if (!rec.errors.length) {
+        const zoneEff = zid || (rec.update.zone_id ?? cur.zone_id) || (cur.lok_sabha_id ? lsZone.get(cur.lok_sabha_id) : null) || null;
+        if (lid && zoneEff && String(lsZone.get(lid) ?? "") !== String(zoneEff)) rec.errors.push(`Lok Sabha "${lsName.get(lid)}" is not in Zone "${zoneName.get(zoneEff) || zoneEff}"`);
+        else if (lid && hadDistrict) {
+          const dEff = rec.update.district_id ?? cur.district_id;
+          if (dEff && String(districtLs.get(dEff) ?? "") !== String(lid)) rec.errors.push(`District "${districtName.get(dEff)}" is not in Lok Sabha "${lsName.get(lid)}"`);
+        }
+      }
+      if (!rec.errors.length) {
+        // The Zone / Lok Sabha a contact SHOWS is its own value, else the one its district belongs to - compare against that,
+        // so an exported sheet (which carries the shown values) re-imports with no phantom change.
+        const effLsCur = cur.lok_sabha_id || districtLs.get(cur.district_id) || null;
+        const effZoneCur = cur.zone_id || (effLsCur ? lsZone.get(effLsCur) : null) || null;
+        if (zid && have.has("zone_id") && String(effZoneCur ?? "") !== String(zid)) { rec.update.zone_id = zid; rec.changes = rec.changes.filter((c) => c.field !== "zone_id"); rec.changes.push({ field: "zone_id", label: LABEL.zone_id, from: zoneName.get(cur.zone_id) || "", to: zoneName.get(zid) }); }
+        if (lid && have.has("lok_sabha_id") && String(effLsCur ?? "") !== String(lid)) { rec.update.lok_sabha_id = lid; rec.changes = rec.changes.filter((c) => c.field !== "lok_sabha_id"); rec.changes.push({ field: "lok_sabha_id", label: LABEL.lok_sabha_id, from: lsName.get(cur.lok_sabha_id) || "", to: lsName.get(lid) }); }
+        if (rec._block) {
+          const aEff = rec.update.assembly_id ?? cur.assembly_id;
+          const wid = aEff ? wardByKey.get(`${aEff}|${norm(rec._block)}`) : null;
+          if (!aEff) rec.errors.push(`Block "${rec._block}" needs the contact to have an Assembly`);
+          else if (!wid) rec.errors.push(`Block "${rec._block}" does not exist under the contact's Assembly (${assemblyName.get(aEff) || aEff})`);
+          else if (String(cur.ward_id ?? "") !== String(wid)) { rec.update.ward_id = wid; rec.changes.push({ field: "ward_id", label: LABEL.ward_id, from: wardName.get(cur.ward_id) || "", to: wardName.get(wid) }); }
+        }
+      }
+    }
+    delete rec._district; delete rec._assembly; delete rec._zone; delete rec._lok_sabha; delete rec._block; delete rec._qDone;
     if (newDesigIds) rec.designation_ids = newDesigIds;
 
-    if (rec.errors.length) { rec.status = "error"; rec.changes = []; rec.update = {}; delete rec.designation_ids; continue; }
+    if (rec.errors.length) { rec.status = "error"; rec.changes = []; rec.update = {}; delete rec.designation_ids; delete rec.desig_rows; delete rec.assign_to; continue; }
     // Values the validation saw, for the compare-and-set in applyImportEdit.
     rec.before = {};
     for (const col of Object.keys(rec.update)) rec.before[col] = cur[col] ?? null;
@@ -397,6 +540,16 @@ export async function applyImportEdit(parsed, session = null) {
     }
     if (r.designation_ids) { sets.push("designation_id = ?"); vals.push(r.designation_ids[0] ?? null); } // legacy primary mirrors the first
     if (have.has("updated_at")) sets.push("updated_at = NOW()");
+    // "Assigned Caller": through the SAME assignment logic as the Contacts page (active caller, exclusions, row lock,
+    // lock clearing, assigned_at / assigned_by stamping); a refusal fails just this row.
+    let assignedNow = false;
+    if (r.assign_to) {
+      // eslint-disable-next-line no-await-in-loop
+      const ar = await assignSingleContact(session, r.contact_id, r.assign_to);
+      if (ar.status !== 200) { r.status = "failed"; r.errors.push(ar.message || "Could not assign the contact"); continue; }
+      assignedNow = !!ar.changed;
+    }
+    if (!Object.keys(r.update || {}).length && !r.designation_ids) { if (r.assign_to) { r.status = "updated"; updated++; } continue; }
     if (!sets.length) continue;
     // The contact's Zone as the Contact Page shows it, before this edit.
     // eslint-disable-next-line no-await-in-loop
@@ -413,13 +566,30 @@ export async function applyImportEdit(parsed, session = null) {
         throw new Error(still ? "This contact was changed by someone else after the preview — nothing was saved for it. Re-run the preview." : "Contact no longer exists");
       }
       if (r.designation_ids) {
+        // The designation set, each paired with its Wing, and the contact's Wing tags kept in step (union of the rows'
+        // Wings, plus any main-organisation-named tag it already had) - same storage the Edit form writes.
         // eslint-disable-next-line no-await-in-loop
         await conn.query("DELETE FROM contact_designations WHERE contact_id = ?", [r.contact_id]);
-        for (const d of r.designation_ids) {
+        const rowsW = r.desig_rows || r.designation_ids.map((id) => ({ designation_id: id, wing: "" }));
+        for (const row of rowsW.filter((x) => x.designation_id)) {
           // eslint-disable-next-line no-await-in-loop
-          await conn.query("INSERT IGNORE INTO contact_designations (contact_id, designation_id) VALUES (?, ?)", [r.contact_id, d]);
+          await conn.query("INSERT IGNORE INTO contact_designations (contact_id, designation_id, wing) VALUES (?, ?, ?)", [r.contact_id, row.designation_id, row.wing || null]);
+        }
+        if (r.desig_rows) {
+          const [curW] = await conn.query("SELECT wing FROM contact_wings WHERE contact_id = ?", [r.contact_id]);
+          const [mainRows] = await conn.query("SELECT name FROM wings WHERE is_main = 1");
+          const mainLc = new Set(mainRows.map((m) => String(m.name).toLowerCase()));
+          const keep = curW.map((w) => w.wing).filter((w) => mainLc.has(String(w).toLowerCase()));
+          const wantW = [...new Set([...rowsW.map((x) => x.wing).filter(Boolean), ...keep])];
+          // eslint-disable-next-line no-await-in-loop
+          await conn.query("DELETE FROM contact_wings WHERE contact_id = ?", [r.contact_id]);
+          for (const w of wantW) {
+            // eslint-disable-next-line no-await-in-loop
+            await conn.query("INSERT IGNORE INTO contact_wings (contact_id, wing) VALUES (?, ?)", [r.contact_id, w]);
+          }
         }
       }
+      if (r.update?.photo_url) { await conn.query("UPDATE contacts SET photo_verified = 1 WHERE id = ?", [r.contact_id]).catch(() => {}); }
       // eslint-disable-next-line no-await-in-loop
       await conn.commit();
       r.status = "updated";
@@ -428,7 +598,7 @@ export async function applyImportEdit(parsed, session = null) {
       // Contact Page edit), so the contact leaves that caller's queue too.
       // eslint-disable-next-line no-await-in-loop
       const zoneAfter = await contactEffectiveZoneId(r.contact_id).catch(() => zoneBefore);
-      if (String(zoneBefore ?? "") !== String(zoneAfter ?? "")) await releaseOutOfZoneAssignment(session, r.contact_id, zoneAfter).catch(() => {});
+      if (!assignedNow && String(zoneBefore ?? "") !== String(zoneAfter ?? "")) await releaseOutOfZoneAssignment(session, r.contact_id, zoneAfter).catch(() => {});
     } catch (e) {
       // eslint-disable-next-line no-await-in-loop
       try { await conn.rollback(); } catch { /* ignore */ }

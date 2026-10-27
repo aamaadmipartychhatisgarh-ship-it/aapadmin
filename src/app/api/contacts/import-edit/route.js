@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight, isSupervisorRole, scopeFilterSync, normalizeRole, ROLES } from "@/lib/permissions";
+import { isOversight, isAdmin, isSupervisorRole, scopeFilterSync, normalizeRole, ROLES } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { supervisorScopeFilter } from "@/lib/supervisorScope";
 import { logAudit } from "@/lib/audit";
@@ -57,7 +57,10 @@ export async function POST(req) {
     if (isSupervisorRole(session)) scope = supervisorScopeFilter(session.user, "c");
     else if (role !== ROLES.SUPER_ADMIN && role !== ROLES.STATE_ADMIN) scope = scopeFilterSync(session.user, "c");
 
-    const parsed = await parseImportEdit(rows, scope);
+    const parsed = await parseImportEdit(rows, scope, {
+      canAssign: await pageAllowed(session, "contacts", isAdmin(session)),   // same rule as the Contacts page / bulk assignment
+      canSetStatus: isAdmin(session),                                        // the Edit form's Status is admin-only
+    });
     if (parsed.error) return NextResponse.json({ message: parsed.error }, { status: 400, headers: NO_STORE });
 
     if (!dryRun) {

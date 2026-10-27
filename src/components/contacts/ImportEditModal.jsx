@@ -1,5 +1,6 @@
 "use client";
 
+import { CONTACT_FIELDS } from "@/lib/contactFieldConfig";
 import { useRef, useState } from "react";
 import { X, Upload, FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2, Download } from "lucide-react";
 
@@ -75,9 +76,9 @@ export default function ImportEditModal({ onClose, onApplied }) {
             <>
               <p className="text-sm text-gray-500">
                 Upload an Excel / CSV file with a <span className="font-medium text-gray-700">Contact ID</span> column (or a
-                <span className="font-medium text-gray-700"> Phone</span> column) plus the columns to change — Name, Phone, Address,
-                Pincode, Village, Remarks, Designation, District, Assembly. Only existing contacts are updated; no new contacts are created.
-                A <span className="font-medium text-gray-700">blank cell leaves the field unchanged</span>; type <code className="bg-gray-100 px-1 rounded">[clear]</code> to deliberately empty Address, Pincode, Village or Remarks.
+                <span className="font-medium text-gray-700"> Mobile Number</span> column) plus the columns to change — any of: {CONTACT_FIELDS.filter((f) => f.key !== "id").map((f) => f.label).join(", ")}.
+                The template has every column. Only existing contacts are updated; no new contacts are created.
+                A <span className="font-medium text-gray-700">blank cell leaves the field unchanged</span> (photo, address, designation, Zone … are never cleared by a blank); type <code className="bg-gray-100 px-1 rounded">[clear]</code> to deliberately empty Address, Village/City, Pincode, Remarks/Notes, Qualification or Vehicle.
               </p>
               <button type="button" onClick={() => { window.location.href = "/api/contacts/import-edit/template"; }} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#164FA3] hover:underline"><Download size={13} /> Download the template</button>
               <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden"
