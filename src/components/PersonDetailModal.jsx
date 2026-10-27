@@ -262,6 +262,10 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       designation_ids: form.designation_ids || [],
       wings: form.wings || [],
       address: form.address,
+      // The address this form was opened with: the server writes the address only if the user
+      // actually changed it (and nobody else did meanwhile), so editing another field never
+      // rewrites it and a stale form can't revert a newer one.
+      address_prev: contact.address || "",
       qualification: form.qualification || "",
       education_level: form.qualification === "literate" ? (form.education_level || "") : "",
       vehicle: form.vehicle || "",
@@ -297,7 +301,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       const dist = districts.find((x) => String(x.id) === String(form.district_id));
       const asm = assemblies.find((x) => String(x.id) === String(form.assembly_id));
       const merged = {
-        ...contact, ...body,
+        ...contact, ...body, address_prev: undefined,
         // Keep wings in the CSV shape the view/list read (body carries an array).
         wings: (form.wings || []).join(", "),
         designation_name: desigNames || null,
@@ -313,6 +317,11 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       // Prefer the server's fully-resolved record (correct for EVERY field,
       // including Block/ward_name and cases the client option lists don't cover)
       // so the list/search show the exact saved data with no stale labels.
+      if (d.address_conflict && d.contact) {
+        // Everything else saved; the stored address was changed by someone else meanwhile.
+        onSaved(d.contact); setForm(emptyForm(d.contact, canEditGeo));
+        setError("Saved — but the address was changed by someone else after you opened this form, so your address edit was NOT applied. The latest address is shown."); setSaving(false); return;
+      }
       onSaved(d.contact || merged);
     } catch {
       setError("Save failed — network error.");

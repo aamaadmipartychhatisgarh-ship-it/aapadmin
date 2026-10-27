@@ -13,6 +13,7 @@ import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
+import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 
@@ -45,7 +46,7 @@ async function getContactColumns() {
 // Rather than add a second scope check against the requested new values,
 // geography simply isn't editable here — a supervisor can relocate/reassign
 // WHO owns a contact, not WHERE it lives.
-const DETAIL_FIELDS = ["person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id"];
+const DETAIL_FIELDS = ["person_name", "phone_number", "pincode", "village", "remarks", "designation_id"];
 
 export async function PUT(req, { params }) {
   try {
@@ -128,6 +129,18 @@ export async function PUT(req, { params }) {
       if (data.assigned_to_user_id) { sets.push("assigned_by_user_id = ?"); vals.push(session.user.id); }
       else { sets.push("assigned_by_user_id = NULL"); }
     }
+    // ADDRESS: written only when the user actually edited it (a stale form can't revert a newer
+    // address; clearing needs a deliberate edit) — see addressForGeneralEdit.
+    let addressConflict = false;
+    if ("address" in data && existingColumns.has("address")) {
+      const sc0 = supervisorScopeFilter(session.user, "c");
+      const [curAddr] = await query(`SELECT c.address FROM contacts c WHERE c.id = ? ${sc0.where}`, [id, ...sc0.params]);
+      if (curAddr) {
+        const ar = addressForGeneralEdit(data, curAddr.address, true);
+        if (ar.value !== undefined) { sets.push("address = ?"); vals.push(ar.value); }
+        addressConflict = !!ar.conflict;
+      }
+    }
     // PHOTO: a general edit never changes the photo, except to attach one just uploaded in the same
     // form, and never reverting a newer photo from a stale form (see photoForGeneralEdit). The
     // contact is read through the same territory scope as the UPDATE below.
@@ -141,7 +154,17 @@ export async function PUT(req, { params }) {
         if (photoSet) { sets.push("photo_url = ?"); vals.push(photoSet); oldPhotoForCleanup = curPhoto.photo_url || null; }
       }
     }
-    if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
+    if (sets.length === 0) {
+      // Only an unchanged / protected Address or Photo was sent — a successful no-op (inside the
+      // supervisor's territory), not an error.
+      if ("address" in data || "photo_url" in data) {
+        const scn = supervisorScopeFilter(session.user, "c");
+        const [inScope] = await query(`SELECT c.id FROM contacts c WHERE c.id = ? ${scn.where}`, [id, ...scn.params]);
+        if (!inScope) return NextResponse.json({ message: "Contact not found or outside your territory." }, { status: 404 });
+        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}) });
+      }
+      return NextResponse.json({ message: "No fields to update" }, { status: 400 });
+    }
     // Audit stamp (feature-detected) — when this contact was last edited.
     if (existingColumns.has("updated_at")) sets.push("updated_at = NOW()");
 
@@ -188,7 +211,7 @@ export async function PUT(req, { params }) {
     await logAudit(session, { action: "contact.update", entityType: "contact", entityId: id, details: { supervisor: true, fields: Object.keys(data) } });
     // Fully-resolved record (all display names) so the client shows fresh data.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated, ...(photoIgnored ? { photo_ignored: true } : {}) });
+    return NextResponse.json({ ok: true, contact: updated, ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}) });
   } catch (err) {
     console.error("supervisor contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

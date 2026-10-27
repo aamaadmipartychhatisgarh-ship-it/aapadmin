@@ -16,6 +16,7 @@ import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle 
 import { syncContactWings } from "@/lib/contactWings";
 import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
+import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
@@ -131,9 +132,8 @@ export async function PUT(req, { params }) {
     // preserved instead of being wiped by an empty save, a page that didn't load
     // it, or an unrelated field edit. Managers (Supervisor/Admin) keep the ability
     // to clear it.
-    if (!canManage && "address" in data && !String(data.address ?? "").trim()) {
-      delete data.address;
-    }
+    // (Handled below by addressForGeneralEdit: a blank never clears unless the form was opened with an
+    // address and deliberately emptied it, and only managers may do that.)
 
     // A Not-Interested contact cannot be (re)assigned to a User/Worker — the
     // restriction is enforced here, server-side, not just by hiding it in lists.
@@ -220,7 +220,7 @@ export async function PUT(req, { params }) {
 
     // Descriptive + geographic details anyone with edit rights may change.
     const DETAIL_FIELDS = ["qualification", "education_level", "vehicle", 
-      "person_name", "phone_number", "address", "pincode", "village", "remarks", "designation_id",
+      "person_name", "phone_number", "pincode", "village", "remarks", "designation_id",
       "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id", "booth_id",
     ];
     // Queue assignment + completion state stay admin-only (not "contact details").
@@ -251,6 +251,16 @@ export async function PUT(req, { params }) {
       if (data.assigned_to_user_id) { sets.push("assigned_by_user_id = ?"); vals.push(session.user.id); }
       else { sets.push("assigned_by_user_id = NULL"); }
     }
+    // ADDRESS: written only when the user actually edited it (see addressForGeneralEdit) — an edit of
+    // another field never rewrites it, a stale form can't revert a newer address, and removing it
+    // needs a deliberate manager edit.
+    let addressConflict = false;
+    if ("address" in data && existingColumns.has("address")) {
+      const [curAddr] = await query("SELECT address FROM contacts WHERE id = ?", [id]);
+      const ar = addressForGeneralEdit(data, curAddr?.address, canManage);
+      if (ar.value !== undefined) { sets.push("address = ?"); vals.push(ar.value); }
+      addressConflict = !!ar.conflict;
+    }
     // PHOTO: a general edit never changes the photo, except to attach one just uploaded in
     // the same form (and never reverting a newer photo from a stale form) — see
     // photoForGeneralEdit. Setting/removing a photo otherwise goes through the photo endpoint.
@@ -261,7 +271,14 @@ export async function PUT(req, { params }) {
       photoSet = pd.set; photoIgnored = pd.ignored;
       if (photoSet) { sets.push("photo_url = ?"); vals.push(photoSet); oldPhotoForCleanup = curPhoto?.photo_url || null; }
     }
-    if (sets.length === 0) return NextResponse.json({ message: "No fields to update" }, { status: 400 });
+    if (sets.length === 0) {
+      // Nothing to write because the only fields sent were an unchanged / protected Address or Photo
+      // (see above) — that is a successful no-op, not an error. Return the current record.
+      if ("address" in data || "photo_url" in data) {
+        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}) });
+      }
+      return NextResponse.json({ message: "No fields to update" }, { status: 400 });
+    }
     // Audit stamp: record WHEN this contact was last edited, so a persistence
     // question ("did my change stick?") can be answered from the row itself.
     // Feature-detected — absent on a deployment that hasn't added the column.
@@ -317,7 +334,7 @@ export async function PUT(req, { params }) {
     // username, resolved photo) — the exact shape the list renders — so the
     // client replaces its row with fresh data and never shows a stale name.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}), ...(photoIgnored ? { photo_ignored: true } : {}) });
+    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}) });
   } catch (err) {
     console.error("contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

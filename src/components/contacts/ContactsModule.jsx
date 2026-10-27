@@ -1667,6 +1667,8 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
       person_name: form.person_name,
       phone_number: form.phone_number,
       address: form.address,
+      // The address the form was opened with — written only if the user changed it (see the server rule).
+      address_prev: contact.address || "",
       qualification: form.qualification || "",
       education_level: form.qualification === "literate" ? (form.education_level || "") : "",
       vehicle: form.vehicle || "",
@@ -1696,7 +1698,11 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
     // Use the server's fully-resolved record (fresh display names) so the list
     // never keeps stale zone/district/assembly/designation labels. Fall back to
     // a local merge only if the API somehow didn't return the record.
-    onSaved(data.contact || { ...contact, ...body });
+    if (data.address_conflict && data.contact) {
+      onSaved(data.contact); setForm(contactToForm(data.contact, canEditGeo));
+      setError("Saved — but the address was changed by someone else after you opened this form, so your address edit was NOT applied. The latest address is shown."); return;
+    }
+    onSaved(data.contact || { ...contact, ...body, address_prev: undefined });
   }
 
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white";

@@ -208,8 +208,14 @@ export async function GET(req) {
         lz.name as zone_name,
         lls.name as lok_sabha_name,
         ld.name as district_name,
-        la.name as assembly_name
+        la.name as assembly_name,
+        -- Show the contact's LATEST saved address (the Contact Page's), not the copy taken when the
+        -- call was logged; the call-time copy is kept as address_at_call (and used if the contact
+        -- no longer exists).
+        c.address as address_at_call,
+        CASE WHEN ctc.id IS NOT NULL THEN ctc.address ELSE c.address END as address
       FROM calls c
+      LEFT JOIN contacts ctc ON ctc.id = c.contact_id
       LEFT JOIN users u ON c.user_id = u.id
       LEFT JOIN call_statuses cs ON c.status_id = cs.id
       LEFT JOIN designations dsg ON c.designation_id = dsg.id
