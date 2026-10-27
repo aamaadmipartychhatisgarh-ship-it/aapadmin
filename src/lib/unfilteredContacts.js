@@ -2,6 +2,8 @@ import { query, getPool } from "@/lib/db";
 import { last10Sql } from "@/lib/phone";
 import { normalizeIndianMobile } from "@/lib/phoneLinks";
 import { buildHeaderIndex, norm, resolveLoc, DISTRICT_ALIASES, ASSEMBLY_ALIASES } from "@/lib/workerImport";
+import { syncContactDesignations } from "@/lib/contactDesignations";
+import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 
 // Unfiltered Contacts — raw bulk-imported numbers kept in their OWN table,
 // logically separate from `contacts` (nothing here reads-for-write or writes the
@@ -402,8 +404,137 @@ export async function ensureUnfilteredCallLogSchema() {
        KEY idx_ucl_caller (caller_id, created_at)
      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  await ensureUnfilteredContactLinkSchema();
   ensuredLogs = true;
 }
+
+// ---------------------------------------------------------------------------
+// Unfiltered Call -> Contact List link. A Positive / Supporter outcome puts the person into the
+// Contact List automatically (see syncUnfilteredToContact). The relationship is stored both ways:
+//   contacts.source / contacts.source_unfiltered_contact_id   (UNIQUE: one contact per record)
+//   unfiltered_contacts.contact_id / contact_synced_at / call_sentiment
+//   unfiltered_call_logs.sentiment
+// ---------------------------------------------------------------------------
+export const UNFILTERED_SOURCE = "unfiltered_calls";
+export const CONTACT_SENTIMENTS = ["positive", "supporter"]; // outcomes that create / update a Contact
+export const UNFILTERED_SENTIMENTS = ["positive", "supporter", "neutral", "negative", "opponent", "not_supporter", "wrong_number"];
+const SENTIMENT_LABEL = { positive: "Positive", supporter: "Supporter", neutral: "Neutral", negative: "Negative", opponent: "Opponent", not_supporter: "Not a Supporter", wrong_number: "Wrong Number" };
+
+let linkEnsured = false;
+export async function ensureUnfilteredContactLinkSchema() {
+  if (linkEnsured) return;
+  const cols = async (t) => new Set((await query("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", [t])).map((r) => r.c));
+  const add = async (t, have, name, def) => {
+    if (have.has(name)) return;
+    try { await query(`ALTER TABLE \`${t}\` ADD COLUMN \`${name}\` ${def}`); } catch (e) { if (!/duplicate column/i.test(e?.message || "")) throw e; }
+  };
+  let c = await cols("contacts");
+  await add("contacts", c, "source", "VARCHAR(40) NULL");
+  await add("contacts", c, "source_unfiltered_contact_id", "INT NULL");
+  const idx = await query("SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts' AND INDEX_NAME = 'uq_contacts_source_unfiltered' LIMIT 1");
+  if (!idx.length) {
+    try { await query("ALTER TABLE contacts ADD UNIQUE KEY uq_contacts_source_unfiltered (source_unfiltered_contact_id)"); } catch (e) { if (!/duplicate key name/i.test(e?.message || "")) throw e; }
+  }
+  c = await cols("unfiltered_contacts");
+  await add("unfiltered_contacts", c, "contact_id", "INT NULL");
+  await add("unfiltered_contacts", c, "contact_synced_at", "DATETIME NULL");
+  await add("unfiltered_contacts", c, "call_sentiment", "VARCHAR(30) NULL");
+  c = await cols("unfiltered_call_logs");
+  await add("unfiltered_call_logs", c, "sentiment", "VARCHAR(30) NULL");
+  linkEnsured = true;
+}
+
+// Create or update the Contact List record for an Unfiltered Contact, on a connection that is already
+// inside a transaction holding the unfiltered row's lock (so repeated / concurrent calls serialize).
+//   - already linked                                     -> that contact is updated
+//   - a Contact with the same number (any format) exists -> THAT record is updated, never a duplicate
+//   - otherwise                                          -> a new Contact is created
+// Updates only FILL blanks (and note the outcome in remarks): an existing value is never overwritten
+// by the carried-forward data. The contact is linked both ways and recorded as sourced from Unfiltered
+// Calls (a contact that already has another source keeps it). Returns
+// { action: "created" | "updated" | "skipped", contact_id?, reason? }.
+export async function syncUnfilteredToContact(conn, row, { sentiment, userId }) {
+  const name = String(row.person_name || "").trim();
+  const phone = String(row.phone_key || "").trim();
+  if (!phone) return { action: "skipped", reason: "no phone number" };
+  const [colRows] = await conn.query("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts'");
+  const have = new Set(colRows.map((r) => r.c));
+  const label = SENTIMENT_LABEL[sentiment] || sentiment;
+  const note = `Unfiltered Call #${row.id}: ${label} (${new Date().toISOString().slice(0, 10)})`;
+  const noteKey = `Unfiltered Call #${row.id}:`;
+
+  // 1. the contact this record is already linked to, else a live contact with the same number
+  let existing = null;
+  if (row.contact_id) { const [[x]] = await conn.query("SELECT * FROM contacts WHERE id = ?", [row.contact_id]); existing = x || null; }
+  if (!existing) { const [[x]] = await conn.query("SELECT * FROM contacts WHERE source_unfiltered_contact_id = ? LIMIT 1", [row.id]); existing = x || null; }
+  if (!existing) {
+    const notRejected = (await hasApprovalStatusColumn()) ? " AND (approval_status IS NULL OR approval_status <> 'rejected')" : "";
+    const [[x]] = await conn.query(`SELECT * FROM contacts WHERE ${last10Sql("phone_number")} = ?${notRejected} ORDER BY id ASC LIMIT 1`, [phone]);
+    existing = x || null;
+  }
+
+  // 2. carried-forward details
+  let desig = null;
+  if (row.designation) {
+    const [[d]] = await conn.query("SELECT id FROM designations WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", [row.designation]);
+    desig = d || null;
+  }
+  const extraNote = row.designation && !desig ? ` | Designation (not in master): ${row.designation}` : "";
+
+  if (existing) {
+    const sets = [], vals = [];
+    const fill = (col, v) => {
+      if (have.has(col) && v != null && String(v).trim() !== "" && (existing[col] == null || String(existing[col]).trim() === "")) { sets.push(`${col} = ?`); vals.push(v); }
+    };
+    fill("person_name", name || null);
+    fill("address", row.address ? String(row.address).trim() : null);
+    fill("district_id", row.district_id || null);
+    fill("assembly_id", row.assembly_id || null);
+    fill("designation_id", desig?.id || null);
+    if (have.has("source_unfiltered_contact_id") && existing.source_unfiltered_contact_id == null) { sets.push("source_unfiltered_contact_id = ?"); vals.push(row.id); }
+    if (have.has("source") && !String(existing.source || "").trim()) { sets.push("source = ?"); vals.push(UNFILTERED_SOURCE); }
+    if (have.has("remarks") && !String(existing.remarks || "").includes(noteKey)) {
+      sets.push("remarks = ?");
+      vals.push(existing.remarks ? `${String(existing.remarks).trimEnd()}\n${note}${extraNote}` : `${note}${extraNote}`);
+    }
+    if (sets.length && have.has("updated_at")) sets.push("updated_at = NOW()");
+    if (sets.length) await conn.query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, [...vals, existing.id]);
+    if (desig?.id && !existing.designation_id) {
+      const [[has]] = await conn.query("SELECT COUNT(*) AS n FROM contact_designations WHERE contact_id = ?", [existing.id]);
+      if (!Number(has.n)) await syncContactDesignations(existing.id, [desig.id]).catch(() => {});
+    }
+    await conn.query("UPDATE unfiltered_contacts SET contact_id = ?, contact_synced_at = NOW() WHERE id = ?", [existing.id, row.id]);
+    return { action: "updated", contact_id: existing.id };
+  }
+
+  // 3. no contact yet: create one (name + number are mandatory - never an incomplete Contact)
+  if (!name) return { action: "skipped", reason: "the Unfiltered record has no name" };
+  const desired = {
+    person_name: name, phone_number: phone, address: row.address ? String(row.address).trim() : null,
+    district_id: row.district_id || null, assembly_id: row.assembly_id || null,
+    designation_id: desig?.id || null,
+    remarks: `${note}${extraNote}`,
+    created_by_user_id: userId || null,
+    source: UNFILTERED_SOURCE, source_unfiltered_contact_id: row.id,
+  };
+  const cols = Object.keys(desired).filter((k) => have.has(k));
+  let contactId;
+  try {
+    const [ins] = await conn.query(`INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, cols.map((k) => desired[k]));
+    contactId = ins.insertId;
+  } catch (e) {
+    if (e?.code !== "ER_DUP_ENTRY") throw e;
+    // the same number (or this record's link) was saved a moment ago by someone else: use that one
+    const [[x]] = await conn.query(`SELECT id FROM contacts WHERE source_unfiltered_contact_id = ? OR ${last10Sql("phone_number")} = ? ORDER BY id ASC LIMIT 1`, [row.id, phone]);
+    if (!x) throw e;
+    await conn.query("UPDATE unfiltered_contacts SET contact_id = ?, contact_synced_at = NOW() WHERE id = ?", [x.id, row.id]);
+    return { action: "updated", contact_id: x.id };
+  }
+  if (desig?.id) await syncContactDesignations(contactId, [desig.id]).catch(() => {});
+  await conn.query("UPDATE unfiltered_contacts SET contact_id = ?, contact_synced_at = NOW() WHERE id = ?", [contactId, row.id]);
+  return { action: "created", contact_id: contactId };
+}
+
 
 // Same completion rule as a regular call (api/calls): these outcomes finish the
 // contact; any other status (Not Picked, Busy, Switched Off…) is an attempt and
@@ -413,34 +544,41 @@ export const UNFILTERED_FINAL_STATUSES = ["Phone Picked", "Wrong Number", "Rudel
 // Log a disposition for one of the acting caller's OWN pending Unfiltered Calls.
 // The row is locked for the check + write, so it can't be logged against
 // someone else's record, after completion, or completed twice.
-export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, remarks, durationSeconds }) {
+export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, remarks, durationSeconds, sentiment }) {
   await ensureUnfilteredCallLogSchema();
   const [st] = await query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(statusId) || 0]);
   if (!st) return { status: 400, message: "Please pick a status." };
   const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
-    const [[row]] = await conn.query("SELECT id, assigned_to_user_id, completed_at FROM unfiltered_contacts WHERE id = ? FOR UPDATE", [Number(id) || 0]);
+    const [[row]] = await conn.query("SELECT * FROM unfiltered_contacts WHERE id = ? FOR UPDATE", [Number(id) || 0]);
     if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) { await conn.rollback(); return { status: 404, message: "This call is not assigned to you." }; }
     if (row.completed_at) { await conn.rollback(); return { status: 409, message: "This call is already completed." }; }
     const notes = remarks ? String(remarks).slice(0, 2000) : null;
     const dur = Math.max(0, Math.min(86400, Math.round(Number(durationSeconds) || 0)));
+    // Sentiment only applies to a connected ("Phone Picked") call, as in a regular call.
+    const sent = st.name === "Phone Picked" && UNFILTERED_SENTIMENTS.includes(String(sentiment || "")) ? String(sentiment) : null;
     const [ins] = await conn.query(
-      `INSERT INTO unfiltered_call_logs (unfiltered_contact_id, caller_id, logged_by, status_id, status_name, remarks, duration_seconds)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [row.id, callerId, loggedBy || callerId, st.id, st.name, notes, dur]
+      `INSERT INTO unfiltered_call_logs (unfiltered_contact_id, caller_id, logged_by, status_id, status_name, remarks, duration_seconds, sentiment)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, callerId, loggedBy || callerId, st.id, st.name, notes, dur, sent]
     );
     const final = UNFILTERED_FINAL_STATUSES.includes(st.name);
     await conn.query(
       `UPDATE unfiltered_contacts
-          SET call_status_id = ?, call_status_name = ?, call_notes = ?,
+          SET call_status_id = ?, call_status_name = ?, call_notes = ?, call_sentiment = ?,
               completed_at = CASE WHEN ? THEN NOW() ELSE NULL END,
               completed_by = CASE WHEN ? THEN ? ELSE NULL END
         WHERE id = ?`,
-      [st.id, st.name, notes, final ? 1 : 0, final ? 1 : 0, callerId, row.id]
+      [st.id, st.name, notes, sent, final ? 1 : 0, final ? 1 : 0, callerId, row.id]
     );
+    // Positive / Supporter -> create or update the Contact List record, in the SAME transaction as the
+    // log (both saved or neither), serialized by the row lock above.
+    let sync = null;
+    if (sent && CONTACT_SENTIMENTS.includes(sent)) sync = await syncUnfilteredToContact(conn, row, { sentiment: sent, userId: callerId });
     await conn.commit();
-    return { status: 200, message: final ? "Saved — call completed." : "Saved — kept pending for a retry.", completed: final, log_id: ins.insertId };
+    const syncMsg = sync?.action === "created" ? " Added to the Contact List." : sync?.action === "updated" ? " Contact List record updated." : sync?.action === "skipped" ? ` Not added to the Contact List (${sync.reason}).` : "";
+    return { status: 200, message: (final ? "Saved — call completed." : "Saved — kept pending for a retry.") + syncMsg, completed: final, log_id: ins.insertId, contact_sync: sync };
   } catch (e) {
     await conn.rollback().catch(() => {});
     throw e;
@@ -455,7 +593,7 @@ export async function unfilteredCallHistory({ id, callerId }) {
   const [row] = await query("SELECT assigned_to_user_id FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
   if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) return null;
   return query(
-    `SELECT l.id, l.status_name, l.remarks, l.duration_seconds, l.created_at, us.username AS agent_name
+    `SELECT l.id, l.status_name, l.sentiment, l.remarks, l.duration_seconds, l.created_at, us.username AS agent_name
        FROM unfiltered_call_logs l LEFT JOIN users us ON us.id = l.caller_id
       WHERE l.unfiltered_contact_id = ? ORDER BY l.id DESC`,
     [Number(id)]

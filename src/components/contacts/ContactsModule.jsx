@@ -1155,6 +1155,16 @@ export default function ContactsModule({ session, mode }) {
                       </button>
                       {/* Created by "Convert to Contact" on a Worker registration —
                           linked permanently to that Registration (contacts.source_registration_id). */}
+                      {/* Added automatically from a Positive / Supporter Unfiltered Call. */}
+                      {c.source === "unfiltered_calls" || c.source_unfiltered_contact_id ? (
+                        <span
+                          title={`Source: Unfiltered Calls (record #${c.source_unfiltered_contact_id || "?"})`}
+                          data-testid="from-unfiltered-calls"
+                          className="block w-fit mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap"
+                        >
+                          Source: Unfiltered Calls
+                        </span>
+                      ) : null}
                       {c.source_registration_id ? (
                         <span
                           title={`Converted from Worker & Voter Registration #${c.source_registration_id}`}

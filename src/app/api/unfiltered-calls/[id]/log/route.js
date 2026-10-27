@@ -19,9 +19,9 @@ export async function POST(req, { params }) {
     const body = await req.json().catch(() => ({}));
     const r = await logUnfilteredCall({
       id, callerId: userId, loggedBy: session.user.id,
-      statusId: body.status_id, remarks: body.remarks, durationSeconds: body.duration_seconds,
+      statusId: body.status_id, remarks: body.remarks, durationSeconds: body.duration_seconds, sentiment: body.sentiment,
     });
-    return NextResponse.json({ message: r.message, completed: !!r.completed }, { status: r.status });
+    return NextResponse.json({ message: r.message, completed: !!r.completed, contact_sync: r.contact_sync || null }, { status: r.status });
   } catch (err) {
     console.error("unfiltered-calls log error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

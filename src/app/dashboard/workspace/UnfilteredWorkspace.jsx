@@ -22,7 +22,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [form, setForm] = useState({ status_id: "", remarks: "" });
+  const [form, setForm] = useState({ status_id: "", remarks: "", sentiment: "" });
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -53,7 +53,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     if (!call) return;
     if (!keepMessage) setMessage("");
     setError("");
-    setForm({ status_id: "", remarks: "" });
+    setForm({ status_id: "", remarks: "", sentiment: "" });
     setElapsed(0);
     setActive({ ...call, started_at: Date.now() });
     setHistory([]); setHistoryOpen(false);
@@ -63,6 +63,8 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       .catch(() => {});
   }
 
+  const isPicked = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked";
+
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
     if (submitting) return;
@@ -71,7 +73,9 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       const r = await fetch(`/api/unfiltered-calls/${active.id}/log`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status_id: Number(form.status_id), remarks: form.remarks, duration_seconds: elapsed }),
+        // Sentiment only applies to a connected ("Phone Picked") call; Positive / Supporter adds the
+        // person to the Contact List automatically (server side).
+        body: JSON.stringify({ status_id: Number(form.status_id), remarks: form.remarks, duration_seconds: elapsed, sentiment: isPicked ? form.sentiment : "" }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.message || "Failed to save"); if (r.status === 404 || r.status === 409) { setActive(null); load(); } return; }
@@ -82,7 +86,8 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       if (view !== "pending") setView("pending");
       // Same rhythm as Regular Calls: move straight on to the next call.
       const nextCall = (fresh?.calls || []).find((c) => c.id !== savedId);
-      setMessage(`Saved (${savedDuration}s) — ${d.completed ? "call completed" : "kept pending for a retry"}.${nextCall ? " Next call ready." : " No more pending Unfiltered Calls."}`);
+      const added = d.contact_sync?.action === "created" ? " Added to the Contact List." : d.contact_sync?.action === "updated" ? " Contact List record updated." : d.contact_sync?.action === "skipped" ? ` Not added to the Contact List (${d.contact_sync.reason}).` : "";
+      setMessage(`Saved (${savedDuration}s) — ${d.completed ? "call completed" : "kept pending for a retry"}.${added}${nextCall ? " Next call ready." : " No more pending Unfiltered Calls."}`);
       if (nextCall) start(nextCall, { keepMessage: true });
     } finally {
       setSubmitting(false);
@@ -219,7 +224,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                       <div key={h.id} className="p-4 text-sm">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-medium text-gray-900">{new Date(h.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                          <span className="text-xs text-gray-500">{h.agent_name} · {h.status_name}</span>
+                          <span className="text-xs text-gray-500">{h.agent_name} · {h.status_name}{h.sentiment ? ` · ${h.sentiment}` : ""}</span>
                         </div>
                         {h.remarks && <div className="text-gray-600 italic">&quot;{h.remarks}&quot;</div>}
                         {h.duration_seconds != null && <div className="text-xs text-gray-400 mt-1">{formatDurationHrMinSec(h.duration_seconds, "0 Sec")} talk</div>}
@@ -240,6 +245,24 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                     {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
+                {isPicked && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Sentiment</label>
+                    <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls} aria-label="Sentiment" data-testid="uw-sentiment">
+                      <option value="">None</option>
+                      <option value="positive">Positive</option>
+                      <option value="supporter">Supporter</option>
+                      <option value="neutral">Neutral</option>
+                      <option value="negative">Negative</option>
+                      <option value="opponent">Opponent</option>
+                      <option value="not_supporter">Not a Supporter</option>
+                      <option value="wrong_number">Wrong Number</option>
+                    </select>
+                    {(form.sentiment === "positive" || form.sentiment === "supporter") && (
+                      <p className="text-[11px] text-emerald-700 mt-1">Positive / Supporter contacts are added to the Contact List automatically.</p>
+                    )}
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Remarks</label>
                   <textarea value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} rows={3} aria-label="Remarks"
