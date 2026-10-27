@@ -786,3 +786,50 @@ export async function assignUnfilteredToCaller({ id, callerId, expectedCallerId 
     conn.release();
   }
 }
+
+// Bulk "Remove Assignment": clears ONLY the caller mapping (assigned_to_user_id / assigned_at / assigned_by)
+// of the selected Unfiltered Contacts, in one transaction with the rows locked. Nothing is deleted:
+// the contacts, their details, linked Contacts, completion state and call history stay as they are.
+// `ids` = the chosen records; or `allMatching` (+ optional search `q`) = every ASSIGNED record the list
+// shows for that search, across all pages. Returns { removed, skipped (already unassigned / unknown) }.
+const BULK_MAX = 20000;
+export async function bulkRemoveUnfilteredAssignments({ ids = [], allMatching = false, q = "" }) {
+  await ensureUnfilteredCallLogSchema();
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    let target;
+    if (allMatching) {
+      const where = ["assigned_to_user_id IS NOT NULL"], params = [];
+      const term = String(q || "").trim();
+      if (term) {
+        const digits = term.replace(/\D/g, "");
+        where.push(digits.length >= 3 ? "(person_name LIKE ? OR phone_key LIKE ?)" : "person_name LIKE ?");
+        params.push(`%${term}%`);
+        if (digits.length >= 3) params.push(`%${digits.slice(-10)}%`);
+      }
+      const [rows] = await conn.query(`SELECT id FROM unfiltered_contacts WHERE ${where.join(" AND ")} ORDER BY id LIMIT ${BULK_MAX} FOR UPDATE`, params);
+      target = rows.map((r) => r.id);
+    } else {
+      const want = [...new Set((Array.isArray(ids) ? ids : []).map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0))].slice(0, BULK_MAX);
+      if (!want.length) { await conn.rollback(); return { status: 400, message: "Select at least one assigned call." }; }
+      const [rows] = await conn.query(`SELECT id FROM unfiltered_contacts WHERE id IN (${want.map(() => "?").join(",")}) AND assigned_to_user_id IS NOT NULL ORDER BY id FOR UPDATE`, want);
+      target = rows.map((r) => r.id);
+      var requested = want.length;
+    }
+    let removed = 0;
+    for (let i = 0; i < target.length; i += 500) {
+      const chunk = target.slice(i, i + 500);
+      // eslint-disable-next-line no-await-in-loop
+      const [res] = await conn.query(`UPDATE unfiltered_contacts SET assigned_to_user_id = NULL, assigned_at = NULL, assigned_by = NULL WHERE id IN (${chunk.map(() => "?").join(",")}) AND assigned_to_user_id IS NOT NULL`, chunk);
+      removed += res.affectedRows || 0;
+    }
+    await conn.commit();
+    return { status: 200, removed, skipped: allMatching ? 0 : Math.max(0, (requested || 0) - removed), message: removed ? `Removed ${removed} assignment${removed === 1 ? "" : "s"}.` : "No assigned calls to remove." };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}

@@ -46,13 +46,14 @@ export async function GET(req) {
         LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
       params
     );
+    const [{ n: assignedN }] = await query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u ${whereSql ? `${whereSql} AND` : "WHERE"} u.assigned_to_user_id IS NOT NULL`, params);
     const [{ all }] = await query("SELECT COUNT(*) AS `all` FROM unfiltered_contacts");
     const batches = await query(
       `SELECT b.id, b.file_name, b.total_rows, b.imported, b.duplicates, b.invalid, b.created_at, us.username AS imported_by
          FROM unfiltered_import_batches b LEFT JOIN users us ON us.id = b.imported_by
         ORDER BY b.id DESC LIMIT 10`
     );
-    return NextResponse.json({ contacts: rows, total: Number(n), all_total: Number(all), page, pageSize, batches }, { headers: NO_STORE });
+    return NextResponse.json({ contacts: rows, total: Number(n), all_total: Number(all), assigned_total: Number(assignedN), page, pageSize, batches }, { headers: NO_STORE });
   } catch (err) {
     console.error("unfiltered-contacts GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

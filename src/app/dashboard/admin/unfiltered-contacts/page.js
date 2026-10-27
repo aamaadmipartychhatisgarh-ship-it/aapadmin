@@ -177,11 +177,41 @@ export default function UnfilteredContactsPage() {
   const [unassigning, setUnassigning] = useState(null);
   const [notice, setNotice] = useState(null);
   const [callers, setCallers] = useState([]);
+  // Bulk Remove Assignment: selected assigned rows (this page), or every assigned match across pages.
+  const [sel, setSel] = useState(() => new Set());
+  const [allMatching, setAllMatching] = useState(false);
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   useEffect(() => {
     if (!ready || !allowed) return;
     fetch("/api/unfiltered-contacts/assignments", { cache: "no-store" }).then((r) => r.json())
       .then((d) => setCallers((d.callers || []).filter((c) => c.eligible))).catch(() => {});
   }, [ready, allowed, refreshKey]);
+
+  async function bulkRemove() {
+    if (bulkBusy) return;
+    setBulkBusy(true); setNotice(null);
+    try {
+      const res = await fetch("/api/unfiltered-contacts/assignments/remove", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(allMatching ? { all_matching: true, q: search } : { ids: [...sel] }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setNotice({ err: true, text: d.message || "Could not remove the assignments." }); }
+      else {
+        setNotice({ err: false, text: `${d.message}${d.skipped ? ` ${d.skipped} already unassigned.` : ""} The calls and their contact details are kept.` });
+        setSel(new Set()); setAllMatching(false);
+      }
+      setBulkConfirm(false);
+      await load();
+      setRefreshKey((k) => k + 1);
+    } catch {
+      setNotice({ err: true, text: "Could not remove the assignments — network error." });
+      setBulkConfirm(false);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   async function assignTo(r, callerId) {
     if (unassigning || !callerId) return;
@@ -242,6 +272,7 @@ export default function UnfilteredContactsPage() {
     }
   }, [page, search]);
   useEffect(() => { if (ready && allowed) load(); }, [ready, allowed, load]);
+  useEffect(() => { setAllMatching(false); setSel(new Set()); }, [search]); // a new search starts a new selection
 
   if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
@@ -250,6 +281,11 @@ export default function UnfilteredContactsPage() {
   const total = data?.total || 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rows = data?.contacts || [];
+  const assignedRows = rows.filter((r) => r.assigned_to_user_id);
+  const pageAllSelected = assignedRows.length > 0 && assignedRows.every((r) => sel.has(r.id));
+  const selCount = allMatching ? (data?.assigned_total ?? 0) : sel.size;
+  const toggleRow = (id) => { setAllMatching(false); setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
+  const togglePage = () => { setAllMatching(false); setSel(pageAllSelected ? new Set() : new Set(assignedRows.map((r) => r.id))); };
 
   return (
     <div className="space-y-4 animate-in fade-in duration-500">
@@ -269,6 +305,24 @@ export default function UnfilteredContactsPage() {
 
       <AssignedCalls refreshKey={refreshKey} onDistributed={load} />
 
+      {bulkConfirm && (
+        <div className="fixed inset-0 z-[150] bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" data-testid="bulk-confirm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900">Remove {selCount} assignment{selCount === 1 ? "" : "s"}?</h3>
+            <p className="text-sm text-gray-600 mt-2">
+              This removes the Caller assignment of {allMatching ? `all ${selCount} assigned call${selCount === 1 ? "" : "s"}${search ? " matching this search" : ""}` : `the ${selCount} selected call${selCount === 1 ? "" : "s"}`}.
+              The calls then show as Unassigned and leave those callers&apos; lists. <strong>Nothing is deleted</strong> — the contacts, their photos, addresses, designations and call history are kept.
+            </p>
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" onClick={() => setBulkConfirm(false)} disabled={bulkBusy} data-testid="bulk-cancel" className="px-4 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={bulkRemove} disabled={bulkBusy} data-testid="bulk-confirm-yes" className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-60">
+                {bulkBusy ? "Removing…" : "Remove assignments"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {notice && <div className={`rounded-lg border px-3 py-2 text-sm ${notice.err ? "bg-red-50 border-red-200 text-red-800" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`} data-testid="unassign-notice">{notice.text}</div>}
 
       <div className="bg-white border border-gray-200 rounded-xl p-3 flex flex-wrap items-center gap-2">
@@ -286,6 +340,21 @@ export default function UnfilteredContactsPage() {
         </div>
       </div>
 
+      {/* Bulk Remove Assignment */}
+      <div className="flex flex-wrap items-center gap-3" data-testid="bulk-bar">
+        <button type="button" onClick={() => setBulkConfirm(true)} disabled={!selCount || bulkBusy} data-testid="bulk-remove"
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed">
+          Bulk Remove Assignment{selCount ? ` (${selCount})` : ""}
+        </button>
+        {selCount > 0 && <button type="button" onClick={() => { setSel(new Set()); setAllMatching(false); }} className="text-xs text-gray-500 hover:underline" data-testid="bulk-clear">Clear selection</button>}
+        {pageAllSelected && !allMatching && (data?.assigned_total || 0) > assignedRows.length && (
+          <button type="button" onClick={() => setAllMatching(true)} className="text-xs font-semibold text-[#164FA3] hover:underline" data-testid="bulk-select-all-matching">
+            Select all {data.assigned_total} assigned call{data.assigned_total === 1 ? "" : "s"}{search ? " matching this search" : ""} (all pages)
+          </button>
+        )}
+        {allMatching && <span className="text-xs text-gray-600" data-testid="bulk-all-note">All {data?.assigned_total} assigned call{data?.assigned_total === 1 ? "" : "s"}{search ? " matching this search" : ""} are selected.</span>}
+      </div>
+
       {err && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -293,6 +362,7 @@ export default function UnfilteredContactsPage() {
           <table className="w-full text-sm min-w-[880px]" data-testid="unfiltered-table">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
+                <th className="px-3 py-2.5 w-8"><input type="checkbox" checked={pageAllSelected} onChange={togglePage} disabled={!assignedRows.length} aria-label="Select all assigned calls" data-testid="bulk-select-page" /></th>
                 <th className="px-4 py-2.5 font-semibold">Name</th>
                 <th className="px-4 py-2.5 font-semibold">Phone Number</th>
                 <th className="px-4 py-2.5 font-semibold">District</th>
@@ -305,11 +375,12 @@ export default function UnfilteredContactsPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading && !data ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">{search ? "No unfiltered contacts match this search." : "No unfiltered contacts yet — use Bulk Import to add some."}</td></tr>
+                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">{search ? "No unfiltered contacts match this search." : "No unfiltered contacts yet — use Bulk Import to add some."}</td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} data-testid="unfiltered-row" className="hover:bg-gray-50">
+                  <td className="px-3 py-2">{r.assigned_to_user_id ? <input type="checkbox" checked={allMatching || sel.has(r.id)} disabled={allMatching} onChange={() => toggleRow(r.id)} aria-label={`Select ${r.person_name || r.phone_key}`} data-testid="bulk-select-row" /> : null}</td>
                   <td className="px-4 py-2 font-medium text-gray-900">{r.person_name || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2 font-mono text-gray-700" data-testid="unfiltered-phone">{r.phone_key}</td>
                   <td className="px-4 py-2 text-gray-600">{r.district || "—"}</td>
