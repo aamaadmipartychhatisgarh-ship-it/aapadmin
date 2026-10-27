@@ -28,6 +28,8 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const timerRef = useRef(null);
+  const submitLock = useRef(false);        // synchronous guard: two quick clicks can't both pass before state updates
+  const attemptedRef = useRef(new Set());  // calls already worked this session (kept pending after e.g. Busy): never offered as "next" again
 
   // Edit details (Photo, Address, Zone, Lok Sabha, District, Assembly, Block) - same fields as a regular call.
   // `editBase` is the snapshot the form was opened with: the server writes only what was changed from it.
@@ -153,7 +155,8 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
 
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
-    if (submitting) return;
+    if (submitting || submitLock.current) return;
+    submitLock.current = true;
     setSubmitting(true); setError("");
     try {
       const r = await fetch(`/api/unfiltered-calls/${active.id}/log`, {
@@ -171,11 +174,16 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       const fresh = await load("pending");
       if (view !== "pending") setView("pending");
       // Same rhythm as Regular Calls: move straight on to the next call.
-      const nextCall = (fresh?.calls || []).find((c) => c.id !== savedId);
+      // A call kept pending for a retry (Busy, Not Picked...) stays at the head of the queue; "next" is the
+      // following call in list order that has not been worked yet this session - never the one just saved.
+      attemptedRef.current.add(savedId);
+      const nextCall = (fresh?.calls || []).find((c) => !attemptedRef.current.has(c.id));
+      const retryLeft = (fresh?.calls || []).length;
       const added = d.contact_sync?.action === "created" ? " Added to the Contact List." : d.contact_sync?.action === "updated" ? " Contact List record updated." : d.contact_sync?.action === "skipped" ? ` Not added to the Contact List (${d.contact_sync.reason}).` : "";
-      setMessage(`Saved (${savedDuration}s) — ${d.completed ? "call completed" : "kept pending for a retry"}.${added}${nextCall ? " Next call ready." : " No more pending Unfiltered Calls."}`);
+      setMessage(`Saved (${savedDuration}s) — ${d.completed ? "call completed" : "kept pending for a retry"}.${added}${!fresh ? " Could not refresh the queue." : nextCall ? " Next call ready." : retryLeft ? ` No more new calls - ${retryLeft} kept pending for a retry (use Start Next Call).` : " No more pending Unfiltered Calls."}`);
       if (nextCall) start(nextCall, { keepMessage: true });
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   }
@@ -194,7 +202,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
             <h2 className="font-bold">Your Unfiltered Queue</h2>
           </div>
           <button
-            onClick={() => start(firstPending)}
+            onClick={() => { const fresh = calls.find((c) => !attemptedRef.current.has(c.id)); if (!fresh) attemptedRef.current.clear(); start(fresh || firstPending); }}
             disabled={!!active || !firstPending}
             data-testid="uw-start-next"
             className="w-full bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2"
