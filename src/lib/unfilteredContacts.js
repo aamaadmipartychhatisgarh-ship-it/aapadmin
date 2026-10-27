@@ -833,3 +833,60 @@ export async function bulkRemoveUnfilteredAssignments({ ids = [], allMatching = 
     conn.release();
   }
 }
+
+// DELETE Unfiltered Contact (call) records - not the same as Remove Assignment (which only clears the
+// caller mapping). Deleting removes the record itself together with its own call log rows; the
+// Contact List record that a Positive / Supporter outcome created is NEVER deleted - it just loses its
+// back-link to the removed record (contacts.source_unfiltered_contact_id -> NULL; its 'source' tag and
+// all its data stay). Runs in ONE transaction with the rows locked, so it is all-or-nothing: any failure
+// rolls back and nothing is deleted. `ids` = the chosen records, or `allMatching` (+ search `q`) = every
+// record the list shows for that search. Returns the ACTUAL result: { deleted, deleted_ids?, not_found }.
+export async function deleteUnfilteredContacts({ ids = [], allMatching = false, q = "" }) {
+  await ensureUnfilteredCallLogSchema();
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    let target, requested;
+    if (allMatching) {
+      const where = ["1=1"], params = [];
+      const term = String(q || "").trim();
+      if (term) {
+        const digits = term.replace(/\D/g, "");
+        where.push(digits.length >= 3 ? "(person_name LIKE ? OR phone_key LIKE ?)" : "person_name LIKE ?");
+        params.push(`%${term}%`);
+        if (digits.length >= 3) params.push(`%${digits.slice(-10)}%`);
+      }
+      const [rows] = await conn.query(`SELECT id FROM unfiltered_contacts WHERE ${where.join(" AND ")} ORDER BY id LIMIT ${BULK_MAX} FOR UPDATE`, params);
+      target = rows.map((r) => r.id);
+    } else {
+      const want = [...new Set((Array.isArray(ids) ? ids : []).map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0))].slice(0, BULK_MAX);
+      if (!want.length) { await conn.rollback(); return { status: 400, message: "Select at least one call." }; }
+      requested = want.length;
+      const [rows] = await conn.query(`SELECT id FROM unfiltered_contacts WHERE id IN (${want.map(() => "?").join(",")}) ORDER BY id FOR UPDATE`, want);
+      target = rows.map((r) => r.id);
+    }
+    let deleted = 0;
+    for (let i = 0; i < target.length; i += 500) {
+      const chunk = target.slice(i, i + 500);
+      const ph = chunk.map(() => "?").join(",");
+      // eslint-disable-next-line no-await-in-loop
+      await conn.query(`DELETE FROM unfiltered_call_logs WHERE unfiltered_contact_id IN (${ph})`, chunk);
+      // eslint-disable-next-line no-await-in-loop
+      await conn.query(`UPDATE contacts SET source_unfiltered_contact_id = NULL WHERE source_unfiltered_contact_id IN (${ph})`, chunk);
+      // eslint-disable-next-line no-await-in-loop
+      const [res] = await conn.query(`DELETE FROM unfiltered_contacts WHERE id IN (${ph})`, chunk);
+      deleted += res.affectedRows || 0;
+    }
+    await conn.commit();
+    return {
+      status: 200, deleted, not_found: allMatching ? 0 : Math.max(0, (requested || 0) - target.length),
+      deleted_ids: allMatching ? undefined : target,
+      message: deleted ? `Deleted ${deleted} call record${deleted === 1 ? "" : "s"}.` : "No matching call records were found.",
+    };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}

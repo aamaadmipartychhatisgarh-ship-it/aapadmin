@@ -178,7 +178,9 @@ export default function UnfilteredContactsPage() {
   const [notice, setNotice] = useState(null);
   const [callers, setCallers] = useState([]);
   // Bulk Remove Assignment: selected assigned rows (this page), or every assigned match across pages.
-  const [sel, setSel] = useState(() => new Set());
+  const [sel, setSel] = useState(() => new Map()); // id -> is assigned (selection spans pages)
+  const [delConfirm, setDelConfirm] = useState(null); // { ids: [..] | null, all: bool, count, name? }
+  const [delBusy, setDelBusy] = useState(false);
   const [allMatching, setAllMatching] = useState(false);
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -194,13 +196,13 @@ export default function UnfilteredContactsPage() {
     try {
       const res = await fetch("/api/unfiltered-contacts/assignments/remove", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(allMatching ? { all_matching: true, q: search } : { ids: [...sel] }),
+        body: JSON.stringify(allMatching ? { all_matching: true, q: search } : { ids: [...sel.keys()] }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { setNotice({ err: true, text: d.message || "Could not remove the assignments." }); }
       else {
         setNotice({ err: false, text: `${d.message}${d.skipped ? ` ${d.skipped} already unassigned.` : ""} The calls and their contact details are kept.` });
-        setSel(new Set()); setAllMatching(false);
+        setSel(new Map()); setAllMatching(false);
       }
       setBulkConfirm(false);
       await load();
@@ -272,7 +274,9 @@ export default function UnfilteredContactsPage() {
     }
   }, [page, search]);
   useEffect(() => { if (ready && allowed) load(); }, [ready, allowed, load]);
-  useEffect(() => { setAllMatching(false); setSel(new Set()); }, [search]); // a new search starts a new selection
+  // After a delete the current page can end up empty: step back one page.
+  useEffect(() => { if (data && data.contacts.length === 0 && page > 1) setPage(page - 1); }, [data, page]);
+  useEffect(() => { setAllMatching(false); setSel(new Map()); }, [search]); // a new search starts a new selection
 
   if (!ready || !allowed) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>;
@@ -281,11 +285,46 @@ export default function UnfilteredContactsPage() {
   const total = data?.total || 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rows = data?.contacts || [];
-  const assignedRows = rows.filter((r) => r.assigned_to_user_id);
-  const pageAllSelected = assignedRows.length > 0 && assignedRows.every((r) => sel.has(r.id));
-  const selCount = allMatching ? (data?.assigned_total ?? 0) : sel.size;
-  const toggleRow = (id) => { setAllMatching(false); setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
-  const togglePage = () => { setAllMatching(false); setSel(pageAllSelected ? new Set() : new Set(assignedRows.map((r) => r.id))); };
+  const pageAllSelected = rows.length > 0 && rows.every((r) => sel.has(r.id));
+  // selCount = calls selected (for Delete); removeCount = the assigned ones among them (for Remove Assignment).
+  const selCount = allMatching ? total : sel.size;
+  const removeCount = allMatching ? (data?.assigned_total ?? 0) : [...sel.values()].filter(Boolean).length;
+  const toggleRow = (r) => { setAllMatching(false); setSel((s) => { const n = new Map(s); if (n.has(r.id)) n.delete(r.id); else n.set(r.id, !!r.assigned_to_user_id); return n; }); };
+  const togglePage = () => { setAllMatching(false); setSel(pageAllSelected ? new Map() : new Map(rows.map((r) => [r.id, !!r.assigned_to_user_id]))); };
+
+  // DELETE call records (the record itself - not Remove Assignment). The server does the deleting; the list
+  // is re-read afterwards, so the deleted rows disappear, the counts update and deleted ids leave the selection.
+  async function doDelete() {
+    if (delBusy || !delConfirm) return;
+    setDelBusy(true); setNotice(null);
+    try {
+      const single = delConfirm.ids && delConfirm.ids.length === 1 && delConfirm.single;
+      const res = single
+        ? await fetch(`/api/unfiltered-contacts/${delConfirm.ids[0]}`, { method: "DELETE" })
+        : await fetch("/api/unfiltered-contacts/delete", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(delConfirm.all ? { all_matching: true, q: search } : { ids: delConfirm.ids }),
+          });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotice({ err: true, text: `${d.message || "Could not delete the selected calls."} The records were kept.` });
+      } else {
+        const gone = new Set(d.deleted_ids || (delConfirm.ids || []));
+        setSel((s) => { if (delConfirm.all) return new Map(); const n = new Map(s); gone.forEach((i) => n.delete(i)); return n; });
+        if (delConfirm.all) setAllMatching(false);
+        setNotice({ err: false, text: `${d.message || `Deleted ${d.deleted} call record(s).`}${d.not_found ? ` ${d.not_found} no longer existed.` : ""}` });
+      }
+      setDelConfirm(null);
+      await load();
+      setRefreshKey((k) => k + 1);
+    } catch {
+      setNotice({ err: true, text: "Could not delete — network error. The records were kept." });
+      setDelConfirm(null);
+    } finally {
+      setDelBusy(false);
+    }
+  }
+
 
   return (
     <div className="space-y-4 animate-in fade-in duration-500">
@@ -305,12 +344,32 @@ export default function UnfilteredContactsPage() {
 
       <AssignedCalls refreshKey={refreshKey} onDistributed={load} />
 
+      {delConfirm && (
+        <div className="fixed inset-0 z-[150] bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" data-testid="delete-confirm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900">Delete {delConfirm.count} call record{delConfirm.count === 1 ? "" : "s"}?</h3>
+            <p className="text-sm text-gray-600 mt-2">
+              {delConfirm.single
+                ? <>The call record for <strong>{delConfirm.name}</strong> will be deleted</>
+                : <>{delConfirm.all ? `All ${delConfirm.count} call records${search ? " matching this search" : ""}` : `The ${delConfirm.count} selected call records`} will be deleted</>}
+              {" "}together with their call history and assignment. This cannot be undone. To only take a call away from a caller, use <strong>Remove assignment</strong> instead.
+            </p>
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" onClick={() => setDelConfirm(null)} disabled={delBusy} data-testid="delete-cancel" className="px-4 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={doDelete} disabled={delBusy} data-testid="delete-confirm-yes" className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:opacity-60">
+                {delBusy ? "Deleting…" : "Confirm Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {bulkConfirm && (
         <div className="fixed inset-0 z-[150] bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" data-testid="bulk-confirm">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900">Remove {selCount} assignment{selCount === 1 ? "" : "s"}?</h3>
+            <h3 className="text-lg font-bold text-gray-900">Remove {removeCount} assignment{removeCount === 1 ? "" : "s"}?</h3>
             <p className="text-sm text-gray-600 mt-2">
-              This removes the Caller assignment of {allMatching ? `all ${selCount} assigned call${selCount === 1 ? "" : "s"}${search ? " matching this search" : ""}` : `the ${selCount} selected call${selCount === 1 ? "" : "s"}`}.
+              This removes the Caller assignment of {allMatching ? `all ${removeCount} assigned call${removeCount === 1 ? "" : "s"}${search ? " matching this search" : ""}` : `the ${removeCount} selected assigned call${removeCount === 1 ? "" : "s"}`}.
               The calls then show as Unassigned and leave those callers&apos; lists. <strong>Nothing is deleted</strong> — the contacts, their photos, addresses, designations and call history are kept.
             </p>
             <div className="flex justify-end gap-2 mt-5">
@@ -342,17 +401,21 @@ export default function UnfilteredContactsPage() {
 
       {/* Bulk Remove Assignment */}
       <div className="flex flex-wrap items-center gap-3" data-testid="bulk-bar">
-        <button type="button" onClick={() => setBulkConfirm(true)} disabled={!selCount || bulkBusy} data-testid="bulk-remove"
+        <button type="button" onClick={() => setBulkConfirm(true)} disabled={!removeCount || bulkBusy} data-testid="bulk-remove"
           className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed">
-          Bulk Remove Assignment{selCount ? ` (${selCount})` : ""}
+          Bulk Remove Assignment{removeCount ? ` (${removeCount})` : ""}
         </button>
-        {selCount > 0 && <button type="button" onClick={() => { setSel(new Set()); setAllMatching(false); }} className="text-xs text-gray-500 hover:underline" data-testid="bulk-clear">Clear selection</button>}
-        {pageAllSelected && !allMatching && (data?.assigned_total || 0) > assignedRows.length && (
+        <button type="button" onClick={() => setDelConfirm({ ids: allMatching ? null : [...sel.keys()], all: allMatching, count: selCount })} disabled={!selCount || delBusy} data-testid="bulk-delete"
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
+          Bulk Delete{selCount ? ` (${selCount})` : ""}
+        </button>
+        {selCount > 0 && <button type="button" onClick={() => { setSel(new Map()); setAllMatching(false); }} className="text-xs text-gray-500 hover:underline" data-testid="bulk-clear">Clear selection</button>}
+        {pageAllSelected && !allMatching && total > rows.length && (
           <button type="button" onClick={() => setAllMatching(true)} className="text-xs font-semibold text-[#164FA3] hover:underline" data-testid="bulk-select-all-matching">
-            Select all {data.assigned_total} assigned call{data.assigned_total === 1 ? "" : "s"}{search ? " matching this search" : ""} (all pages)
+            Select all {total} call{total === 1 ? "" : "s"}{search ? " matching this search" : ""} (all pages)
           </button>
         )}
-        {allMatching && <span className="text-xs text-gray-600" data-testid="bulk-all-note">All {data?.assigned_total} assigned call{data?.assigned_total === 1 ? "" : "s"}{search ? " matching this search" : ""} are selected.</span>}
+        {allMatching && <span className="text-xs text-gray-600" data-testid="bulk-all-note">All {total} call{total === 1 ? "" : "s"}{search ? " matching this search" : ""} are selected.</span>}
       </div>
 
       {err && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
@@ -362,7 +425,7 @@ export default function UnfilteredContactsPage() {
           <table className="w-full text-sm min-w-[880px]" data-testid="unfiltered-table">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
-                <th className="px-3 py-2.5 w-8"><input type="checkbox" checked={pageAllSelected} onChange={togglePage} disabled={!assignedRows.length} aria-label="Select all assigned calls" data-testid="bulk-select-page" /></th>
+                <th className="px-3 py-2.5 w-8"><input type="checkbox" checked={pageAllSelected} onChange={togglePage} disabled={!rows.length} aria-label="Select all calls" data-testid="bulk-select-page" /></th>
                 <th className="px-4 py-2.5 font-semibold">Name</th>
                 <th className="px-4 py-2.5 font-semibold">Phone Number</th>
                 <th className="px-4 py-2.5 font-semibold">District</th>
@@ -371,16 +434,17 @@ export default function UnfilteredContactsPage() {
                 <th className="px-4 py-2.5 font-semibold">Address</th>
                 <th className="px-4 py-2.5 font-semibold">Imported</th>
                 <th className="px-4 py-2.5 font-semibold">Assigned to</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading && !data ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">{search ? "No unfiltered contacts match this search." : "No unfiltered contacts yet — use Bulk Import to add some."}</td></tr>
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">{search ? "No unfiltered contacts match this search." : "No unfiltered contacts yet — use Bulk Import to add some."}</td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} data-testid="unfiltered-row" className="hover:bg-gray-50">
-                  <td className="px-3 py-2">{r.assigned_to_user_id ? <input type="checkbox" checked={allMatching || sel.has(r.id)} disabled={allMatching} onChange={() => toggleRow(r.id)} aria-label={`Select ${r.person_name || r.phone_key}`} data-testid="bulk-select-row" /> : null}</td>
+                  <td className="px-3 py-2"><input type="checkbox" checked={allMatching || sel.has(r.id)} disabled={allMatching} onChange={() => toggleRow(r)} aria-label={`Select ${r.person_name || r.phone_key}`} data-testid="bulk-select-row" /></td>
                   <td className="px-4 py-2 font-medium text-gray-900">{r.person_name || <span className="text-gray-300">—</span>}</td>
                   <td className="px-4 py-2 font-mono text-gray-700" data-testid="unfiltered-phone">{r.phone_key}</td>
                   <td className="px-4 py-2 text-gray-600">{r.district || "—"}</td>
@@ -404,6 +468,10 @@ export default function UnfilteredContactsPage() {
                         {unassigning === r.id ? "Removing…" : "Remove assignment"}
                       </button>
                     )}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <button type="button" onClick={() => setDelConfirm({ ids: [r.id], all: false, count: 1, single: true, name: r.person_name || r.phone_key })} disabled={delBusy} data-testid="unfiltered-delete"
+                      className="text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 rounded-lg px-2.5 py-1 disabled:opacity-50">Delete</button>
                   </td>
                 </tr>
               ))}
