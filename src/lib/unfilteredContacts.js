@@ -724,3 +724,30 @@ export async function updateUnfilteredContact({ session, id, callerId, data, can
     conn.release();
   }
 }
+
+// Remove the Caller -> Unfiltered Contact assignment. Only the three assignment columns are cleared;
+// the contact, its details (photo, address, designation, geography, Block), its linked Contact, and
+// every call log / completion record are left exactly as they are. The row is locked for the check
+// + write, and `expectedCallerId` (the mapping the admin selected) must still be the current one.
+export async function removeUnfilteredAssignment({ id, expectedCallerId = null }) {
+  await ensureUnfilteredCallLogSchema();
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [[row]] = await conn.query("SELECT id, assigned_to_user_id, completed_at FROM unfiltered_contacts WHERE id = ? FOR UPDATE", [Number(id) || 0]);
+    if (!row) { await conn.rollback(); return { status: 404, message: "Unfiltered contact not found." }; }
+    if (row.assigned_to_user_id == null) { await conn.rollback(); return { status: 409, message: "This contact is not assigned to any caller." }; }
+    if (expectedCallerId && Number(row.assigned_to_user_id) !== Number(expectedCallerId)) {
+      await conn.rollback();
+      return { status: 409, message: "This contact is now assigned to a different caller. Please refresh and try again." };
+    }
+    await conn.query("UPDATE unfiltered_contacts SET assigned_to_user_id = NULL, assigned_at = NULL, assigned_by = NULL WHERE id = ?", [row.id]);
+    await conn.commit();
+    return { status: 200, message: "Assignment removed.", removed_caller_id: row.assigned_to_user_id, was_completed: !!row.completed_at };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}

@@ -174,6 +174,25 @@ export default function UnfilteredContactsPage() {
   const [page, setPage] = useState(1);
   const [showImport, setShowImport] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0); // re-reads Assigned Calls after an import
+  const [unassigning, setUnassigning] = useState(null);
+  const [notice, setNotice] = useState(null);
+
+  async function removeAssignment(r) {
+    if (unassigning) return;
+    if (!window.confirm(`Remove ${r.assigned_to}'s assignment of ${r.person_name || r.phone_key}? The contact and its history are kept; it returns to the unassigned pool.`)) return;
+    setUnassigning(r.id); setNotice(null);
+    try {
+      const res = await fetch(`/api/unfiltered-contacts/${r.id}/assignment?caller_id=${r.assigned_to_user_id}`, { method: "DELETE" });
+      const d = await res.json().catch(() => ({}));
+      setNotice({ err: !res.ok, text: res.ok ? `Assignment removed for ${r.person_name || r.phone_key}.` : (d.message || "Could not remove the assignment.") });
+      await load();
+      setRefreshKey((k) => k + 1);
+    } catch {
+      setNotice({ err: true, text: "Could not remove the assignment — network error." });
+    } finally {
+      setUnassigning(null);
+    }
+  }
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -222,6 +241,8 @@ export default function UnfilteredContactsPage() {
       />
 
       <AssignedCalls refreshKey={refreshKey} onDistributed={load} />
+
+      {notice && <div className={`rounded-lg border px-3 py-2 text-sm ${notice.err ? "bg-red-50 border-red-200 text-red-800" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`} data-testid="unassign-notice">{notice.text}</div>}
 
       <div className="bg-white border border-gray-200 rounded-xl p-3 flex flex-wrap items-center gap-2">
         <form className="flex items-center gap-2 flex-1 min-w-[220px]" onSubmit={(e) => { e.preventDefault(); setPage(1); setSearch(q.trim()); }}>
@@ -272,6 +293,12 @@ export default function UnfilteredContactsPage() {
                   <td className="px-4 py-2 text-xs whitespace-nowrap" data-testid="unfiltered-assignee">
                     {r.assigned_to ? <span className="font-medium text-gray-800">{r.assigned_to}</span> : <span className="text-gray-400">Unassigned</span>}
                     {r.assigned_to && <div className={r.completed_at ? "text-emerald-700" : "text-amber-700"}>{r.completed_at ? `Completed${r.call_status_name ? ` · ${r.call_status_name}` : ""}` : "Pending"}</div>}
+                    {r.assigned_to && (
+                      <button type="button" onClick={() => removeAssignment(r)} disabled={unassigning === r.id} data-testid="unfiltered-unassign"
+                        className="mt-1 text-[11px] font-semibold text-red-600 hover:underline disabled:opacity-50">
+                        {unassigning === r.id ? "Removing…" : "Remove assignment"}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

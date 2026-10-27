@@ -35,7 +35,7 @@ export async function GET(req) {
     const rows = await query(
       `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation, u.created_at,
               COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
-              b.file_name, au.username AS assigned_to, u.completed_at, u.call_status_name
+              b.file_name, au.username AS assigned_to, u.assigned_to_user_id, u.completed_at, u.call_status_name
          FROM unfiltered_contacts u
          LEFT JOIN users au ON au.id = u.assigned_to_user_id
          LEFT JOIN locations ld ON ld.id = u.district_id
