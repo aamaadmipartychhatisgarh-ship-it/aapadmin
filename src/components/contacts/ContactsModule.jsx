@@ -1430,6 +1430,7 @@ function Pagination({ total, page, pageSize, onPage, onPageSize, loading }) {
         })}
         <button onClick={() => onPage(page + 1)} disabled={page >= pageCount || loading}
           className="px-2.5 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next</button>
+        <GoToPage page={page} pageCount={pageCount} onPage={onPage} disabled={loading} />
       </div>
       )}
     </div>
@@ -2267,5 +2268,62 @@ function RfaControl({ contact, canSubmit, onDone, onFail }) {
         </div>
       )}
     </>
+  );
+}
+
+
+// "Go to Page" — a small popover next to Prev/Next: type a page number, OK jumps straight
+// there through the same onPage the other controls use, so the search, filters, sort and
+// page size stay exactly as they are. Nothing is sent for an invalid entry.
+function GoToPage({ page, pageCount, onPage, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState("");
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  function validate(raw) {
+    const v = String(raw ?? "").trim();
+    if (!v) return { error: "Enter a page number." };
+    if (!/^-?\d+$/.test(v)) return { error: "Enter a whole page number (digits only)." };
+    const n = Number(v);
+    if (!Number.isSafeInteger(n)) return { error: `Enter a page number between 1 and ${pageCount}.` };
+    if (n < 0) return { error: "Page number cannot be negative." };
+    if (n === 0) return { error: "Page numbers start at 1." };
+    if (n > pageCount) return { error: `Page ${n.toLocaleString()} doesn't exist — there ${pageCount === 1 ? "is 1 page" : `are ${pageCount.toLocaleString()} pages`}.` };
+    return { n };
+  }
+  function go() {
+    const r = validate(val);
+    if (r.error) { setErr(r.error); return; }
+    setErr(""); setOpen(false); setVal("");
+    if (r.n !== page) onPage(r.n);
+  }
+
+  return (
+    <div className="relative ml-1" ref={boxRef}>
+      <button type="button" onClick={() => { setOpen((o) => !o); setErr(""); setVal(""); }} disabled={disabled} data-testid="goto-page-btn"
+        className="px-2.5 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Go to Page</button>
+      {open && (
+        <div className="absolute right-0 bottom-full mb-2 z-30 w-60 rounded-xl border border-gray-200 bg-white shadow-lg p-3" data-testid="goto-page-box" role="dialog" aria-label="Go to page">
+          <label className="block text-xs font-medium text-gray-500 mb-1">Page number (1–{pageCount.toLocaleString()})</label>
+          <input autoFocus value={val} inputMode="numeric" data-testid="goto-page-input" placeholder={`e.g. ${Math.min(pageCount, 25)}`}
+            onChange={(e) => { setVal(e.target.value); if (err) setErr(""); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } else if (e.key === "Escape") setOpen(false); }}
+            className={`w-full h-9 rounded-lg border px-2.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30 ${err ? "border-red-300" : "border-gray-200"}`} />
+          {err && <p className="text-xs text-red-600 mt-1" data-testid="goto-page-error">{err}</p>}
+          <div className="flex justify-end gap-2 mt-2.5">
+            <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={go} data-testid="goto-page-ok" className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#164FA3] text-white hover:bg-blue-800">OK</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
