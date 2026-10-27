@@ -44,7 +44,13 @@ export default function PageAccessManager() {
       const r = await fetch("/api/admin/page-access", { cache: "no-store" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || "Failed to load");
-      setData({ pages: d.pages || [], users: d.users || [], grants: d.grants || [] });
+      // Worker (Member) accounts are managed in Member Accounts, never here (the API already omits
+      // them; this keeps the console correct even against an older server response).
+      setData({
+        pages: d.pages || [],
+        users: (d.users || []).filter((u) => u.role !== "worker"),
+        grants: (d.grants || []).filter((g) => g.role !== "worker"),
+      });
     } catch (e) {
       fail(e.message || "Failed to load page access.");
     } finally {

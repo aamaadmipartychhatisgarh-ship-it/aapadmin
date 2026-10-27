@@ -23,6 +23,13 @@ function guard(session) {
   return session && isSuperAdmin(session);
 }
 
+// Worker (Member) accounts are NOT managed through Page Access: they are created and managed
+// in Member Accounts, and their portal access follows that module. They are therefore never
+// listed here and this console cannot grant, change, revoke or reset pages for them. Their
+// accounts, profiles and any grants they already hold are left exactly as they are.
+const WORKER_ROLE_NOTE = "Worker accounts are managed in Member Accounts, not in Page Access.";
+const isWorkerRole = (role) => normalizeRole(role) === ROLES.WORKER;
+
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
@@ -30,7 +37,8 @@ export async function GET() {
     await ensurePagePermissionsSchema();
 
     // Grantable users = everyone except Super Admins (who already hold every
-    // page and must never be managed through this system, §12). Distinct rows
+    // page and must never be managed through this system, §12) and Worker accounts
+    // (managed in Member Accounts — see WORKER_ROLE_NOTE). Distinct rows
     // by id (no duplicates). username doubles as the display name in this app.
     // Worker (Member) accounts only have a generated User ID as username, so also
     // pull their linked contact's name / phone / designations / assembly to show.
@@ -55,7 +63,7 @@ export async function GET() {
     const managedRows = await query(`SELECT user_id FROM page_access_config`);
     const managedSet = new Set(managedRows.map((r) => r.user_id));
     const grantable = users
-      .filter((u) => normalizeRole(u.role) !== ROLES.SUPER_ADMIN)
+      .filter((u) => normalizeRole(u.role) !== ROLES.SUPER_ADMIN && !isWorkerRole(u.role))
       .map((u) => ({
         id: u.id,
         username: u.username,
@@ -82,7 +90,7 @@ export async function GET() {
     );
     // Only surface grants for pages still present in the registry.
     const grants = grantRows
-      .filter((g) => isValidPageKey(g.page_key) && !HIDDEN.has(g.page_key))
+      .filter((g) => isValidPageKey(g.page_key) && !HIDDEN.has(g.page_key) && !isWorkerRole(g.role))
       .map((g) => ({
         id: g.id,
         user_id: g.user_id,
@@ -141,6 +149,7 @@ export async function POST(req) {
     if (normalizeRole(target.role) === ROLES.SUPER_ADMIN) {
       return NextResponse.json({ message: "Super Admin already has access to every page." }, { status: 400 });
     }
+    if (isWorkerRole(target.role)) return NextResponse.json({ message: WORKER_ROLE_NOTE }, { status: 400 });
 
     // (Under the managed/override model a role baseline never auto-grants, so a
     // page in the role's baseline is still a meaningful explicit assignment.)
@@ -200,6 +209,7 @@ export async function PUT(req) {
     if (normalizeRole(target.role) === ROLES.SUPER_ADMIN) {
       return NextResponse.json({ message: "Super Admin already has access to every page." }, { status: 400 });
     }
+    if (isWorkerRole(target.role)) return NextResponse.json({ message: WORKER_ROLE_NOTE }, { status: 400 });
 
     // Reset → remove the managed marker AND all grants, reverting the user to
     // their normal role-based access (the escape hatch from Page-Access control).
@@ -245,6 +255,8 @@ export async function DELETE(req) {
       return NextResponse.json({ message: "user_id and page_key are required." }, { status: 400 });
     }
 
+    const [victim] = await query(`SELECT role FROM users WHERE id = ?`, [userId]);
+    if (victim && isWorkerRole(victim.role)) return NextResponse.json({ message: WORKER_ROLE_NOTE }, { status: 400 });
     const res = await query(
       `DELETE FROM page_permissions WHERE user_id = ? AND page_key = ?`,
       [userId, pageKey]
