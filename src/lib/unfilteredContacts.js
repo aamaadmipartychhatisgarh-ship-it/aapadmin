@@ -4,6 +4,11 @@ import { normalizeIndianMobile } from "@/lib/phoneLinks";
 import { buildHeaderIndex, norm, resolveLoc, DISTRICT_ALIASES, ASSEMBLY_ALIASES } from "@/lib/workerImport";
 import { syncContactDesignations } from "@/lib/contactDesignations";
 import { hasApprovalStatusColumn } from "@/lib/contactExtras";
+import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
+import { addressForGeneralEdit } from "@/lib/contactAddress";
+import { resolveOrCreateWard } from "@/lib/contactLocation";
+import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
+import { logAudit } from "@/lib/audit";
 
 // Unfiltered Contacts — raw bulk-imported numbers kept in their OWN table,
 // logically separate from `contacts` (nothing here reads-for-write or writes the
@@ -356,17 +361,23 @@ export async function distributeUnfiltered({ byUserId }) {
 }
 
 // Caller side: the caller's own assigned Unfiltered Calls.
-export async function myUnfilteredCalls(userId, { view = "pending" } = {}) {
+export async function myUnfilteredCalls(userId, { view = "pending", onlyId = null } = {}) {
   await ensureUnfilteredCallLogSchema();
-  const cond = view === "completed" ? "u.completed_at IS NOT NULL" : view === "all" ? "1=1" : "u.completed_at IS NULL";
+  let cond = view === "completed" ? "u.completed_at IS NOT NULL" : view === "all" ? "1=1" : "u.completed_at IS NULL";
+  if (onlyId) cond = `u.id = ${Number(onlyId) || 0}`;
   const rows = await query(
     `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation,
             COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
+            u.photo_url, u.zone_id, u.lok_sabha_id, u.district_id, u.assembly_id, u.ward_id, u.contact_id,
+            lz.name AS zone_name, lls.name AS lok_sabha_name, lw.name AS ward_name,
             u.assigned_at, u.completed_at, u.call_status_name, u.call_notes,
             (SELECT COUNT(*) FROM unfiltered_call_logs l WHERE l.unfiltered_contact_id = u.id) AS attempts
        FROM unfiltered_contacts u
        LEFT JOIN locations ld ON ld.id = u.district_id
        LEFT JOIN locations la ON la.id = u.assembly_id
+       LEFT JOIN locations lz ON lz.id = u.zone_id
+       LEFT JOIN locations lls ON lls.id = u.lok_sabha_id
+       LEFT JOIN locations lw ON lw.id = u.ward_id
       WHERE u.assigned_to_user_id = ? AND ${cond}
       ORDER BY ${view === "completed" ? "u.completed_at DESC" : "u.assigned_at ASC, u.id ASC"}
       LIMIT 500`,
@@ -439,6 +450,11 @@ export async function ensureUnfilteredContactLinkSchema() {
   await add("unfiltered_contacts", c, "contact_id", "INT NULL");
   await add("unfiltered_contacts", c, "contact_synced_at", "DATETIME NULL");
   await add("unfiltered_contacts", c, "call_sentiment", "VARCHAR(30) NULL");
+  // details a caller can edit from My Workspace (same set as a regular call's edit form)
+  await add("unfiltered_contacts", c, "photo_url", "VARCHAR(255) NULL");
+  await add("unfiltered_contacts", c, "zone_id", "INT NULL");
+  await add("unfiltered_contacts", c, "lok_sabha_id", "INT NULL");
+  await add("unfiltered_contacts", c, "ward_id", "INT NULL");
   c = await cols("unfiltered_call_logs");
   await add("unfiltered_call_logs", c, "sentiment", "VARCHAR(30) NULL");
   linkEnsured = true;
@@ -490,6 +506,10 @@ export async function syncUnfilteredToContact(conn, row, { sentiment, userId }) 
     fill("address", row.address ? String(row.address).trim() : null);
     fill("district_id", row.district_id || null);
     fill("assembly_id", row.assembly_id || null);
+    fill("photo_url", row.photo_url || null);
+    fill("zone_id", row.zone_id || null);
+    fill("lok_sabha_id", row.lok_sabha_id || null);
+    fill("ward_id", row.ward_id || null);
     fill("designation_id", desig?.id || null);
     if (have.has("source_unfiltered_contact_id") && existing.source_unfiltered_contact_id == null) { sets.push("source_unfiltered_contact_id = ?"); vals.push(row.id); }
     if (have.has("source") && !String(existing.source || "").trim()) { sets.push("source = ?"); vals.push(UNFILTERED_SOURCE); }
@@ -512,6 +532,7 @@ export async function syncUnfilteredToContact(conn, row, { sentiment, userId }) 
   const desired = {
     person_name: name, phone_number: phone, address: row.address ? String(row.address).trim() : null,
     district_id: row.district_id || null, assembly_id: row.assembly_id || null,
+    photo_url: row.photo_url || null, zone_id: row.zone_id || null, lok_sabha_id: row.lok_sabha_id || null, ward_id: row.ward_id || null,
     designation_id: desig?.id || null,
     remarks: `${note}${extraNote}`,
     created_by_user_id: userId || null,
@@ -598,4 +619,108 @@ export async function unfilteredCallHistory({ id, callerId }) {
       WHERE l.unfiltered_contact_id = ? ORDER BY l.id DESC`,
     [Number(id)]
   );
+}
+
+
+// ---------------------------------------------------------------------------
+// Edit an Unfiltered Call's details from My Workspace (Photo, Address, Zone, Lok Sabha, District,
+// Assembly, Block) - the same fields, and the same stale-form protection, as a regular call's edit.
+// Only the ASSIGNED caller may edit. The edit form is a snapshot, so only deliberately changed
+// fields are written (address_prev / photo_url_prev / geo_prev baselines); blanks never clear a
+// value, and only managers (canClear) may remove an address. When the record is already linked to
+// a Contact List record the same changes are applied to THAT contact (never a new one).
+// ---------------------------------------------------------------------------
+const GEO_KEYS = ["zone_id", "lok_sabha_id", "district_id", "assembly_id"];
+const GEO_TYPE = { zone_id: "zone", lok_sabha_id: "lok_sabha", district_id: "district", assembly_id: "assembly" };
+const idOrNull = (v) => (v == null || String(v).trim() === "" ? null : Number(v));
+
+export async function updateUnfilteredContact({ session, id, callerId, data, canClear = false }) {
+  await ensureUnfilteredCallLogSchema();
+  data = data && typeof data === "object" ? data : {};
+  const conn = await getPool().getConnection();
+  let zoneChanged = null;
+  try {
+    await conn.beginTransaction();
+    const [[row]] = await conn.query("SELECT * FROM unfiltered_contacts WHERE id = ? FOR UPDATE", [Number(id) || 0]);
+    if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) { await conn.rollback(); return { status: 404, message: "This call is not assigned to you." }; }
+
+    const sets = {};
+    const flags = {};
+    const ad = addressForGeneralEdit(data, row.address, canClear);
+    if (ad.conflict) flags.address_conflict = true;
+    if ("value" in ad) sets.address = ad.value;
+    const ph = await photoForGeneralEdit(data, row.photo_url);
+    if (ph.ignored) flags.photo_ignored = true;
+    if (ph.set) sets.photo_url = ph.set;
+
+    // Geography: only fields whose value differs from the form's baseline (or, with no baseline, the record)
+    const prev = data.geo_prev && typeof data.geo_prev === "object" ? data.geo_prev : null;
+    const next = {};
+    for (const k of GEO_KEYS) {
+      if (!(k in data)) continue;
+      const want = idOrNull(data[k]);
+      if (want == null) continue;                   // a blank never clears
+      const base = prev && k in prev ? idOrNull(prev[k]) : idOrNull(row[k]);
+      if (want === base) continue;                  // the user did not edit it
+      if (!Number.isInteger(want) || want <= 0) { await conn.rollback(); return { status: 400, message: "Invalid location selected." }; }
+      if (want === idOrNull(row[k])) continue;      // already stored
+      next[k] = want;
+    }
+    for (const k of Object.keys(next)) {
+      const [[loc]] = await conn.query("SELECT type FROM locations WHERE id = ?", [next[k]]);
+      if (!loc || loc.type !== GEO_TYPE[k]) { await conn.rollback(); return { status: 400, message: `Invalid ${GEO_TYPE[k].replace("_", " ")} selected.` }; }
+    }
+    const finalDistrict = next.district_id ?? row.district_id;
+    const finalAssembly = next.assembly_id ?? row.assembly_id;
+    if ((next.assembly_id || next.district_id) && finalAssembly && finalDistrict) {
+      const [[a]] = await conn.query("SELECT parent_id FROM locations WHERE id = ?", [finalAssembly]);
+      if (!a || Number(a.parent_id) !== Number(finalDistrict)) { await conn.rollback(); return { status: 400, message: "The Assembly does not belong to the selected District. Please choose an Assembly of that District." }; }
+    }
+    Object.assign(sets, next);
+    if ("district_id" in next) { const [[d]] = await conn.query("SELECT name FROM locations WHERE id = ?", [next.district_id]); sets.district_name = d?.name || null; }
+    if ("assembly_id" in next) { const [[a]] = await conn.query("SELECT name FROM locations WHERE id = ?", [next.assembly_id]); sets.assembly_name = a?.name || null; }
+
+    // Block: free text stored as a ward location under the Assembly. A blank never clears it.
+    let curWardName = null;
+    if (row.ward_id) { const [[w]] = await conn.query("SELECT name FROM locations WHERE id = ?", [row.ward_id]); curWardName = w?.name || null; }
+    if ("ward_name" in data) {
+      const want = String(data.ward_name ?? "").trim();
+      const baseName = "ward_prev" in data ? String(data.ward_prev ?? "").trim() : String(curWardName || "").trim();
+      if (want.length > 150) { await conn.rollback(); return { status: 400, message: "Block name is too long." }; }
+      if (want && want.toLowerCase() !== baseName.toLowerCase() && want.toLowerCase() !== String(curWardName || "").trim().toLowerCase()) {
+        sets.ward_id = await resolveOrCreateWard(want, finalAssembly || null);
+      }
+    }
+    // The Assembly moved but the Block was not edited: keep the same Block name under the new Assembly
+    if (next.assembly_id && !("ward_id" in sets) && curWardName) sets.ward_id = await resolveOrCreateWard(curWardName, next.assembly_id);
+
+    const cols = Object.keys(sets);
+    if (!cols.length) {
+      await conn.commit();
+      return { status: 200, message: "No changes to save.", no_change: true, ...flags, record: (await myUnfilteredCalls(callerId, { view: "all", onlyId: row.id })).calls[0] || null };
+    }
+    await conn.query(`UPDATE unfiltered_contacts SET ${cols.map((c) => `\`${c}\` = ?`).join(", ")} WHERE id = ?`, [...cols.map((c) => sets[c]), row.id]);
+
+    // The same changes onto the linked Contact List record (never a new record)
+    let linkedId = row.contact_id || null;
+    if (!linkedId) { const [[x]] = await conn.query("SELECT id FROM contacts WHERE source_unfiltered_contact_id = ? LIMIT 1", [row.id]); linkedId = x?.id || null; }
+    if (linkedId) {
+      const cset = {};
+      for (const k of ["address", "photo_url", "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id"]) if (k in sets) cset[k] = sets[k];
+      const ck = Object.keys(cset);
+      if (ck.length) {
+        await conn.query(`UPDATE contacts SET ${ck.map((c) => `\`${c}\` = ?`).join(", ")} WHERE id = ?`, [...ck.map((c) => cset[c]), linkedId]);
+        if ("zone_id" in cset) zoneChanged = { contactId: linkedId, zoneId: cset.zone_id };
+      }
+    }
+    await conn.commit();
+    if (zoneChanged) await releaseOutOfZoneAssignment(session, zoneChanged.contactId, zoneChanged.zoneId).catch(() => {});
+    logAudit(session, { action: "unfiltered.update", entityType: "unfiltered_contact", entityId: String(row.id), details: `Edited ${cols.join(", ")}${linkedId ? ` (contact #${linkedId})` : ""}` });
+    return { status: 200, message: "Saved.", ...flags, record: (await myUnfilteredCalls(callerId, { view: "all", onlyId: row.id })).calls[0] || null };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
 }

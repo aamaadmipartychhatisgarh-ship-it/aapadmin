@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight } from "lucide-react";
+import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight, Pencil } from "lucide-react";
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
+import ProfilePhoto from "@/components/ProfilePhoto";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
 
 // My Workspace → Unfiltered Calls. The same workspace layout and calling
@@ -27,6 +28,90 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const timerRef = useRef(null);
+
+  // Edit details (Photo, Address, Zone, Lok Sabha, District, Assembly, Block) - same fields as a regular call.
+  // `editBase` is the snapshot the form was opened with: the server writes only what was changed from it.
+  const [editing, setEditing] = useState(false);
+  const [edit, setEdit] = useState(null);
+  const [editBase, setEditBase] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editMsg, setEditMsg] = useState("");
+  const [editErr, setEditErr] = useState("");
+  const [zones, setZones] = useState([]);
+  const [lokSabhas, setLokSabhas] = useState([]);
+  const [districts, setDistricts] = useState([]);
+  const [editAssemblies, setEditAssemblies] = useState([]);
+  useEffect(() => {
+    if (!editing || zones.length) return;
+    const get = (t, set) => fetch(`/api/locations?type=${t}`).then((r) => r.json()).then((d) => set((d.locations || []).filter((l) => l.type === t))).catch(() => {});
+    get("zone", setZones); get("lok_sabha", setLokSabhas); get("district", setDistricts);
+  }, [editing, zones.length]);
+  useEffect(() => {
+    if (!editing || !edit?.district_id) { setEditAssemblies([]); return; }
+    fetch(`/api/locations?parent_id=${edit.district_id}`).then((r) => r.json()).then((d) => setEditAssemblies(d.locations || [])).catch(() => {});
+  }, [editing, edit?.district_id]);
+
+  const snapshot = (c) => ({
+    address: c.address || "", zone_id: c.zone_id ? String(c.zone_id) : "", lok_sabha_id: c.lok_sabha_id ? String(c.lok_sabha_id) : "",
+    district_id: c.district_id ? String(c.district_id) : "", assembly_id: c.assembly_id ? String(c.assembly_id) : "", ward_name: c.ward_name || "",
+  });
+  function openEdit() {
+    const snap = snapshot(active);
+    setEdit(snap); setEditBase(snap); setEditMsg(""); setEditErr(""); setEditing(true);
+  }
+
+  // Merge a saved record into the active card and the list, in place.
+  function applyRecord(rec) {
+    if (!rec) return;
+    setActive((a) => (a && a.id === rec.id ? { ...a, ...rec } : a));
+    setData((d) => (d ? { ...d, calls: d.calls.map((c) => (c.id === rec.id ? { ...c, ...rec } : c)) } : d));
+  }
+
+  async function saveEdit() {
+    if (editSaving || !active) return;
+    setEditSaving(true); setEditErr(""); setEditMsg("");
+    try {
+      const r = await fetch(`/api/unfiltered-calls/${active.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: edit.address, address_prev: editBase.address,
+          zone_id: edit.zone_id, lok_sabha_id: edit.lok_sabha_id, district_id: edit.district_id, assembly_id: edit.assembly_id,
+          geo_prev: { zone_id: editBase.zone_id, lok_sabha_id: editBase.lok_sabha_id, district_id: editBase.district_id, assembly_id: editBase.assembly_id },
+          ward_name: edit.ward_name, ward_prev: editBase.ward_name,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setEditErr(d.message || "Could not save the details."); return; }
+      applyRecord(d.record);
+      if (d.address_conflict) { setEditErr("The address was changed by someone else after you opened this form, so your address edit was not applied. Reopen to see the latest."); }
+      else { setEditMsg(d.no_change ? "No changes to save." : "Details saved."); }
+      if (!d.address_conflict) setEditing(false);
+    } catch {
+      setEditErr("Could not save the details.");
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function saveActivePhoto(blob) {
+    if (!active) return null;
+    if (!blob) throw new Error("Photos can only be replaced here, not removed.");
+    const fd = new FormData();
+    fd.append("file", new File([blob], "photo.jpg", { type: "image/jpeg" }));
+    const up = await fetch("/api/uploads", { method: "POST", body: fd });
+    const upData = await up.json().catch(() => ({}));
+    if (!up.ok) throw new Error(upData.message || "Upload failed");
+    const r = await fetch(`/api/unfiltered-calls/${active.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photo_url: upData.url, photo_url_prev: active.photo_url || "" }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.message || `Could not save the photo (error ${r.status}).`);
+    if (d.photo_ignored) throw new Error("The photo was changed by someone else meanwhile. Please reload and try again.");
+    return upData.url;
+  }
 
   const load = useCallback(async (v = view) => {
     try {
@@ -54,6 +139,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     if (!keepMessage) setMessage("");
     setError("");
     setForm({ status_id: "", remarks: "", sentiment: "" });
+    setEditing(false); setEditMsg(""); setEditErr("");
     setElapsed(0);
     setActive({ ...call, started_at: Date.now() });
     setHistory([]); setHistoryOpen(false);
@@ -190,19 +276,41 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
           <>
             <div className="bg-[#164FA3] text-white rounded-2xl shadow-sm p-6" data-testid="uw-active">
               <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
+                <div className="shrink-0">
+                  <ProfilePhoto
+                    name={active.person_name}
+                    src={active.photo_url}
+                    size={84}
+                    square
+                    className="bg-white/15 border-2 border-white/25"
+                    textClassName="text-white"
+                    canRemove={false}
+                    persist={saveActivePhoto}
+                    onChange={(url) => applyRecord({ id: active.id, photo_url: url })}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
                   <div className="text-xs uppercase tracking-wider text-blue-200 mb-1 flex items-center gap-2">
                     Calling · Unfiltered
                     {history.length > 0 && <span className="bg-[#FCB712] text-[#164FA3] text-[10px] font-bold px-2 py-0.5 rounded-full">RETRY ×{history.length}</span>}
                   </div>
                   <h2 className="text-3xl font-bold">{active.person_name || "Unnamed"}</h2>
                   <div className="text-blue-100 text-sm mt-1">{[active.designation, active.assembly, active.district].filter(Boolean).join(" · ") || "No other details"}</div>
-                  {active.address && <div className="text-blue-200 text-xs mt-0.5">{active.address}</div>}
+                  {active.address && <div className="text-blue-200 text-xs mt-0.5" data-testid="uw-active-address">{active.address}</div>}
+                  {(active.zone_name || active.lok_sabha_name || active.ward_name) && (
+                    <div className="text-blue-200 text-xs mt-0.5" data-testid="uw-active-geo">
+                      {[active.zone_name && `Zone: ${active.zone_name}`, active.lok_sabha_name && `Lok Sabha: ${active.lok_sabha_name}`, active.ward_name && `Block: ${active.ward_name}`].filter(Boolean).join(" · ")}
+                    </div>
+                  )}
                   <div className="mt-3 flex items-center gap-3 flex-wrap">
                     <span className="font-mono text-lg" data-testid="uw-active-phone">{active.phone_key}</span>
                     {/* Call / WhatsApp / copy only — no contactId, so nothing reads
                         or writes regular Contact history. */}
                     <CallActionIcons phone={active.phone_key} personName={active.person_name || ""} dark />
+                    <button type="button" onClick={() => (editing ? setEditing(false) : openEdit())} data-testid="uw-edit-toggle"
+                      className="inline-flex items-center gap-1 text-xs font-semibold bg-white/15 hover:bg-white/25 px-2.5 py-1 rounded-lg">
+                      <Pencil size={12} /> {editing ? "Close edit" : "Edit details"}
+                    </button>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
@@ -211,6 +319,64 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                 </div>
               </div>
             </div>
+
+
+            {(editMsg || editErr) && !editing && (
+              <div className={`${editErr ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-emerald-50 border-emerald-200 text-emerald-800"} border rounded-xl p-3 text-sm`} data-testid="uw-edit-message">{editErr || editMsg}</div>
+            )}
+            {editing && edit && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6" data-testid="uw-edit-form">
+                <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-4"><Pencil size={16} /> Edit details</h3>
+                {editErr && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm mb-3" data-testid="uw-edit-error">{editErr}</div>}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Address</label>
+                    <textarea value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} rows={2} aria-label="Address" data-testid="uw-edit-address"
+                      className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#FCB712] outline-none resize-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Zone</label>
+                    <select value={edit.zone_id} onChange={(e) => setEdit({ ...edit, zone_id: e.target.value })} className={inputCls} aria-label="Zone" data-testid="uw-edit-zone">
+                      <option value="">Select…</option>
+                      {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Lok Sabha</label>
+                    <select value={edit.lok_sabha_id} onChange={(e) => setEdit({ ...edit, lok_sabha_id: e.target.value })} className={inputCls} aria-label="Lok Sabha" data-testid="uw-edit-ls">
+                      <option value="">Select…</option>
+                      {lokSabhas.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">District</label>
+                    <select value={edit.district_id} onChange={(e) => setEdit({ ...edit, district_id: e.target.value, assembly_id: e.target.value === edit.district_id ? edit.assembly_id : "" })} className={inputCls} aria-label="District" data-testid="uw-edit-district">
+                      <option value="">Select…</option>
+                      {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Assembly</label>
+                    <select value={edit.assembly_id} onChange={(e) => setEdit({ ...edit, assembly_id: e.target.value })} disabled={!edit.district_id} className={`${inputCls} disabled:opacity-60`} aria-label="Assembly" data-testid="uw-edit-assembly">
+                      <option value="">Select…</option>
+                      {editAssemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Block</label>
+                    <input value={edit.ward_name} onChange={(e) => setEdit({ ...edit, ward_name: e.target.value })} className={inputCls} aria-label="Block" data-testid="uw-edit-block" maxLength={150} />
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-500 mt-3">The photo is changed from the picture above. Only the fields you change are saved; empty fields never clear existing data.</p>
+                <div className="flex items-center justify-end gap-3 mt-4">
+                  <button onClick={() => setEditing(false)} disabled={editSaving} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                  <button onClick={saveEdit} disabled={editSaving} data-testid="uw-edit-save"
+                    className="px-5 py-2 bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white font-semibold rounded-xl flex items-center gap-2">
+                    {editSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />} Save details
+                  </button>
+                </div>
+              </div>
+            )}
 
             {history.length > 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-amber-200">

@@ -17,6 +17,7 @@ import { syncContactWings } from "@/lib/contactWings";
 import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
+import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
@@ -194,22 +195,7 @@ export async function PUT(req, { params }) {
     // value keeps displaying across Workers/Contacts/Reports, which read the
     // ward via that id. Empty text clears the ward.
     if ("ward_name" in data) {
-      const wn = typeof data.ward_name === "string" ? data.ward_name.trim() : "";
-      if (!wn) {
-        data.ward_id = null;
-      } else {
-        const asm = ("assembly_id" in data && data.assembly_id) ? data.assembly_id : null;
-        const found = await query(
-          "SELECT id FROM locations WHERE type = 'ward' AND LOWER(name) = LOWER(?) AND (parent_id <=> ?) LIMIT 1",
-          [wn, asm]
-        );
-        if (found[0]?.id) {
-          data.ward_id = found[0].id;
-        } else {
-          const res = await query("INSERT INTO locations (type, name, parent_id) VALUES ('ward', ?, ?)", [wn, asm]);
-          data.ward_id = res.insertId;
-        }
-      }
+      data.ward_id = await resolveOrCreateWard(data.ward_name, ("assembly_id" in data && data.assembly_id) ? data.assembly_id : null);
     }
 
     // Qualification (Illiterate / Literate + education level). Validated and normalised
