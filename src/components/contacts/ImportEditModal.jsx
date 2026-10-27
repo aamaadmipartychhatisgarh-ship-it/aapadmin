@@ -33,6 +33,7 @@ export default function ImportEditModal({ onClose, onApplied }) {
   const [data, setData] = useState(null);     // preview or result payload
   const [error, setError] = useState("");
   const [show, setShow] = useState("all");
+  const [confirmClear, setConfirmClear] = useState(false); // "[clear]" operations must be confirmed
   const inputRef = useRef(null);
 
   async function send(dry) {
@@ -43,10 +44,11 @@ export default function ImportEditModal({ onClose, onApplied }) {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      if (!dry && confirmClear) fd.append("confirm_clear", "1");
       const r = await fetch(`/api/contacts/import-edit${dry ? "?dry_run=1" : ""}`, { method: "POST", body: fd, signal: controller.signal });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.message || "Import Edit failed. Check the file and try again."); if (dry) setData(null); return; }
-      setData(d); setShow("all");
+      setData(d); setShow("all"); if (dry) setConfirmClear(false);
       if (!dry) onApplied?.();
     } catch (e) {
       setError(e?.name === "AbortError" ? "The request timed out. Try a smaller file." : "Network error — please try again.");
@@ -104,6 +106,12 @@ export default function ImportEditModal({ onClose, onApplied }) {
                 {isResult ? <CheckCircle2 size={16} /> : <FileSpreadsheet size={16} />}
                 {isResult ? `Done — ${s.updated} contact${s.updated === 1 ? "" : "s"} updated${s.failed ? `, ${s.failed} failed` : ""}.` : `Preview — nothing has been changed yet. Identifier column: ${data.identifier}.`}
               </div>
+              {!isResult && s.fields_cleared > 0 && (
+                <label className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2 text-xs cursor-pointer" data-testid="ie-clear-confirm">
+                  <input type="checkbox" checked={confirmClear} onChange={(e) => setConfirmClear(e.target.checked)} className="mt-0.5" />
+                  <span><span className="font-semibold">{s.fields_cleared} field{s.fields_cleared === 1 ? "" : "s"} will be emptied</span> because the file contains <code>[clear]</code> (shown in red below). Tick to confirm this is intended — blank cells never clear anything.</span>
+                </label>
+              )}
               {(data.columns || []).length > 0 && (
                 <div className="text-xs text-gray-600" data-testid="ie-columns">Columns read for updating: <span className="font-medium text-gray-800">{data.columns.join(", ")}</span></div>
               )}
@@ -142,7 +150,7 @@ export default function ImportEditModal({ onClose, onApplied }) {
                         {(r.changes || []).length > 0 && (
                           <ul className="mt-1 space-y-0.5 text-gray-600">
                             {r.changes.map((c) => (
-                              <li key={c.field} className="break-words"><span className="text-gray-400">{c.label}:</span> {c.from ? <span className="line-through text-gray-400">{c.from}</span> : <span className="text-gray-300">(empty)</span>} → <span className="font-medium text-gray-800">{c.to}</span></li>
+                              <li key={c.field} className="break-words"><span className="text-gray-400">{c.label}:</span> {c.from ? <span className="line-through text-gray-400">{c.from}</span> : <span className="text-gray-300">(empty)</span>} → <span className={`font-medium ${c.cleared ? "text-red-600" : "text-gray-800"}`}>{c.to}</span></li>
                             ))}
                           </ul>
                         )}
@@ -163,7 +171,7 @@ export default function ImportEditModal({ onClose, onApplied }) {
           ) : data ? (
             <>
               <button onClick={() => { setData(null); setError(""); }} disabled={busy} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Back</button>
-              <button onClick={() => send(false)} disabled={busy || !s?.to_update} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-2">
+              <button onClick={() => send(false)} disabled={busy || !s?.to_update || (s?.fields_cleared > 0 && !confirmClear)} className="px-5 py-2 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold inline-flex items-center gap-2">
                 {busy && <Loader2 size={15} className="animate-spin" />}{busy ? "Applying…" : `Apply ${s?.to_update || 0} update${s?.to_update === 1 ? "" : "s"}`}
               </button>
             </>

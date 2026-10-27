@@ -61,6 +61,14 @@ export async function POST(req) {
     if (parsed.error) return NextResponse.json({ message: parsed.error }, { status: 400, headers: NO_STORE });
 
     if (!dryRun) {
+      // Deliberate "[clear]" operations must be confirmed explicitly (the preview shows the
+      // count and a checkbox) — enforced here, not only in the UI.
+      if (parsed.summary.fields_cleared > 0 && form.get("confirm_clear") !== "1") {
+        return NextResponse.json({
+          message: `This file would empty ${parsed.summary.fields_cleared} field${parsed.summary.fields_cleared === 1 ? "" : "s"} with [clear]. Confirm the clear operation to continue — nothing was changed.`,
+          needs_confirm_clear: true, fields_cleared: parsed.summary.fields_cleared,
+        }, { status: 409, headers: NO_STORE });
+      }
       await applyImportEdit(parsed, session);
       await logAudit(session, {
         action: "contact.import_edit", entityType: "contact", entityId: null,

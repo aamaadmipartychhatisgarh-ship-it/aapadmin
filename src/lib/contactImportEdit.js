@@ -8,7 +8,14 @@ import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contac
 // or, when the file has no Contact ID column, by mobile number (last 10 digits;
 // a number shared by several contacts is ambiguous and is NOT applied).
 //
-// Blank cell  = leave that field exactly as it is.
+// Column absent  = that field is not part of the import at all (never read, never written).
+// Blank cell     = leave that field exactly as it is.
+// Same value     = "no change" (nothing is written for it).
+// Different value= updated, and ONLY that column is written (every other column of the
+//                  contact — photo, address, zone, block, ... — is left untouched).
+// Safe writes    : each changed column is guarded by compare-and-set against the value that
+//                  was validated, so a contact edited by someone else after the preview is
+//                  reported as failed instead of being overwritten.
 // "[clear]"   = explicitly empty a clearable text field (address, pincode, village,
 //               remarks). Name, phone and designation can never be cleared this way.
 // Designation = one or more EXISTING designation names (comma / semicolon separated);
@@ -58,6 +65,18 @@ const isClear = (v) => cellStr(v).toLowerCase() === CLEAR_TOKEN;
 const phoneStore = (v) => cellStr(v).replace(/[^\d+]/g, "");
 const sameText = (a, b) => cellStr(a) === cellStr(b);
 
+// Max lengths of the text columns, so an over-long value is REJECTED rather than silently
+// truncated by a non-strict database.
+let _lens;
+async function columnLengths() {
+  if (!_lens) {
+    _lens = query(`SELECT COLUMN_NAME AS name, CHARACTER_MAXIMUM_LENGTH AS len FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts' AND CHARACTER_MAXIMUM_LENGTH IS NOT NULL`)
+      .then((r) => new Map(r.map((x) => [x.name, Number(x.len)]))).catch((e) => { _lens = undefined; throw e; });
+  }
+  return _lens;
+}
+
 let _cols;
 async function contactColumns() {
   if (!_cols) {
@@ -89,6 +108,8 @@ export async function parseImportEdit(rows, scope = null) {
   if (!editable.length) return { error: "No columns to update were found. Add at least one of: Name, Phone, Address, Pincode, Village, Remarks, Designation, District, Assembly." };
 
   const have = await contactColumns();
+  const maxLen = await columnLengths();
+  const tooLong = (col, v) => maxLen.has(col) && String(v).length > maxLen.get(col);
   const unsupported = editable.filter((f) => ({ pincode: "pincode", village: "village", remarks: "remarks", address: "address" }[f]) && !have.has(f));
   if (unsupported.length) return { error: `This database has no column for: ${unsupported.join(", ")}.` };
 
@@ -146,7 +167,7 @@ export async function parseImportEdit(rows, scope = null) {
   const liveIds = new Map(); // id -> contact row (in scope)
   const anyIds = new Set();  // id exists at all (scope-independent) → tells "unmatched" from "out of scope"
   const byPhone = new Map(); // last10 -> [contact rows in scope]
-  const cols = ["c.id", "c.person_name", "c.phone_number", ...["address", "pincode", "village", "remarks", "designation_id", "district_id", "assembly_id", "zone_id", "lok_sabha_id"].filter((f) => have.has(f)).map((f) => `c.${f}`)];
+  const cols = ["c.id", "c.person_name", "c.phone_number", ...["address", "pincode", "village", "remarks", "designation_id", "district_id", "assembly_id", "zone_id", "lok_sabha_id", "ward_id"].filter((f) => have.has(f)).map((f) => `c.${f}`)];
   const ids = [...new Set(parsed.filter((r) => r.ident?.kind === "id").map((r) => r.ident.value))];
   if (ids.length) {
     for (let i = 0; i < ids.length; i += 500) {
@@ -245,13 +266,14 @@ export async function parseImportEdit(rows, scope = null) {
         if ((newPhoneRows.get(key) || []).length > 1) { rec.errors.push(`New phone ${v} is used on more than one row (${newPhoneRows.get(key).join(", ")})`); continue; }
         const holders = (takenBy.get(key) || []).filter((id) => id !== cur.id);
         if (holders.length) { rec.errors.push(`Phone ${v} already belongs to contact #${holders[0]}`); continue; }
+        if (tooLong("phone_number", phoneStore(v))) { rec.errors.push(`Phone ${v} is too long (max ${maxLen.get("phone_number")} characters)`); continue; }
         rec.update.phone_number = phoneStore(v);
         rec.changes.push({ field: "phone_number", label: LABEL.phone_number, from: cur.phone_number || "", to: rec.update.phone_number });
       } else if (f === "name") {
         const v = cellStr(get(f));
         if (!v) continue;
         if (isClear(v)) { rec.errors.push("Name cannot be cleared"); continue; }
-        if (v.length > 200) { rec.errors.push("Name is too long (max 200 characters)"); continue; }
+        if (v.length > 200 || tooLong("person_name", v)) { rec.errors.push(`Name is too long (max ${Math.min(200, maxLen.get("person_name") || 200)} characters)`); continue; }
         if (!sameText(v, cur.person_name)) { rec.update.person_name = v; rec.changes.push({ field: "person_name", label: LABEL.person_name, from: cur.person_name || "", to: v }); }
       } else if (CLEARABLE.has(f)) {
         const v = cellStr(get(f));
@@ -259,11 +281,11 @@ export async function parseImportEdit(rows, scope = null) {
         let to = v;
         if (isClear(v)) to = null;
         else if (f === "pincode" && !/^\d{6}$/.test(v)) { rec.errors.push(`Invalid pincode "${v}" (6 digits)`); continue; }
-        else if (v.length > 2000) { rec.errors.push(`${LABEL[f]} is too long`); continue; }
+        else if (v.length > 2000 || tooLong(f, v)) { rec.errors.push(`${LABEL[f]} is too long (max ${Math.min(2000, maxLen.get(f) || 2000)} characters)`); continue; }
         const before = cur[f] ?? null;
         if (to === null ? before !== null && cellStr(before) !== "" : !sameText(to, before)) {
           rec.update[f] = to;
-          rec.changes.push({ field: f, label: LABEL[f], from: before ?? "", to: to === null ? "(cleared)" : to });
+          rec.changes.push({ field: f, label: LABEL[f], from: before ?? "", to: to === null ? "(cleared)" : to, cleared: to === null });
         }
       } else if (f === "designation") {
         const v = cellStr(get(f));
@@ -296,6 +318,18 @@ export async function parseImportEdit(rows, scope = null) {
         if (did && aid && parentOfA && parentOfA !== did) rec.errors.push(`Assembly "${rec._assembly}" is not in district "${rec._district}"`);
         else {
           const newDistrict = did || (aid ? parentOfA : null);
+          // Never leave a contact half-moved or silently drop its lower levels: if the district
+          // changes and the contact's CURRENT assembly is in a different district, or the
+          // assembly changes while the contact has a Block, the row is rejected (nothing is
+          // written) with the reason — fix that contact on the Contact Page, or include a
+          // matching Assembly column.
+          const districtChanges = newDistrict && String(cur.district_id ?? "") !== String(newDistrict);
+          const assemblyChanges = aid && String(cur.assembly_id ?? "") !== String(aid);
+          if (districtChanges && !aid && cur.assembly_id && assemblyParent.get(cur.assembly_id) !== newDistrict) {
+            rec.errors.push(`This contact's Assembly (${assemblyName.get(cur.assembly_id) || cur.assembly_id}) is not in district "${districtName.get(newDistrict)}". Add an Assembly column for it, or change it on the Contact Page — nothing was changed.`);
+          } else if (assemblyChanges && cur.ward_id) {
+            rec.errors.push("This contact has a Block under its current Assembly, which would no longer match. Change the Assembly on the Contact Page so the Block can be re-selected — nothing was changed.");
+          }
           if (aid && have.has("assembly_id") && String(cur.assembly_id ?? "") !== String(aid)) {
             rec.update.assembly_id = aid;
             rec.changes.push({ field: "assembly_id", label: LABEL.assembly_id, from: assemblyName.get(cur.assembly_id) || "", to: assemblyName.get(aid) });
@@ -307,7 +341,10 @@ export async function parseImportEdit(rows, scope = null) {
             // the Contact Page (own value first) would not show the move. Move them with the district.
             const newLs = districtLs.get(newDistrict) || null;
             const newZone = newLs ? lsZone.get(newLs) || null : null;
-            if (newLs && cur.lok_sabha_id && String(cur.lok_sabha_id) !== String(newLs)) rec.update.lok_sabha_id = newLs;
+            if (newLs && cur.lok_sabha_id && String(cur.lok_sabha_id) !== String(newLs)) {
+              rec.update.lok_sabha_id = newLs;
+              rec.changes.push({ field: "lok_sabha_id", label: "Lok Sabha", from: "", to: "follows the new district" });
+            }
             if (newZone && cur.zone_id && String(cur.zone_id) !== String(newZone)) {
               rec.update.zone_id = newZone;
               rec.changes.push({ field: "zone_id", label: "Zone", from: "", to: "follows the new district" });
@@ -320,6 +357,9 @@ export async function parseImportEdit(rows, scope = null) {
     if (newDesigIds) rec.designation_ids = newDesigIds;
 
     if (rec.errors.length) { rec.status = "error"; rec.changes = []; rec.update = {}; delete rec.designation_ids; continue; }
+    // Values the validation saw, for the compare-and-set in applyImportEdit.
+    rec.before = {};
+    for (const col of Object.keys(rec.update)) rec.before[col] = cur[col] ?? null;
     rec.status = rec.changes.length ? "update" : "no_change";
   }
 
@@ -333,6 +373,9 @@ export async function parseImportEdit(rows, scope = null) {
     out_of_scope: count("out_of_scope"),
     duplicate_identifiers: count("duplicate_identifier"),
     errors: count("error"),
+    // Fields the file would deliberately EMPTY with "[clear]" — the commit refuses to run
+    // until the user has confirmed these.
+    fields_cleared: parsed.filter((r) => r.status === "update").reduce((n, r) => n + r.changes.filter((c) => c.cleared).length, 0),
   };
   return { rows: parsed, summary, columns: editable, ignoredColumns, identifier: byId ? "Contact ID" : "Phone" };
 }
@@ -346,7 +389,12 @@ export async function applyImportEdit(parsed, session = null) {
   let updated = 0;
   for (const r of parsed.rows.filter((x) => x.status === "update")) {
     const sets = [], vals = [];
-    for (const [col, v] of Object.entries(r.update || {})) { sets.push(`${col} = ?`); vals.push(v); }
+    const guards = [], gvals = [];
+    for (const [col, v] of Object.entries(r.update || {})) {
+      sets.push(`${col} = ?`); vals.push(v);
+      // compare-and-set: only overwrite the value that was validated (NULL-safe).
+      guards.push(`${col} <=> ?`); gvals.push(r.before ? r.before[col] ?? null : null);
+    }
     if (r.designation_ids) { sets.push("designation_id = ?"); vals.push(r.designation_ids[0] ?? null); } // legacy primary mirrors the first
     if (have.has("updated_at")) sets.push("updated_at = NOW()");
     if (!sets.length) continue;
@@ -359,8 +407,11 @@ export async function applyImportEdit(parsed, session = null) {
       // eslint-disable-next-line no-await-in-loop
       await conn.beginTransaction();
       // eslint-disable-next-line no-await-in-loop
-      const [res] = await conn.query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, [...vals, r.contact_id]);
-      if (!res.affectedRows) throw new Error("Contact no longer exists");
+      const [res] = await conn.query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?${guards.length ? ` AND ${guards.join(" AND ")}` : ""}`, [...vals, r.contact_id, ...gvals]);
+      if (!res.affectedRows) {
+        const [[still]] = await conn.query("SELECT id FROM contacts WHERE id = ?", [r.contact_id]);
+        throw new Error(still ? "This contact was changed by someone else after the preview — nothing was saved for it. Re-run the preview." : "Contact no longer exists");
+      }
       if (r.designation_ids) {
         // eslint-disable-next-line no-await-in-loop
         await conn.query("DELETE FROM contact_designations WHERE contact_id = ?", [r.contact_id]);
