@@ -17,6 +17,7 @@ import { isCaller } from "@/lib/permissions";
 // request — this page never decides what the caller may see.
 const PAGE_SIZES = [25, 50, 100];
 const COLS = [
+  { key: null, label: "" },
   { key: "name", label: "Name" },
   { key: "phone", label: "Mobile" },
   { key: "designation", label: "Designation" },
@@ -54,6 +55,10 @@ export default function ZoneContactsPage() {
   const [assemblies, setAssemblies] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [viewing, setViewing] = useState(null);
+  // Self-assign: eligible = unassigned (pool) and not done. Selection spans the current filter/page.
+  const [picked, setPicked] = useState(() => new Set());
+  const [assigning, setAssigning] = useState(false);
+  const [notice, setNotice] = useState(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -61,6 +66,7 @@ export default function ZoneContactsPage() {
   }, [status, ready, allowed, router]);
 
   useEffect(() => { const t = setTimeout(() => setSearch(searchInput.trim()), 400); return () => clearTimeout(t); }, [searchInput]);
+  useEffect(() => { setPicked(new Set()); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF]);
   useEffect(() => { setPage(1); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, pageSize, sortKey, sortDir]);
 
   const qs = useMemo(() => {
@@ -123,6 +129,24 @@ export default function ZoneContactsPage() {
   }, [districtId]);
   const districtOptions = lokSabhaId ? districts.filter((d) => String(d.parent_id) === String(lokSabhaId)) : districts;
 
+  const eligible = (c) => !c.assigned_to_user_id && !c.is_completed;
+  const eligibleRows = rows.filter(eligible);
+  const pageAllPicked = eligibleRows.length > 0 && eligibleRows.every((c) => picked.has(c.id));
+  const togglePick = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  async function assignToMe() {
+    if (assigning || !picked.size) return;
+    const dName = designationId ? designations.find((d) => String(d.id) === String(designationId))?.name : null;
+    if (!confirm(`Assign ${picked.size} selected contact${picked.size === 1 ? "" : "s"}${dName ? ` (${dName})` : ""} to yourself?`)) return;
+    setAssigning(true); setNotice(null);
+    try {
+      const r = await fetch("/api/zone-contacts/self-assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contact_ids: [...picked] }) });
+      const d = await r.json().catch(() => ({}));
+      setNotice({ err: !r.ok || !d.assigned, text: d.message || (r.ok ? "Done." : "Could not assign the contacts.") });
+      setPicked(new Set());
+      await load();
+    } catch { setNotice({ err: true, text: "Could not assign the contacts — network error." }); }
+    finally { setAssigning(false); }
+  }
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const anyFilter = !!(search || lokSabhaId || districtId || assemblyId || designationId || statusF);
   const clear = () => { setSearchInput(""); setSearch(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setDesignationId(""); setStatusF(""); };
@@ -182,13 +206,26 @@ export default function ZoneContactsPage() {
       </div>
 
       {err && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
+      {notice && <div className={`rounded-lg border text-sm px-4 py-3 ${notice.err ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`} data-testid="zc-notice">{notice.text}</div>}
+      {zone?.zone_id && (
+        <div className="flex flex-wrap items-center gap-3" data-testid="zc-assign-bar">
+          <button type="button" onClick={assignToMe} disabled={!picked.size || assigning} data-testid="zc-assign-me"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-[#164FA3] text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed">
+            {assigning ? <Loader2 size={15} className="animate-spin" /> : <UserCheck size={15} />} Assign to me{picked.size ? ` (${picked.size})` : ""}
+          </button>
+          <span className="text-xs text-gray-500">Tick unassigned, pending contacts of your Zone (filter by Designation first if you like) and assign them to yourself.</span>
+          {picked.size > 0 && <button type="button" onClick={() => setPicked(new Set())} className="text-xs text-gray-500 hover:underline" data-testid="zc-pick-clear">Clear selection</button>}
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[1000px]" data-testid="zc-table">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">
-                {COLS.map((c) => (
+                {COLS.map((c) => c.label === "" ? (
+                  <th key="pick" className="px-3 py-3 w-8"><input type="checkbox" checked={pageAllPicked} disabled={!eligibleRows.length} onChange={() => setPicked(pageAllPicked ? new Set() : new Set(eligibleRows.map((x) => x.id)))} aria-label="Select all eligible contacts on this page" data-testid="zc-pick-page" /></th>
+                ) : (
                   <th key={c.label} className={`px-3 py-3 font-semibold ${c.key ? "cursor-pointer select-none hover:text-gray-800" : ""}`} onClick={() => sortBy(c.key)}>
                     <span className="inline-flex items-center gap-1">{c.label}
                       {c.key && sortKey === c.key && (sortDir === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
@@ -204,6 +241,9 @@ export default function ZoneContactsPage() {
                 <tr><td colSpan={COLS.length} className="py-12 text-center text-gray-400">{anyFilter ? "No contacts match these filters." : "No contacts in your Zone."}</td></tr>
               ) : rows.map((c) => (
                 <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" data-testid="zc-row" data-id={c.id} onClick={() => setViewing(c)}>
+                  <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                    {eligible(c) ? <input type="checkbox" checked={picked.has(c.id)} onChange={() => togglePick(c.id)} aria-label={`Select ${c.person_name}`} data-testid="zc-pick-row" /> : null}
+                  </td>
                   <td className="px-3 py-2.5">
                     <span className="inline-flex items-center gap-2">
                       <Avatar name={c.person_name} src={c.photo_url} size={28} className="bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[10px]" />

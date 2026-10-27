@@ -1,6 +1,6 @@
 import { getPool } from "@/lib/db";
 import { normalizeRole, ROLES, scopeFilterSync } from "@/lib/permissions";
-import { contactsHaveAssignedAt, contactsHaveAssignedBy } from "@/lib/assignmentRules";
+import { contactsHaveAssignedAt, contactsHaveAssignedBy, zoneMatch } from "@/lib/assignmentRules";
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { logAudit } from "@/lib/audit";
@@ -61,6 +61,74 @@ export async function assignSingleContact(session, contactId, userId) {
     logAudit(session, { action: target !== null ? "contact.assign" : "contact.unassign", entityType: "contact", entityId: String(cid), details: { assigned_to_user_id: target, previous_user_id: previous } }).catch(() => {});
     if (target !== null) emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: cid });
     return { status: 200, message: target !== null ? `Assigned to ${assignee.username}.` : "Returned to the pool.", changed: true, assigned_to_user_id: target, previous_user_id: previous };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+// A CALLER assigns eligible contacts of THEIR OWN Zone to THEMSELVES (Zone Contacts page). The assignee is
+// always the logged-in caller (never taken from the request) and the Zone is the caller's CURRENT Zone,
+// read fresh by the caller (callerZoneAccess). For every requested contact, under a row lock, it must be
+//   - inside that Zone (the Contact Page's own Zone definition - zoneMatch),
+//   - still in the pool (unassigned - another caller's contact is never taken),
+//   - not completed, and not Wrong Number / pending approval / Not Interested / 10+ Switch-Off
+// (the same exclusions bulk Distribute applies). Everything that qualifies is assigned with the same
+// stamping as bulk (assigned_at, assigned_by_user_id = the caller, locks cleared); the rest is reported
+// with the reason, never changed. One assignee column = no duplicate mappings; a repeat changes nothing.
+export async function selfAssignContacts(session, zoneId, contactIds) {
+  const ids = [...new Set((Array.isArray(contactIds) ? contactIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return { status: 400, message: "Select at least one contact." };
+  if (ids.length > 500) return { status: 400, message: "Select at most 500 contacts at a time." };
+  if (!zoneId) return { status: 403, message: "You have no Zone assigned." };
+  const me = Number(session.user.id);
+  const stampAt = await contactsHaveAssignedAt();
+  const stampBy = await contactsHaveAssignedBy();
+  const excl = (await notWrongNumberClause("c")) + (await notPendingClause("c")) + (await notNotInterestedClause("c")) + (await repeatOffExclusion("c"));
+  const z = zoneMatch(zoneId, "c");
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const ph = ids.map(() => "?").join(",");
+    // Lock every requested row that exists, then classify.
+    const [all] = await conn.query(`SELECT c.id, c.assigned_to_user_id, c.is_completed FROM contacts c WHERE c.id IN (${ph}) ORDER BY c.id FOR UPDATE`, ids);
+    const [inZone] = await conn.query(`SELECT c.id FROM contacts c WHERE c.id IN (${ph}) ${z.where}`, [...ids, ...z.params]);
+    const [clean] = await conn.query(`SELECT c.id FROM contacts c WHERE c.id IN (${ph}) ${excl}`, ids);
+    const zoneSet = new Set(inZone.map((r) => r.id)), cleanSet = new Set(clean.map((r) => r.id));
+    const ok = [], skipped = [];
+    const seen = new Set(all.map((r) => r.id));
+    for (const id of ids) {
+      if (!seen.has(id) || !zoneSet.has(id)) { skipped.push({ id, reason: "outside_zone" }); continue; }   // never reveal more than "not in your Zone"
+      const r = all.find((x) => x.id === id);
+      if (r.assigned_to_user_id != null) { skipped.push({ id, reason: String(r.assigned_to_user_id) === String(me) ? "already_yours" : "already_assigned" }); continue; }
+      if (Number(r.is_completed) === 1) { skipped.push({ id, reason: "completed" }); continue; }
+      if (!cleanSet.has(id)) { skipped.push({ id, reason: "not_eligible" }); continue; }
+      ok.push(id);
+    }
+    let assigned = 0;
+    if (ok.length) {
+      const [res] = await conn.query(
+        `UPDATE contacts SET assigned_to_user_id = ?${stampAt ? ", assigned_at = NOW()" : ""}${stampBy ? ", assigned_by_user_id = ?" : ""},
+                locked_by_user_id = NULL, locked_at = NULL
+          WHERE id IN (${ok.map(() => "?").join(",")}) AND assigned_to_user_id IS NULL`,
+        [me, ...(stampBy ? [me] : []), ...ok]
+      );
+      assigned = res.affectedRows || 0;
+    }
+    await conn.commit();
+    if (assigned) {
+      logAudit(session, { action: "contact.self_assign", entityType: "contacts", entityId: null, details: { zone_id: zoneId, assigned, ids: ok.slice(0, 200) } }).catch(() => {});
+      emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: assigned });
+    }
+    const outside = skipped.filter((s) => s.reason === "outside_zone").length;
+    return {
+      status: 200, assigned, assigned_ids: ok, skipped,
+      message: assigned
+        ? `Assigned ${assigned} contact${assigned === 1 ? "" : "s"} to you.${skipped.length ? ` ${skipped.length} could not be assigned (${outside ? `${outside} outside your Zone, ` : ""}already assigned / completed / not eligible).` : ""}`
+        : "None of the selected contacts could be assigned (outside your Zone, already assigned, completed or not eligible).",
+    };
   } catch (e) {
     await conn.rollback().catch(() => {});
     throw e;
