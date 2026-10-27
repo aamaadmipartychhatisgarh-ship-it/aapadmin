@@ -97,6 +97,8 @@ async function getContactColumns() {
   return contactColumnsPromise;
 }
 
+const norm0 = (v) => String(v ?? "").replace(/\r\n?/g, "\n").trim();
+
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
@@ -264,11 +266,13 @@ export async function PUT(req, { params }) {
     // ADDRESS: written only when the user actually edited it (see addressForGeneralEdit) — an edit of
     // another field never rewrites it, a stale form can't revert a newer address, and removing it
     // needs a deliberate manager edit.
-    let addressConflict = false;
+    let addressConflict = false, addressWanted;
     if ("address" in data && existingColumns.has("address")) {
       const [curAddr] = await query("SELECT address FROM contacts WHERE id = ?", [id]);
       const ar = addressForGeneralEdit(data, curAddr?.address, canManage);
-      if (ar.value !== undefined) { sets.push("address = ?"); vals.push(ar.value); }
+      // Compare-and-set: the address is only replaced if it still is what was read above, so two edits
+      // racing from the same starting value can't overwrite each other (the later one is reported as a conflict).
+      if (ar.value !== undefined) { sets.push("address = IF(address <=> ?, ?, address)"); vals.push(curAddr?.address ?? null, ar.value); addressWanted = ar.value; }
       addressConflict = !!ar.conflict;
     }
     // PHOTO: a general edit never changes the photo, except to attach one just uploaded in
@@ -313,6 +317,10 @@ export async function PUT(req, { params }) {
       await conn.beginTransaction();
       vals.push(id);
       await conn.query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`, vals);
+      if (addressWanted !== undefined) {
+        const [[nowRow]] = await conn.query("SELECT address FROM contacts WHERE id = ?", [id]);
+        if (norm0(nowRow?.address) !== norm0(addressWanted)) addressConflict = true; // someone else's newer address won
+      }
       await conn.commit();
     } catch (e) {
       await conn.rollback();

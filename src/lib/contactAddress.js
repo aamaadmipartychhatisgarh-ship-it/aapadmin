@@ -9,16 +9,19 @@
 // Returns { value } to write (a string, or null to clear), or { skip: true } (+ conflict: true when
 // the stored address changed after the form was opened, so the user's edit is NOT applied over it).
 const norm = (v) => String(v ?? "").replace(/\r\n?/g, "\n").trim();
+// "Same address" ignores line breaks / repeated spaces: a single-line input flattens a multi-line address to
+// spaces, which must not look like an edit (and silently reformat the stored address).
+const key = (v) => norm(v).replace(/\s+/g, " ");
 
 export function addressForGeneralEdit(data, currentAddress, canClear) {
   if (!data || !("address" in data)) return { skip: true };
   const next = norm(data.address);
   const cur = norm(currentAddress);
-  if (next === cur) return { skip: true };                       // nothing to change
+  if (key(next) === key(cur)) return { skip: true };                       // nothing to change
   if ("address_prev" in data) {
     const prev = norm(data.address_prev);
-    if (next === prev) return { skip: true };                    // the user did not edit it: stale copy
-    if (prev !== cur) return { skip: true, conflict: true };     // someone changed it since the form opened
+    if (key(next) === key(prev)) return { skip: true };                    // the user did not edit it: stale copy
+    if (key(prev) !== key(cur)) return { skip: true, conflict: true };     // someone changed it since the form opened
     if (!next) return canClear ? { value: null } : { skip: true }; // explicit clear — managers only
     return { value: next };
   }

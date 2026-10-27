@@ -1105,11 +1105,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                     placeholder="Phone"
                     className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-blue-200 text-sm font-mono outline-none focus:bg-white/20"
                   />
-                  <input
+                  <textarea rows={2}
                     value={edit.address}
                     onChange={(e) => setEdit({ ...edit, address: e.target.value })}
                     placeholder="Address"
-                    className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-blue-200 text-sm outline-none focus:bg-white/20"
+                    className="resize-none w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-blue-200 text-sm outline-none focus:bg-white/20"
                   />
                   <div>
                     <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Designation</label>

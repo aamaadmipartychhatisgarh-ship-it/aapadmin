@@ -144,13 +144,14 @@ export async function PUT(req, { params }) {
     }
     // ADDRESS: written only when the user actually edited it (a stale form can't revert a newer
     // address; clearing needs a deliberate edit) — see addressForGeneralEdit.
-    let addressConflict = false;
+    let addressConflict = false, addressWanted;
     if ("address" in data && existingColumns.has("address")) {
       const sc0 = supervisorScopeFilter(session.user, "c");
       const [curAddr] = await query(`SELECT c.address FROM contacts c WHERE c.id = ? ${sc0.where}`, [id, ...sc0.params]);
       if (curAddr) {
         const ar = addressForGeneralEdit(data, curAddr.address, true);
-        if (ar.value !== undefined) { sets.push("address = ?"); vals.push(ar.value); }
+        // Compare-and-set: only replaces the address if it still is what was read above (racing edits can't overwrite each other).
+        if (ar.value !== undefined) { sets.push("address = IF(c.address <=> ?, ?, c.address)"); vals.push(curAddr.address ?? null, ar.value); addressWanted = ar.value; }
         addressConflict = !!ar.conflict;
       }
     }
@@ -207,6 +208,11 @@ export async function PUT(req, { params }) {
         [...vals, ...scope.params]
       );
       affected = result.affectedRows;
+      if (affected && addressWanted !== undefined) {
+        const norm0 = (v) => String(v ?? "").replace(/\r\n?/g, "\n").trim();
+        const [[nowRow]] = await conn.query("SELECT address FROM contacts WHERE id = ?", [id]);
+        if (norm0(nowRow?.address) !== norm0(addressWanted)) addressConflict = true;
+      }
       await conn.commit();
     } catch (e) {
       await conn.rollback();

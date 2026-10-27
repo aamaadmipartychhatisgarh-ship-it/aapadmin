@@ -356,7 +356,7 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
         <Field label="Full Name *" full><input className={inp} value={form.person_name} onChange={(e) => setForm({ ...form, person_name: e.target.value })} /></Field>
         <Field label="Mobile Number *"><input className={phoneDup ? `${inp} border-red-400 ring-1 ring-red-300 bg-red-50` : inp} value={form.phone_number} onChange={(e) => { setForm({ ...form, phone_number: e.target.value }); if (phoneDup) { setPhoneDup(false); setError(""); } }} /></Field>
         {/* Address follows Phone, matching the Add Contact field order. */}
-        <Field label="Address" full><input className={inp} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
+        <Field label="Address" full><textarea rows={2} className={`${inp} resize-none`} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
         <div className="col-span-2"><QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} /></div>
         <div className="col-span-2"><VehicleField value={form.vehicle} onChange={(v) => setForm((f) => ({ ...f, vehicle: v }))} /></div>
         {/* Designation + Wing — one combined row per combination; "Add Designation" adds a row below. */}
