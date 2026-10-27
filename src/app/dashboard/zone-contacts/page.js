@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { UserCheck, Loader2, Search, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
@@ -235,11 +235,71 @@ export default function ZoneContactsPage() {
           <span className="inline-flex gap-2">
             <button type="button" aria-label="Previous page" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))} className="h-8 px-2 rounded-md border border-gray-200 disabled:opacity-40"><ChevronLeft size={15} /></button>
             <button type="button" aria-label="Next page" disabled={page >= totalPages || loading} onClick={() => setPage((p) => p + 1)} className="h-8 px-2 rounded-md border border-gray-200 disabled:opacity-40"><ChevronRight size={15} /></button>
+            {totalPages > 1 && <ZoneGoToPage pageCount={totalPages} onPage={setPage} disabled={loading} />}
           </span>
         </div>
       </div>
 
       {viewing && <PersonDetailModal type="contact" data={viewing} onClose={() => setViewing(null)} />}
     </div>
+  );
+}
+
+
+// "Go to Page" for the Zone Contacts pager. Self-contained (it shares nothing with the
+// Contact Page's pagination): enter a page number, OK jumps there through this page's own
+// setPage, so the search, filters, sort and page size in `qs` are untouched. Invalid
+// entries (empty, non-numeric, decimal, negative, zero, out of range) show a message and
+// never navigate.
+function ZoneGoToPage({ pageCount, onPage, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState("");
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  function check(raw) {
+    const v = String(raw ?? "").trim();
+    if (!v) return { error: "Enter a page number." };
+    if (!/^-?\d+$/.test(v)) return { error: "Enter a whole page number (digits only)." };
+    const n = Number(v);
+    if (!Number.isSafeInteger(n)) return { error: `Enter a page number between 1 and ${pageCount}.` };
+    if (n < 0) return { error: "Page number cannot be negative." };
+    if (n === 0) return { error: "Page numbers start at 1." };
+    if (n > pageCount) return { error: `Page ${n.toLocaleString()} doesn't exist — there are ${pageCount.toLocaleString()} pages.` };
+    return { n };
+  }
+  function go() {
+    const r = check(val);
+    if (r.error) { setErr(r.error); return; }
+    setErr(""); setOpen(false); setVal("");
+    onPage(r.n);
+  }
+
+  return (
+    <span className="relative" ref={boxRef}>
+      <button type="button" onClick={() => { setOpen((o) => !o); setErr(""); setVal(""); }} disabled={disabled} data-testid="zc-goto-btn"
+        className="h-8 px-2.5 rounded-md border border-gray-200 text-xs font-medium disabled:opacity-40">Go to Page</button>
+      {open && (
+        <div className="absolute right-0 bottom-full mb-2 z-30 w-60 rounded-xl border border-gray-200 bg-white shadow-lg p-3 text-left" data-testid="zc-goto-box" role="dialog" aria-label="Go to page">
+          <label className="block text-xs font-medium text-gray-500 mb-1">Page number (1–{pageCount.toLocaleString()})</label>
+          <input autoFocus value={val} inputMode="numeric" data-testid="zc-goto-input" placeholder={`e.g. ${Math.min(pageCount, 25)}`}
+            onChange={(e) => { setVal(e.target.value); if (err) setErr(""); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } else if (e.key === "Escape") setOpen(false); }}
+            className={`w-full h-9 rounded-lg border px-2.5 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30 ${err ? "border-red-300" : "border-gray-200"}`} />
+          {err && <p className="text-xs text-red-600 mt-1" data-testid="zc-goto-error">{err}</p>}
+          <div className="flex justify-end gap-2 mt-2.5">
+            <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={go} data-testid="zc-goto-ok" className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#164FA3] text-white hover:bg-blue-800">OK</button>
+          </div>
+        </div>
+      )}
+    </span>
   );
 }
