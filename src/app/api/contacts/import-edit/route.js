@@ -37,7 +37,13 @@ export async function POST(req) {
 
     let rows;
     try {
-      const wb = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer" });
+      const buf = Buffer.from(await file.arrayBuffer());
+      // CSV is read as UTF-8 text: handed to SheetJS as a raw buffer it is decoded as a legacy
+      // single-byte codepage, which garbles Hindi / accented values (and a BOM breaks the
+      // first heading). Excel files are read as binary as before.
+      const wb = /\.csv$/i.test(file.name || "")
+        ? XLSX.read(buf.toString("utf8").replace(/^\uFEFF/, ""), { type: "string" })
+        : XLSX.read(buf, { type: "buffer" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       if (!sheet) throw new Error("empty");
       rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
@@ -55,7 +61,7 @@ export async function POST(req) {
     if (parsed.error) return NextResponse.json({ message: parsed.error }, { status: 400, headers: NO_STORE });
 
     if (!dryRun) {
-      await applyImportEdit(parsed);
+      await applyImportEdit(parsed, session);
       await logAudit(session, {
         action: "contact.import_edit", entityType: "contact", entityId: null,
         details: { file: file.name, ...parsed.summary, contact_ids: parsed.rows.filter((r) => r.status === "updated").map((r) => r.contact_id).slice(0, 500) },
@@ -70,6 +76,7 @@ export async function POST(req) {
       summary: parsed.summary,
       identifier: parsed.identifier,
       columns: parsed.columns,
+      ignored_columns: parsed.ignoredColumns || [],
       rows: out,
       truncated: parsed.rows.length > PREVIEW_ROWS,
     }, { headers: NO_STORE });

@@ -1,6 +1,7 @@
 import { query, getPool } from "@/lib/db";
 import { normalizePhone, resolveLoc, DISTRICT_ALIASES, ASSEMBLY_ALIASES } from "@/lib/workerImport";
 import { norm } from "@/lib/cgGeoAliases";
+import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
 
 // "Import Edit" — update EXISTING contacts in bulk from a spreadsheet. It never
 // inserts a contact. A row is matched to ONE existing contact by Contact ID (preferred)
@@ -27,8 +28,10 @@ const COLS = {
   name: ["name", "person name", "contact name", "full name", "new name"],
   address: ["address", "new address"],
   pincode: ["pincode", "pin code", "pin"],
-  village: ["village", "gram"],
-  remarks: ["remarks", "remark", "notes"],
+  // "Village/City" and "Remarks/Notes" are the Contact export's own headings, so an exported
+  // sheet can be edited and imported back as is.
+  village: ["village", "gram", "village/city", "village / city", "village city", "city"],
+  remarks: ["remarks", "remark", "notes", "remarks/notes", "remarks / notes", "remarks notes"],
   designation: ["designation", "designations", "position", "role"],
   district: ["district", "jila", "zila"],
   assembly: ["assembly", "vidhansabha", "vidhan sabha", "assembly constituency"],
@@ -48,6 +51,8 @@ function headerIndex(headerRow) {
   });
   return idx;
 }
+// The heading as shown (for the "ignored columns" notice).
+const headerKey = (h) => String(h ?? "").trim().toLowerCase().replace(/\s+/g, " ").replace(/[.:*]+$/, "");
 const cellStr = (v) => (v === null || v === undefined ? "" : String(v).trim());
 const isClear = (v) => cellStr(v).toLowerCase() === CLEAR_TOKEN;
 const phoneStore = (v) => cellStr(v).replace(/[^\d+]/g, "");
@@ -68,6 +73,10 @@ export async function parseImportEdit(rows, scope = null) {
   if (!Array.isArray(rows) || rows.length < 2) return { error: "The sheet has no data rows." };
   if (rows.length - 1 > MAX_ROWS) return { error: `Too many rows (${rows.length - 1}). Import Edit accepts up to ${MAX_ROWS} rows at a time.` };
   const idx = headerIndex(rows[0]);
+  const used = new Set(Object.values(idx));
+  // Columns in the file that Import Edit does not read — reported so a value in one of them
+  // (e.g. Zone, Qualification) is never silently dropped without the user knowing.
+  const ignoredColumns = (rows[0] || []).map((h, i) => ({ h: String(h ?? "").trim(), i })).filter((x) => x.h && !used.has(x.i)).map((x) => x.h);
   const byId = idx.id !== undefined;
   if (!byId && idx.phone === undefined) {
     return { error: "Could not find an identifier column. Add a \"Contact ID\" column (preferred) or a \"Phone\" column." };
@@ -84,7 +93,7 @@ export async function parseImportEdit(rows, scope = null) {
   if (unsupported.length) return { error: `This database has no column for: ${unsupported.join(", ")}.` };
 
   const [districtRows, assemblyRows, desigRows] = await Promise.all([
-    query("SELECT id, name FROM locations WHERE type = 'district'"),
+    query("SELECT id, name, parent_id FROM locations WHERE type = 'district'"),
     query("SELECT id, name, parent_id FROM locations WHERE type = 'assembly'"),
     query("SELECT id, name FROM designations"),
   ]);
@@ -92,6 +101,11 @@ export async function parseImportEdit(rows, scope = null) {
   const assemblyByName = new Map(assemblyRows.map((r) => [norm(r.name), r.id]));
   const assemblyParent = new Map(assemblyRows.map((r) => [r.id, r.parent_id]));
   const districtName = new Map(districtRows.map((r) => [r.id, r.name]));
+  // district -> its Lok Sabha and that Lok Sabha's Zone (to keep a contact's own Lok Sabha / Zone
+  // in step when its district is changed — see the geography block below).
+  const lsRows = await query("SELECT id, parent_id FROM locations WHERE type = 'lok_sabha'");
+  const lsZone = new Map(lsRows.map((r) => [r.id, r.parent_id]));
+  const districtLs = new Map(districtRows.map((r) => [r.id, lsZone.has(r.parent_id) ? r.parent_id : null]));
   const assemblyName = new Map(assemblyRows.map((r) => [r.id, r.name]));
   const desigByName = new Map(desigRows.map((r) => [String(r.name).trim().toLowerCase(), r]));
 
@@ -132,7 +146,7 @@ export async function parseImportEdit(rows, scope = null) {
   const liveIds = new Map(); // id -> contact row (in scope)
   const anyIds = new Set();  // id exists at all (scope-independent) → tells "unmatched" from "out of scope"
   const byPhone = new Map(); // last10 -> [contact rows in scope]
-  const cols = ["c.id", "c.person_name", "c.phone_number", ...["address", "pincode", "village", "remarks", "designation_id", "district_id", "assembly_id"].filter((f) => have.has(f)).map((f) => `c.${f}`)];
+  const cols = ["c.id", "c.person_name", "c.phone_number", ...["address", "pincode", "village", "remarks", "designation_id", "district_id", "assembly_id", "zone_id", "lok_sabha_id"].filter((f) => have.has(f)).map((f) => `c.${f}`)];
   const ids = [...new Set(parsed.filter((r) => r.ident?.kind === "id").map((r) => r.ident.value))];
   if (ids.length) {
     for (let i = 0; i < ids.length; i += 500) {
@@ -166,6 +180,13 @@ export async function parseImportEdit(rows, scope = null) {
       // eslint-disable-next-line no-await-in-loop
       const rs = await query(`SELECT cd.contact_id, d.id, d.name FROM contact_designations cd JOIN designations d ON d.id = cd.designation_id WHERE cd.contact_id IN (${chunk.map(() => "?").join(",")}) ORDER BY cd.id`, chunk).catch(() => []);
       for (const r of rs) { if (!curDesig.has(r.contact_id)) curDesig.set(r.contact_id, []); curDesig.get(r.contact_id).push({ id: r.id, name: r.name }); }
+    }
+    // A contact with no designation-set rows but a legacy primary designation_id IS holding
+    // that designation (the Contact List / export show it) — treat it as the current value so
+    // an unchanged cell is "no change", not a phantom update.
+    const desigById = new Map(desigRows.map((d) => [d.id, d]));
+    for (const c of [...liveIds.values(), ...[...byPhone.values()].flat()]) {
+      if (!curDesig.has(c.id) && c.designation_id && desigById.has(c.designation_id)) curDesig.set(c.id, [{ id: c.designation_id, name: desigById.get(c.designation_id).name }]);
     }
   }
 
@@ -282,6 +303,15 @@ export async function parseImportEdit(rows, scope = null) {
           if (newDistrict && have.has("district_id") && String(cur.district_id ?? "") !== String(newDistrict)) {
             rec.update.district_id = newDistrict;
             rec.changes.push({ field: "district_id", label: LABEL.district_id, from: districtName.get(cur.district_id) || "", to: districtName.get(newDistrict) });
+            // A contact that carries its OWN Lok Sabha / Zone would otherwise keep the old ones and
+            // the Contact Page (own value first) would not show the move. Move them with the district.
+            const newLs = districtLs.get(newDistrict) || null;
+            const newZone = newLs ? lsZone.get(newLs) || null : null;
+            if (newLs && cur.lok_sabha_id && String(cur.lok_sabha_id) !== String(newLs)) rec.update.lok_sabha_id = newLs;
+            if (newZone && cur.zone_id && String(cur.zone_id) !== String(newZone)) {
+              rec.update.zone_id = newZone;
+              rec.changes.push({ field: "zone_id", label: "Zone", from: "", to: "follows the new district" });
+            }
           }
         }
       }
@@ -304,13 +334,13 @@ export async function parseImportEdit(rows, scope = null) {
     duplicate_identifiers: count("duplicate_identifier"),
     errors: count("error"),
   };
-  return { rows: parsed, summary, columns: editable, identifier: byId ? "Contact ID" : "Phone" };
+  return { rows: parsed, summary, columns: editable, ignoredColumns, identifier: byId ? "Contact ID" : "Phone" };
 }
 
 // Apply the validated "update" rows. Each row is its own small transaction, so one
 // failing row (e.g. a phone taken by a concurrent edit) never blocks or rolls back the
 // others — it is reported as failed. Only existing rows are UPDATEd; nothing is inserted.
-export async function applyImportEdit(parsed) {
+export async function applyImportEdit(parsed, session = null) {
   const have = await contactColumns();
   const pool = getPool();
   let updated = 0;
@@ -320,6 +350,9 @@ export async function applyImportEdit(parsed) {
     if (r.designation_ids) { sets.push("designation_id = ?"); vals.push(r.designation_ids[0] ?? null); } // legacy primary mirrors the first
     if (have.has("updated_at")) sets.push("updated_at = NOW()");
     if (!sets.length) continue;
+    // The contact's Zone as the Contact Page shows it, before this edit.
+    // eslint-disable-next-line no-await-in-loop
+    const zoneBefore = await contactEffectiveZoneId(r.contact_id);
     // eslint-disable-next-line no-await-in-loop
     const conn = await pool.getConnection();
     try {
@@ -340,6 +373,11 @@ export async function applyImportEdit(parsed) {
       await conn.commit();
       r.status = "updated";
       updated++;
+      // Zone moved → release an assignment held by a caller of the OLD Zone (same rule as a
+      // Contact Page edit), so the contact leaves that caller's queue too.
+      // eslint-disable-next-line no-await-in-loop
+      const zoneAfter = await contactEffectiveZoneId(r.contact_id).catch(() => zoneBefore);
+      if (String(zoneBefore ?? "") !== String(zoneAfter ?? "")) await releaseOutOfZoneAssignment(session, r.contact_id, zoneAfter).catch(() => {});
     } catch (e) {
       // eslint-disable-next-line no-await-in-loop
       try { await conn.rollback(); } catch { /* ignore */ }

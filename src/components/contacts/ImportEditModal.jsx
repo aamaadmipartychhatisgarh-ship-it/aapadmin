@@ -104,6 +104,14 @@ export default function ImportEditModal({ onClose, onApplied }) {
                 {isResult ? <CheckCircle2 size={16} /> : <FileSpreadsheet size={16} />}
                 {isResult ? `Done — ${s.updated} contact${s.updated === 1 ? "" : "s"} updated${s.failed ? `, ${s.failed} failed` : ""}.` : `Preview — nothing has been changed yet. Identifier column: ${data.identifier}.`}
               </div>
+              {(data.columns || []).length > 0 && (
+                <div className="text-xs text-gray-600" data-testid="ie-columns">Columns read for updating: <span className="font-medium text-gray-800">{data.columns.join(", ")}</span></div>
+              )}
+              {(data.ignored_columns || []).length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs" data-testid="ie-ignored">
+                  <span className="font-semibold">Not used for updates (ignored):</span> {data.ignored_columns.join(", ")}. Import Edit changes only the columns listed above — values in these columns are not saved.
+                </div>
+              )}
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 <Tile label="Rows in file" value={s.total_rows} />
                 <Tile label="Matched" value={s.matched} />
