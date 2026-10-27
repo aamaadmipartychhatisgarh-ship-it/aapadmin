@@ -16,7 +16,7 @@ const BRAND = "#164FA3";
 // Default filters: Main Organisation (designations of no other Wing) at State level.
 // Must match MAIN_WING_FILTER in lib/vacancyDashboard.
 const MAIN_WING = "__main__";
-const DEFAULT_LEVEL = "state";
+const DEFAULT_LEVEL = ""; // all levels - the combined list spans every level
 
 function fmtDateTime(v) {
   if (!v) return "—";
@@ -88,12 +88,14 @@ export default function VacanciesPage() {
   const [assemblyId, setAssemblyId] = useState("");
   const [blockId, setBlockId] = useState("");
   const [designationId, setDesignationId] = useState("");
-  const [statusF, setStatusF] = useState(""); // '', vacant, review (Vacant Designation) | filled (Filed Designation)
+  const [statusF, setStatusF] = useState("combined"); // combined (All: Filled + Vacant) | '' / vacant / review (Vacant Designation) | filled (Filled Designation)
   // Two categories: Vacant Designation (vacant + needs review, with the existing
-  // reminder actions) and Filed Designation (assigned, display-only).
+  // reminder actions) and Filled Designation (assigned, display-only).
   const filedView = statusF === "filled";
+  const allView = statusF === "combined";
   const showCategory = (k) => {
     if (k === "filed") { setStatusF("filled"); setReminderF(""); setResponsibleF(""); }
+    else if (k === "all") setStatusF("combined");
     else setStatusF("");
   };
   const [reminderF, setReminderF] = useState("");
@@ -181,11 +183,11 @@ export default function VacanciesPage() {
     }
   }
 
-  const anyFilter = wing !== MAIN_WING || level !== DEFAULT_LEVEL || lokSabhaId || districtId || assemblyId || blockId || designationId || statusF || reminderF || responsibleF;
-  // Back to the default view (Main Organisation + State), not to "everything".
+  const anyFilter = wing !== MAIN_WING || level !== DEFAULT_LEVEL || lokSabhaId || districtId || assemblyId || blockId || designationId || statusF !== "combined" || reminderF || responsibleF;
+  // Back to the default view (Main Organisation, all levels, Filled + Vacant).
   const clearFilters = () => {
     setWing(MAIN_WING); setLevel(DEFAULT_LEVEL); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setBlockId("");
-    setDesignationId(""); setStatusF(""); setReminderF(""); setResponsibleF("");
+    setDesignationId(""); setStatusF("combined"); setReminderF(""); setResponsibleF("");
   };
 
   if (authStatus === "loading" || (!isSuper && pagesLoading)) {
@@ -244,7 +246,7 @@ export default function VacanciesPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 mb-4">
         <StatCard label="Total Positions" value={c.total} tone="brand" />
-        <StatCard label="Filed" value={c.filled} tone="green" />
+        <StatCard label="Filled" value={c.filled} tone="green" />
         <StatCard label="Vacant" value={c.vacant} tone="amber" />
         {/* Not vacant: a holder of the designation exists but their location is
             missing/invalid, so the position can't be confirmed either way. */}
@@ -291,6 +293,7 @@ export default function VacanciesPage() {
           {/* Vacant-only filters (status detail, reminders, responsible person). */}
           {!filedView && (<>
           <select className={selCls} value={statusF} onChange={(e) => setStatusF(e.target.value)} aria-label="Vacant status">
+            <option value="combined">Filled &amp; Vacant (all)</option>
             <option value="">Vacant &amp; needs review</option>
             <option value="vacant">Vacant only</option>
             <option value="review">Needs review only</option>
@@ -322,7 +325,7 @@ export default function VacanciesPage() {
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
           <MapPin size={16} style={{ color: BRAND }} />
           <h2 className="text-sm font-bold text-gray-900">Hierarchy-wise Vacancy Summary</h2>
-          <span className="ml-auto text-xs text-gray-400">Total · Filed · Vacant · Review · Vacant %</span>
+          <span className="ml-auto text-xs text-gray-400">Total · Filled · Vacant · Review · Vacant %</span>
         </div>
         <div className="overflow-x-auto max-h-72 overflow-y-auto">
           <table className="w-full text-sm min-w-[720px]">
@@ -332,7 +335,7 @@ export default function VacanciesPage() {
                 <th className="px-4 py-2.5 font-semibold">Location</th>
                 <th className="px-4 py-2.5 font-semibold">Under</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Total</th>
-                <th className="px-4 py-2.5 font-semibold text-right">Filed</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Filled</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Vacant</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Review</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Vacant %</th>
@@ -363,8 +366,9 @@ export default function VacanciesPage() {
       {/* Vacancy list */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap items-center gap-2">
-          <CategorySwitch filed={filedView} vacantCount={(c.vacant || 0) + (c.review || 0)} filedCount={c.filled || 0} onChange={showCategory} />
+          <CategorySwitch view={allView ? "all" : filedView ? "filed" : "vacant"} allCount={(c.total || 0)} vacantCount={(c.vacant || 0) + (c.review || 0)} filedCount={c.filled || 0} onChange={showCategory} />
           {filedView && <span className="text-xs text-gray-500">Assigned designations — display only on this page.</span>}
+          {allView && <span className="text-xs text-gray-500">Every designation, Filled or Vacant, in Designation Order.</span>}
           {data?.wing_positions_skipped > 0 && (
             <button onClick={() => switchTab("wings")} className="text-xs text-violet-700 hover:underline" data-testid="wing-positions-note">
               Wing President / Prabhari / General Secretary posts are listed in the Wings tab →
@@ -374,8 +378,8 @@ export default function VacanciesPage() {
         </div>
         <VacancyTable
           rows={(data?.vacancies || []).map(fromMainRow)}
-          mode={filedView ? "filed" : "vacant"}
-          emptyText={filedView ? "No filed designations for these filters." : "No vacant designations for these filters."}
+          mode={allView ? "combined" : filedView ? "filed" : "vacant"}
+          emptyText={allView ? "No designations for these filters." : filedView ? "No filled designations for these filters." : "No vacant designations for these filters."}
           loading={loading}
           err={err}
           renderContactExtra={(l) => l.reminder ? (

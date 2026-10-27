@@ -93,18 +93,18 @@ function sortRows(rows) {
 }
 
 export function StatusChip({ status }) {
-  if (status === "filled") return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200"><span className="w-1.5 h-1.5 rounded-full bg-green-500" />Filed</span>;
+  if (status === "filled") return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200"><span className="w-1.5 h-1.5 rounded-full bg-green-500" />Filled</span>;
   if (status === "review") return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200" title="A holder exists but their location or Wing mapping is incomplete"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Needs review</span>;
-  return <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-300"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />VACANT</span>;
+  return <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-300"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />Vacant</span>;
 }
 
 const ROW_ACCENT = { vacant: "border-l-amber-400", review: "border-l-red-400", filled: "border-l-green-400" };
 const dash = <span className="text-gray-300">—</span>;
 const areaSuffix = (a) => (a && a !== "State" ? ` (${a})` : "");
 
-// Filed rows are DISPLAY-ONLY on this page: no reminder / edit / delete actions.
+// Filled rows are DISPLAY-ONLY on this page: no reminder / edit / delete actions.
 function ReadOnlyBadge() {
-  return <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400" data-testid="vac-readonly" title="Filed designations are display-only on this page"><Lock size={10} />Display only</span>;
+  return <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400" data-testid="vac-readonly" title="Filled designations are display-only on this page"><Lock size={10} />Display only</span>;
 }
 
 function StatusDetail({ row }) {
@@ -141,7 +141,7 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
   const cols = showWing ? 10 : 9;
   const counts = (g) => {
     const v = g.rows.filter((x) => x.status === "vacant").length, rv = g.rows.filter((x) => x.status === "review").length, f = g.rows.filter((x) => x.status === "filled").length;
-    return [v && `${v} vacant`, rv && `${rv} needs review`, f && `${f} filed`].filter(Boolean).join(" · ");
+    return [v && `${v} vacant`, rv && `${rv} needs review`, f && `${f} filled`].filter(Boolean).join(" · ");
   };
   // Filed mode: the assigned person(s) — name, designation, mobile — as plain text.
   const Holders = ({ row, field }) => {
@@ -200,10 +200,10 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
               <th className="px-3 py-3 font-semibold min-w-[130px]">District</th>
               <th className="px-3 py-3 font-semibold min-w-[130px]">Assembly</th>
               {showWing && <th className="px-3 py-3 font-semibold">Wing</th>}
-              <th className="px-3 py-3 font-semibold min-w-[180px]">{filed ? "Filed Designation" : "Vacant Designation"}</th>
+              <th className="px-3 py-3 font-semibold min-w-[180px]">{mode === "combined" ? "Designation" : filed ? "Filled Designation" : "Vacant Designation"}</th>
               <th className="px-3 py-3 font-semibold">Status</th>
-              <th className="px-3 py-3 font-semibold">{filed ? "Assigned Person" : "Responsible Person"}</th>
-              <th className="px-3 py-3 font-semibold">{filed ? "Assigned Person\u2019s Designation" : "Responsible Person\u2019s Designation"}</th>
+              <th className="px-3 py-3 font-semibold">{mode === "combined" ? "Assigned / Responsible Person" : filed ? "Assigned Person" : "Responsible Person"}</th>
+              <th className="px-3 py-3 font-semibold">{mode === "combined" ? "Person\u2019s Designation" : filed ? "Assigned Person\u2019s Designation" : "Responsible Person\u2019s Designation"}</th>
               <th className="px-3 py-3 font-semibold">Contact</th>
             </tr>
           </thead>
@@ -305,10 +305,12 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
   );
 }
 
-// Vacant Designation ↔ Filed Designation switch (both tabs). A position is in
-// exactly one category: Filed when a valid person is assigned, else Vacant
-// (including "needs review", where no valid assignment exists yet).
-export function CategorySwitch({ filed, vacantCount, filedCount, onChange }) {
+// All ↔ Vacant Designation ↔ Filled Designation switch. A position is in exactly one category:
+// Filled when a valid person is assigned, else Vacant (including "needs review", where no valid
+// assignment exists yet). "All" (when allCount is given) lists both together. `view` =
+// "all" | "vacant" | "filed"; `filed` (legacy boolean) is used when `view` is not passed.
+export function CategorySwitch({ filed, view, allCount, vacantCount, filedCount, onChange }) {
+  const cur = view || (filed ? "filed" : "vacant");
   const btn = (k, label, n, active) => (
     <button key={k} role="tab" aria-selected={active} data-testid={`vac-category-${k}`} onClick={() => onChange(k)}
       className={`h-8 px-3 rounded-md text-sm font-semibold inline-flex items-center gap-1.5 ${active ? "bg-[#164FA3] text-white" : "text-gray-600 hover:bg-gray-50"}`}>
@@ -318,8 +320,9 @@ export function CategorySwitch({ filed, vacantCount, filedCount, onChange }) {
   );
   return (
     <div role="tablist" aria-label="Designation category" className="inline-flex border border-gray-200 rounded-lg p-0.5 bg-white">
-      {btn("vacant", "Vacant Designation", vacantCount, !filed)}
-      {btn("filed", "Filed Designation", filedCount, filed)}
+      {allCount !== undefined && btn("all", "All Designations", allCount, cur === "all")}
+      {btn("vacant", "Vacant Designation", vacantCount, cur === "vacant")}
+      {btn("filed", "Filled Designation", filedCount, cur === "filed")}
     </div>
   );
 }

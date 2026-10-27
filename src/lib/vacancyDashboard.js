@@ -11,7 +11,7 @@ import { listWings } from "@/lib/wingDesignations";
 const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
 // Levels scanned for vacancies (State vacancies are the State Prabhari's).
 const VACANCY_LEVELS = ["state", ...TEAM_LEVELS];
-const MAX_ROWS = 2000;
+const MAX_ROWS = 5000;
 
 const asId = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 0 ? n : null; };
 const normW = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
@@ -70,7 +70,8 @@ export async function buildVacancyDataset(session, filters = {}) {
     wings: Array.isArray(filters.wings)
       ? filters.wings.map((w) => String(w || "").trim()).filter(Boolean)
       : String(filters.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
-    status: ["filled", "vacant", "review"].includes(filters.status) ? filters.status : "all",
+    // "combined" = Filled + Vacant (+ needs-review) positions in ONE list; "all" (legacy) = the vacant list.
+    status: ["filled", "vacant", "review", "combined"].includes(filters.status) ? filters.status : "all",
     reminderStatus: ["sent", "pending", "failed"].includes(filters.reminderStatus) ? filters.reminderStatus : "all",
     responsibleId: asId(filters.responsibleId),
   };
@@ -261,6 +262,17 @@ export async function buildVacancyDataset(session, filters = {}) {
     tableRows = scoped.filter((r) => r.status === "filled").map((r) => ({ ...r, responsibles: [], responsible_note: null }));
   } else if (f.status === "review") {
     tableRows = scoped.filter((r) => r.status === "review").map((r) => ({ ...r, responsibles: [], responsible_note: null }));
+  } else if (f.status === "combined") {
+    // ONE list of every position - Filled, Vacant (with responsible people / reminders) and
+    // Needs-review - nothing hidden. The reminder / responsible filters, when set, narrow it to
+    // the vacant posts they apply to.
+    const vacantByKey = new Map(displayRows.map((r) => [`${r.level}:${r.location_id}:${r.designation_id}`, r]));
+    tableRows = scoped.map((r) => {
+      if (r.status === "vacant") return vacantByKey.get(`${r.level}:${r.location_id}:${r.designation_id}`) || r;
+      return { ...r, responsibles: [], responsible_note: null };
+    });
+    if (f.reminderStatus !== "all") tableRows = tableRows.filter((r) => (r.responsibles || []).some((rp) => rp.reminder_status === f.reminderStatus));
+    if (f.responsibleId) tableRows = tableRows.filter((r) => (r.responsibles || []).some((rp) => rp.contact_id === f.responsibleId));
   } else {
     // Default list = genuine vacancies; "all" also lists the needs-review positions.
     tableRows = f.status === "vacant" ? displayRows
@@ -268,6 +280,26 @@ export async function buildVacancyDataset(session, filters = {}) {
     if (f.reminderStatus !== "all") tableRows = tableRows.filter((r) => (r.responsibles || []).some((rp) => rp.reminder_status === f.reminderStatus));
     if (f.responsibleId) tableRows = tableRows.filter((r) => (r.responsibles || []).some((rp) => rp.contact_id === f.responsibleId));
   }
+  // One row per (level, location, designation) - never duplicated - in Designation Order/Rank:
+  // level, then location, then the Designation Master rank (sort_order, then name) within a
+  // location, whatever the status of each post.
+  // The Designation Master's order: global Rank first (as the Designation Master lists them), then
+  // sort_order, then name.
+  const hasRank = (await query("SHOW COLUMNS FROM designations LIKE 'rank'")).length > 0;
+  const rankRows = await query(`SELECT id FROM designations ORDER BY ${hasRank ? "(`rank` IS NULL), `rank`, " : ""}(sort_order IS NULL), sort_order, name, id`);
+  const rankOf = new Map(rankRows.map((r, i) => [r.id, i]));
+  const levelIdx = (l) => { const i = VACANCY_LEVELS.indexOf(l); return i < 0 ? 99 : i; };
+  const seenRow = new Set();
+  tableRows = tableRows
+    .filter((r) => { const k = `${r.level}:${r.location_id}:${r.designation_id}:${r.designation_wing || ""}`; if (seenRow.has(k)) return false; seenRow.add(k); return true; })
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) =>
+      levelIdx(a.r.level) - levelIdx(b.r.level)
+      || String(a.r.location_name || "").localeCompare(String(b.r.location_name || ""))
+      || (a.r.location_id - b.r.location_id)
+      || ((rankOf.get(a.r.designation_id) ?? 1e9) - (rankOf.get(b.r.designation_id) ?? 1e9))
+      || (a.i - b.i))
+    .map((x) => x.r);
   const capped = tableRows.length > MAX_ROWS;
   tableRows = tableRows.slice(0, MAX_ROWS);
 
