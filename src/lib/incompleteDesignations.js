@@ -41,7 +41,7 @@ const LEVEL_ID_EXPR = {
 };
 // The location master `type` for each level (block = ward).
 const LOC_TYPE = { zone: "zone", lok_sabha: "lok_sabha", district: "district", assembly: "assembly", block: "ward" };
-const MAX_PEOPLE = 8000;
+const MAX_PEOPLE = 300000; // safety ceiling only; a truncated holder list would make filled posts look vacant, so callers fail closed above it
 const MAX_LOCS = 5000;
 
 export function normalizeLevel(v) {
