@@ -1255,8 +1255,10 @@ export default function ContactsModule({ session, mode }) {
                       <ClipboardList size={14} /> Task
                     </button>
                     {/* Review for Announce (RfA): a Supervisor-2 submits the contact to the
-                        Super Admin's RfA Review List. Other roles only see the status. */}
-                    <RfaControl contact={c} canSubmit={mode === "supervisor" && isSupervisorRole(session)} onDone={(m) => { setMessage(m); load(); }} onFail={setError} />
+                        Super Admin's RfA Review List. Other roles only see the status. Shown to a Supervisor-2 in
+                        BOTH Contact List views: their own Supervisor list and the main Contacts page they
+                        reach through a Contacts Page-Access grant. POST /api/rfa re-checks the role. */}
+                    <RfaControl contact={c} canSubmit={isSupervisorRole(session)} onDone={(m) => { setMessage(m); load(); }} onFail={setError} />
                     {/* Generate (or reuse) a Worker & Voter Registration link for this
                         Contact — uses the Contact's existing name/phone/photo; the
                         worker row keeps the stable contact_id (admin only). */}
