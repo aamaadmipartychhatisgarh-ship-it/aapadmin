@@ -38,8 +38,9 @@ export async function GET(req) {
     const where = ["c.is_wrong_number = 1"];
     const params = [];
     if (search) { where.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
-    if (zoneId) { where.push("c.zone_id = ?"); params.push(zoneId); }
-    if (lokSabhaId) { where.push("c.lok_sabha_id = ?"); params.push(lokSabhaId); }
+    // Zone / Lok Sabha filters use the Contact Page definition (own value, else the district's).
+    if (zoneId) { where.push("(c.zone_id = ? OR (c.zone_id IS NULL AND dz.id = ?))"); params.push(zoneId, zoneId); }
+    if (lokSabhaId) { where.push("(c.lok_sabha_id = ? OR (c.lok_sabha_id IS NULL AND dls.id = ?))"); params.push(lokSabhaId, lokSabhaId); }
     if (districtId) { where.push("c.district_id = ?"); params.push(districtId); }
     if (assemblyId) { where.push("c.assembly_id = ?"); params.push(assemblyId); }
     if (caller) { where.push("c.assigned_to_user_id = ?"); params.push(caller); }
@@ -76,7 +77,7 @@ export async function GET(req) {
         SELECT c.id, c.person_name, c.phone_number, c.address, c.assigned_to_user_id,
               u.username AS caller_name,
               COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
-              lz.name AS zone_name, lls.name AS lok_sabha_name, ld.name AS district_name,
+              COALESCE(lz.name, dz.name) AS zone_name, COALESCE(lls.name, dls.name) AS lok_sabha_name, ld.name AS district_name,
               la.name AS assembly_name, lw.name AS ward_name,
               COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
               ${detailCols}
@@ -94,6 +95,8 @@ export async function GET(req) {
          LEFT JOIN locations lz ON lz.id = c.zone_id
          LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
          LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations dls ON dls.id = ld.parent_id AND dls.type = 'lok_sabha'
+         LEFT JOIN locations dz ON dz.id = dls.parent_id
          LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
          ${detailJoins}

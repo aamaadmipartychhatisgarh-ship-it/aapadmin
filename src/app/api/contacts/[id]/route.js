@@ -14,6 +14,7 @@ import { isContactRepeatOff } from "@/lib/repeatOff";
 import { resolveContactCard } from "@/lib/contactCard";
 import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
+import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { callerOwnsContact } from "@/lib/callerContactAccess";
@@ -255,6 +256,10 @@ export async function PUT(req, { params }) {
     // Feature-detected — absent on a deployment that hasn't added the column.
     if (existingColumns.has("updated_at")) sets.push("updated_at = NOW()");
 
+    // Zone before the edit (Contact Page definition) — compared after, to keep the
+    // callers' lists in step if this edit moves the contact to another Zone.
+    const zoneBefore = await contactEffectiveZoneId(id);
+
     // Apply the contact edit. Returns the fresh contact.
     const pool = getPool();
     const conn = await pool.getConnection();
@@ -288,11 +293,19 @@ export async function PUT(req, { params }) {
     if (isAdminTier && "assigned_to_user_id" in data && data.assigned_to_user_id) {
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: id });
     }
+    // Zone moved? Visibility itself is computed live from the contact's Zone (callers'
+    // Zone lists update on the next request); an assignment to a caller of the OLD Zone
+    // is released so it also leaves that caller's work queue.
+    let releasedFrom = null;
+    const zoneAfter = await contactEffectiveZoneId(id);
+    if (String(zoneBefore ?? "") !== String(zoneAfter ?? "") && !(isAdminTier && data.assigned_to_user_id)) {
+      releasedFrom = await releaseOutOfZoneAssignment(session, id, zoneAfter);
+    }
     // Return the FULLY-RESOLVED record (all *_name display fields, assigned-to
     // username, resolved photo) — the exact shape the list renders — so the
     // client replaces its row with fresh data and never shows a stale name.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated });
+    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}) });
   } catch (err) {
     console.error("contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

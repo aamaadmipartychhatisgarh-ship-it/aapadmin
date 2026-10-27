@@ -147,13 +147,15 @@ export async function GET(req) {
               (SELECT GROUP_CONCAT(dd.name ORDER BY dd.name SEPARATOR ', ')
                  FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
                 WHERE cd.contact_id = c.id) AS designation_names,
-              lz.name AS zone_name, lls.name AS lok_sabha_name,
+              COALESCE(lz.name, dz.name) AS zone_name, COALESCE(lls.name, dls.name) AS lok_sabha_name,
               ld.name AS district_name, la.name AS assembly_name, lw.name AS block_name
          FROM contacts c
          LEFT JOIN designations dsg ON dsg.id = c.designation_id
          LEFT JOIN locations lz ON lz.id = c.zone_id
          LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
          LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations dls ON dls.id = ld.parent_id AND dls.type = 'lok_sabha'
+         LEFT JOIN locations dz ON dz.id = dls.parent_id
          LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
         ${where}

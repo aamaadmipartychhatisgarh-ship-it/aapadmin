@@ -30,7 +30,10 @@ export async function GET(req, { params }) {
     const eq = (key, col) => { const v = searchParams.get(key); if (v) { where.push(`c.${col} = ?`); qp.push(v); } };
     const search = searchParams.get("search");
     if (search) { where.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); qp.push(`%${search}%`, `%${search}%`); }
-    eq("zone_id", "zone_id"); eq("lok_sabha_id", "lok_sabha_id"); eq("district_id", "district_id");
+    // Zone / Lok Sabha: the Contact Page definition (own value, else the district's) — same as the list.
+    const zf = searchParams.get("zone_id"); if (zf) { where.push("(c.zone_id = ? OR (c.zone_id IS NULL AND dz.id = ?))"); qp.push(zf, zf); }
+    const lf = searchParams.get("lok_sabha_id"); if (lf) { where.push("(c.lok_sabha_id = ? OR (c.lok_sabha_id IS NULL AND dls.id = ?))"); qp.push(lf, lf); }
+    eq("district_id", "district_id");
     eq("assembly_id", "assembly_id"); eq("caller", "assigned_to_user_id");
     const statusF = searchParams.get("status");
     if (statusF === "assigned") where.push("c.assigned_to_user_id IS NOT NULL");
@@ -41,7 +44,7 @@ export async function GET(req, { params }) {
     const rows = await query(
       `SELECT c.person_name, c.phone_number, c.address,
               u.username AS caller_name,
-              lz.name AS zone_name, lls.name AS lok_sabha_name, ld.name AS district_name,
+              COALESCE(lz.name, dz.name) AS zone_name, COALESCE(lls.name, dls.name) AS lok_sabha_name, ld.name AS district_name,
               la.name AS assembly_name, lw.name AS ward_name,
               (SELECT COUNT(*) FROM calls x WHERE x.contact_id = c.id) AS attempts,
               (SELECT MAX(x.called_at) FROM calls x WHERE x.contact_id = c.id) AS last_call_date,
@@ -53,6 +56,8 @@ export async function GET(req, { params }) {
          LEFT JOIN locations lz ON lz.id = c.zone_id
          LEFT JOIN locations lls ON lls.id = c.lok_sabha_id
          LEFT JOIN locations ld ON ld.id = c.district_id
+         LEFT JOIN locations dls ON dls.id = ld.parent_id AND dls.type = 'lok_sabha'
+         LEFT JOIN locations dz ON dz.id = dls.parent_id
          LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
         WHERE ${where.join(" AND ")}
