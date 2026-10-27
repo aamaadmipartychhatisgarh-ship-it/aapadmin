@@ -23,14 +23,33 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+// POST (no body)               -> Evenly Distribute the whole available pool (unchanged)
+// POST { count, caller_id? }   -> assign UP TO `count` available calls (a positive whole number), evenly
+//                                 among the active callers or to the one chosen caller
+const MAX_COUNT = 1000000;
+export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!(await allowed(session))) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
-    const result = await distributeUnfiltered({ byUserId: session.user.id });
+    const body = await req.json().catch(() => ({}));
+    let limit = null, callerId = null;
+    if (body && Object.prototype.hasOwnProperty.call(body, "count")) {
+      const raw = body.count;
+      if (typeof raw === "boolean" || raw === null || raw === "" || !/^\d+$/.test(String(raw).trim())) {
+        return NextResponse.json({ message: "Enter a positive whole number of calls to assign." }, { status: 400, headers: NO_STORE });
+      }
+      limit = Number(String(raw).trim());
+      if (!Number.isSafeInteger(limit) || limit < 1) return NextResponse.json({ message: "Enter a positive whole number of calls to assign (1 or more)." }, { status: 400, headers: NO_STORE });
+      if (limit > MAX_COUNT) return NextResponse.json({ message: `Enter a number up to ${MAX_COUNT.toLocaleString("en-IN")}.` }, { status: 400, headers: NO_STORE });
+    }
+    if (body && body.caller_id != null && body.caller_id !== "") {
+      if (!/^\d+$/.test(String(body.caller_id)) || Number(body.caller_id) < 1) return NextResponse.json({ message: "Invalid caller." }, { status: 400, headers: NO_STORE });
+      callerId = Number(body.caller_id);
+    }
+    const result = await distributeUnfiltered({ byUserId: session.user.id, limit, callerId });
     await logAudit(session, {
       action: "unfiltered_contacts.distribute", entityType: "unfiltered_contacts", entityId: null,
-      details: { pool: result.pool, assigned: result.assigned, callers: result.callers, per_caller: result.per_caller.map((c) => [c.user_id, c.assigned_now]) },
+      details: { requested: result.requested ?? undefined, remaining: result.remaining, pool: result.pool, assigned: result.assigned, callers: result.callers, per_caller: result.per_caller.map((c) => [c.user_id, c.assigned_now]) },
     }).catch(() => {});
     return NextResponse.json({ ...result, overview: await unfilteredAssignmentOverview() }, { headers: NO_STORE });
   } catch (err) {

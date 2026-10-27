@@ -52,6 +52,10 @@ function AssignedCalls({ refreshKey, onDistributed }) {
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [msg, setMsg] = useState(null);
+  // "No. of Calls to Assign": assign UP TO this many available calls (to all callers evenly, or one caller).
+  const [countIn, setCountIn] = useState("");
+  const [countErr, setCountErr] = useState("");
+  const [countCaller, setCountCaller] = useState("");
   const load = useCallback(async () => {
     try {
       const r = await fetch("/api/unfiltered-contacts/assignments", { cache: "no-store" });
@@ -84,6 +88,37 @@ function AssignedCalls({ refreshKey, onDistributed }) {
     } finally {
       setBusy(false); setConfirm(false);
     }
+  }
+
+  async function assignCount() {
+    if (busy) return;
+    const v = countIn.trim();
+    if (!v) { setCountErr("Enter the number of calls to assign."); return; }
+    if (!/^\d+$/.test(v)) { setCountErr("Enter a positive whole number (digits only, no decimals or negatives)."); return; }
+    const n = Number(v);
+    if (!Number.isSafeInteger(n) || n < 1) { setCountErr("The number of calls must be 1 or more."); return; }
+    setCountErr(""); setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/unfiltered-contacts/assignments", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count: n, ...(countCaller ? { caller_id: Number(countCaller) } : {}) }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg({ err: true, text: d.message || "Assignment failed. Nothing was assigned." }); return; }
+      if (d.overview) setOv(d.overview);
+      const rem = d.remaining ?? d.overview?.available ?? 0;
+      if (d.assigned === 0) {
+        setMsg({ err: false, warn: true, text: `Requested: ${n} call${n === 1 ? "" : "s"} | Assigned: 0 — there are no unassigned calls available.` });
+      } else if (d.assigned < n) {
+        setMsg({ err: false, text: `Requested: ${n} calls | Assigned: ${d.assigned} call${d.assigned === 1 ? "" : "s"} because only ${d.assigned} unassigned call${d.assigned === 1 ? " was" : "s were"} available. All available calls have been assigned. Remaining unassigned: ${rem}.` });
+      } else {
+        setMsg({ err: false, text: `Requested: ${n} calls | Assigned: ${d.assigned} calls | Remaining unassigned: ${rem}.` });
+      }
+      setCountIn("");
+      onDistributed?.();
+    } catch {
+      setMsg({ err: true, text: "Assignment failed — network error. Nothing was assigned." });
+    } finally { setBusy(false); }
   }
 
   const k = ov?.eligible_callers || 0;
@@ -122,6 +157,27 @@ function AssignedCalls({ refreshKey, onDistributed }) {
             {ov.now_contacts > 0 && <>{ov.now_contacts} number{ov.now_contacts === 1 ? " is" : "s are"} now in Contacts and excluded.</>}
           </p>
         )}
+        <div className="flex flex-wrap items-end gap-3" data-testid="assign-count-bar">
+          <label className="block">
+            <span className="block text-xs font-semibold text-gray-600 mb-1">No. of Calls to Assign</span>
+            <input value={countIn} onChange={(e) => { setCountIn(e.target.value); if (countErr) setCountErr(""); }} inputMode="numeric" placeholder="e.g. 100" aria-label="No. of Calls to Assign" data-testid="assign-count-input"
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); assignCount(); } }}
+              className={`h-10 w-40 rounded-lg border px-3 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]/30 ${countErr ? "border-red-300" : "border-gray-200"}`} />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-semibold text-gray-600 mb-1">Assign to</span>
+            <select value={countCaller} onChange={(e) => setCountCaller(e.target.value)} aria-label="Assign calls to" data-testid="assign-count-caller" className="h-10 rounded-lg border border-gray-200 px-2 text-sm bg-white">
+              <option value="">All callers (evenly)</option>
+              {(ov?.callers || []).filter((c) => c.eligible).map((c) => <option key={c.user_id} value={c.user_id}>{c.caller_name}</option>)}
+            </select>
+          </label>
+          <button onClick={assignCount} disabled={busy || !k} data-testid="assign-count-btn"
+            className="h-10 inline-flex items-center gap-2 px-4 text-sm bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white rounded-lg font-semibold">
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <Headphones size={15} />} Assign Calls
+          </button>
+          <span className="text-xs text-gray-500 pb-2" data-testid="assign-count-remaining">{ov ? `${ov.available} unassigned call${ov.available === 1 ? "" : "s"} available` : ""}</span>
+          {countErr && <p className="basis-full text-xs text-red-600" data-testid="assign-count-error">{countErr}</p>}
+        </div>
         {confirm && (
           <div className="border border-blue-200 bg-blue-50 rounded-lg p-3 text-sm flex flex-wrap items-center gap-3" data-testid="distribute-confirm">
             <span className="text-blue-900">Distribute <b>{avail}</b> call{avail === 1 ? "" : "s"} among <b>{k}</b> active caller{k === 1 ? "" : "s"} — {base}{avail % k ? `–${base + 1}` : ""} each. Existing assignments stay as they are.</span>
@@ -133,7 +189,7 @@ function AssignedCalls({ refreshKey, onDistributed }) {
             </div>
           </div>
         )}
-        {msg && <div className={`text-sm rounded-lg px-3 py-2 border ${msg.err ? "bg-red-50 border-red-200 text-red-700" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`} data-testid="distribute-msg">{msg.text}</div>}
+        {msg && <div className={`text-sm rounded-lg px-3 py-2 border ${msg.err ? "bg-red-50 border-red-200 text-red-700" : msg.warn ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-emerald-50 border-emerald-200 text-emerald-800"}`} data-testid="distribute-msg">{msg.text}</div>}
         <div className="overflow-x-auto border border-gray-100 rounded-lg">
           <table className="w-full text-sm min-w-[480px]" data-testid="caller-summary">
             <thead><tr className="bg-gray-50 text-left text-gray-500 text-xs uppercase tracking-wide">

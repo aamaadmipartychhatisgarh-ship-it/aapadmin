@@ -307,7 +307,12 @@ export async function unfilteredAssignmentOverview() {
 // condition — a second click (or a concurrent request) finds nothing left and
 // assigns 0, never a duplicate.
 const DIST_LOCK = "aapadmin_unfiltered_distribute";
-export async function distributeUnfiltered({ byUserId }) {
+// `limit` (optional, a positive whole number) assigns UP TO that many pool calls instead of the whole pool -
+// the same locked, re-checked mechanism, just a capped selection (lowest ids first); fewer available than
+// requested is not an error - the available ones are assigned and the result says so. `callerId` (optional)
+// hands the calls to that one active caller instead of sharing them evenly. The result carries the real
+// requested / assigned / remaining numbers, counted from the database after the commit.
+export async function distributeUnfiltered({ byUserId, limit = null, callerId = null }) {
   await ensureUnfilteredAssignmentSchema();
   const conn = await getPool().getConnection();
   let locked = false;
@@ -319,11 +324,13 @@ export async function distributeUnfiltered({ byUserId }) {
     const [callers] = await conn.query(
       `SELECT us.id, us.username,
               (SELECT COUNT(*) FROM unfiltered_contacts x WHERE x.assigned_to_user_id = us.id AND x.completed_at IS NULL) AS pending
-         FROM users us WHERE us.role = 'caller' AND us.is_active = 1
-        ORDER BY pending ASC, us.id ASC`
+         FROM users us WHERE us.role = 'caller' AND us.is_active = 1${callerId ? " AND us.id = ?" : ""}
+        ORDER BY pending ASC, us.id ASC`,
+      callerId ? [Number(callerId)] : []
     );
-    if (!callers.length) throw Object.assign(new Error("No active caller accounts to distribute to."), { status: 400 });
-    const [poolRows] = await conn.query(`SELECT u.id FROM unfiltered_contacts u WHERE ${POOL_WHERE("u")} ORDER BY u.id ASC FOR UPDATE`);
+    if (!callers.length) throw Object.assign(new Error(callerId ? "That caller is not an active caller account." : "No active caller accounts to distribute to."), { status: 400 });
+    const capSql = limit ? ` LIMIT ${Math.floor(Number(limit))}` : "";
+    const [poolRows] = await conn.query(`SELECT u.id FROM unfiltered_contacts u WHERE ${POOL_WHERE("u")} ORDER BY u.id ASC${capSql} FOR UPDATE`);
     const ids = poolRows.map((r) => r.id);
     const k = callers.length;
     const base = Math.floor(ids.length / k);
@@ -350,7 +357,8 @@ export async function distributeUnfiltered({ byUserId }) {
       perCaller.push({ user_id: callers[i].id, caller_name: callers[i].username, assigned_now: done });
     }
     await conn.commit();
-    return { pool: ids.length, assigned, callers: k, per_caller: perCaller };
+    const [[remRow]] = await conn.query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u WHERE ${POOL_WHERE("u")}`);
+    return { pool: ids.length, assigned, callers: k, per_caller: perCaller, requested: limit ? Math.floor(Number(limit)) : null, remaining: Number(remRow?.n || 0) };
   } catch (e) {
     await conn.rollback().catch(() => {});
     throw e;
