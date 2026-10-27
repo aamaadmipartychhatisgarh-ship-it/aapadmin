@@ -660,7 +660,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         headers: { "Content-Type": "application/json" },
         // address_prev = the address when this contact was opened: the server writes the address only if
         // it was actually edited (and not changed by someone else meanwhile).
-        body: JSON.stringify({ ...edit, address_prev: active.address || "" }),
+        body: JSON.stringify({ ...edit, address_prev: active.address || "", designation_id_prev: active.designation_id || "" }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -673,17 +673,19 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       const districtName = districts.find((d) => String(d.id) === String(edit.district_id))?.name || (edit.district_id ? active.district_name : null);
       // If the stored address was changed by someone else meanwhile, keep THEIR (latest) address.
       const keptAddress = data.address_conflict && data.contact ? { address: data.contact.address || "" } : {};
+      const keptDesignation = data.designation_conflict && data.contact ? { designation_id: data.contact.designation_id || "" } : {};
       setActive({
         ...active,
         ...edit,
         ...keptAddress,
+        ...keptDesignation,
         district_name: districtName,
         ward_name: edit.ward_name || null,
-        designation_id: edit.designation_id || null,
+        designation_id: keptDesignation.designation_id ?? (edit.designation_id || null),
       });
       setForm({ ...form, person_name: edit.person_name, phone_number: edit.phone_number });
       setEditing(false);
-      setMessage(data.address_conflict ? "Contact updated — but the address had been changed by someone else, so your address edit was not applied (the latest address is shown)." : "Contact updated.");
+      setMessage(data.address_conflict || data.designation_conflict ? "Contact updated — but the address or designation had been changed by someone else, so your edit of it was not applied (the latest value is shown)." : "Contact updated.");
       // Refresh the queue so the list reflects the saved changes without a reload.
       loadQueue({ silent: true });
     } finally {

@@ -12,7 +12,7 @@ import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDup
 import { isContactNotInterested } from "@/lib/contactExtras";
 import { isContactRepeatOff } from "@/lib/repeatOff";
 import { resolveContactCard } from "@/lib/contactCard";
-import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle } from "@/lib/contactDesignations";
+import { syncContactDesignations, designationsForGeneralEdit } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
 import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
@@ -157,13 +157,17 @@ export async function PUT(req, { params }) {
     // table is fully synced below and the legacy primary column is kept aligned
     // to the FIRST id (or null). Adding/removing one only changes the set — the
     // others stay.
-    let designationIds = null;
-    if ("designation_ids" in data) {
-      designationIds = parseDesignationIds(data.designation_ids);
-      data.designation_id = designationIds[0] || null; // primary mirrors first
-    } else if ("designation_id" in data) {
-      // Caller workspace sends one designation_id — keep the join table in step.
-      designationIds = await designationIdsFromSingle(id, data);
+    // The designation set / primary are written only when the user actually CHANGED them
+    // (designationsForGeneralEdit): an edit of another field never rewrites or clears them, a stale
+    // form can't revert a newer designation, and removing all designations needs a deliberate
+    // manager edit. The Caller workspace's single designation_id follows the same rule.
+    let designationIds = null, designationConflict = false;
+    {
+      const dres = await designationsForGeneralEdit(id, data, canManage);
+      if (dres.error) return NextResponse.json({ message: dres.error }, { status: 400 });
+      designationConflict = !!dres.conflict;
+      if (dres.skip) { delete data.designation_ids; delete data.designation_id; }
+      else if (dres.ids) { designationIds = dres.ids; data.designation_id = dres.ids[0] || null; } // primary mirrors first
     }
 
     // Editing may keep the contact's OWN mobile (same row) but must not collide
@@ -274,8 +278,8 @@ export async function PUT(req, { params }) {
     if (sets.length === 0) {
       // Nothing to write because the only fields sent were an unchanged / protected Address or Photo
       // (see above) — that is a successful no-op, not an error. Return the current record.
-      if ("address" in data || "photo_url" in data) {
-        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}) });
+      if ("address" in data || "photo_url" in data || designationConflict || "designation_ids_prev" in data || "designation_id_prev" in data) {
+        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
       }
       return NextResponse.json({ message: "No fields to update" }, { status: 400 });
     }
@@ -334,7 +338,7 @@ export async function PUT(req, { params }) {
     // username, resolved photo) — the exact shape the list renders — so the
     // client replaces its row with fresh data and never shows a stale name.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}) });
+    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
   } catch (err) {
     console.error("contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

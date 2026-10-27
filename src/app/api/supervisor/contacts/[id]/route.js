@@ -10,7 +10,7 @@ import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
 import { resolveContactCard } from "@/lib/contactCard";
-import { parseDesignationIds, syncContactDesignations, designationIdsFromSingle } from "@/lib/contactDesignations";
+import { syncContactDesignations, designationsForGeneralEdit } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
@@ -59,12 +59,14 @@ export async function PUT(req, { params }) {
 
     // Multi-designation (PROMPT 5): sync the join table below; keep the legacy
     // primary column aligned to the first id.
-    let designationIds = null;
-    if ("designation_ids" in data) {
-      designationIds = parseDesignationIds(data.designation_ids);
-      data.designation_id = designationIds[0] || null;
-    } else if ("designation_id" in data) {
-      designationIds = await designationIdsFromSingle(id, data);
+    // Written only when the user actually changed the designation(s) — see designationsForGeneralEdit.
+    let designationIds = null, designationConflict = false;
+    {
+      const dres = await designationsForGeneralEdit(id, data, true);
+      if (dres.error) return NextResponse.json({ message: dres.error }, { status: 400 });
+      designationConflict = !!dres.conflict;
+      if (dres.skip) { delete data.designation_ids; delete data.designation_id; }
+      else if (dres.ids) { designationIds = dres.ids; data.designation_id = dres.ids[0] || null; }
     }
 
     // Editing may keep the contact's OWN mobile but must not collide with a
@@ -157,11 +159,11 @@ export async function PUT(req, { params }) {
     if (sets.length === 0) {
       // Only an unchanged / protected Address or Photo was sent — a successful no-op (inside the
       // supervisor's territory), not an error.
-      if ("address" in data || "photo_url" in data) {
+      if ("address" in data || "photo_url" in data || designationConflict || "designation_ids_prev" in data || "designation_id_prev" in data) {
         const scn = supervisorScopeFilter(session.user, "c");
         const [inScope] = await query(`SELECT c.id FROM contacts c WHERE c.id = ? ${scn.where}`, [id, ...scn.params]);
         if (!inScope) return NextResponse.json({ message: "Contact not found or outside your territory." }, { status: 404 });
-        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}) });
+        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
       }
       return NextResponse.json({ message: "No fields to update" }, { status: 400 });
     }
@@ -211,7 +213,7 @@ export async function PUT(req, { params }) {
     await logAudit(session, { action: "contact.update", entityType: "contact", entityId: id, details: { supervisor: true, fields: Object.keys(data) } });
     // Fully-resolved record (all display names) so the client shows fresh data.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated, ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}) });
+    return NextResponse.json({ ok: true, contact: updated, ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
   } catch (err) {
     console.error("supervisor contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

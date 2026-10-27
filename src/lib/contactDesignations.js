@@ -92,3 +92,51 @@ export async function designationIdsFromSingle(contactId, data) {
   if (String(curId ?? "") === String(next[0] ?? "")) return null;
   return next;
 }
+
+// How a GENERAL contact edit (admin / supervisor / caller) may change a contact's designations.
+// Forms are snapshots taken when opened, so a form that was NOT used to change the designation
+// (another field was edited) must never write its stale copy over a newer designation, nor clear
+// it because it never loaded one; and a designation is only removed when it was deliberately
+// emptied by someone allowed to.
+//
+//   data.designation_ids / designation_id      — what the form sends (set from the multi-select,
+//                                                 or the caller workspace's single dropdown)
+//   data.designation_ids_prev / designation_id_prev — what the form was OPENED with
+//
+// Returns:
+//   { ids: null }              — nothing to do (field not sent)
+//   { skip: true }             — unchanged / stale / not permitted → neither the set nor the
+//                                legacy primary column is touched (+ conflict: true when someone
+//                                else changed it after the form opened)
+//   { ids: [...] }             — the new full set (the primary is its first id)
+//   { error }                  — an id that is not in the Designation master
+export async function designationsForGeneralEdit(contactId, data, canClear) {
+  const hasSet = "designation_ids" in data;
+  const hasOne = !hasSet && "designation_id" in data;
+  if (!hasSet && !hasOne) return { ids: null };
+  await ensureContactDesignationsSchema();
+  const rows = await query("SELECT designation_id FROM contact_designations WHERE contact_id = ? ORDER BY id", [contactId]);
+  const [c] = await query("SELECT designation_id FROM contacts WHERE id = ?", [contactId]);
+  // Current designations as the app shows them: the set, else the legacy single value.
+  const curIds = rows.length ? rows.map((r) => r.designation_id) : (c?.designation_id ? [c.designation_id] : []);
+  // The single dropdown only ever shows (and sets) the primary.
+  const cur = hasSet ? curIds : curIds.slice(0, 1);
+  const next = hasSet ? parseDesignationIds(data.designation_ids) : parseDesignationIds([data.designation_id]);
+  const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+  const result = (ids) => ids;
+  if (same(next, cur)) return { skip: true };                       // already exactly this
+  const prevKey = hasSet ? "designation_ids_prev" : "designation_id_prev";
+  if (prevKey in data) {
+    const prev = parseDesignationIds(hasSet ? data[prevKey] : [data[prevKey]]);
+    if (same(next, prev)) return { skip: true };                    // the user did not change it: stale copy
+    if (!same(prev, cur)) return { skip: true, conflict: true };    // changed by someone else since the form opened
+    if (!next.length) return canClear ? { ids: [] } : { skip: true }; // deliberate clear — managers only
+  } else if (!next.length) {
+    return { skip: true };                                          // a blank with no baseline never clears
+  }
+  if (next.length) {
+    const found = await query(`SELECT id FROM designations WHERE id IN (${next.map(() => "?").join(",")})`, next);
+    if (found.length !== next.length) return { error: "That designation does not exist." };
+  }
+  return { ids: result(next) };
+}

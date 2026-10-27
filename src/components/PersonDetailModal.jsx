@@ -260,6 +260,8 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       person_name: form.person_name.trim(),
       phone_number: form.phone_number.trim(),
       designation_ids: form.designation_ids || [],
+      // The designation(s) this form was opened with: the server changes them only if the user did.
+      designation_ids_prev: emptyForm(contact, canEditGeo).designation_ids,
       wings: form.wings || [],
       address: form.address,
       // The address this form was opened with: the server writes the address only if the user
@@ -317,10 +319,10 @@ function ContactEditForm({ contact, canEditGeo, canEditStatus, contactUrl, users
       // Prefer the server's fully-resolved record (correct for EVERY field,
       // including Block/ward_name and cases the client option lists don't cover)
       // so the list/search show the exact saved data with no stale labels.
-      if (d.address_conflict && d.contact) {
-        // Everything else saved; the stored address was changed by someone else meanwhile.
+      if ((d.address_conflict || d.designation_conflict) && d.contact) {
+        // Everything else saved; a protected field was changed by someone else meanwhile.
         onSaved(d.contact); setForm(emptyForm(d.contact, canEditGeo));
-        setError("Saved — but the address was changed by someone else after you opened this form, so your address edit was NOT applied. The latest address is shown."); setSaving(false); return;
+        setError(`Saved — but ${(d.address_conflict && d.designation_conflict ? "the address and the designation were" : d.address_conflict ? "the address was" : "the designation was")} changed by someone else after you opened this form, so your edit of it was NOT applied. The latest value is shown.`); setSaving(false); return;
       }
       onSaved(d.contact || merged);
     } catch {

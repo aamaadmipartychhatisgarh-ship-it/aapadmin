@@ -1673,6 +1673,8 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
       education_level: form.qualification === "literate" ? (form.education_level || "") : "",
       vehicle: form.vehicle || "",
       designation_ids: form.designation_ids || [], // full multi-designation set
+      // The designation(s) the form was opened with — the server changes them only if the user did.
+      designation_ids_prev: contactToForm(contact, canEditGeo).designation_ids,
       wings: form.wings || [], // full wing-tag set (add/remove keeps the rest)
       // The photo is only sent when a NEW one was picked in this form, together with the photo the
       // form was opened with — the server then attaches it only if the contact still has that one,
@@ -1698,11 +1700,12 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
     // Use the server's fully-resolved record (fresh display names) so the list
     // never keeps stale zone/district/assembly/designation labels. Fall back to
     // a local merge only if the API somehow didn't return the record.
-    if (data.address_conflict && data.contact) {
+    if ((data.address_conflict || data.designation_conflict) && data.contact) {
       onSaved(data.contact); setForm(contactToForm(data.contact, canEditGeo));
-      setError("Saved — but the address was changed by someone else after you opened this form, so your address edit was NOT applied. The latest address is shown."); return;
+      const d = data;
+      setError(`Saved — but ${(d.address_conflict && d.designation_conflict ? "the address and the designation were" : d.address_conflict ? "the address was" : "the designation was")} changed by someone else after you opened this form, so your edit of it was NOT applied. The latest value is shown.`); return;
     }
-    onSaved(data.contact || { ...contact, ...body, address_prev: undefined });
+    onSaved(data.contact || { ...contact, ...body, address_prev: undefined, designation_ids_prev: undefined });
   }
 
   const inp = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white";
