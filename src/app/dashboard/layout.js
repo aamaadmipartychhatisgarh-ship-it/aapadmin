@@ -81,7 +81,8 @@ const SUPERVISOR_NAV = [
 const CALLER_NAV = [
   { name: "My Workspace", href: "/dashboard/workspace", icon: Headphones },
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Log a Call", href: "/dashboard/calls/new", icon: PhoneCall },
+  // "Log a Call" is intentionally not listed in the Caller sidebar (its page /dashboard/calls/new,
+  // the calls APIs and all call records are unchanged).
   { name: "My Calls", href: "/dashboard/calls", icon: Database },
   // "Unfiltered Calls" is intentionally not listed here any more (hidden from the Caller
   // sidebar only). Its page (/dashboard/unfiltered-calls), APIs, data and the
