@@ -559,6 +559,14 @@ export default function DashboardLayout({ children }) {
     }
   }
 
+  // Unfiltered Calls is not a sidebar option for the Caller profile - whether the nav is the Caller's
+  // role default or built from Page Access grants. Only the navigation entry is removed: the page
+  // (/dashboard/unfiltered-calls), its APIs, data, the "unfiltered_calls" page key and the Unfiltered
+  // switch inside My Workspace are unchanged, and every other role keeps its own navigation.
+  if (!previewing && canonical === ROLES.CALLER) {
+    navItems = navItems.filter((i) => !String(i.href).startsWith("/dashboard/unfiltered-calls"));
+  }
+
   // Social Media section — Social Command and Media are never standalone main
   // items: whichever of the two this user's nav has (by role or Page Access)
   // are moved into one "Social Media" section, placed where the first of them
