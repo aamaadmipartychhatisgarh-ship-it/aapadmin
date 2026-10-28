@@ -3,6 +3,7 @@
 import { PHONE_PICKED_OPTIONS, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
 import { UNFILTERED_WRONG_REASONS, unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight, Pencil, X } from "lucide-react";
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
@@ -30,6 +31,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [fuFilter, setFuFilter] = useState(""); // Follow-ups tab: show only this exact date
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const router = useRouter();
   const timerRef = useRef(null);
   const submitLock = useRef(false);        // synchronous guard: two quick clicks can't both pass before state updates
   const attemptedRef = useRef(new Set());  // calls already worked this session (kept pending after e.g. Busy): never offered as "next" again
@@ -179,6 +181,12 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       if (!r.ok) { setError(d.message || "Failed to save"); if (r.status === 404 || r.status === 409) { setActive(null); load(); } return; }
       const savedId = active.id;
       const savedDuration = elapsed;
+      // Wrong Number: the call (with its reason) is already saved - go straight to the Wrong Number page, no extra step.
+      if (isWrongNo) {
+        setActive(null);
+        router.push("/dashboard/admin/wrong-numbers?tab=wrong");
+        return;
+      }
       setActive(null);
       const fresh = await load("pending");
       if (view !== "pending") setView("pending");

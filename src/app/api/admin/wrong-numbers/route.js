@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight, scopeFilterSync } from "@/lib/permissions";
+import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
+import { resolveActingUserId } from "@/lib/actAs";
+import { ensureUnfilteredCallLogSchema } from "@/lib/unfilteredContacts";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns } from "@/lib/contactExtras";
@@ -15,10 +17,14 @@ export const dynamic = "force-dynamic";
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!(await pageAllowed(session, "wrong_numbers", session && isOversight(session)))) {
+    if (!(await pageAllowed(session, "wrong_numbers", session && (isOversight(session) || isCaller(session))))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    if (!(await hasWrongNumberColumn())) {
+    const callerOnly = !isOversight(session);
+    // A Caller sees ONLY the Unfiltered Calls they marked Wrong Number (their own records); the contact list stays oversight-only.
+    let callerId = null;
+    if (callerOnly) callerId = (await resolveActingUserId(session)).userId;
+    if (!callerOnly && !(await hasWrongNumberColumn())) {
       return NextResponse.json({ wrong_numbers: [] });
     }
 
@@ -72,6 +78,50 @@ export async function GET(req) {
          LEFT JOIN users rb ON rb.id = c.restored_by`
       : "";
 
+    // Unfiltered Calls marked Wrong Number: the same page lists them (read from unfiltered_contacts - no Contact is created
+    // for them), with the saved reason. Global-scope users (Super Admin / State Admin / Supervisor, whose scope adds no
+    // geographic condition) see all of them; a Caller sees their own.
+    let unfRows = [];
+    if (callerOnly || !scope.where) {
+      await ensureUnfilteredCallLogSchema();
+      const uw = ["u.call_status_name = 'Wrong Number'", "u.completed_at IS NOT NULL"], up = [];
+      if (callerOnly) { uw.push("u.assigned_to_user_id = ?"); up.push(callerId); }
+      if (search) { uw.push("(u.person_name LIKE ? OR u.phone_number LIKE ?)"); up.push(`%${search}%`, `%${search}%`); }
+      if (zoneId) { uw.push("u.zone_id = ?"); up.push(zoneId); }
+      if (lokSabhaId) { uw.push("u.lok_sabha_id = ?"); up.push(lokSabhaId); }
+      if (districtId) { uw.push("u.district_id = ?"); up.push(districtId); }
+      if (assemblyId) { uw.push("u.assembly_id = ?"); up.push(assemblyId); }
+      if (caller) { uw.push("u.assigned_to_user_id = ?"); up.push(caller); }
+      if (statusF === "assigned") uw.push("u.assigned_to_user_id IS NOT NULL");
+      if (statusF === "unassigned") uw.push("u.assigned_to_user_id IS NULL");
+      if (reason) { uw.push("u.wrong_number_reason = ?"); up.push(reason); }
+      if (designationId) uw.push("1 = 0"); // unfiltered records carry a free-text designation, not a Master Data id
+      if (dateFrom) { uw.push("DATE(u.completed_at) >= ?"); up.push(dateFrom); }
+      if (dateTo) { uw.push("DATE(u.completed_at) <= ?"); up.push(dateTo); }
+      const ur = await query(
+        `SELECT u.id, u.person_name, u.phone_number, u.address, u.assigned_to_user_id, au.username AS caller_name,
+                u.designation AS designation_name, lz.name AS zone_name, lls.name AS lok_sabha_name,
+                COALESCE(ld.name, u.district_name) AS district_name, COALESCE(la.name, u.assembly_name) AS assembly_name, lw.name AS ward_name,
+                u.photo_url, u.wrong_number_reason, u.call_notes AS wrong_number_notes, u.completed_at AS marked_wrong_date,
+                cb.username AS marked_by_name, u.call_notes AS last_remarks,
+                (SELECT COUNT(*) FROM unfiltered_call_logs x WHERE x.unfiltered_contact_id = u.id) AS attempts,
+                (SELECT COUNT(*) FROM unfiltered_call_logs x WHERE x.unfiltered_contact_id = u.id AND x.status_name = 'Wrong Number') AS wrong_attempts
+           FROM unfiltered_contacts u
+           LEFT JOIN users au ON au.id = u.assigned_to_user_id
+           LEFT JOIN users cb ON cb.id = u.completed_by
+           LEFT JOIN locations lz ON lz.id = u.zone_id
+           LEFT JOIN locations lls ON lls.id = u.lok_sabha_id
+           LEFT JOIN locations ld ON ld.id = u.district_id
+           LEFT JOIN locations la ON la.id = u.assembly_id
+           LEFT JOIN locations lw ON lw.id = u.ward_id
+          WHERE ${uw.join(" AND ")}
+          ORDER BY u.completed_at DESC, u.id DESC LIMIT 2000`,
+        up
+      );
+      unfRows = ur.map((r) => ({ ...r, id: `u${r.id}`, unfiltered_id: r.id, source: "unfiltered" }));
+    }
+    if (callerOnly) return NextResponse.json({ wrong_numbers: unfRows, total: unfRows.length });
+
     const rows = await query(
       `SELECT * FROM (
         SELECT c.id, c.person_name, c.phone_number, c.address, c.assigned_to_user_id,
@@ -108,7 +158,8 @@ export async function GET(req) {
       [...params, ...outerParams]
     );
 
-    return NextResponse.json({ wrong_numbers: rows, total: rows.length });
+    const all = [...rows, ...unfRows].sort((a, b) => (new Date(b.marked_wrong_date || 0)) - (new Date(a.marked_wrong_date || 0)));
+    return NextResponse.json({ wrong_numbers: all, total: all.length });
   } catch (err) {
     console.error("wrong-numbers GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

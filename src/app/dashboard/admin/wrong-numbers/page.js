@@ -14,6 +14,7 @@ import Avatar from "@/components/Avatar";
 import NotInterestedView from "@/components/NotInterestedView";
 import RepeatOffPanel from "@/components/RepeatOffPanel";
 import { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
+import { unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 
 const REASON_LABEL = Object.fromEntries(WRONG_NUMBER_REASONS.map((r) => [r.value, r.label]));
 
@@ -48,13 +49,19 @@ export function WrongNumbersDashboard({ session, oversight, canDelete }) {
   // see Not Interested).
   const { pages: myPages, restricted: pageRestricted } = usePageAccess();
   const has = (k) => Array.isArray(myPages) && myPages.includes(k);
-  const showWrong = oversight && (pageRestricted ? has("wn_wrong_list") : true);
+  // A Caller also gets the Wrong Numbers tab, showing only THEIR OWN Unfiltered Calls marked Wrong Number (server-scoped).
+  const showWrong = oversight ? (pageRestricted ? has("wn_wrong_list") : true) : true;
   const showNI = pageRestricted ? has("not_interested") : true;
   // The "10+ Times" repeat-off views (spec §4) — the same oversight audience as
   // the Wrong Numbers list (and honoring the same Page-Access restriction), so a
   // managed user gains NO new access. Callers only ever see Not Interested, so
   // these never show for them.
-  const showRepeat = showWrong;
+  const showRepeat = oversight && showWrong;
+  // ?tab=wrong opens the Wrong Numbers tab directly (used by the Unfiltered Calls redirect).
+  useEffect(() => {
+    try { if (new URLSearchParams(window.location.search).get("tab") === "wrong" && showWrong) setTab("wrong"); } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     // Keep the active tab valid for what this user may see.
     if (tab === "wrong" && !showWrong) setTab(showNI ? "not_interested" : "wrong");
@@ -90,7 +97,7 @@ export function WrongNumbersDashboard({ session, oversight, canDelete }) {
         {showRepeat && <Tab id="incoming">10+ Times Incoming Off</Tab>}
       </div>
       {tab === "wrong" && showWrong ? (
-        <Body canDelete={canDelete} embedded />
+        <Body canDelete={canDelete} readOnly={!oversight} embedded />
       ) : (tab === "switched" || tab === "incoming") && showRepeat ? (
         <div className="space-y-4">
           <PageHeader
@@ -120,7 +127,7 @@ export function WrongNumbersDashboard({ session, oversight, canDelete }) {
 
 const fmt = (d) => d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 
-function Body({ canDelete }) {
+function Body({ canDelete, readOnly = false }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -211,9 +218,9 @@ function Body({ canDelete }) {
       <PageHeader
         icon={AlertCircle}
         title="Wrong Numbers"
-        description={`${rows.length} records marked wrong by callers. Restore, reassign, edit or export.`}
+        description={readOnly ? `${rows.length} of your Unfiltered Calls marked Wrong Number.` : `${rows.length} records marked wrong by callers. Restore, reassign, edit or export.`}
         breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Wrong Numbers" }]}
-        actions={<ActionBar items={[
+        actions={readOnly ? null : <ActionBar items={[
           { key: "xlsx", label: "Excel", icon: Download, href: `/api/admin/wrong-numbers/export/xlsx?${qs()}` },
           { key: "pdf", label: "PDF", icon: FileText, href: `/api/admin/wrong-numbers/export/pdf?${qs()}` },
         ]} />}
@@ -259,6 +266,7 @@ function Body({ canDelete }) {
                       <div className="flex items-center gap-2">
                         <Avatar name={c.person_name} src={c.photo_url} size={28} className="bg-red-50 border border-red-100" textClassName="text-red-600 text-[10px]" />
                         {c.person_name}
+                        {c.source === "unfiltered" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200" data-testid="wn-source-unfiltered">Unfiltered Call</span>}
                       </div>
                     </td>
                     <td className="px-3 py-3 font-mono text-xs text-gray-700">{c.phone_number}</td>
@@ -272,11 +280,12 @@ function Body({ canDelete }) {
                     <td className="px-3 py-3 text-xs text-gray-700">{c.caller_name || <span className="text-gray-300">Unassigned</span>}</td>
                     <td className="px-3 py-3 text-xs text-gray-700">{c.marked_by_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{fmt(c.marked_wrong_date)}</td>
-                    <td className="px-3 py-3 text-xs text-gray-600">{c.wrong_number_reason ? (REASON_LABEL[c.wrong_number_reason] || c.wrong_number_reason) : "—"}</td>
+                    <td className="px-3 py-3 text-xs text-gray-600">{c.wrong_number_reason ? (c.source === "unfiltered" ? (unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason) : (REASON_LABEL[c.wrong_number_reason] || c.wrong_number_reason)) : "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[160px] truncate" title={c.wrong_number_notes || c.last_remarks || ""}>{c.wrong_number_notes || c.last_remarks || "—"}</td>
                     <td className="px-3 py-3 text-center font-bold text-gray-700">{c.wrong_attempts}</td>
                     <td className="px-3 py-3"><span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Wrong Number</span></td>
                     <td className="px-3 py-3">
+                      {c.source === "unfiltered" ? <span className="text-[11px] text-gray-400">Unfiltered record</span> : (
                       <div className="flex items-center gap-1">
                         <IconBtn title="Restore to queue" onClick={() => restore(c.id)} className="text-emerald-600 hover:bg-emerald-50"><RotateCcw size={15} /></IconBtn>
                         <IconBtn title="Edit contact / mobile number" onClick={() => setEditRow(c)} className="text-[#164FA3] hover:bg-blue-50"><Pencil size={15} /></IconBtn>
@@ -287,7 +296,7 @@ function Body({ canDelete }) {
                         </IconBtn>
                         <IconBtn title="Call history" onClick={() => setHistoryRow(c)} className="text-gray-600 hover:bg-gray-100"><History size={15} /></IconBtn>
                         {canDelete && <IconBtn title="Delete permanently" onClick={() => del(c.id)} className="text-red-600 hover:bg-red-50"><Trash2 size={15} /></IconBtn>}
-                      </div>
+                      </div>)}
                     </td>
                   </tr>
                 ))}
