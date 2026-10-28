@@ -1,5 +1,6 @@
 "use client";
 
+import { PHONE_PICKED_OPTIONS, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
 import { UNFILTERED_WRONG_REASONS, unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight, Pencil, X } from "lucide-react";
@@ -157,6 +158,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
 
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
+    if (isPicked && !form.sentiment) { setError("Please select Active or Not Active"); return; }
     if (isWrongNo && !form.wrong_number_reason) { setError("Please select the Wrong Number reason"); return; }
     if (submitting || submitLock.current) return;
     submitLock.current = true;
@@ -189,6 +191,19 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       submitLock.current = false;
       setSubmitting(false);
     }
+  }
+
+  // Change the Active / Not Active option of an already saved Phone Picked call: updates that record (no new log).
+  async function changePhonePicked(id, option) {
+    if (!option) return;
+    setError("");
+    try {
+      const r = await fetch(`/api/unfiltered-calls/${id}/phone-picked`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ option }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.message || "Could not update the option."); return; }
+      setMessage("Phone Picked option updated.");
+      await load("completed");
+    } catch { setError("Could not update the option."); }
   }
 
   // Release (no log): let go of the current call without logging it - same as Regular Calls. Nothing is saved on the call;
@@ -283,8 +298,18 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                     </div>
                     {view === "pending"
                       ? (Number(c.attempts) > 0 && <span className="text-[10px] font-bold bg-[#FCB712] text-[#164FA3] px-2 py-0.5 rounded-full">RETRY ×{c.attempts}</span>)
-                      : <span className="text-[11px] text-emerald-700 font-semibold">{c.call_status_name}{c.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason}` : ""}</span>}
+                      : <span className="text-[11px] text-emerald-700 font-semibold">{c.call_status_name}{c.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason}` : ""}{c.call_status_name === "Phone Picked" && c.call_sentiment ? ` · ${phonePickedLabel(c.call_sentiment)}` : ""}</span>}
                   </button>
+                  {view === "completed" && c.call_status_name === "Phone Picked" && (
+                    <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-1">
+                      <span className="text-[11px] text-gray-500">Phone Picked:</span>
+                      <select value={c.call_sentiment === "active" || c.call_sentiment === "not_active" ? c.call_sentiment : ""} onChange={(e) => changePhonePicked(c.id, e.target.value)} data-testid="uw-picked-edit" aria-label="Change Phone Picked option"
+                        className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white">
+                        {!(c.call_sentiment === "active" || c.call_sentiment === "not_active") && <option value="">{c.call_sentiment ? phonePickedLabel(c.call_sentiment) : "Select…"}</option>}
+                        {PHONE_PICKED_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -421,7 +446,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                       <div key={h.id} className="p-4 text-sm">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-medium text-gray-900">{new Date(h.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                          <span className="text-xs text-gray-500">{h.agent_name} · {h.status_name}{h.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(h.wrong_number_reason) || h.wrong_number_reason}` : ""}{h.sentiment ? ` · ${h.sentiment}` : ""}</span>
+                          <span className="text-xs text-gray-500">{h.agent_name} · {h.status_name}{h.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(h.wrong_number_reason) || h.wrong_number_reason}` : ""}{h.sentiment ? ` · ${phonePickedLabel(h.sentiment)}` : ""}</span>
                         </div>
                         {h.remarks && <div className="text-gray-600 italic">&quot;{h.remarks}&quot;</div>}
                         {h.duration_seconds != null && <div className="text-xs text-gray-400 mt-1">{formatDurationHrMinSec(h.duration_seconds, "0 Sec")} talk</div>}
@@ -453,20 +478,11 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                 )}
                 {isPicked && (
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Sentiment</label>
-                    <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls} aria-label="Sentiment" data-testid="uw-sentiment">
-                      <option value="">None</option>
-                      <option value="positive">Positive</option>
-                      <option value="supporter">Supporter</option>
-                      <option value="neutral">Neutral</option>
-                      <option value="negative">Negative</option>
-                      <option value="opponent">Opponent</option>
-                      <option value="not_supporter">Not a Supporter</option>
-                      <option value="wrong_number">Wrong Number</option>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Phone Picked *</label>
+                    <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls} aria-label="Phone Picked option" data-testid="uw-sentiment">
+                      <option value="">Select…</option>
+                      {PHONE_PICKED_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
-                    {(form.sentiment === "positive" || form.sentiment === "supporter") && (
-                      <p className="text-[11px] text-emerald-700 mt-1">Positive / Supporter contacts are added to the Contact List automatically.</p>
-                    )}
                   </div>
                 )}
                 <div>

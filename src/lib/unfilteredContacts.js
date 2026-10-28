@@ -7,6 +7,7 @@ import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { UNFILTERED_WRONG_REASON_VALUES } from "@/lib/unfilteredWrongReasons";
+import { PHONE_PICKED_VALUES } from "@/lib/unfilteredPhonePicked";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { logAudit } from "@/lib/audit";
@@ -379,7 +380,7 @@ export async function myUnfilteredCalls(userId, { view = "pending", onlyId = nul
             COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
             u.photo_url, u.zone_id, u.lok_sabha_id, u.district_id, u.assembly_id, u.ward_id, u.contact_id,
             lz.name AS zone_name, lls.name AS lok_sabha_name, lw.name AS ward_name,
-            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes, u.wrong_number_reason,
+            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes, u.call_sentiment, u.wrong_number_reason,
             (SELECT COUNT(*) FROM unfiltered_call_logs l WHERE l.unfiltered_contact_id = u.id) AS attempts
        FROM unfiltered_contacts u
        LEFT JOIN locations ld ON ld.id = u.district_id
@@ -581,11 +582,17 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
   await ensureUnfilteredCallLogSchema();
   const [st] = await query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(statusId) || 0]);
   if (!st) return { status: 400, message: "Please pick a status." };
+  // Ownership first: someone else's call is a 404 whatever the payload (validation never masks it).
+  const [own] = await query("SELECT assigned_to_user_id FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
+  if (!own || Number(own.assigned_to_user_id) !== Number(callerId)) return { status: 404, message: "This call is not assigned to you." };
   // Wrong Number needs exactly one of the two supported reasons; an unsupported value is refused for any status.
   const reasonIn = String(wrongReason ?? "").trim();
   if (reasonIn && !UNFILTERED_WRONG_REASON_VALUES.includes(reasonIn)) return { status: 400, message: "Unsupported Wrong Number reason." };
   if (st.name === "Wrong Number" && !reasonIn) return { status: 400, message: "Please select the Wrong Number reason." };
   const wrongNo = st.name === "Wrong Number" ? reasonIn : null;
+  // Phone Picked needs exactly one of its two options (Active / Not Active); anything else is refused.
+  const sentIn = String(sentiment ?? "").trim();
+  if (st.name === "Phone Picked" && !PHONE_PICKED_VALUES.includes(sentIn)) return { status: 400, message: sentIn ? "Unsupported Phone Picked option." : "Please select Active or Not Active." };
   const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
@@ -595,7 +602,7 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
     const notes = remarks ? String(remarks).slice(0, 2000) : null;
     const dur = Math.max(0, Math.min(86400, Math.round(Number(durationSeconds) || 0)));
     // Sentiment only applies to a connected ("Phone Picked") call, as in a regular call.
-    const sent = st.name === "Phone Picked" && UNFILTERED_SENTIMENTS.includes(String(sentiment || "")) ? String(sentiment) : null;
+    const sent = st.name === "Phone Picked" ? sentIn : null;
     const [ins] = await conn.query(
       `INSERT INTO unfiltered_call_logs (unfiltered_contact_id, caller_id, logged_by, status_id, status_name, remarks, duration_seconds, sentiment, wrong_number_reason)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -916,4 +923,32 @@ export async function releaseUnfilteredCall({ id, callerId }) {
   if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) return { status: 404, message: "This call is not assigned to you." };
   if (row.completed_at) return { status: 409, message: "This call is already completed." };
   return { status: 200, message: "Released without logging." };
+}
+
+
+// Change the Active / Not Active option of an ALREADY SAVED Phone Picked call: updates the existing
+// record (the unfiltered contact and its latest Phone Picked log) - never inserts a second log.
+export async function updatePhonePickedOption({ id, callerId, option }) {
+  await ensureUnfilteredCallLogSchema();
+  const opt = String(option ?? "").trim();
+  if (!PHONE_PICKED_VALUES.includes(opt)) return { status: 400, message: "Unsupported Phone Picked option." };
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [[row]] = await conn.query("SELECT id, assigned_to_user_id, call_status_name FROM unfiltered_contacts WHERE id = ? FOR UPDATE", [Number(id) || 0]);
+    if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) { await conn.rollback(); return { status: 404, message: "This call is not assigned to you." }; }
+    if (row.call_status_name !== "Phone Picked") { await conn.rollback(); return { status: 409, message: "Only a Phone Picked call has this option." }; }
+    await conn.query("UPDATE unfiltered_contacts SET call_sentiment = ? WHERE id = ?", [opt, row.id]);
+    await conn.query(
+      "UPDATE unfiltered_call_logs SET sentiment = ? WHERE id = (SELECT id FROM (SELECT MAX(id) AS id FROM unfiltered_call_logs WHERE unfiltered_contact_id = ? AND status_name = 'Phone Picked') x)",
+      [opt, row.id]
+    );
+    await conn.commit();
+    return { status: 200, message: "Updated.", option: opt };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
 }
