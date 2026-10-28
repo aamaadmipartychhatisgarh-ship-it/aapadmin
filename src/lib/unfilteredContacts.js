@@ -8,6 +8,7 @@ import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { UNFILTERED_WRONG_REASON_VALUES } from "@/lib/unfilteredWrongReasons";
 import { PHONE_PICKED_VALUES } from "@/lib/unfilteredPhonePicked";
+import { dueClause, laterClause } from "@/lib/followup";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { logAudit } from "@/lib/audit";
@@ -371,16 +372,20 @@ export async function distributeUnfiltered({ byUserId, limit = null, callerId = 
 }
 
 // Caller side: the caller's own assigned Unfiltered Calls.
-export async function myUnfilteredCalls(userId, { view = "pending", onlyId = null } = {}) {
+// view: pending (incomplete AND due - a Busy follow-up in the future is hidden until its date/time) | followups
+// (incomplete AND scheduled for later, optionally one exact `date`) | completed | all.
+export async function myUnfilteredCalls(userId, { view = "pending", onlyId = null, date = null } = {}) {
   await ensureUnfilteredCallLogSchema();
-  let cond = view === "completed" ? "u.completed_at IS NOT NULL" : view === "all" ? "1=1" : "u.completed_at IS NULL";
+  let cond = view === "completed" ? "u.completed_at IS NOT NULL" : view === "all" ? "1=1"
+    : view === "followups" ? `u.completed_at IS NULL AND ${laterClause("u", true)}${/^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) ? ` AND u.follow_up_date = '${date}'` : ""}`
+    : `u.completed_at IS NULL AND ${dueClause("u", true)}`;
   if (onlyId) cond = `u.id = ${Number(onlyId) || 0}`;
   const rows = await query(
     `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation,
             COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
             u.photo_url, u.zone_id, u.lok_sabha_id, u.district_id, u.assembly_id, u.ward_id, u.contact_id,
             lz.name AS zone_name, lls.name AS lok_sabha_name, lw.name AS ward_name,
-            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes, u.call_sentiment, u.wrong_number_reason,
+            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes, u.call_sentiment, u.wrong_number_reason, u.follow_up_date, u.follow_up_time,
             (SELECT COUNT(*) FROM unfiltered_call_logs l WHERE l.unfiltered_contact_id = u.id) AS attempts
        FROM unfiltered_contacts u
        LEFT JOIN locations ld ON ld.id = u.district_id
@@ -389,16 +394,18 @@ export async function myUnfilteredCalls(userId, { view = "pending", onlyId = nul
        LEFT JOIN locations lls ON lls.id = u.lok_sabha_id
        LEFT JOIN locations lw ON lw.id = u.ward_id
       WHERE u.assigned_to_user_id = ? AND ${cond}
-      ORDER BY ${view === "completed" ? "u.completed_at DESC" : "u.assigned_at ASC, u.id ASC"}
+      ORDER BY ${view === "completed" ? "u.completed_at DESC" : view === "followups" ? "u.follow_up_date ASC, u.follow_up_time IS NULL ASC, u.follow_up_time ASC, u.id ASC" : "u.assigned_at ASC, u.id ASC"}
       LIMIT 500`,
     [userId]
   );
   const [c] = await query(
-    `SELECT COUNT(*) AS assigned, SUM(completed_at IS NOT NULL) AS completed, SUM(completed_at IS NULL) AS pending
-       FROM unfiltered_contacts WHERE assigned_to_user_id = ?`,
+    `SELECT COUNT(*) AS assigned, SUM(u.completed_at IS NOT NULL) AS completed,
+            SUM(u.completed_at IS NULL AND ${dueClause("u", true)}) AS pending,
+            SUM(u.completed_at IS NULL AND ${laterClause("u", true)}) AS followups
+       FROM unfiltered_contacts u WHERE u.assigned_to_user_id = ?`,
     [userId]
   );
-  return { calls: rows, counts: { assigned: Number(c?.assigned || 0), completed: Number(c?.completed || 0), pending: Number(c?.pending || 0) } };
+  return { calls: rows, counts: { assigned: Number(c?.assigned || 0), completed: Number(c?.completed || 0), pending: Number(c?.pending || 0), followups: Number(c?.followups || 0) } };
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +476,11 @@ export async function ensureUnfilteredContactLinkSchema() {
   await add("unfiltered_call_logs", c, "sentiment", "VARCHAR(30) NULL");
   // Wrong Number reason (Belongs to Someone Else / Wrong-Invalid Number): the call's own log + the record's latest.
   await add("unfiltered_call_logs", c, "wrong_number_reason", "VARCHAR(40) NULL");
+  // Busy follow-up: the scheduled date / time live on the record itself (one per record - never duplicated) and on the call's log.
+  await add("unfiltered_call_logs", c, "follow_up_date", "DATE NULL");
+  await add("unfiltered_call_logs", c, "follow_up_time", "TIME NULL");
+  await add("unfiltered_contacts", await cols("unfiltered_contacts"), "follow_up_date", "DATE NULL");
+  await add("unfiltered_contacts", await cols("unfiltered_contacts"), "follow_up_time", "TIME NULL");
   await add("unfiltered_contacts", await cols("unfiltered_contacts"), "wrong_number_reason", "VARCHAR(40) NULL");
   linkEnsured = true;
 }
@@ -578,7 +590,7 @@ export const UNFILTERED_FINAL_STATUSES = ["Phone Picked", "Wrong Number", "Rudel
 // Log a disposition for one of the acting caller's OWN pending Unfiltered Calls.
 // The row is locked for the check + write, so it can't be logged against
 // someone else's record, after completion, or completed twice.
-export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, remarks, durationSeconds, sentiment, wrongReason }) {
+export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, remarks, durationSeconds, sentiment, wrongReason, followUpDate, followUpTime }) {
   await ensureUnfilteredCallLogSchema();
   const [st] = await query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(statusId) || 0]);
   if (!st) return { status: 400, message: "Please pick a status." };
@@ -590,6 +602,20 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
   if (reasonIn && !UNFILTERED_WRONG_REASON_VALUES.includes(reasonIn)) return { status: 400, message: "Unsupported Wrong Number reason." };
   if (st.name === "Wrong Number" && !reasonIn) return { status: 400, message: "Please select the Wrong Number reason." };
   const wrongNo = st.name === "Wrong Number" ? reasonIn : null;
+  // Busy follow-up (existing follow-up design: a date, plus an optional time that needs a date). Only a Busy call
+  // schedules one; the date can't be in the past, and today's time must still be ahead.
+  const fuDate = String(followUpDate ?? "").trim(), fuTime = String(followUpTime ?? "").trim().slice(0, 5);
+  let fuD = null, fuT = null;
+  if (fuDate || fuTime) {
+    if (st.name !== "Busy") return { status: 400, message: "A follow-up can only be scheduled for a Busy call." };
+    if (!fuDate) return { status: 400, message: "Please select a Follow-up Date before choosing a Follow-up Time." };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fuDate) || Number.isNaN(Date.parse(fuDate))) return { status: 400, message: "Invalid follow-up date." };
+    if (fuTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(fuTime)) return { status: 400, message: "Invalid follow-up time." };
+    const todayLocal = await query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS d, DATE_FORMAT(NOW(), '%H:%i') AS t");
+    if (fuDate < todayLocal[0].d) return { status: 400, message: "The follow-up date cannot be in the past." };
+    if (fuDate === todayLocal[0].d && fuTime && fuTime <= todayLocal[0].t) return { status: 400, message: "The follow-up time must be later than now." };
+    fuD = fuDate; fuT = fuTime || null;
+  }
   // Phone Picked needs exactly one of its two options (Active / Not Active); anything else is refused.
   const sentIn = String(sentiment ?? "").trim();
   if (st.name === "Phone Picked" && !PHONE_PICKED_VALUES.includes(sentIn)) return { status: 400, message: sentIn ? "Unsupported Phone Picked option." : "Please select Active or Not Active." };
@@ -604,18 +630,18 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
     // Sentiment only applies to a connected ("Phone Picked") call, as in a regular call.
     const sent = st.name === "Phone Picked" ? sentIn : null;
     const [ins] = await conn.query(
-      `INSERT INTO unfiltered_call_logs (unfiltered_contact_id, caller_id, logged_by, status_id, status_name, remarks, duration_seconds, sentiment, wrong_number_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [row.id, callerId, loggedBy || callerId, st.id, st.name, notes, dur, sent, wrongNo]
+      `INSERT INTO unfiltered_call_logs (unfiltered_contact_id, caller_id, logged_by, status_id, status_name, remarks, duration_seconds, sentiment, wrong_number_reason, follow_up_date, follow_up_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, callerId, loggedBy || callerId, st.id, st.name, notes, dur, sent, wrongNo, fuD, fuT]
     );
     const final = UNFILTERED_FINAL_STATUSES.includes(st.name);
     await conn.query(
       `UPDATE unfiltered_contacts
-          SET call_status_id = ?, call_status_name = ?, call_notes = ?, call_sentiment = ?, wrong_number_reason = ?,
+          SET call_status_id = ?, call_status_name = ?, call_notes = ?, call_sentiment = ?, wrong_number_reason = ?, follow_up_date = ?, follow_up_time = ?,
               completed_at = CASE WHEN ? THEN NOW() ELSE NULL END,
               completed_by = CASE WHEN ? THEN ? ELSE NULL END
         WHERE id = ?`,
-      [st.id, st.name, notes, sent, wrongNo, final ? 1 : 0, final ? 1 : 0, callerId, row.id]
+      [st.id, st.name, notes, sent, wrongNo, fuD, fuT, final ? 1 : 0, final ? 1 : 0, callerId, row.id]
     );
     // Positive / Supporter -> create or update the Contact List record, in the SAME transaction as the
     // log (both saved or neither), serialized by the row lock above.
@@ -638,7 +664,7 @@ export async function unfilteredCallHistory({ id, callerId }) {
   const [row] = await query("SELECT assigned_to_user_id FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
   if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) return null;
   return query(
-    `SELECT l.id, l.status_name, l.sentiment, l.wrong_number_reason, l.remarks, l.duration_seconds, l.created_at, us.username AS agent_name
+    `SELECT l.id, l.status_name, l.sentiment, l.wrong_number_reason, l.follow_up_date, l.follow_up_time, l.remarks, l.duration_seconds, l.created_at, us.username AS agent_name
        FROM unfiltered_call_logs l LEFT JOIN users us ON us.id = l.caller_id
       WHERE l.unfiltered_contact_id = ? ORDER BY l.id DESC`,
     [Number(id)]

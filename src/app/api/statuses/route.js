@@ -16,6 +16,8 @@ export async function GET() {
     // Ensure the "Incoming Off" disposition exists so it appears in every call
     // status dropdown (all of which read from here).
     await ensureRepeatOffSchema();
+    // "Busy" must exist for every call form (Busy follow-up). Idempotent: never adds a second one.
+    await query("INSERT INTO call_statuses (name) SELECT 'Busy' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM call_statuses WHERE name = 'Busy')");
     const statuses = await query("SELECT id, name FROM call_statuses ORDER BY id ASC");
     return Response.json({ statuses }, { status: 200 });
   } catch (error) {

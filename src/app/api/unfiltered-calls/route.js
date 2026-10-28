@@ -20,8 +20,10 @@ export async function GET(req) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     }
     const { userId } = await resolveActingUserId(session);
-    const view = new URL(req.url).searchParams.get("view") === "completed" ? "completed" : "pending";
-    return NextResponse.json(await myUnfilteredCalls(userId, { view }), { headers: NO_STORE });
+    const sp = new URL(req.url).searchParams;
+    const v = sp.get("view");
+    const view = v === "completed" ? "completed" : v === "followups" ? "followups" : "pending";
+    return NextResponse.json(await myUnfilteredCalls(userId, { view, date: sp.get("date") }), { headers: NO_STORE });
   } catch (err) {
     console.error("unfiltered-calls GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

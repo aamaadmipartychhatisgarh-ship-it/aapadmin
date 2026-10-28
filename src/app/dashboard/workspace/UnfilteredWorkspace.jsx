@@ -25,8 +25,9 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [form, setForm] = useState({ status_id: "", remarks: "", sentiment: "", wrong_number_reason: "" });
+  const [form, setForm] = useState({ status_id: "", remarks: "", sentiment: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [fuFilter, setFuFilter] = useState(""); // Follow-ups tab: show only this exact date
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const timerRef = useRef(null);
@@ -119,7 +120,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
 
   const load = useCallback(async (v = view) => {
     try {
-      const r = await fetch(`/api/unfiltered-calls?view=${v}`, { cache: "no-store" });
+      const r = await fetch(`/api/unfiltered-calls?view=${v}${v === "followups" && fuFilter ? `&date=${encodeURIComponent(fuFilter)}` : ""}`, { cache: "no-store" });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setLoadErr(d.message || "Could not load your Unfiltered Calls."); return null; }
       setLoadErr(""); setData(d); onCounts?.(d.counts);
@@ -128,7 +129,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       setLoadErr("Could not load your Unfiltered Calls.");
       return null;
     }
-  }, [view, onCounts]);
+  }, [view, onCounts, fuFilter]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { onBusy?.(!!active); }, [active, onBusy]);
 
@@ -142,7 +143,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     if (!call) return;
     if (!keepMessage) setMessage("");
     setError("");
-    setForm({ status_id: "", remarks: "", sentiment: "", wrong_number_reason: "" });
+    setForm({ status_id: "", remarks: "", sentiment: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" });
     setEditing(false); setEditMsg(""); setEditErr("");
     setElapsed(0);
     setActive({ ...call, started_at: Date.now() });
@@ -154,10 +155,13 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   }
 
   const isPicked = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked";
+  const isBusy = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Busy";
   const isWrongNo = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Wrong Number";
 
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
+    if (isBusy && form.follow_up_time && !form.follow_up_date) { setError("Please select a Follow-up Date before choosing a Follow-up Time."); return; }
+    if (isBusy && form.follow_up_date && form.follow_up_date < new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)) { setError("The follow-up date cannot be in the past."); return; }
     if (isPicked && !form.sentiment) { setError("Please select Active or Not Active"); return; }
     if (isWrongNo && !form.wrong_number_reason) { setError("Please select the Wrong Number reason"); return; }
     if (submitting || submitLock.current) return;
@@ -169,7 +173,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
         headers: { "Content-Type": "application/json" },
         // Sentiment only applies to a connected ("Phone Picked") call; Positive / Supporter adds the
         // person to the Contact List automatically (server side).
-        body: JSON.stringify({ status_id: Number(form.status_id), remarks: form.remarks, duration_seconds: elapsed, sentiment: isPicked ? form.sentiment : "", wrong_number_reason: isWrongNo ? form.wrong_number_reason : "" }),
+        body: JSON.stringify({ status_id: Number(form.status_id), remarks: form.remarks, duration_seconds: elapsed, sentiment: isPicked ? form.sentiment : "", wrong_number_reason: isWrongNo ? form.wrong_number_reason : "", follow_up_date: isBusy ? form.follow_up_date : "", follow_up_time: isBusy && form.follow_up_date ? form.follow_up_time : "" }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.message || "Failed to save"); if (r.status === 404 || r.status === 409) { setActive(null); load(); } return; }
@@ -185,7 +189,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       const nextCall = (fresh?.calls || []).find((c) => !attemptedRef.current.has(c.id));
       const retryLeft = (fresh?.calls || []).length;
       const added = d.contact_sync?.action === "created" ? " Added to the Contact List." : d.contact_sync?.action === "updated" ? " Contact List record updated." : d.contact_sync?.action === "skipped" ? ` Not added to the Contact List (${d.contact_sync.reason}).` : "";
-      setMessage(`Saved (${savedDuration}s) — ${d.completed ? "call completed" : "kept pending for a retry"}.${added}${!fresh ? " Could not refresh the queue." : nextCall ? " Next call ready." : retryLeft ? ` No more new calls - ${retryLeft} kept pending for a retry (use Start Next Call).` : " No more pending Unfiltered Calls."}`);
+      setMessage(`Saved (${savedDuration}s) — ${d.completed ? "call completed" : form.follow_up_date && isBusy ? `follow-up scheduled for ${form.follow_up_date}${form.follow_up_time ? ` at ${form.follow_up_time}` : ""}` : "kept pending for a retry"}.${added}${!fresh ? " Could not refresh the queue." : nextCall ? " Next call ready." : retryLeft ? ` No more new calls - ${retryLeft} kept pending for a retry (use Start Next Call).` : " No more pending Unfiltered Calls."}`);
       if (nextCall) start(nextCall, { keepMessage: true });
     } finally {
       submitLock.current = false;
@@ -217,7 +221,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       if (!r.ok) { setError(d.message || "Could not release the call."); if (r.status === 404 || r.status === 409) { setActive(null); load(); } return; }
       attemptedRef.current.add(active.id);
       setActive(null);
-      await load("pending");
+      await load(view);
       setMessage("Call released without logging. It stays in your queue.");
     } catch {
       setError("Could not release the call. Please try again.");
@@ -268,26 +272,32 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
             <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2"><Users size={16} /> Assigned to You</h3>
           </div>
           <div className="flex gap-1 mb-3">
-            {[["pending", `Pending (${counts.pending})`], ["completed", `Completed (${counts.completed})`]].map(([k, label]) => (
+            {[["pending", `Pending (${counts.pending})`], ["followups", `Follow-ups (${counts.followups || 0})`], ["completed", `Completed (${counts.completed})`]].map(([k, label]) => (
               <button key={k} onClick={() => setView(k)} data-testid={`uw-tab-${k}`}
                 className={`flex-1 h-8 rounded-lg text-xs font-semibold border ${view === k ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200"}`}>
                 {label}
               </button>
             ))}
           </div>
+          {view === "followups" && (
+            <div className="flex items-center gap-2 mb-2">
+              <input type="date" value={fuFilter} onChange={(e) => setFuFilter(e.target.value)} aria-label="Filter follow-ups by date" data-testid="uw-followup-date-filter" className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white" />
+              {fuFilter && <button type="button" onClick={() => setFuFilter("")} className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline">Show all</button>}
+            </div>
+          )}
           {loadErr ? (
             <div className="text-sm text-red-600">{loadErr}</div>
           ) : !data ? (
             <div className="py-4 text-center"><Loader2 className="animate-spin inline text-gray-400" size={18} /></div>
           ) : calls.length === 0 ? (
-            <div className="text-gray-400 text-sm py-2">{view === "pending" ? "No pending Unfiltered Calls." : "No completed Unfiltered Calls yet."}</div>
+            <div className="text-gray-400 text-sm py-2">{view === "pending" ? "No pending Unfiltered Calls." : view === "followups" ? (fuFilter ? "No follow-ups for this date." : "No scheduled follow-ups.") : "No completed Unfiltered Calls yet."}</div>
           ) : (
             <ul className="space-y-1.5 max-h-[460px] overflow-y-auto">
               {calls.map((c) => (
                 <li key={c.id}>
                   <button
-                    onClick={() => view === "pending" && start(c)}
-                    disabled={view !== "pending" || !!active}
+                    onClick={() => (view === "pending" || view === "followups") && start(c)}
+                    disabled={(view !== "pending" && view !== "followups") || !!active}
                     data-testid="uw-row"
                     className={`w-full text-left flex items-center gap-3 p-2.5 rounded-xl border ${active?.id === c.id ? "border-[#164FA3] bg-blue-50" : "border-gray-100 hover:bg-gray-50"} disabled:cursor-default`}
                   >
@@ -296,7 +306,9 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                       <div className="font-medium text-sm text-gray-900 truncate">{c.person_name || "Unnamed"}</div>
                       <div className="text-xs text-gray-500 font-mono" data-testid="uw-row-phone">{c.phone_key}</div>
                     </div>
-                    {view === "pending"
+                    {view === "followups"
+                      ? <span className="text-[11px] font-semibold text-[#164FA3]" data-testid="uw-followup-when">Follow up {String(c.follow_up_date).slice(0, 10)}{c.follow_up_time ? ` · ${String(c.follow_up_time).slice(0, 5)}` : ""}</span>
+                      : view === "pending"
                       ? (Number(c.attempts) > 0 && <span className="text-[10px] font-bold bg-[#FCB712] text-[#164FA3] px-2 py-0.5 rounded-full">RETRY ×{c.attempts}</span>)
                       : <span className="text-[11px] text-emerald-700 font-semibold">{c.call_status_name}{c.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason}` : ""}{c.call_status_name === "Phone Picked" && c.call_sentiment ? ` · ${phonePickedLabel(c.call_sentiment)}` : ""}</span>}
                   </button>
@@ -446,7 +458,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                       <div key={h.id} className="p-4 text-sm">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-medium text-gray-900">{new Date(h.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                          <span className="text-xs text-gray-500">{h.agent_name} · {h.status_name}{h.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(h.wrong_number_reason) || h.wrong_number_reason}` : ""}{h.sentiment ? ` · ${phonePickedLabel(h.sentiment)}` : ""}</span>
+                          <span className="text-xs text-gray-500">{h.agent_name} · {h.status_name}{h.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(h.wrong_number_reason) || h.wrong_number_reason}` : ""}{h.sentiment ? ` · ${phonePickedLabel(h.sentiment)}` : ""}{h.follow_up_date ? ` · follow-up ${String(h.follow_up_date).slice(0, 10)}${h.follow_up_time ? ` ${String(h.follow_up_time).slice(0, 5)}` : ""}` : ""}</span>
                         </div>
                         {h.remarks && <div className="text-gray-600 italic">&quot;{h.remarks}&quot;</div>}
                         {h.duration_seconds != null && <div className="text-xs text-gray-400 mt-1">{formatDurationHrMinSec(h.duration_seconds, "0 Sec")} talk</div>}
@@ -462,7 +474,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Status *</label>
-                  <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value, wrong_number_reason: "" })} className={inputCls} aria-label="Status">
+                  <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value, wrong_number_reason: "", follow_up_date: "", follow_up_time: "" })} className={inputCls} aria-label="Status">
                     <option value="">Select…</option>
                     {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
@@ -483,6 +495,23 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                       <option value="">Select…</option>
                       {PHONE_PICKED_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
+                  </div>
+                )}
+                {isBusy && (
+                  <div className="grid grid-cols-2 gap-3" data-testid="uw-followup-fields">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Follow-up Date</label>
+                      <input type="date" value={form.follow_up_date} min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)}
+                        onChange={(e) => setForm({ ...form, follow_up_date: e.target.value, follow_up_time: e.target.value ? form.follow_up_time : "" })} className={inputCls} aria-label="Follow-up Date" data-testid="uw-followup-date" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Follow-up Time</label>
+                      <input type="time" value={form.follow_up_time} disabled={!form.follow_up_date} title={form.follow_up_date ? "" : "Pick a date first"}
+                        onChange={(e) => setForm({ ...form, follow_up_time: e.target.value })} className={`${inputCls} disabled:opacity-50`} aria-label="Follow-up Time" data-testid="uw-followup-time" />
+                    </div>
+                    {form.follow_up_date && (
+                      <button type="button" onClick={() => setForm({ ...form, follow_up_date: "", follow_up_time: "" })} className="col-span-2 text-left text-[11px] text-gray-500 hover:text-gray-800 underline">Remove follow-up</button>
+                    )}
                   </div>
                 )}
                 <div>
