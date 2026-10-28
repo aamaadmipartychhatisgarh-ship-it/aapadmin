@@ -197,6 +197,14 @@ export async function POST(req) {
         const [dr] = await conn.execute("SELECT GROUP_CONCAT(designation_id ORDER BY id) AS ids FROM contact_designations WHERE contact_id = ?", [row.id]);
         dsgIds = dr[0]?.ids ?? null;
       } catch {}
+      // The contact's Designation + Wing pairs and Wings, for the Edit Details form (same data the Add / Edit Contact forms use).
+      let dsgPairs = null, wingsCsv = null;
+      try {
+        const [pr] = await conn.execute("SELECT GROUP_CONCAT(CONCAT(designation_id, ':', IFNULL(wing, '')) ORDER BY id SEPARATOR '|') AS p FROM contact_designations WHERE contact_id = ?", [row.id]);
+        dsgPairs = pr[0]?.p ?? null;
+        const [wr] = await conn.execute("SELECT GROUP_CONCAT(wing ORDER BY id SEPARATOR ', ') AS w FROM contact_wings WHERE contact_id = ?", [row.id]);
+        wingsCsv = wr[0]?.w ?? null;
+      } catch {}
       await conn.commit();
       return NextResponse.json({
         contact: {
@@ -211,6 +219,7 @@ export async function POST(req) {
           photo_url: String(row.photo_url ?? "").trim() || String(nameRows[0]?.photo_url ?? "").trim() || null,
           // The primary is the first of the contact's designation set (the join table is the authority).
           designation_id: dsgIds ? Number(String(dsgIds).split(",")[0]) : row.designation_id,
+          designation_pairs: dsgPairs, wings: wingsCsv,
           designation_ids: dsgIds || (row.designation_id ? String(row.designation_id) : ""),
           locked_by_user_id: userId,
         },

@@ -13,6 +13,8 @@ import SubtaskChecklist from "@/components/SubtaskChecklist";
 import { AddContactModal } from "@/components/contacts/ContactsModule";
 import { MultiSelect } from "@/components/MultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
+import DesignationWingRows from "@/components/contacts/DesignationWingRows";
+import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
 import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
 import UnfilteredWorkspace from "./UnfilteredWorkspace";
@@ -156,6 +158,10 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [assemblies, setAssemblies] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [wingOptions, setWingOptions] = useState([]);
+  // Edit Details: the SAME combined Wing + Designation rows as Add / Edit Contact (/api/wings master + designation_rows).
+  const [wingMaster, setWingMaster] = useState(null);
+  const [dwRows, setDwRows] = useState(null);
+  const [dwPrev, setDwPrev] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -230,6 +236,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     // /api/designations already returns rows in the Designation Master order
     // (sort_order); use it as-is — never re-sort by name/keyword on the client.
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingMaster(d.wings || [])).catch(() => setWingMaster([]));
     // Wing list comes from Master Data (/api/wings) — single source of truth.
     fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ id: w.name, name: wingShortLabel(w.name) })))).catch(() => {});
   }, []);
@@ -446,6 +453,22 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     } catch { /* ignore quota/private-mode */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qLokSabha.join(","), qDistrict.join(","), qAssembly.join(","), qDesignation.join(","), qWing.join(","), qCallHistory]);
+
+  // Derive the Edit Details Wing + Designation rows from the opened contact (re-derived when another contact opens).
+  useEffect(() => {
+    setDwRows(null); setDwPrev(null);
+  }, [active?.id]);
+  useEffect(() => {
+    if (!active || dwRows || !wingMaster || !designations.length) return;
+    const designationWings = Object.fromEntries(designations.map((d) => [d.id, d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []]));
+    let pairs = parseDesignationPairs(active.designation_pairs);
+    if (!pairs.length && active.designation_id) pairs = [{ designation_id: active.designation_id, wing: null }]; // legacy single designation
+    const rows = deriveRows({
+      pairs, wings: String(active.wings || "").split(",").map((w) => w.trim()).filter(Boolean),
+      designationWings, mainNames: wingMaster.filter((w) => w.is_main).map((w) => w.name),
+    });
+    setDwPrev(rows); setDwRows(rows.length ? rows : [{ designation_id: "", wing: "" }]);
+  }, [active, dwRows, wingMaster, designations]);
 
   function startActive(contact, startedAtMs = Date.now()) {
     setActive({ ...contact, started_at: startedAtMs });
@@ -667,7 +690,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         headers: { "Content-Type": "application/json" },
         // address_prev = the address when this contact was opened: the server writes the address only if
         // it was actually edited (and not changed by someone else meanwhile).
-        body: JSON.stringify({ ...edit, address_prev: active.address || "", designation_id_prev: active.designation_id || "" }),
+        body: JSON.stringify({
+          ...(({ designation_id, ...rest }) => rest)(edit),   // the single designation is replaced by the Wing + Designation rows
+          address_prev: active.address || "",
+          ...(dwRows && dwPrev ? { designation_rows: normalizeRows(dwRows), designation_rows_prev: dwPrev } : {}),
+        }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -681,16 +708,20 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       // If the stored address was changed by someone else meanwhile, keep THEIR (latest) address.
       const keptAddress = data.address_conflict && data.contact ? { address: data.contact.address || "" } : {};
       const keptDesignation = data.designation_conflict && data.contact ? { designation_id: data.contact.designation_id || "" } : {};
+      const srv = data.contact || {};
+      const fromServer = dwRows ? { designation_pairs: srv.designation_pairs ?? active.designation_pairs, wings: srv.wings ?? active.wings, designation_ids: srv.designation_ids ?? active.designation_ids, designation_id: srv.designation_id ?? (normalizeRows(dwRows)[0]?.designation_id || null) } : {};
       setActive({
         ...active,
         ...edit,
         ...keptAddress,
         ...keptDesignation,
+        ...fromServer,
         district_name: districtName,
         ward_name: edit.ward_name || null,
-        designation_id: keptDesignation.designation_id ?? (edit.designation_id || null),
+        designation_id: keptDesignation.designation_id ?? (dwRows ? (fromServer.designation_id ?? null) : (edit.designation_id || null)),
       });
       setForm({ ...form, person_name: edit.person_name, phone_number: edit.phone_number });
+      setDwRows(null); setDwPrev(null); // re-derive the Wing + Designation rows from the saved record
       setEditing(false);
       setMessage(data.address_conflict || data.designation_conflict ? "Contact updated — but the address or designation had been changed by someone else, so your edit of it was not applied (the latest value is shown)." : "Contact updated.");
       // Refresh the queue so the list reflects the saved changes without a reload.
@@ -1133,16 +1164,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                     placeholder="Address"
                     className="resize-none w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder-blue-200 text-sm outline-none focus:bg-white/20"
                   />
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wide text-blue-200 mb-1">Designation</label>
-                    <select
-                      value={edit.designation_id || ""}
-                      onChange={(e) => setEdit({ ...edit, designation_id: e.target.value })}
-                      className={editSelectCls}
-                    >
-                      <option className="text-gray-900" value="">No designation</option>
-                      {designations.map((d) => <option key={d.id} value={d.id} className="text-gray-900">{d.name}</option>)}
-                    </select>
+                  {/* Wings immediately before Designation - the same combined rows as Add Contact. */}
+                  <div className="bg-white rounded-lg p-2 text-gray-900" data-testid="edit-wing-designation">
+                    {dwRows ? (
+                      <DesignationWingRows rows={dwRows} onChange={setDwRows} designations={designations} wingMaster={wingMaster || []} />
+                    ) : <div className="text-xs text-gray-400 px-1 py-2">Loading Wings & Designations…</div>}
                   </div>
 
                   <div className="pt-1 border-t border-white/15">

@@ -5,7 +5,8 @@ import { isOversight } from "@/lib/permissions";
 import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
-import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
+import { ensureContactDesignationsSchema, DESIGNATION_PAIRS_SQL } from "@/lib/contactDesignations";
+import { ensureContactWingsSchema, WINGS_SQL } from "@/lib/contactWings";
 import { buildRulesOrMatch, zoneMatch, contactsHaveAssignedBy } from "@/lib/assignmentRules";
 import { hasWrongNumberColumn, hasFollowUpTimeColumn, ensureNotInterestedColumns, hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
@@ -40,6 +41,7 @@ export async function GET(req) {
     const designationId = searchParams.get("designation_id");
 
     await ensureContactDesignationsSchema();
+    await ensureContactWingsSchema();
     // Load the caller's territory FIRST — the zone is applied automatically.
     const [me] = await query(
       `SELECT u.home_district_id, l.name AS home_district_name,
@@ -128,7 +130,7 @@ export async function GET(req) {
       : "";
 
     const assigned = await query(
-      `SELECT c.*, COALESCE((SELECT cd.designation_id FROM contact_designations cd WHERE cd.contact_id = c.id ORDER BY cd.id LIMIT 1), c.designation_id) AS designation_id, ld.name AS district_name, lw.name AS ward_name, COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
+      `SELECT c.*, COALESCE((SELECT cd.designation_id FROM contact_designations cd WHERE cd.contact_id = c.id ORDER BY cd.id LIMIT 1), c.designation_id) AS designation_id, ${DESIGNATION_PAIRS_SQL} AS designation_pairs, ${WINGS_SQL} AS wings, ld.name AS district_name, lw.name AS ward_name, COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
               (SELECT COUNT(*) FROM calls WHERE contact_id = c.id) AS attempts,
               -- "Worked" = the contact has at least one call with a SAVED call
               -- status or sentiment. This is the exact "not fresh" test: a fresh
@@ -175,7 +177,7 @@ export async function GET(req) {
 
     // Scheduled (future) follow-ups: surfaced so the caller can see what's coming.
     const scheduled = await query(
-      `SELECT c.*, COALESCE((SELECT cd.designation_id FROM contact_designations cd WHERE cd.contact_id = c.id ORDER BY cd.id LIMIT 1), c.designation_id) AS designation_id, ld.name AS district_name
+      `SELECT c.*, COALESCE((SELECT cd.designation_id FROM contact_designations cd WHERE cd.contact_id = c.id ORDER BY cd.id LIMIT 1), c.designation_id) AS designation_id, ${DESIGNATION_PAIRS_SQL} AS designation_pairs, ${WINGS_SQL} AS wings, ld.name AS district_name
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
         WHERE c.assigned_to_user_id = ?
@@ -194,7 +196,7 @@ export async function GET(req) {
     // Numbers module — callers no longer see or restore them here.
 
     const lockedRows = await query(
-      `SELECT c.*, COALESCE((SELECT cd.designation_id FROM contact_designations cd WHERE cd.contact_id = c.id ORDER BY cd.id LIMIT 1), c.designation_id) AS designation_id, ld.name AS district_name, lw.name AS ward_name, COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
+      `SELECT c.*, COALESCE((SELECT cd.designation_id FROM contact_designations cd WHERE cd.contact_id = c.id ORDER BY cd.id LIMIT 1), c.designation_id) AS designation_id, ${DESIGNATION_PAIRS_SQL} AS designation_pairs, ${WINGS_SQL} AS wings, ld.name AS district_name, lw.name AS ward_name, COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lw ON lw.id = c.ward_id
