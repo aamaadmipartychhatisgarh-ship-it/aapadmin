@@ -6,6 +6,7 @@ import { resolveActingUserId } from "@/lib/actAs";
 import { ensureUnfilteredCallLogSchema } from "@/lib/unfilteredContacts";
 import { sourceSelectSql, wrongNumberSourceFilter, sourceSearchOr } from "@/lib/contactSource";
 import { contactSourceLabel } from "@/lib/sourceLabel";
+import { NOT_IN_SERVICE_SQL } from "@/lib/wrongNumberRestore";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns } from "@/lib/contactExtras";
@@ -42,12 +43,15 @@ export async function GET(req) {
     const statusF = searchParams.get("status"); // assigned | unassigned
     const reason = searchParams.get("reason");
     const designationId = searchParams.get("designation_id");
+    const savedStatusF = searchParams.get("saved_status"); // not_in_service
+    const NIS_SQL = NOT_IN_SERVICE_SQL("c", await hasWrongNumberDetailColumns());
     const sourceF = searchParams.get("source"); // unfiltered_calls | registration | none (Not Available)
 
     const where = ["c.is_wrong_number = 1"];
     const params = [];
     if (search) { where.push(`(c.person_name LIKE ? OR c.phone_number LIKE ?${await sourceSearchOr(search, "c")})`); params.push(`%${search}%`, `%${search}%`); }
     { const sf = await wrongNumberSourceFilter(sourceF, "c"); if (sf) where.push(sf); }
+    if (savedStatusF === "not_in_service") where.push(NIS_SQL);
     // Zone / Lok Sabha filters use the Contact Page definition (own value, else the district's).
     if (zoneId) { where.push("(c.zone_id = ? OR (c.zone_id IS NULL AND dz.id = ?))"); params.push(zoneId, zoneId); }
     if (lokSabhaId) { where.push("(c.lok_sabha_id = ? OR (c.lok_sabha_id IS NULL AND dls.id = ?))"); params.push(lokSabhaId, lokSabhaId); }
@@ -93,6 +97,7 @@ export async function GET(req) {
       const uw = ["(u.call_status_name = 'Wrong Number' OR (u.call_status_name = 'Phone Picked' AND u.call_sentiment = 'wrong_number'))", "u.completed_at IS NOT NULL"], up = [];
       if (callerOnly) { uw.push("u.assigned_to_user_id = ?"); up.push(callerId); }
       if (search) { const q = String(search).trim().toLowerCase(); uw.push(`(u.person_name LIKE ? OR u.phone_number LIKE ?${q.length >= 4 && "unfiltered calls".includes(q) ? " OR 1 = 1" : ""})`); up.push(`%${search}%`, `%${search}%`); }
+      if (savedStatusF === "not_in_service") uw.push("1 = 0");   // Unfiltered wrong numbers are not Not-in-Service restores
       if (sourceF && sourceF !== "unfiltered_calls") uw.push("1 = 0"); // every row here originated from Unfiltered Calls
       if (zoneId) { uw.push("u.zone_id = ?"); up.push(zoneId); }
       if (lokSabhaId) { uw.push("u.lok_sabha_id = ?"); up.push(lokSabhaId); }
@@ -138,6 +143,7 @@ export async function GET(req) {
               COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
               ${detailCols}
               ${await sourceSelectSql("c")},
+              (CASE WHEN ${NIS_SQL} THEN 1 ELSE 0 END) AS not_in_service,
               (SELECT COUNT(*) FROM calls x WHERE x.contact_id = c.id) AS attempts,
               (SELECT COUNT(*) FROM calls x JOIN call_statuses cs2 ON cs2.id = x.status_id
                  WHERE x.contact_id = c.id AND cs2.name = 'Wrong Number') AS wrong_attempts,

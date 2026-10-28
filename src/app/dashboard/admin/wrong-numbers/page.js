@@ -140,6 +140,7 @@ function Body({ canDelete, readOnly = false }) {
   const [statusF, setStatusF] = useState("");
   const [reasonF, setReasonF] = useState("");
   const [sourceF, setSourceF] = useState("");
+  const [savedF, setSavedF] = useState(""); // saved status filter: "" | not_in_service
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [zones, setZones] = useState([]);
@@ -173,6 +174,7 @@ function Body({ canDelete, readOnly = false }) {
     if (statusF) p.set("status", statusF);
     if (reasonF) p.set("reason", reasonF);
     if (sourceF) p.set("source", sourceF);
+    if (savedF) p.set("saved_status", savedF);
     if (from) p.set("date_from", from);
     if (to) p.set("date_to", to);
     return p;
@@ -188,7 +190,35 @@ function Body({ canDelete, readOnly = false }) {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, reasonF, sourceF, from, to]);
+  }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, reasonF, sourceF, savedF, from, to]);
+
+  // Restore Not-in-Service contacts to the Contact List (the same contact rows - nothing is inserted). Eligible rows carry a checkbox;
+  // the dialog is built from a server-side dry run so it states exactly what will be restored.
+  const [nisSel, setNisSel] = useState(() => new Set());
+  const [nisDlg, setNisDlg] = useState(null);
+  const [nisBusy, setNisBusy] = useState(false);
+  const nisRows = rows.filter((c) => c.not_in_service && c.row_type !== "unfiltered");
+  const toggleNis = (id) => setNisSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  async function openNis() {
+    setMsg(""); setNisDlg({ loading: true, preview: null });
+    try {
+      const r = await fetch("/api/admin/wrong-numbers/restore-not-in-service", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [...nisSel], dry_run: true }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setNisDlg(null); setMsg(d.message || "Could not check the selection."); return; }
+      setNisDlg({ loading: false, preview: d });
+    } catch { setNisDlg(null); setMsg("Could not check the selection - network error."); }
+  }
+  async function confirmNis() {
+    if (nisBusy || !nisDlg?.preview?.eligible) return;
+    setNisBusy(true);
+    try {
+      const r = await fetch("/api/admin/wrong-numbers/restore-not-in-service", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: nisDlg.preview.eligible_ids }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setMsg(`${d.message || "Could not restore the selected contacts."} Nothing was changed.`);
+      else { setMsg(d.message); setNisSel(new Set()); load(); }
+    } catch { setMsg("Could not restore the selected contacts - network error. Nothing was reported as restored."); }
+    finally { setNisBusy(false); setNisDlg(null); }
+  }
 
   async function restore(id) {
     if (!confirm("Restore this contact to the active calling queue?")) return;
@@ -230,6 +260,36 @@ function Body({ canDelete, readOnly = false }) {
       />
 
       {msg && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 text-sm">{msg}</div>}
+      {!readOnly && nisRows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3" data-testid="nis-bar">
+          <button type="button" onClick={openNis} disabled={!nisSel.size || nisBusy} data-testid="nis-restore"
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed">
+            <RotateCcw size={15} /> Restore to Contact List{nisSel.size ? ` (${nisSel.size})` : ""}
+          </button>
+          <span className="text-xs text-gray-500">{nisRows.length} Not in Service contact{nisRows.length === 1 ? "" : "s"} can be restored — tick them below.</span>
+          {nisSel.size > 0 && <button type="button" onClick={() => setNisSel(new Set())} className="text-xs text-gray-500 hover:underline">Clear selection</button>}
+        </div>
+      )}
+      {nisDlg && (
+        <div className="fixed inset-0 z-[150] bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" data-testid="nis-confirm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+            <h3 className="text-base font-bold text-gray-900">Restore to Contact List</h3>
+            {nisDlg.loading ? <div className="py-6 text-center"><Loader2 className="animate-spin inline text-gray-400" size={18} /></div> : (
+              <>
+                <p className="text-sm text-gray-700 mt-2" data-testid="nis-eligible"><span className="font-semibold">{nisDlg.preview.eligible}</span> of {nisDlg.preview.selected} selected contact{nisDlg.preview.selected === 1 ? " is" : "s are"} Not in Service and will be restored.</p>
+                {nisDlg.preview.selected - nisDlg.preview.eligible > 0 && (
+                  <p className="text-xs text-gray-500 mt-2">{nisDlg.preview.counts.already_restored} already restored, {nisDlg.preview.counts.not_eligible} not Not in Service{nisDlg.preview.counts.not_found ? `, ${nisDlg.preview.counts.not_found} not found` : ""} — these will be skipped.</p>
+                )}
+                <p className="text-xs text-gray-500 mt-2">The same contact is restored (no new record). Its details, source, assignment and call history are kept.</p>
+              </>
+            )}
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setNisDlg(null)} disabled={nisBusy} data-testid="nis-cancel" className="px-4 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={confirmNis} disabled={nisBusy || nisDlg.loading || !nisDlg.preview?.eligible} data-testid="nis-confirm-yes" className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50">{nisBusy ? "Restoring…" : `Confirm${nisDlg.preview?.eligible ? ` (${nisDlg.preview.eligible})` : ""}`}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <CollapsibleSection title="Search & Filters">
       <div className="flex items-center gap-3 flex-wrap">
@@ -241,6 +301,7 @@ function Body({ canDelete, readOnly = false }) {
         <select value={assemblyId} onChange={(e) => setAssemblyId(e.target.value)} className={sel}><option value="">All assemblies</option>{assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select value={caller} onChange={(e) => setCaller(e.target.value)} className={sel}><option value="">All callers</option>{callers.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}</select>
         <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className={sel}><option value="">Any status</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select>
+        <select value={savedF} onChange={(e) => setSavedF(e.target.value)} className={sel} aria-label="Saved status" data-testid="wn-saved-filter"><option value="">Any saved status</option><option value="not_in_service">Not in Service</option></select>
         <select value={sourceF} onChange={(e) => setSourceF(e.target.value)} className={sel} aria-label="Source" data-testid="wn-source-filter"><option value="">Any source</option><option value="unfiltered_calls">Unfiltered Calls</option><option value="registration">Worker &amp; Voter Registration</option><option value="none">{SOURCE_NOT_AVAILABLE}</option></select>
         <select value={reasonF} onChange={(e) => setReasonF(e.target.value)} className={sel}><option value="">Any reason</option>{WRONG_NUMBER_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</select>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} title="Marked from" className={sel} />
@@ -258,7 +319,7 @@ function Body({ canDelete, readOnly = false }) {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 text-left">
                 <tr>
-                  {["Name", "Mobile", "Source", "Designation", "Zone", "Lok Sabha", "District", "Assembly", "Block/Ward", "Address", "Caller", "Marked By", "Marked Wrong", "Reason", "Notes", "Wrong # Attempts", "Status", "Actions"].map((h) => (
+                  {["", "Name", "Mobile", "Source", "Designation", "Zone", "Lok Sabha", "District", "Assembly", "Block/Ward", "Address", "Caller", "Marked By", "Marked Wrong", "Reason", "Notes", "Wrong # Attempts", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-3 py-3 font-semibold text-gray-600">{h}</th>
                   ))}
                 </tr>
@@ -266,6 +327,7 @@ function Body({ canDelete, readOnly = false }) {
               <tbody>
                 {rows.map((c) => (
                   <tr key={c.id} className="border-t border-gray-100 hover:bg-red-50/20 align-top">
+                    <td className="px-3 py-3">{!readOnly && c.not_in_service && c.row_type !== "unfiltered" ? <input type="checkbox" checked={nisSel.has(c.id)} onChange={() => toggleNis(c.id)} aria-label={`Select ${c.person_name}`} data-testid="nis-pick" /> : null}</td>
                     <td className="px-3 py-3 font-medium text-gray-900">
                       <div className="flex items-center gap-2">
                         <Avatar name={c.person_name} src={c.photo_url} size={28} className="bg-red-50 border border-red-100" textClassName="text-red-600 text-[10px]" />
@@ -288,7 +350,7 @@ function Body({ canDelete, readOnly = false }) {
                     <td className="px-3 py-3 text-xs text-gray-600">{c.wrong_number_reason ? (c.row_type === "unfiltered" ? (unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason) : (REASON_LABEL[c.wrong_number_reason] || c.wrong_number_reason)) : "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[160px] truncate" title={c.wrong_number_notes || c.last_remarks || ""}>{c.wrong_number_notes || c.last_remarks || "—"}</td>
                     <td className="px-3 py-3 text-center font-bold text-gray-700">{c.wrong_attempts}</td>
-                    <td className="px-3 py-3"><span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Wrong Number</span></td>
+                    <td className="px-3 py-3"><span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">{c.not_in_service && c.row_type !== "unfiltered" ? "Not in Service" : "Wrong Number"}</span></td>
                     <td className="px-3 py-3">
                       {c.row_type === "unfiltered" ? <span className="text-[11px] text-gray-400">Unfiltered record</span> : readOnly ? <span className="text-[11px] text-gray-400">View only</span> : (
                       <div className="flex items-center gap-1">
