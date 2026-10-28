@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, scopeFilterSync } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn } from "@/lib/contactExtras";
+import { sourceSelectSql, wrongNumberSourceFilter } from "@/lib/contactSource";
+import { contactSourceLabel, SOURCE_NOT_AVAILABLE } from "@/lib/sourceLabel";
 import * as XLSX from "xlsx";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
@@ -38,11 +40,12 @@ export async function GET(req, { params }) {
     const statusF = searchParams.get("status");
     if (statusF === "assigned") where.push("c.assigned_to_user_id IS NOT NULL");
     if (statusF === "unassigned") where.push("c.assigned_to_user_id IS NULL");
+    { const sf = await wrongNumberSourceFilter(searchParams.get("source"), "c"); if (sf) where.push(sf); }
     const scope = scopeFilterSync(session.user, "c");
     if (scope.where) { where.push(scope.where.replace(/^AND /, "")); qp.push(...scope.params); }
 
     const rows = await query(
-      `SELECT c.person_name, c.phone_number, c.address,
+      `SELECT c.person_name, c.phone_number, c.address, ${await sourceSelectSql("c")},
               u.username AS caller_name,
               COALESCE(lz.name, dz.name) AS zone_name, COALESCE(lls.name, dls.name) AS lok_sabha_name, ld.name AS district_name,
               la.name AS assembly_name, lw.name AS ward_name,
@@ -69,10 +72,11 @@ export async function GET(req, { params }) {
     // DD-MM-YYYY, HH:MM:SS — dashes (not the locale's slashes) for the date part.
     const fmtDate = (d) => d ? new Date(d).toLocaleString("en-GB").replace(/\//g, "-") : "";
     const stamp = new Date().toISOString().slice(0, 10);
+    for (const r of rows) r.source_label = contactSourceLabel(r) || SOURCE_NOT_AVAILABLE;
 
     if (format === "xlsx") {
       const data = rows.map((r) => ({
-        Name: r.person_name || "", Mobile: r.phone_number || "",
+        Name: r.person_name || "", Mobile: r.phone_number || "", Source: r.source_label,
         Zone: r.zone_name || "", "Lok Sabha": r.lok_sabha_name || "", District: r.district_name || "",
         Assembly: r.assembly_name || "", "Block/Ward": r.ward_name || "", Address: r.address || "",
         "Assigned Caller": r.caller_name || "Unassigned",
@@ -117,6 +121,7 @@ const styles = StyleSheet.create({
 const COLS = [
   { key: "person_name", label: "Name", flex: 2 },
   { key: "phone_number", label: "Mobile", flex: 1.5 },
+  { key: "source_label", label: "Source", flex: 1.6 },
   { key: "district_name", label: "District", flex: 1.5 },
   { key: "assembly_name", label: "Assembly", flex: 1.5 },
   { key: "ward_name", label: "Block", flex: 1.5 },

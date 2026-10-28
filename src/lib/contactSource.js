@@ -48,3 +48,32 @@ export async function sourceSearchOr(term, alias = "c") {
   const cond = await fromUnfilteredSql(alias);
   return cond ? ` OR ${cond}` : "";
 }
+
+// Wrong Number page: the original-source columns to SELECT (only those that exist - they are added lazily),
+// and the ?source= filter (unfiltered_calls | registration | none = no source recorded).
+let wnCols = null, wnAt = 0;
+async function wnSourceColumns() {
+  if (wnCols && wnCols.size === 3) return wnCols;
+  if (wnCols && Date.now() - wnAt < 15000) return wnCols;
+  const rows = await query(
+    `SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contacts' AND COLUMN_NAME IN ('source', 'source_unfiltered_contact_id', 'source_registration_id')`
+  );
+  wnCols = new Set(rows.map((r) => r.c)); wnAt = Date.now();
+  return wnCols;
+}
+export async function sourceSelectSql(alias = "c") {
+  const have = await wnSourceColumns();
+  return ["source", "source_unfiltered_contact_id", "source_registration_id"].map((n) => (have.has(n) ? `${alias}.${n}` : `NULL AS ${n}`)).join(", ");
+}
+export async function wrongNumberSourceFilter(value, alias = "c") {
+  const v = String(value || "");
+  if (!["unfiltered_calls", "registration", "none"].includes(v)) return "";
+  const have = await wnSourceColumns();
+  const col = (n) => (have.has(n) ? `${alias}.${n}` : "NULL");
+  const unf = `(COALESCE(${col("source")}, '') = '${SOURCE_UNFILTERED}' OR ${col("source_unfiltered_contact_id")} IS NOT NULL)`;
+  const reg = `${col("source_registration_id")} IS NOT NULL`;
+  if (v === "unfiltered_calls") return unf;
+  if (v === "registration") return `(${reg} AND NOT ${unf})`;
+  return `(NOT ${unf} AND NOT (${reg}) AND (${col("source")} IS NULL OR TRIM(${col("source")}) = ''))`;
+}

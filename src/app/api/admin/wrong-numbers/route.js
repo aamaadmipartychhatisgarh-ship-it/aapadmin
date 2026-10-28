@@ -4,6 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
 import { resolveActingUserId } from "@/lib/actAs";
 import { ensureUnfilteredCallLogSchema } from "@/lib/unfilteredContacts";
+import { sourceSelectSql, wrongNumberSourceFilter, sourceSearchOr } from "@/lib/contactSource";
+import { contactSourceLabel } from "@/lib/sourceLabel";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns } from "@/lib/contactExtras";
@@ -40,10 +42,12 @@ export async function GET(req) {
     const statusF = searchParams.get("status"); // assigned | unassigned
     const reason = searchParams.get("reason");
     const designationId = searchParams.get("designation_id");
+    const sourceF = searchParams.get("source"); // unfiltered_calls | registration | none (Not Available)
 
     const where = ["c.is_wrong_number = 1"];
     const params = [];
-    if (search) { where.push("(c.person_name LIKE ? OR c.phone_number LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
+    if (search) { where.push(`(c.person_name LIKE ? OR c.phone_number LIKE ?${await sourceSearchOr(search, "c")})`); params.push(`%${search}%`, `%${search}%`); }
+    { const sf = await wrongNumberSourceFilter(sourceF, "c"); if (sf) where.push(sf); }
     // Zone / Lok Sabha filters use the Contact Page definition (own value, else the district's).
     if (zoneId) { where.push("(c.zone_id = ? OR (c.zone_id IS NULL AND dz.id = ?))"); params.push(zoneId, zoneId); }
     if (lokSabhaId) { where.push("(c.lok_sabha_id = ? OR (c.lok_sabha_id IS NULL AND dls.id = ?))"); params.push(lokSabhaId, lokSabhaId); }
@@ -86,7 +90,8 @@ export async function GET(req) {
       await ensureUnfilteredCallLogSchema();
       const uw = ["u.call_status_name = 'Wrong Number'", "u.completed_at IS NOT NULL"], up = [];
       if (callerOnly) { uw.push("u.assigned_to_user_id = ?"); up.push(callerId); }
-      if (search) { uw.push("(u.person_name LIKE ? OR u.phone_number LIKE ?)"); up.push(`%${search}%`, `%${search}%`); }
+      if (search) { const q = String(search).trim().toLowerCase(); uw.push(`(u.person_name LIKE ? OR u.phone_number LIKE ?${q.length >= 4 && "unfiltered calls".includes(q) ? " OR 1 = 1" : ""})`); up.push(`%${search}%`, `%${search}%`); }
+      if (sourceF && sourceF !== "unfiltered_calls") uw.push("1 = 0"); // every row here originated from Unfiltered Calls
       if (zoneId) { uw.push("u.zone_id = ?"); up.push(zoneId); }
       if (lokSabhaId) { uw.push("u.lok_sabha_id = ?"); up.push(lokSabhaId); }
       if (districtId) { uw.push("u.district_id = ?"); up.push(districtId); }
@@ -118,7 +123,7 @@ export async function GET(req) {
           ORDER BY u.completed_at DESC, u.id DESC LIMIT 2000`,
         up
       );
-      unfRows = ur.map((r) => ({ ...r, id: `u${r.id}`, unfiltered_id: r.id, source: "unfiltered" }));
+      unfRows = ur.map((r) => ({ ...r, id: `u${r.id}`, unfiltered_id: r.id, row_type: "unfiltered", source: "unfiltered_calls", source_label: "Unfiltered Calls" }));
     }
     if (callerOnly) return NextResponse.json({ wrong_numbers: unfRows, total: unfRows.length });
 
@@ -131,6 +136,7 @@ export async function GET(req) {
               la.name AS assembly_name, lw.name AS ward_name,
               COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
               ${detailCols}
+              ${await sourceSelectSql("c")},
               (SELECT COUNT(*) FROM calls x WHERE x.contact_id = c.id) AS attempts,
               (SELECT COUNT(*) FROM calls x JOIN call_statuses cs2 ON cs2.id = x.status_id
                  WHERE x.contact_id = c.id AND cs2.name = 'Wrong Number') AS wrong_attempts,
@@ -158,6 +164,7 @@ export async function GET(req) {
       [...params, ...outerParams]
     );
 
+    for (const r of rows) r.source_label = contactSourceLabel(r); // null = no source recorded (the page shows 'Not Available')
     const all = [...rows, ...unfRows].sort((a, b) => (new Date(b.marked_wrong_date || 0)) - (new Date(a.marked_wrong_date || 0)));
     return NextResponse.json({ wrong_numbers: all, total: all.length });
   } catch (err) {

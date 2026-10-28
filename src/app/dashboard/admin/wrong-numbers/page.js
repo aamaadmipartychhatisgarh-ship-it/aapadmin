@@ -15,6 +15,7 @@ import NotInterestedView from "@/components/NotInterestedView";
 import RepeatOffPanel from "@/components/RepeatOffPanel";
 import { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 import { unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
+import { SOURCE_NOT_AVAILABLE } from "@/lib/sourceLabel";
 
 const REASON_LABEL = Object.fromEntries(WRONG_NUMBER_REASONS.map((r) => [r.value, r.label]));
 
@@ -138,6 +139,7 @@ function Body({ canDelete, readOnly = false }) {
   const [caller, setCaller] = useState("");
   const [statusF, setStatusF] = useState("");
   const [reasonF, setReasonF] = useState("");
+  const [sourceF, setSourceF] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [zones, setZones] = useState([]);
@@ -170,6 +172,7 @@ function Body({ canDelete, readOnly = false }) {
     if (caller) p.set("caller", caller);
     if (statusF) p.set("status", statusF);
     if (reasonF) p.set("reason", reasonF);
+    if (sourceF) p.set("source", sourceF);
     if (from) p.set("date_from", from);
     if (to) p.set("date_to", to);
     return p;
@@ -185,7 +188,7 @@ function Body({ canDelete, readOnly = false }) {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, reasonF, from, to]);
+  }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, reasonF, sourceF, from, to]);
 
   async function restore(id) {
     if (!confirm("Restore this contact to the active calling queue?")) return;
@@ -238,6 +241,7 @@ function Body({ canDelete, readOnly = false }) {
         <select value={assemblyId} onChange={(e) => setAssemblyId(e.target.value)} className={sel}><option value="">All assemblies</option>{assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select value={caller} onChange={(e) => setCaller(e.target.value)} className={sel}><option value="">All callers</option>{callers.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}</select>
         <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className={sel}><option value="">Any status</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select>
+        <select value={sourceF} onChange={(e) => setSourceF(e.target.value)} className={sel} aria-label="Source" data-testid="wn-source-filter"><option value="">Any source</option><option value="unfiltered_calls">Unfiltered Calls</option><option value="registration">Worker &amp; Voter Registration</option><option value="none">{SOURCE_NOT_AVAILABLE}</option></select>
         <select value={reasonF} onChange={(e) => setReasonF(e.target.value)} className={sel}><option value="">Any reason</option>{WRONG_NUMBER_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</select>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} title="Marked from" className={sel} />
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="Marked to" className={sel} />
@@ -254,7 +258,7 @@ function Body({ canDelete, readOnly = false }) {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 text-left">
                 <tr>
-                  {["Name", "Mobile", "Designation", "Zone", "Lok Sabha", "District", "Assembly", "Block/Ward", "Address", "Caller", "Marked By", "Marked Wrong", "Reason", "Notes", "Wrong # Attempts", "Status", "Actions"].map((h) => (
+                  {["Name", "Mobile", "Source", "Designation", "Zone", "Lok Sabha", "District", "Assembly", "Block/Ward", "Address", "Caller", "Marked By", "Marked Wrong", "Reason", "Notes", "Wrong # Attempts", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-3 py-3 font-semibold text-gray-600">{h}</th>
                   ))}
                 </tr>
@@ -266,10 +270,11 @@ function Body({ canDelete, readOnly = false }) {
                       <div className="flex items-center gap-2">
                         <Avatar name={c.person_name} src={c.photo_url} size={28} className="bg-red-50 border border-red-100" textClassName="text-red-600 text-[10px]" />
                         {c.person_name}
-                        {c.source === "unfiltered" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200" data-testid="wn-source-unfiltered">Unfiltered Call</span>}
+                        {c.row_type === "unfiltered" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200" data-testid="wn-source-unfiltered">Unfiltered Call</span>}
                       </div>
                     </td>
                     <td className="px-3 py-3 font-mono text-xs text-gray-700">{c.phone_number}</td>
+                    <td className="px-3 py-3 text-xs" data-testid="wn-source">{c.source_label ? <span className="font-semibold text-gray-700">{c.source_label}</span> : <span className="text-gray-400">{SOURCE_NOT_AVAILABLE}</span>}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.designation_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.zone_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.lok_sabha_name || "—"}</td>
@@ -280,12 +285,12 @@ function Body({ canDelete, readOnly = false }) {
                     <td className="px-3 py-3 text-xs text-gray-700">{c.caller_name || <span className="text-gray-300">Unassigned</span>}</td>
                     <td className="px-3 py-3 text-xs text-gray-700">{c.marked_by_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{fmt(c.marked_wrong_date)}</td>
-                    <td className="px-3 py-3 text-xs text-gray-600">{c.wrong_number_reason ? (c.source === "unfiltered" ? (unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason) : (REASON_LABEL[c.wrong_number_reason] || c.wrong_number_reason)) : "—"}</td>
+                    <td className="px-3 py-3 text-xs text-gray-600">{c.wrong_number_reason ? (c.row_type === "unfiltered" ? (unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason) : (REASON_LABEL[c.wrong_number_reason] || c.wrong_number_reason)) : "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[160px] truncate" title={c.wrong_number_notes || c.last_remarks || ""}>{c.wrong_number_notes || c.last_remarks || "—"}</td>
                     <td className="px-3 py-3 text-center font-bold text-gray-700">{c.wrong_attempts}</td>
                     <td className="px-3 py-3"><span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Wrong Number</span></td>
                     <td className="px-3 py-3">
-                      {c.source === "unfiltered" ? <span className="text-[11px] text-gray-400">Unfiltered record</span> : (
+                      {c.row_type === "unfiltered" ? <span className="text-[11px] text-gray-400">Unfiltered record</span> : (
                       <div className="flex items-center gap-1">
                         <IconBtn title="Restore to queue" onClick={() => restore(c.id)} className="text-emerald-600 hover:bg-emerald-50"><RotateCcw size={15} /></IconBtn>
                         <IconBtn title="Edit contact / mobile number" onClick={() => setEditRow(c)} className="text-[#164FA3] hover:bg-blue-50"><Pencil size={15} /></IconBtn>
