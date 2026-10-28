@@ -60,8 +60,10 @@ export async function GET(req) {
     if (designationId) { where.push("c.designation_id = ?"); params.push(designationId); }
 
     // Geographic scope from role (super_admin / state / supervisor see all).
-    const scope = scopeFilterSync(session.user, "c");
-    if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
+    // A Caller sees only THEIR OWN assigned contacts here (read-only page); everyone else keeps the role scope.
+    let scope = { where: "", params: [] };
+    if (callerOnly) { where.push("c.assigned_to_user_id = ?"); params.push(callerId); }
+    else { scope = scopeFilterSync(session.user, "c"); if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); } }
 
     // Date range applies to when the contact was marked a wrong number. Applied
     // on the derived column via an outer WHERE (a wrapper subquery) so it stays a
@@ -125,9 +127,8 @@ export async function GET(req) {
       );
       unfRows = ur.map((r) => ({ ...r, id: `u${r.id}`, unfiltered_id: r.id, row_type: "unfiltered", source: "unfiltered_calls", source_label: "Unfiltered Calls" }));
     }
-    if (callerOnly) return NextResponse.json({ wrong_numbers: unfRows, total: unfRows.length });
 
-    const rows = await query(
+    const rows = !(await hasWrongNumberColumn()) ? [] : await query(
       `SELECT * FROM (
         SELECT c.id, c.person_name, c.phone_number, c.address, c.assigned_to_user_id,
               u.username AS caller_name,

@@ -60,7 +60,7 @@ export function WrongNumbersDashboard({ session, oversight, canDelete }) {
   const showRepeat = oversight && showWrong;
   // ?tab=wrong opens the Wrong Numbers tab directly (used by the Unfiltered Calls redirect).
   useEffect(() => {
-    try { if (new URLSearchParams(window.location.search).get("tab") === "wrong" && showWrong) setTab("wrong"); } catch {}
+    try { const tp = new URLSearchParams(window.location.search).get("tab"); if (tp === "wrong" && showWrong) setTab("wrong"); else if (tp === "not_interested" && showNI) setTab("not_interested"); } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -290,7 +290,7 @@ function Body({ canDelete, readOnly = false }) {
                     <td className="px-3 py-3 text-center font-bold text-gray-700">{c.wrong_attempts}</td>
                     <td className="px-3 py-3"><span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Wrong Number</span></td>
                     <td className="px-3 py-3">
-                      {c.row_type === "unfiltered" ? <span className="text-[11px] text-gray-400">Unfiltered record</span> : (
+                      {c.row_type === "unfiltered" ? <span className="text-[11px] text-gray-400">Unfiltered record</span> : readOnly ? <span className="text-[11px] text-gray-400">View only</span> : (
                       <div className="flex items-center gap-1">
                         <IconBtn title="Restore to queue" onClick={() => restore(c.id)} className="text-emerald-600 hover:bg-emerald-50"><RotateCcw size={15} /></IconBtn>
                         <IconBtn title="Edit contact / mobile number" onClick={() => setEditRow(c)} className="text-[#164FA3] hover:bg-blue-50"><Pencil size={15} /></IconBtn>

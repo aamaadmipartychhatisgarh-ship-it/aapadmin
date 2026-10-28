@@ -18,6 +18,8 @@ export async function GET() {
     await ensureRepeatOffSchema();
     // "Busy" must exist for every call form (Busy follow-up). Idempotent: never adds a second one.
     await query("INSERT INTO call_statuses (name) SELECT 'Busy' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM call_statuses WHERE name = 'Busy')");
+    // "Not in Service" (Member workflow) - same idempotent seed as Busy; shown only to Member contacts by the call form.
+    await query("INSERT INTO call_statuses (name) SELECT 'Not in Service' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM call_statuses WHERE name = 'Not in Service')");
     const statuses = await query("SELECT id, name FROM call_statuses ORDER BY id ASC");
     return Response.json({ statuses }, { status: 200 });
   } catch (error) {

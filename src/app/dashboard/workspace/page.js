@@ -14,6 +14,7 @@ import { AddContactModal } from "@/components/contacts/ContactsModule";
 import { MultiSelect } from "@/components/MultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
 import DesignationWingRows from "@/components/contacts/DesignationWingRows";
+import { MEMBER_PICKED, MEMBER_FOLLOWUP_STATUSES, MEMBER_ONLY_STATUSES, isMemberName, memberPickedLabel } from "@/lib/memberWorkflowShared";
 import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
 import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
@@ -86,6 +87,7 @@ export default function WorkspacePage() {
 }
 
 function WorkspaceBody({ previewingCaller, viewAsCaller }) {
+  const router = useRouter();
   // The signed-in session — needed for role checks in this body (e.g. whether a
   // caller may remove a contact photo). Without this, `isOversight(session)`
   // below referenced an undefined `session` and threw a ReferenceError at render,
@@ -162,6 +164,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [wingMaster, setWingMaster] = useState(null);
   const [dwRows, setDwRows] = useState(null);
   const [dwPrev, setDwPrev] = useState(null);
+  // Member workflow: only a contact whose Designation is Member gets the Member status / Phone Picked / follow-up options.
+  const activeDesigIds = String(active?.designation_ids || active?.designation_id || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const isMember = !!active && activeDesigIds.some((id) => isMemberName(designations.find((d) => String(d.id) === id)?.name));
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -625,10 +630,19 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     try {
       // Sentiment only applies to a connected ("Phone Picked") call — never save
       // a stale sentiment for any other status.
-      const isPicked = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked";
+      const statusNameNow = statuses.find((s) => String(s.id) === String(form.status_id))?.name;
+      const isPicked = statusNameNow === "Phone Picked";
+      // Member: Phone Picked is Active, or Not Active + a reason; follow-up only on the four follow-up statuses.
+      let memberSentiment = null;
+      if (isMember && isPicked) {
+        memberSentiment = form.member_pp === "active" ? "active" : (form.member_pp === "not_active" ? (form.sentiment || "") : "");
+        if (!memberSentiment) { setError(form.member_pp === "not_active" ? "Please choose Wrong Number, Opponent or Not Interested." : "Please choose Active or Not Active."); setSubmitting(false); return; }
+      }
+      const fuAllowed = !isMember || MEMBER_FOLLOWUP_STATUSES.includes(statusNameNow);
       const payload = {
         ...form,
-        sentiment: isPicked ? (form.sentiment || null) : null,
+        ...(fuAllowed ? {} : { is_follow_up_required: false, follow_up_date: "", follow_up_time: "" }),
+        sentiment: isPicked ? (isMember ? memberSentiment : (form.sentiment || null)) : null,
         contact_id: active.id,
         designation_id: active.designation_id,
         zone_id: active.zone_id,
@@ -653,6 +667,16 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       const savedDuration = elapsed;
       const scheduledFor = form.is_follow_up_required && form.follow_up_date ? form.follow_up_date : null;
       const followMsg = scheduledFor ? ` Reminder set for ${scheduledFor}${form.follow_up_time ? ` at ${form.follow_up_time}` : ""}.` : "";
+      // Member outcomes that move the contact to the Wrong Number / Not Interested page: go straight there (already saved).
+      if (isMember) {
+        const goWrong = statusNameNow === "Wrong Number" || (isPicked && (memberSentiment === "wrong_number" || memberSentiment === "member_opponent"));
+        const goNI = isPicked && memberSentiment === "not_interested";
+        if (goWrong || goNI) {
+          setActive(null); setForm(initialForm()); setElapsed(0);
+          router.push(goWrong ? "/dashboard/admin/wrong-numbers?tab=wrong" : "/dashboard/admin/wrong-numbers?tab=not_interested");
+          return;
+        }
+      }
       // Reset the active state, then immediately auto-claim the next contact.
       setActive(null);
       setForm(initialForm());
@@ -1337,7 +1361,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                           {h.remarks && <div className="text-gray-600 italic">"{h.remarks}"</div>}
                           <div className="text-xs text-gray-400 mt-1">
                             {h.duration_seconds != null && <span>{formatDurationHrMinSec(h.duration_seconds, "0 Sec")} talk</span>}
-                            {h.sentiment && <span> · {h.sentiment}</span>}
+                            {h.sentiment && <span> · {memberPickedLabel(h.sentiment) || h.sentiment}</span>}
                             {h.is_follow_up_required && h.follow_up_date && <span> · follow-up scheduled {h.follow_up_date.slice(0, 10)}{h.follow_up_time ? ` ${String(h.follow_up_time).slice(0, 5)}` : ""}</span>}
                           </div>
                         </div>
@@ -1417,15 +1441,32 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                           onChange={(e) => {
                             const picked = statuses.find((s) => String(s.id) === String(e.target.value))?.name === "Phone Picked";
                             // Reset sentiment whenever the status is not Phone Picked.
-                            setForm({ ...form, status_id: e.target.value, sentiment: picked ? form.sentiment : "", wrong_number_reason: "" });
+                            setForm({ ...form, status_id: e.target.value, sentiment: picked ? form.sentiment : "", member_pp: "", wrong_number_reason: "" });
                           }}
                           className={inputCls}
                         >
                           <option value="">Select…</option>
-                          {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          {statuses.filter((s) => isMember || !MEMBER_ONLY_STATUSES.includes(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                       </Field>
-                      {isPicked && (
+                      {isPicked && isMember && (
+                        <Field label="Phone Picked *">
+                          <select value={form.member_pp} onChange={(e) => setForm({ ...form, member_pp: e.target.value, sentiment: "" })} className={inputCls} data-testid="member-pp">
+                            <option value="">Select…</option>
+                            <option value="active">Active</option>
+                            <option value="not_active">Not Active</option>
+                          </select>
+                        </Field>
+                      )}
+                      {isPicked && isMember && form.member_pp === "not_active" && (
+                        <Field label="Not Active - reason *">
+                          <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls} data-testid="member-notactive">
+                            <option value="">Select…</option>
+                            {MEMBER_PICKED.filter((o) => o.value !== "active").map((o) => <option key={o.value} value={o.value}>{o.label.replace("Not Active · ", "")}</option>)}
+                          </select>
+                        </Field>
+                      )}
+                      {isPicked && !isMember && (
                         <Field label="Sentiment">
                           <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls}>
                             <option value="">None</option>
@@ -1456,8 +1497,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                   </Field>
                 </div>
                 <div className="md:col-span-2 flex flex-wrap items-end gap-6">
-                  {/* Follow-up DATE picker */}
-                  <div>
+                  {/* Follow-up DATE picker (a Member contact: only for Not Picked / Not in Service / Switched Off / Incoming Off) */}
+                  {(!isMember || MEMBER_FOLLOWUP_STATUSES.includes(statuses.find((s) => String(s.id) === String(form.status_id))?.name)) && (<>
+                  <div data-testid="followup-date-block">
                     <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Follow-up Date (optional)</label>
                     <div className="flex items-center gap-2">
                       <div className="flex items-center gap-2 border border-gray-200 rounded px-2.5 py-1.5 bg-white focus-within:ring-2 focus-within:ring-[#164FA3]">
@@ -1493,6 +1535,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                     </div>
                     <p className="text-[11px] text-gray-400 mt-1">Defaults to the day's reminder time if blank.</p>
                   </div>
+                  </>)}
                   <label className="flex items-center gap-2 text-sm font-medium text-gray-700 pb-1.5">
                     <input type="checkbox" checked={form.is_vip} onChange={(e) => setForm({ ...form, is_vip: e.target.checked })} />
                     VIP
@@ -1903,6 +1946,7 @@ function initialForm() {
     phone_number: "",
     status_id: "",
     sentiment: "",
+    member_pp: "",   // Member workflow: Phone Picked -> active | not_active (the Not Active reason goes in `sentiment`)
     wrong_number_reason: "",
     remarks: "",
     is_follow_up_required: false,

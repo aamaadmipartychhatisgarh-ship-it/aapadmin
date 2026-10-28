@@ -1,3 +1,4 @@
+import { isMemberContact, MEMBER_PICKED_VALUES, MEMBER_ONLY_SENTIMENTS, MEMBER_FOLLOWUP_STATUSES, MEMBER_ONLY_STATUSES } from "@/lib/memberWorkflow";
 import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
@@ -287,6 +288,26 @@ export async function POST(req) {
     const statusName = statusRow?.name;
     const finalSentiment = statusName === "Phone Picked" ? (sentiment || null) : null;
 
+    // MEMBER workflow (see lib/memberWorkflow): its statuses / Phone Picked options / follow-up rules apply ONLY to a contact whose
+    // Designation is Member, and are enforced here - a contact of any other designation can never submit them.
+    const member = contact_id ? await isMemberContact(contact_id) : false;
+    const askedFollowUp = !!is_follow_up_required || !!follow_up_date || !!follow_up_time;
+    if (!member) {
+      if (MEMBER_ONLY_STATUSES.includes(statusName)) return Response.json({ message: `"${statusName}" is available only for Member contacts.` }, { status: 400 });
+      if (MEMBER_ONLY_SENTIMENTS.includes(String(sentiment || "").toLowerCase()) && statusName === "Phone Picked") {
+        return Response.json({ message: "This Phone Picked option is available only for Member contacts." }, { status: 400 });
+      }
+    } else {
+      if (statusName === "Phone Picked" && !MEMBER_PICKED_VALUES.includes(String(sentiment || ""))) {
+        return Response.json({ message: "Please choose Active, or Not Active with Wrong Number / Opponent / Not Interested." }, { status: 400 });
+      }
+      if (askedFollowUp && !MEMBER_FOLLOWUP_STATUSES.includes(statusName)) {
+        return Response.json({ message: "A follow-up can only be scheduled for Not Picked, Not in Service, Switched Off or Incoming Off." }, { status: 400 });
+      }
+    }
+    const memberOpponent = member && statusName === "Phone Picked" && finalSentiment === "member_opponent";
+    const memberNotInterested = member && statusName === "Phone Picked" && finalSentiment === "not_interested";
+
     const res = await query(
       `INSERT INTO calls (
         destination, designation_id, person_name, address, phone_number,
@@ -348,8 +369,9 @@ export async function POST(req) {
       // the contact just stays in the main list. The explicit "Wrong Number" call
       // STATUS is unchanged. Enforced here, server-side.
       const sentimentWrong = String(finalSentiment || "").toLowerCase() === "wrong_number";
-      const protectedFromSentiment = sentimentWrong && statusName !== "Wrong Number" ? await isDesignatedContact(contact_id) : false;
-      isWrongNumber = statusName === "Wrong Number" || (sentimentWrong && !protectedFromSentiment);
+      // A Member's explicit Not Active -> Wrong Number choice is part of the Member workflow, so the designated-contact exemption does not apply to it.
+      const protectedFromSentiment = sentimentWrong && statusName !== "Wrong Number" && !member ? await isDesignatedContact(contact_id) : false;
+      isWrongNumber = statusName === "Wrong Number" || (sentimentWrong && !protectedFromSentiment) || memberOpponent;
       if (sentimentWrong && protectedFromSentiment) console.info(`[designated] wrong-number SENTIMENT ignored for designated contact=${contact_id} call=${res.insertId}`);
       // If a follow-up was scheduled, keep the contact open and pin it to this caller.
       const wantsFollowUp = !!is_follow_up_required;
@@ -408,7 +430,7 @@ export async function POST(req) {
                 SET wrong_number_reason = ?, wrong_number_notes = ?, wrong_number_at = NOW(),
                     wrong_number_by = ?, wrong_number_call_id = ?
               WHERE id = ?`,
-            [data.wrong_number_reason || null, remarks || null, session.user.id, res.insertId, contact_id]
+            [memberOpponent ? "other" : (data.wrong_number_reason || null), memberOpponent ? (`Opponent${remarks ? " - " + remarks : ""}`).slice(0, 500) : (remarks || null), session.user.id, res.insertId, contact_id]
           );
         }
       }
@@ -418,10 +440,10 @@ export async function POST(req) {
     // contact into the persistent Not Interested state — excluded from every active/
     // Main contacts list and from assignment until an authorized user EXPLICITLY
     // restores it. Set-only: a later non-negative call must never auto-restore it.
-    if (contact_id && ["negative", "opponent", "not_supporter"].includes(String(sentiment || "").toLowerCase())) {
+    if (contact_id && (memberNotInterested || (!memberOpponent && ["negative", "opponent", "not_supporter"].includes(String(sentiment || "").toLowerCase())))) {
       // Designated contacts (State / Lok Sabha / District / Assembly / Block) are exempt:
       // the sentiment is recorded on the call but the contact stays in the main list.
-      if (await isDesignatedContact(contact_id)) {
+      if (!memberNotInterested && await isDesignatedContact(contact_id)) {
         console.info(`[designated] not-interested move skipped for designated contact=${contact_id} call=${res.insertId} sentiment=${sentiment}`);
       } else if (await ensureNotInterestedColumns()) {
         await query(
