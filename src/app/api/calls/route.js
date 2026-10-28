@@ -2,7 +2,7 @@ import { isMemberContact, MEMBER_PICKED_VALUES, MEMBER_ONLY_SENTIMENTS, MEMBER_F
 import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
-import { isOversight, scopeFilterSync } from "@/lib/permissions";
+import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
 import { isPageRestricted, userCanAccessPageKey } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
 import { query } from "@/lib/db";
@@ -305,6 +305,12 @@ export async function POST(req) {
         return Response.json({ message: "A follow-up can only be scheduled for Not Picked, Not in Service, Switched Off or Incoming Off." }, { status: 400 });
       }
     }
+    // NON-MEMBER Regular Calls workflow (every designation except Member): a Caller's Phone Picked carries only Positive / Neutral /
+    // Negative (or none), and those outcomes stay inside Regular Calls - they never move the contact to another page / list.
+    const regularCaller = !member && !!contact_id && isCaller(session);
+    if (regularCaller && statusName === "Phone Picked" && sentiment && !["positive", "neutral", "negative"].includes(String(sentiment).toLowerCase())) {
+      return Response.json({ message: "Phone Picked allows Positive, Neutral or Negative." }, { status: 400 });
+    }
     const memberOpponent = member && statusName === "Phone Picked" && finalSentiment === "member_opponent";
     const memberNotInterested = member && statusName === "Phone Picked" && finalSentiment === "not_interested";
 
@@ -440,7 +446,7 @@ export async function POST(req) {
     // contact into the persistent Not Interested state — excluded from every active/
     // Main contacts list and from assignment until an authorized user EXPLICITLY
     // restores it. Set-only: a later non-negative call must never auto-restore it.
-    if (contact_id && (memberNotInterested || (!memberOpponent && ["negative", "opponent", "not_supporter"].includes(String(sentiment || "").toLowerCase())))) {
+    if (contact_id && (memberNotInterested || (!memberOpponent && !(regularCaller && String(sentiment || "").toLowerCase() === "negative") && ["negative", "opponent", "not_supporter"].includes(String(sentiment || "").toLowerCase())))) {
       // Designated contacts (State / Lok Sabha / District / Assembly / Block) are exempt:
       // the sentiment is recorded on the call but the contact stays in the main list.
       if (!memberNotInterested && await isDesignatedContact(contact_id)) {

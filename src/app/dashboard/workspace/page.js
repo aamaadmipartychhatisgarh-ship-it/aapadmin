@@ -1468,15 +1468,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                       )}
                       {isPicked && !isMember && (
                         <Field label="Sentiment">
-                          <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls}>
-                            <option value="">None</option>
+                          <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls} data-testid="regular-sentiment">
+                            <option value="">Select…</option>
                             <option value="positive">Positive</option>
-                            <option value="supporter">Supporter</option>
                             <option value="neutral">Neutral</option>
                             <option value="negative">Negative</option>
-                            <option value="opponent">Opponent</option>
-                            <option value="not_supporter">Not a Supporter</option>
-                            <option value="wrong_number">Wrong Number</option>
                           </select>
                         </Field>
                       )}
