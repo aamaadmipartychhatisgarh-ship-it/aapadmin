@@ -1024,6 +1024,10 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false })
   const [source, setSource] = useState("");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
+  // "Added By": a separate filter (the worker whose link collected the registration), matched by worker id - independent of the search bar.
+  const [addedById, setAddedById] = useState("");
+  const [addedByText, setAddedByText] = useState("");
+  const [addedByOpts, setAddedByOpts] = useState([]);
   const [loading, setLoading] = useState(true);
   // Delete confirmation: the registration awaiting confirmation (null = closed),
   // the id whose delete is in flight (double-click guard), and a brief success note.
@@ -1034,7 +1038,18 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false })
 
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
-  const qs = useCallback((extra = {}) => filterQs({ person_type: type, status, source, search: debounced, ...extra }), [filterQs, type, status, source, debounced]);
+  const qs = useCallback((extra = {}) => filterQs({ person_type: type, status, source, search: debounced, worker_id: addedById, ...extra }), [filterQs, type, status, source, debounced, addedById]);
+
+  useEffect(() => {
+    fetch("/api/registration/workers/options", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { workers: [] })).then((d) => setAddedByOpts(d.workers || [])).catch(() => {});
+  }, []);
+  const addedByLabel = (w) => `${w.name}${w.worker_code ? ` (${w.worker_code})` : w.mobile ? ` (${w.mobile})` : ""}`;
+  function pickAddedBy(text) {
+    setAddedByText(text);
+    const m = addedByOpts.find((w) => addedByLabel(w) === text);
+    setAddedById(m ? String(m.id) : "");   // only an exact option selects a creator; free text just searches the list
+    setPage(1);
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1108,7 +1123,13 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false })
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-          <input className={`${inputCls} pl-9 w-64`} placeholder="Search person, mobile, worker" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className={`${inputCls} pl-9 w-64`} placeholder="Search name or contact number" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="relative">
+          <input list="added-by-options" className={`${inputCls} w-56`} placeholder="Added By (search worker)" aria-label="Added By" data-testid="added-by"
+            value={addedByText} onChange={(e) => pickAddedBy(e.target.value)} />
+          <datalist id="added-by-options">{addedByOpts.map((w) => <option key={w.id} value={addedByLabel(w)} />)}</datalist>
+          {addedByText ? <button type="button" aria-label="Clear Added By" data-testid="added-by-clear" onClick={() => pickAddedBy("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">×</button> : null}
         </div>
         <select className={inputCls} value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
           <option value="">All types</option>

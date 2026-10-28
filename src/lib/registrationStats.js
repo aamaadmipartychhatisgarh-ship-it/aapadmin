@@ -43,9 +43,10 @@ function peopleFilters({ campaignId, from, to, ward, workerId, personType, statu
   if (workerId) { cond.push("p.worker_id = ?"); params.push(workerId); }
   if (personType) { cond.push("p.person_type = ?"); params.push(personType); }
   if (search) {
-    cond.push("(p.name LIKE ? OR p.mobile LIKE ? OR p.address LIKE ? OR w.name LIKE ?)");
+    // The search bar covers the person's Name and Contact Number only; "Added By" is its own filter (worker_id).
+    cond.push("(p.name LIKE ? OR p.mobile LIKE ?)");
     const like = `%${search}%`;
-    params.push(like, like, like, like);
+    params.push(like, like);
   }
   // "Direct" = came through the general link with no karyakarta behind it.
   if (source === "direct") cond.push("p.worker_id IS NULL");
