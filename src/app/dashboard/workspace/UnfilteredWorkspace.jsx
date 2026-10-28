@@ -1,5 +1,6 @@
 "use client";
 
+import { UNFILTERED_WRONG_REASONS, unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight, Pencil, X } from "lucide-react";
 import CallActionIcons from "@/components/CallActionIcons";
@@ -23,7 +24,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [form, setForm] = useState({ status_id: "", remarks: "", sentiment: "" });
+  const [form, setForm] = useState({ status_id: "", remarks: "", sentiment: "", wrong_number_reason: "" });
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -140,7 +141,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     if (!call) return;
     if (!keepMessage) setMessage("");
     setError("");
-    setForm({ status_id: "", remarks: "", sentiment: "" });
+    setForm({ status_id: "", remarks: "", sentiment: "", wrong_number_reason: "" });
     setEditing(false); setEditMsg(""); setEditErr("");
     setElapsed(0);
     setActive({ ...call, started_at: Date.now() });
@@ -152,9 +153,11 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   }
 
   const isPicked = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked";
+  const isWrongNo = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Wrong Number";
 
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
+    if (isWrongNo && !form.wrong_number_reason) { setError("Please select the Wrong Number reason"); return; }
     if (submitting || submitLock.current) return;
     submitLock.current = true;
     setSubmitting(true); setError("");
@@ -164,7 +167,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
         headers: { "Content-Type": "application/json" },
         // Sentiment only applies to a connected ("Phone Picked") call; Positive / Supporter adds the
         // person to the Contact List automatically (server side).
-        body: JSON.stringify({ status_id: Number(form.status_id), remarks: form.remarks, duration_seconds: elapsed, sentiment: isPicked ? form.sentiment : "" }),
+        body: JSON.stringify({ status_id: Number(form.status_id), remarks: form.remarks, duration_seconds: elapsed, sentiment: isPicked ? form.sentiment : "", wrong_number_reason: isWrongNo ? form.wrong_number_reason : "" }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.message || "Failed to save"); if (r.status === 404 || r.status === 409) { setActive(null); load(); } return; }
@@ -280,7 +283,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                     </div>
                     {view === "pending"
                       ? (Number(c.attempts) > 0 && <span className="text-[10px] font-bold bg-[#FCB712] text-[#164FA3] px-2 py-0.5 rounded-full">RETRY ×{c.attempts}</span>)
-                      : <span className="text-[11px] text-emerald-700 font-semibold">{c.call_status_name}</span>}
+                      : <span className="text-[11px] text-emerald-700 font-semibold">{c.call_status_name}{c.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason}` : ""}</span>}
                   </button>
                 </li>
               ))}
@@ -418,7 +421,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                       <div key={h.id} className="p-4 text-sm">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-medium text-gray-900">{new Date(h.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                          <span className="text-xs text-gray-500">{h.agent_name} · {h.status_name}{h.sentiment ? ` · ${h.sentiment}` : ""}</span>
+                          <span className="text-xs text-gray-500">{h.agent_name} · {h.status_name}{h.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(h.wrong_number_reason) || h.wrong_number_reason}` : ""}{h.sentiment ? ` · ${h.sentiment}` : ""}</span>
                         </div>
                         {h.remarks && <div className="text-gray-600 italic">&quot;{h.remarks}&quot;</div>}
                         {h.duration_seconds != null && <div className="text-xs text-gray-400 mt-1">{formatDurationHrMinSec(h.duration_seconds, "0 Sec")} talk</div>}
@@ -434,11 +437,20 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Status *</label>
-                  <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value })} className={inputCls} aria-label="Status">
+                  <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value, wrong_number_reason: "" })} className={inputCls} aria-label="Status">
                     <option value="">Select…</option>
                     {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
+                {isWrongNo && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Wrong Number reason *</label>
+                    <select value={form.wrong_number_reason} onChange={(e) => setForm({ ...form, wrong_number_reason: e.target.value })} className={inputCls} aria-label="Wrong Number reason" data-testid="uw-wrong-reason">
+                      <option value="">Select reason…</option>
+                      {UNFILTERED_WRONG_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    </select>
+                  </div>
+                )}
                 {isPicked && (
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Sentiment</label>

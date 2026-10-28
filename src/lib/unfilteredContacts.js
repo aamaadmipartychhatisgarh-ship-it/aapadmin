@@ -6,6 +6,7 @@ import { syncContactDesignations } from "@/lib/contactDesignations";
 import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
+import { UNFILTERED_WRONG_REASON_VALUES } from "@/lib/unfilteredWrongReasons";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { logAudit } from "@/lib/audit";
@@ -378,7 +379,7 @@ export async function myUnfilteredCalls(userId, { view = "pending", onlyId = nul
             COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
             u.photo_url, u.zone_id, u.lok_sabha_id, u.district_id, u.assembly_id, u.ward_id, u.contact_id,
             lz.name AS zone_name, lls.name AS lok_sabha_name, lw.name AS ward_name,
-            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes,
+            u.assigned_at, u.completed_at, u.call_status_name, u.call_notes, u.wrong_number_reason,
             (SELECT COUNT(*) FROM unfiltered_call_logs l WHERE l.unfiltered_contact_id = u.id) AS attempts
        FROM unfiltered_contacts u
        LEFT JOIN locations ld ON ld.id = u.district_id
@@ -465,6 +466,9 @@ export async function ensureUnfilteredContactLinkSchema() {
   await add("unfiltered_contacts", c, "ward_id", "INT NULL");
   c = await cols("unfiltered_call_logs");
   await add("unfiltered_call_logs", c, "sentiment", "VARCHAR(30) NULL");
+  // Wrong Number reason (Belongs to Someone Else / Wrong-Invalid Number): the call's own log + the record's latest.
+  await add("unfiltered_call_logs", c, "wrong_number_reason", "VARCHAR(40) NULL");
+  await add("unfiltered_contacts", await cols("unfiltered_contacts"), "wrong_number_reason", "VARCHAR(40) NULL");
   linkEnsured = true;
 }
 
@@ -573,10 +577,15 @@ export const UNFILTERED_FINAL_STATUSES = ["Phone Picked", "Wrong Number", "Rudel
 // Log a disposition for one of the acting caller's OWN pending Unfiltered Calls.
 // The row is locked for the check + write, so it can't be logged against
 // someone else's record, after completion, or completed twice.
-export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, remarks, durationSeconds, sentiment }) {
+export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, remarks, durationSeconds, sentiment, wrongReason }) {
   await ensureUnfilteredCallLogSchema();
   const [st] = await query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(statusId) || 0]);
   if (!st) return { status: 400, message: "Please pick a status." };
+  // Wrong Number needs exactly one of the two supported reasons; an unsupported value is refused for any status.
+  const reasonIn = String(wrongReason ?? "").trim();
+  if (reasonIn && !UNFILTERED_WRONG_REASON_VALUES.includes(reasonIn)) return { status: 400, message: "Unsupported Wrong Number reason." };
+  if (st.name === "Wrong Number" && !reasonIn) return { status: 400, message: "Please select the Wrong Number reason." };
+  const wrongNo = st.name === "Wrong Number" ? reasonIn : null;
   const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
@@ -588,18 +597,18 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
     // Sentiment only applies to a connected ("Phone Picked") call, as in a regular call.
     const sent = st.name === "Phone Picked" && UNFILTERED_SENTIMENTS.includes(String(sentiment || "")) ? String(sentiment) : null;
     const [ins] = await conn.query(
-      `INSERT INTO unfiltered_call_logs (unfiltered_contact_id, caller_id, logged_by, status_id, status_name, remarks, duration_seconds, sentiment)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [row.id, callerId, loggedBy || callerId, st.id, st.name, notes, dur, sent]
+      `INSERT INTO unfiltered_call_logs (unfiltered_contact_id, caller_id, logged_by, status_id, status_name, remarks, duration_seconds, sentiment, wrong_number_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, callerId, loggedBy || callerId, st.id, st.name, notes, dur, sent, wrongNo]
     );
     const final = UNFILTERED_FINAL_STATUSES.includes(st.name);
     await conn.query(
       `UPDATE unfiltered_contacts
-          SET call_status_id = ?, call_status_name = ?, call_notes = ?, call_sentiment = ?,
+          SET call_status_id = ?, call_status_name = ?, call_notes = ?, call_sentiment = ?, wrong_number_reason = ?,
               completed_at = CASE WHEN ? THEN NOW() ELSE NULL END,
               completed_by = CASE WHEN ? THEN ? ELSE NULL END
         WHERE id = ?`,
-      [st.id, st.name, notes, sent, final ? 1 : 0, final ? 1 : 0, callerId, row.id]
+      [st.id, st.name, notes, sent, wrongNo, final ? 1 : 0, final ? 1 : 0, callerId, row.id]
     );
     // Positive / Supporter -> create or update the Contact List record, in the SAME transaction as the
     // log (both saved or neither), serialized by the row lock above.
@@ -622,7 +631,7 @@ export async function unfilteredCallHistory({ id, callerId }) {
   const [row] = await query("SELECT assigned_to_user_id FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
   if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) return null;
   return query(
-    `SELECT l.id, l.status_name, l.sentiment, l.remarks, l.duration_seconds, l.created_at, us.username AS agent_name
+    `SELECT l.id, l.status_name, l.sentiment, l.wrong_number_reason, l.remarks, l.duration_seconds, l.created_at, us.username AS agent_name
        FROM unfiltered_call_logs l LEFT JOIN users us ON us.id = l.caller_id
       WHERE l.unfiltered_contact_id = ? ORDER BY l.id DESC`,
     [Number(id)]

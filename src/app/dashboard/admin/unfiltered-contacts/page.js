@@ -1,5 +1,6 @@
 "use client";
 
+import { unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -510,7 +511,7 @@ export default function UnfilteredContactsPage() {
                   <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">{fmtDate(r.created_at)}{r.file_name ? <div className="truncate max-w-[180px]">{r.file_name}</div> : null}</td>
                   <td className="px-4 py-2 text-xs whitespace-nowrap" data-testid="unfiltered-assignee">
                     {r.assigned_to ? <span className="font-medium text-gray-800">{r.assigned_to}</span> : <span className="text-gray-400">Unassigned</span>}
-                    {r.assigned_to && <div className={r.completed_at ? "text-emerald-700" : "text-amber-700"}>{r.completed_at ? `Completed${r.call_status_name ? ` · ${r.call_status_name}` : ""}` : "Pending"}</div>}
+                    {r.assigned_to && <div className={r.completed_at ? "text-emerald-700" : "text-amber-700"}>{r.completed_at ? `Completed${r.call_status_name ? ` · ${r.call_status_name}` : ""}${r.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(r.wrong_number_reason) || r.wrong_number_reason}` : ""}` : "Pending"}</div>}
                     {!r.completed_at && (
                       <select value="" onChange={(e) => assignTo(r, e.target.value)} disabled={unassigning === r.id || !callers.length} aria-label="Assign to caller" data-testid="unfiltered-assign-select"
                         className="mt-1 block max-w-[150px] border border-gray-200 rounded px-1 py-0.5 text-[11px] bg-white">

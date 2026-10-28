@@ -19,7 +19,7 @@ export async function POST(req, { params }) {
     const body = await req.json().catch(() => ({}));
     const r = await logUnfilteredCall({
       id, callerId: userId, loggedBy: session.user.id,
-      statusId: body.status_id, remarks: body.remarks, durationSeconds: body.duration_seconds, sentiment: body.sentiment,
+      statusId: body.status_id, remarks: body.remarks, durationSeconds: body.duration_seconds, sentiment: body.sentiment, wrongReason: body.wrong_number_reason,
     });
     return NextResponse.json({ message: r.message, completed: !!r.completed, contact_sync: r.contact_sync || null }, { status: r.status });
   } catch (err) {
