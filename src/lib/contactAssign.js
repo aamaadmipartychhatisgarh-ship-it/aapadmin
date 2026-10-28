@@ -1,4 +1,4 @@
-import { getPool } from "@/lib/db";
+import { getPool, query } from "@/lib/db";
 import { normalizeRole, ROLES, scopeFilterSync } from "@/lib/permissions";
 import { contactsHaveAssignedAt, contactsHaveAssignedBy, zoneMatch } from "@/lib/assignmentRules";
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
@@ -78,12 +78,20 @@ export async function assignSingleContact(session, contactId, userId) {
 // (the same exclusions bulk Distribute applies). Everything that qualifies is assigned with the same
 // stamping as bulk (assigned_at, assigned_by_user_id = the caller, locks cleared); the rest is reported
 // with the reason, never changed. One assignee column = no duplicate mappings; a repeat changes nothing.
-export async function selfAssignContacts(session, zoneId, contactIds) {
+export async function selfAssignContacts(session, zoneId, contactIds, designationId = null) {
   const ids = [...new Set((Array.isArray(contactIds) ? contactIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   if (!ids.length) return { status: 400, message: "Select at least one contact." };
   if (ids.length > 500) return { status: 400, message: "Select at most 500 contacts at a time." };
   if (!zoneId) return { status: 403, message: "You have no Zone assigned." };
   const me = Number(session.user.id);
+  // Designation-wise pull: when a designation is chosen, only contacts that actually HOLD it (their designation set in
+  // contact_designations, else the single legacy designation) are assigned - validated here, not trusted from the page.
+  const desig = designationId ? Number(designationId) : null;
+  if (designationId && (!Number.isInteger(desig) || desig <= 0)) return { status: 400, message: "Invalid designation." };
+  if (desig) {
+    const [d] = await query("SELECT id FROM designations WHERE id = ?", [desig]);
+    if (!d) return { status: 400, message: "That designation does not exist." };
+  }
   const stampAt = await contactsHaveAssignedAt();
   const stampBy = await contactsHaveAssignedBy();
   const excl = (await notWrongNumberClause("c")) + (await notPendingClause("c")) + (await notNotInterestedClause("c")) + (await repeatOffExclusion("c"));
@@ -97,6 +105,14 @@ export async function selfAssignContacts(session, zoneId, contactIds) {
     const [inZone] = await conn.query(`SELECT c.id FROM contacts c WHERE c.id IN (${ph}) ${z.where}`, [...ids, ...z.params]);
     const [clean] = await conn.query(`SELECT c.id FROM contacts c WHERE c.id IN (${ph}) ${excl}`, ids);
     const zoneSet = new Set(inZone.map((r) => r.id)), cleanSet = new Set(clean.map((r) => r.id));
+    let holdSet = null;
+    if (desig) {
+      const [holders] = await conn.query(
+        `SELECT c.id FROM contacts c WHERE c.id IN (${ph}) AND (c.designation_id = ? OR EXISTS (SELECT 1 FROM contact_designations cd WHERE cd.contact_id = c.id AND cd.designation_id = ?))`,
+        [...ids, desig, desig]
+      );
+      holdSet = new Set(holders.map((r) => r.id));
+    }
     const ok = [], skipped = [];
     const seen = new Set(all.map((r) => r.id));
     for (const id of ids) {
@@ -105,6 +121,7 @@ export async function selfAssignContacts(session, zoneId, contactIds) {
       if (r.assigned_to_user_id != null) { skipped.push({ id, reason: String(r.assigned_to_user_id) === String(me) ? "already_yours" : "already_assigned" }); continue; }
       if (Number(r.is_completed) === 1) { skipped.push({ id, reason: "completed" }); continue; }
       if (!cleanSet.has(id)) { skipped.push({ id, reason: "not_eligible" }); continue; }
+      if (holdSet && !holdSet.has(id)) { skipped.push({ id, reason: "designation_mismatch" }); continue; }
       ok.push(id);
     }
     let assigned = 0;
@@ -119,15 +136,20 @@ export async function selfAssignContacts(session, zoneId, contactIds) {
     }
     await conn.commit();
     if (assigned) {
-      logAudit(session, { action: "contact.self_assign", entityType: "contacts", entityId: null, details: { zone_id: zoneId, assigned, ids: ok.slice(0, 200) } }).catch(() => {});
+      logAudit(session, { action: "contact.self_assign", entityType: "contacts", entityId: null, details: { zone_id: zoneId, designation_id: desig, previous_assignee: null, assigned_to: me, assigned, ids: ok.slice(0, 200) } }).catch(() => {});
       emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: assigned });
     }
-    const outside = skipped.filter((s) => s.reason === "outside_zone").length;
+    const cnt = (r) => skipped.filter((x) => x.reason === r).length;
+    const parts = [
+      [cnt("already_yours"), "already assigned to you"], [cnt("already_assigned"), "assigned to another user (not changed - ask a Supervisor to reassign)"],
+      [cnt("outside_zone"), "outside your Zone"], [cnt("completed"), "completed"], [cnt("not_eligible"), "not eligible"],
+      [cnt("designation_mismatch"), "not holding the selected designation"],
+    ].filter(([n]) => n > 0).map(([n, t]) => `${n} ${t}`);
     return {
       status: 200, assigned, assigned_ids: ok, skipped,
       message: assigned
-        ? `Assigned ${assigned} contact${assigned === 1 ? "" : "s"} to you.${skipped.length ? ` ${skipped.length} could not be assigned (${outside ? `${outside} outside your Zone, ` : ""}already assigned / completed / not eligible).` : ""}`
-        : "None of the selected contacts could be assigned (outside your Zone, already assigned, completed or not eligible).",
+        ? `Assigned ${assigned} contact${assigned === 1 ? "" : "s"} to you.${parts.length ? ` Not assigned: ${parts.join(", ")}.` : ""}`
+        : `None of the selected contacts could be assigned${parts.length ? `: ${parts.join(", ")}` : ""}.`,
     };
   } catch (e) {
     await conn.rollback().catch(() => {});

@@ -25,7 +25,7 @@ const COLS = [
   { key: "district", label: "District" },
   { key: "assembly", label: "Assembly" },
   { key: null, label: "Block" },
-  { key: null, label: "Assigned To" },
+  { key: null, label: "Assignment" },
   { key: null, label: "Calling" },
 ];
 
@@ -139,7 +139,7 @@ export default function ZoneContactsPage() {
     if (!confirm(`Assign ${picked.size} selected contact${picked.size === 1 ? "" : "s"}${dName ? ` (${dName})` : ""} to yourself?`)) return;
     setAssigning(true); setNotice(null);
     try {
-      const r = await fetch("/api/zone-contacts/self-assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contact_ids: [...picked] }) });
+      const r = await fetch("/api/zone-contacts/self-assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contact_ids: [...picked], designation_id: designationId || undefined }) });
       const d = await r.json().catch(() => ({}));
       setNotice({ err: !r.ok || !d.assigned, text: d.message || (r.ok ? "Done." : "Could not assign the contacts.") });
       setPicked(new Set());
@@ -261,7 +261,12 @@ export default function ZoneContactsPage() {
                   <td className="px-3 py-2.5 text-gray-600">{c.district_name || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.assembly_name || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.ward_name || "—"}</td>
-                  <td className="px-3 py-2.5 text-gray-600">{c.assigned_to_username || "—"}</td>
+                  <td className="px-3 py-2.5" data-testid="zc-assign-status">
+                    {c.is_completed ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Completed</span>
+                      : !c.assigned_to_user_id ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Available in Pool</span>
+                      : String(c.assigned_to_user_id) === String(session?.user?.id) ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-[#164FA3]">Assigned to you</span>
+                      : <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700" title="Only a Supervisor / Admin can reassign">Assigned · {c.assigned_to_username || "another user"}</span>}
+                  </td>
                   <td className="px-3 py-2.5">
                     <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${c.is_completed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{c.is_completed ? "Done" : "Pending"}</span>
                   </td>

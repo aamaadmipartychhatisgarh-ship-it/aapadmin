@@ -23,7 +23,7 @@ export async function POST(req) {
     if (!Array.isArray(body.contact_ids) || body.contact_ids.some((x) => !Number.isInteger(Number(x)) || Number(x) <= 0)) {
       return NextResponse.json({ message: "Invalid selection." }, { status: 400, headers: NO_STORE });
     }
-    const r = await selfAssignContacts(session, access.zoneId, body.contact_ids);
+    const r = await selfAssignContacts(session, access.zoneId, body.contact_ids, body.designation_id || null);
     const { status, ...rest } = r;
     return NextResponse.json(rest, { status, headers: NO_STORE });
   } catch (err) {
