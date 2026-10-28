@@ -7,7 +7,7 @@ import PublicRegistrationForm from "@/components/registration/PublicRegistration
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "कार्यकर्ता एवं मतदाता पंजीयन — आम आदमी पार्टी छत्तीसगढ़",
+  title: "Worker एवं मतदाता पंजीयन — आम आदमी पार्टी छत्तीसगढ़",
   description: "Aam Aadmi Party Chhattisgarh — Worker & Voter Registration",
   robots: { index: false, follow: false },
 };
