@@ -1292,7 +1292,7 @@ export default function ContactsModule({ session, mode }) {
                     {(mode === "admin" || canGenerateLink) && (
                       <button onClick={() => generateLink(c)} disabled={genBusyId === c.id}
                         className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">
-                        {genBusyId === c.id ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} Generate Link
+                        {genBusyId === c.id ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} Link
                       </button>
                     )}
                     {/* The row-level Edit was a duplicate of the profile card's Edit
@@ -2307,7 +2307,7 @@ function RfaControl({ contact, canSubmit, onDone, onFail }) {
       )}
       <button onClick={submit} disabled={busy} data-testid="rfa-button"
         className="inline-flex items-center gap-1 text-xs text-violet-700 hover:bg-violet-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">
-        {busy ? <Loader2 size={14} className="animate-spin" /> : null} {st === "Incorrect" ? "Resubmit RfA" : "Review for Announce (RfA)"}
+        {busy ? <Loader2 size={14} className="animate-spin" /> : null} {st === "Incorrect" ? "Resubmit RfA" : "RfA"}
       </button>
       {detail && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 text-left" onClick={() => setDetail(null)}>
