@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
+import { wingShortLabel } from "@/lib/wingLabel";
 
 // The Designation + Wing field of the Add / Edit Contact forms: ONE row = ONE Designation paired
 // with ITS Wing ("Main Organisation" or a Master-Data Wing). "Add Designation" inserts another
@@ -19,8 +20,8 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
   const mainLc = new Set(wingMaster.filter((w) => w.is_main).map((w) => String(w.name).trim().toLowerCase()));
   const wings = wingMaster.filter((w) => !w.is_main);
   // The Main Wing's name comes from Master Data (Administration -> Master Data -> Wing) - never a hardcoded list. While the
-  // master is still loading (or unavailable) the blank option reads "Main (no Wing)" so a selection is always possible.
-  const mainLabel = wingMaster.find((w) => w.is_main)?.name || (wingMaster.length ? "Main Wing" : "Main (no Wing)");
+  // master is still loading (or unavailable) the blank option still reads "Main" so a selection is always possible.
+  const mainLabel = wingShortLabel(wingMaster.find((w) => w.is_main)?.name) || "Main";   // the Main option reads "Main" (the stored value stays blank = Main Organisation)
   const wingsOf = (d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).map((w) => String(w).trim().toLowerCase());
   // Is this designation mapped to the Wing? A named Wing: the designation lists it. The Main Wing (blank): the designation
   // has no Wing at all, or lists the Main Wing (also when it is shared with other Wings). One that belongs ONLY to other
@@ -48,7 +49,7 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
         <div key={idx} className="grid grid-cols-[1fr_auto] gap-2 items-start border border-gray-100 rounded-xl p-2.5 bg-gray-50/60" data-testid="designation-wing-row">
           <div className="space-y-2 min-w-0">
             <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1">Wing{idx === 0 ? "" : ` ${idx + 1}`}</label>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Wings</label>
               <select className={sel} aria-label={`Wing ${idx + 1}`} data-testid="dw-wing" value={r.wing || ""} title={r.wing || mainLabel}
                 onChange={(e) => {
                   const wing = e.target.value;
