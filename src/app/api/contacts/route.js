@@ -1,3 +1,4 @@
+import { parseIdList } from "@/lib/idList";
 import { NextResponse } from "next/server";
 import { sourceFilterClause, sourceSearchOr } from "@/lib/contactSource";
 import { getServerSession } from "next-auth/next";
@@ -135,7 +136,9 @@ export async function GET(req) {
     const person = buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, assembly_ids, designation_ids, wings });
     where += person.where;
     params.push(...person.params);
-    if (assigned_to) { where += " AND c.assigned_to_user_id = ?"; params.push(assigned_to); }
+    // Caller filter: one id or a comma list = ANY of the selected callers (alternatives); ids are validated, and the
+    // rows stay inside the user's own scope because every other condition / scope above still applies.
+    { const ac = parseIdList(assigned_to); if (ac.invalid) return NextResponse.json({ message: "Invalid caller selection." }, { status: 400 }); if (ac.ids.length) { where += ` AND c.assigned_to_user_id IN (${ac.ids.map(() => "?").join(",")})`; params.push(...ac.ids); } }
     // Source filter (?source=unfiltered_calls): contacts that came from / were updated from Unfiltered Calls.
     { const sf = await sourceFilterClause(searchParams.get("source"), "c"); where += sf.where; params.push(...sf.params); }
     // Active Workers page: only workers with one of the four real statuses —

@@ -135,7 +135,7 @@ export default function ContactsModule({ session, mode }) {
   const [districtId, setDistrictId] = useState("");
   const [assemblies, setAssemblies] = useState([]);
   const [assemblyIds, setAssemblyIds] = useState([]);
-  const [assignedTo, setAssignedTo] = useState("");
+  const [assignedTo, setAssignedTo] = useState([]); // selected caller ids (strings) - any of them
   const [sourceF, setSourceF] = useState(""); // "" = any source | "unfiltered_calls"
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -262,7 +262,7 @@ export default function ContactsModule({ session, mode }) {
     // Caller-wise counts too (§8): the status counts must reflect the SAME
     // caller + designation scope the list uses, so the badge count can never
     // differ from the actual filtered/pooled records.
-    if (assignedTo) base.set("assigned_to", assignedTo);
+    if (assignedTo.length) base.set("assigned_to", assignedTo.join(","));
     if (sourceF) base.set("source", sourceF);
     base.set("page_size", "1");
     const fetchCount = async (status) => {
@@ -418,7 +418,7 @@ export default function ContactsModule({ session, mode }) {
     const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
     const callerLabel = bulkCallers.length > 0
       ? `${bulkCallers.length} selected caller(s)`
-      : (assignedTo ? "the selected caller" : (cfg.territoryScoped ? "callers in your territory" : "callers"));
+      : (assignedTo.length ? "the selected caller(s)" : (cfg.territoryScoped ? "callers in your territory" : "callers"));
     const scope = hasSelection
       ? `${selectedIds.size} selected contact(s)`
       : `${filter !== "all" ? filter + " " : ""}contacts${desigLabel} from ${callerLabel}`;
@@ -431,7 +431,7 @@ export default function ContactsModule({ session, mode }) {
         body: JSON.stringify({
           caller_ids: bulkCallers,
           ...(hasSelection ? { contact_ids: [...selectedIds] } : {
-            assigned_to: assignedTo || undefined,
+            assigned_to: assignedTo.length ? assignedTo.join(",") : undefined,
             status: filter,
             zone_id: zoneId || undefined,
             lok_sabha_id: lokSabhaId || undefined,
@@ -520,7 +520,7 @@ export default function ContactsModule({ session, mode }) {
     // designations (designations.wing), unioned with any explicitly-picked
     // designations above. A wing with no designations correctly matches nothing.
     if (wingSel.size) params.set("wings", [...wingSel].join(","));
-    if (assignedTo) params.set("assigned_to", assignedTo);
+    if (assignedTo.length) params.set("assigned_to", assignedTo.join(","));
     if (sourceF) params.set("source", sourceF);
     // Added-date filter (sent to the list, the select-all ids call and the exports alike).
     if (addedMode === "single") { if (addedOn) params.set("added_on", addedOn); }
@@ -930,10 +930,27 @@ export default function ContactsModule({ session, mode }) {
           label="designations" items={designations} selected={designationIds} onChange={setDesignationIds}
         />
         <WingMultiSelect options={wingOptions} value={wingSel} onChange={setWingSel} placeholder="All wings" className="min-w-[160px]" />
-        <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
-          <option value="">Any caller</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
-        </select>
+        <FilterMultiSelect
+          label="callers" items={users.map((u) => ({ id: String(u.id), name: u.username }))} selected={assignedTo} onChange={setAssignedTo}
+        />
+        {(assignedTo.length > 0 || designationIds.length > 0) && (
+          /* Selected callers / designations as removable chips: drop one without clearing the rest. */
+          <div className="w-full flex flex-wrap items-center gap-1.5" data-testid="selected-chips">
+            {assignedTo.map((id) => (
+              <span key={`c${id}`} data-testid="chip-caller" className="inline-flex items-center gap-1 text-xs bg-blue-50 text-[#164FA3] border border-blue-200 rounded-full pl-2 pr-1 py-0.5">
+                Caller: {users.find((u) => String(u.id) === String(id))?.username || id}
+                <button type="button" aria-label="Remove caller" onClick={() => setAssignedTo(assignedTo.filter((x) => x !== id))} className="hover:bg-blue-100 rounded-full px-1">×</button>
+              </span>
+            ))}
+            {designationIds.map((id) => (
+              <span key={`d${id}`} data-testid="chip-designation" className="inline-flex items-center gap-1 text-xs bg-violet-50 text-violet-700 border border-violet-200 rounded-full pl-2 pr-1 py-0.5">
+                Designation: {designations.find((d) => String(d.id) === String(id))?.name || id}
+                <button type="button" aria-label="Remove designation" onClick={() => setDesignationIds(designationIds.filter((x) => String(x) !== String(id)))} className="hover:bg-violet-100 rounded-full px-1">×</button>
+              </span>
+            ))}
+            <button type="button" data-testid="chips-clear" onClick={() => { setAssignedTo([]); setDesignationIds([]); }} className="text-[11px] font-semibold text-gray-500 hover:underline">Clear caller &amp; designation</button>
+          </div>
+        )}
         {/* Source — contacts that came from (or were updated from) Unfiltered Calls. */}
         <select value={sourceF} onChange={(e) => setSourceF(e.target.value)} data-testid="source-filter" aria-label="Source" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">Any source</option>

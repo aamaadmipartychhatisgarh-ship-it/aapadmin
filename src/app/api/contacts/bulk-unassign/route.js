@@ -1,3 +1,4 @@
+import { parseIdList } from "@/lib/idList";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -33,7 +34,12 @@ export async function POST(req) {
     const body = await req.json().catch(() => ({}));
 
     const callerIds = Array.isArray(body.caller_ids) ? body.caller_ids.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
-    if (body.assigned_to != null && /^\d+$/.test(String(body.assigned_to))) callerIds.push(Number(body.assigned_to));
+    if (body.assigned_to != null && String(body.assigned_to).trim() !== "") {
+      // The list's caller filter may carry several callers ("3,5,9"): ALL of them are honoured (never silently dropped, which would widen the action).
+      const ac = parseIdList(body.assigned_to);
+      if (ac.invalid) return NextResponse.json({ message: "Invalid caller selection." }, { status: 400 });
+      callerIds.push(...ac.ids);
+    }
     const callers = [...new Set(callerIds)];
 
     const explicitIds = Array.isArray(body.contact_ids)
