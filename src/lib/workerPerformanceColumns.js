@@ -3,12 +3,15 @@
 // displayed: add, remove, reorder or hide (visible: false) a column here and all three follow.
 //   value(row)  - the plain value shown / exported ("" when unknown)
 //   display     - hint for the screen's richer cell ("rank" badge, "name" with its Worker ID line)
+//   pdfValue    - optional: the PDF shows this instead of value(row) (Excel / CSV keep value)
 //   pdfFlex     - relative width in the PDF
 //   numeric     - exported as a number in Excel
 export const WORKER_PERFORMANCE_COLUMNS = [
   { key: "rank", label: "Rank", value: (r) => r.rank, display: "rank", pdfFlex: 0.5, numeric: true },
   // The screen shows the Worker ID under the name, so the exported cell carries it too.
-  { key: "name", label: "Worker Name", value: (r) => (r.worker_code ? `${r.name} (${r.worker_code})` : r.name || ""), display: "name", pdfFlex: 2.0, bold: true },
+  { key: "name", label: "Worker Name", value: (r) => (r.worker_code ? `${r.name} (${r.worker_code})` : r.name || ""), display: "name", pdfFlex: 2.0, bold: true,
+    // The PDF shows the Worker Name only - no Worker ID.
+    pdfValue: (r) => r.name || "" },
   { key: "mobile", label: "Mobile", value: (r) => r.mobile || "", pdfFlex: 1.0 },
   { key: "zone", label: "Zone", value: (r) => r.zone_name || "", pdfFlex: 1.1 },
   { key: "assembly", label: "Assembly", value: (r) => r.assembly_name || "", pdfFlex: 1.3 },

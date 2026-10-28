@@ -85,7 +85,7 @@ export async function buildRegistrationPdf(rows, { title = "Registrations", crit
 
 // Worker-wise Performance (the dashboard ranking): the columns come from the SAME configuration as the
 // dashboard table (lib/workerPerformanceColumns), so the PDF holds exactly the displayed columns.
-const workerPerfCols = () => visibleWorkerColumns().map((c) => ({ key: c.key, label: c.label, flex: c.pdfFlex || 1, bold: c.bold, get: (r) => dash(c.value(r)) }));
+const workerPerfCols = () => visibleWorkerColumns().map((c) => ({ key: c.key, label: c.label, flex: c.pdfFlex || 1, bold: c.bold, get: (r) => dash((c.pdfValue || c.value)(r)) }));
 
 export async function buildWorkerPerformancePdf(rows, { criteria = [] } = {}) {
   const title = "Worker-wise Performance";
