@@ -7,7 +7,7 @@ import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { UNFILTERED_WRONG_REASON_VALUES } from "@/lib/unfilteredWrongReasons";
-import { PHONE_PICKED_VALUES } from "@/lib/unfilteredPhonePicked";
+import { PHONE_PICKED_VALUES, UNFILTERED_FOLLOWUP_STATUSES } from "@/lib/unfilteredPhonePicked";
 import { dueClause, laterClause } from "@/lib/followup";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
@@ -600,14 +600,16 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
   // Wrong Number needs exactly one of the two supported reasons; an unsupported value is refused for any status.
   const reasonIn = String(wrongReason ?? "").trim();
   if (reasonIn && !UNFILTERED_WRONG_REASON_VALUES.includes(reasonIn)) return { status: 400, message: "Unsupported Wrong Number reason." };
-  if (st.name === "Wrong Number" && !reasonIn) return { status: 400, message: "Please select the Wrong Number reason." };
-  const wrongNo = st.name === "Wrong Number" ? reasonIn : null;
+  const sentRaw = String(sentiment ?? "").trim();
+  const isWrongOutcome = st.name === "Wrong Number" || (st.name === "Phone Picked" && sentRaw === "wrong_number");
+  if (isWrongOutcome && !reasonIn) return { status: 400, message: "Please select the Wrong Number reason." };
+  const wrongNo = isWrongOutcome ? reasonIn : null;
   // Busy follow-up (existing follow-up design: a date, plus an optional time that needs a date). Only a Busy call
   // schedules one; the date can't be in the past, and today's time must still be ahead.
   const fuDate = String(followUpDate ?? "").trim(), fuTime = String(followUpTime ?? "").trim().slice(0, 5);
   let fuD = null, fuT = null;
   if (fuDate || fuTime) {
-    if (st.name !== "Busy") return { status: 400, message: "A follow-up can only be scheduled for a Busy call." };
+    if (!UNFILTERED_FOLLOWUP_STATUSES.includes(st.name)) return { status: 400, message: "A follow-up can only be scheduled for Busy, Not Picked, Not in Service, Switched Off or Incoming Off." };
     if (!fuDate) return { status: 400, message: "Please select a Follow-up Date before choosing a Follow-up Time." };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fuDate) || Number.isNaN(Date.parse(fuDate))) return { status: 400, message: "Invalid follow-up date." };
     if (fuTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(fuTime)) return { status: 400, message: "Invalid follow-up time." };
@@ -618,7 +620,7 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
   }
   // Phone Picked needs exactly one of its two options (Active / Not Active); anything else is refused.
   const sentIn = String(sentiment ?? "").trim();
-  if (st.name === "Phone Picked" && !PHONE_PICKED_VALUES.includes(sentIn)) return { status: 400, message: sentIn ? "Unsupported Phone Picked option." : "Please select Active or Not Active." };
+  if (st.name === "Phone Picked" && !PHONE_PICKED_VALUES.includes(sentIn)) return { status: 400, message: sentIn ? "Unsupported Phone Picked option." : "Please select Active, or Not Active with Wrong Number / Opponent / Not Interested." };
   const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
@@ -957,7 +959,8 @@ export async function releaseUnfilteredCall({ id, callerId }) {
 export async function updatePhonePickedOption({ id, callerId, option }) {
   await ensureUnfilteredCallLogSchema();
   const opt = String(option ?? "").trim();
-  if (!PHONE_PICKED_VALUES.includes(opt)) return { status: 400, message: "Unsupported Phone Picked option." };
+  // Wrong Number needs its reason, so it can only be chosen on a new call; an already saved call can change between the others.
+  if (!PHONE_PICKED_VALUES.includes(opt) || opt === "wrong_number") return { status: 400, message: "Unsupported Phone Picked option." };
   const conn = await getPool().getConnection();
   try {
     await conn.beginTransaction();
@@ -976,5 +979,25 @@ export async function updatePhonePickedOption({ id, callerId, option }) {
     throw e;
   } finally {
     conn.release();
+  }
+}
+
+
+// SQL condition (whitelisted literals only) for the admin list's Status filter, from the record's SAVED status
+// (call_status_name + call_sentiment). Not Active includes its three reasons and the legacy plain "not_active".
+export function unfilteredStatusCondition(value, alias = "u") {
+  const t = alias ? `${alias}.` : "";
+  const pp = `${t}call_status_name = 'Phone Picked'`;
+  switch (String(value || "")) {
+    case "active": return `(${pp} AND ${t}call_sentiment = 'active')`;
+    case "not_active": return `(${pp} AND ${t}call_sentiment IN ('not_active','wrong_number','opponent','not_interested'))`;
+    case "wrong_number": return `(${t}call_status_name = 'Wrong Number' OR (${pp} AND ${t}call_sentiment = 'wrong_number'))`;
+    case "opponent": return `(${pp} AND ${t}call_sentiment = 'opponent')`;
+    case "not_interested": return `(${pp} AND ${t}call_sentiment = 'not_interested')`;
+    case "not_picked": return `${t}call_status_name = 'Not Picked'`;
+    case "not_in_service": return `${t}call_status_name = 'Not in Service'`;
+    case "switched_off": return `${t}call_status_name = 'Switched Off'`;
+    case "incoming_off": return `${t}call_status_name = 'Incoming Off'`;
+    default: return "";
   }
 }

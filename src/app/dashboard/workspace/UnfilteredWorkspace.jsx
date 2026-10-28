@@ -1,6 +1,6 @@
 "use client";
 
-import { PHONE_PICKED_OPTIONS, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
+import { PHONE_PICKED_OPTIONS, NOT_ACTIVE_REASONS, UNFILTERED_FOLLOWUP_STATUSES, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
 import { UNFILTERED_WRONG_REASONS, unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -26,7 +26,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [form, setForm] = useState({ status_id: "", remarks: "", sentiment: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" });
+  const [form, setForm] = useState({ status_id: "", remarks: "", sentiment: "", pp: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" });
   const [submitting, setSubmitting] = useState(false);
   const [fuFilter, setFuFilter] = useState(""); // Follow-ups tab: show only this exact date
   const [message, setMessage] = useState("");
@@ -145,7 +145,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     if (!call) return;
     if (!keepMessage) setMessage("");
     setError("");
-    setForm({ status_id: "", remarks: "", sentiment: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" });
+    setForm({ status_id: "", remarks: "", sentiment: "", pp: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" });
     setEditing(false); setEditMsg(""); setEditErr("");
     setElapsed(0);
     setActive({ ...call, started_at: Date.now() });
@@ -157,14 +157,18 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   }
 
   const isPicked = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Phone Picked";
-  const isBusy = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Busy";
-  const isWrongNo = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Wrong Number";
+  // Follow-up date: Busy, Not Picked, Not in Service, Switched Off, Incoming Off.
+  const isBusy = UNFILTERED_FOLLOWUP_STATUSES.includes(statuses.find((s) => String(s.id) === String(form.status_id))?.name);
+  const isWrongStatus = statuses.find((s) => String(s.id) === String(form.status_id))?.name === "Wrong Number";
+  // Phone Picked -> Active, or Not Active + a reason (Wrong Number | Opponent | Not Interested), saved as the sentiment value.
+  const pickedValue = isPicked ? (form.pp === "active" ? "active" : form.pp === "not_active" ? form.sentiment : "") : "";
+  const isWrongNo = isWrongStatus || (isPicked && pickedValue === "wrong_number");   // either way the Wrong Number reason is required
 
   async function submit() {
     if (!form.status_id) { setError("Please pick a status"); return; }
     if (isBusy && form.follow_up_time && !form.follow_up_date) { setError("Please select a Follow-up Date before choosing a Follow-up Time."); return; }
     if (isBusy && form.follow_up_date && form.follow_up_date < new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)) { setError("The follow-up date cannot be in the past."); return; }
-    if (isPicked && !form.sentiment) { setError("Please select Active or Not Active"); return; }
+    if (isPicked && !pickedValue) { setError(form.pp === "not_active" ? "Please select Wrong Number, Opponent or Not Interested" : "Please select Active or Not Active"); return; }
     if (isWrongNo && !form.wrong_number_reason) { setError("Please select the Wrong Number reason"); return; }
     if (submitting || submitLock.current) return;
     submitLock.current = true;
@@ -175,7 +179,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
         headers: { "Content-Type": "application/json" },
         // Sentiment only applies to a connected ("Phone Picked") call; Positive / Supporter adds the
         // person to the Contact List automatically (server side).
-        body: JSON.stringify({ status_id: Number(form.status_id), remarks: form.remarks, duration_seconds: elapsed, sentiment: isPicked ? form.sentiment : "", wrong_number_reason: isWrongNo ? form.wrong_number_reason : "", follow_up_date: isBusy ? form.follow_up_date : "", follow_up_time: isBusy && form.follow_up_date ? form.follow_up_time : "" }),
+        body: JSON.stringify({ status_id: Number(form.status_id), remarks: form.remarks, duration_seconds: elapsed, sentiment: isPicked ? pickedValue : "", wrong_number_reason: isWrongNo ? form.wrong_number_reason : "", follow_up_date: isBusy ? form.follow_up_date : "", follow_up_time: isBusy && form.follow_up_date ? form.follow_up_time : "" }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d.message || "Failed to save"); if (r.status === 404 || r.status === 409) { setActive(null); load(); } return; }
@@ -323,10 +327,10 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                   {view === "completed" && c.call_status_name === "Phone Picked" && (
                     <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-1">
                       <span className="text-[11px] text-gray-500">Phone Picked:</span>
-                      <select value={c.call_sentiment === "active" || c.call_sentiment === "not_active" ? c.call_sentiment : ""} onChange={(e) => changePhonePicked(c.id, e.target.value)} data-testid="uw-picked-edit" aria-label="Change Phone Picked option"
+                      <select value={["active", "opponent", "not_interested"].includes(c.call_sentiment) ? c.call_sentiment : ""} onChange={(e) => changePhonePicked(c.id, e.target.value)} data-testid="uw-picked-edit" aria-label="Change Phone Picked option"
                         className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white">
-                        {!(c.call_sentiment === "active" || c.call_sentiment === "not_active") && <option value="">{c.call_sentiment ? phonePickedLabel(c.call_sentiment) : "Select…"}</option>}
-                        {PHONE_PICKED_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        {!["active", "opponent", "not_interested"].includes(c.call_sentiment) && <option value="">{c.call_sentiment ? phonePickedLabel(c.call_sentiment) : "Select…"}</option>}
+                        {PHONE_PICKED_OPTIONS.filter((o) => o.value !== "wrong_number").map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                       </select>
                     </div>
                   )}
@@ -482,7 +486,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Status *</label>
-                  <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value, wrong_number_reason: "", follow_up_date: "", follow_up_time: "" })} className={inputCls} aria-label="Status">
+                  <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value, pp: "", sentiment: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" })} className={inputCls} aria-label="Status">
                     <option value="">Select…</option>
                     {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
@@ -499,9 +503,19 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                 {isPicked && (
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Phone Picked *</label>
-                    <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value })} className={inputCls} aria-label="Phone Picked option" data-testid="uw-sentiment">
+                    <select value={form.pp} onChange={(e) => setForm({ ...form, pp: e.target.value, sentiment: "", wrong_number_reason: "" })} className={inputCls} aria-label="Phone Picked option" data-testid="uw-sentiment">
                       <option value="">Select…</option>
-                      {PHONE_PICKED_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      <option value="active">Active</option>
+                      <option value="not_active">Not Active</option>
+                    </select>
+                  </div>
+                )}
+                {isPicked && form.pp === "not_active" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Not Active - reason *</label>
+                    <select value={form.sentiment} onChange={(e) => setForm({ ...form, sentiment: e.target.value, wrong_number_reason: "" })} className={inputCls} aria-label="Not Active reason" data-testid="uw-notactive">
+                      <option value="">Select…</option>
+                      {NOT_ACTIVE_REASONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
                 )}

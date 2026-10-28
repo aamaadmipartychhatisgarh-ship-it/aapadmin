@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { ensureUnfilteredAssignmentSchema, ensureUnfilteredCallLogSchema } from "@/lib/unfilteredContacts";
+import { ensureUnfilteredAssignmentSchema, ensureUnfilteredCallLogSchema, unfilteredStatusCondition } from "@/lib/unfilteredContacts";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -31,12 +31,20 @@ export async function GET(req) {
       params.push(`%${q}%`);
       if (digits.length >= 3) params.push(`%${digits.slice(-10)}%`);
     }
+    // Status filter: the record's SAVED status (works for assigned and unassigned records alike - nothing is hidden because
+    // a caller no longer holds it).
+    const statusParam = String(searchParams.get("status") || "");
+    if (statusParam) {
+      const sc = unfilteredStatusCondition(statusParam, "u");
+      if (!sc) return NextResponse.json({ message: "Invalid status filter." }, { status: 400, headers: NO_STORE });
+      where.push(sc);
+    }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const [{ n }] = await query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u ${whereSql}`, params);
     const rows = await query(
       `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation, u.created_at,
               COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
-              b.file_name, au.username AS assigned_to, u.assigned_to_user_id, u.completed_at, u.call_status_name, u.wrong_number_reason
+              b.file_name, au.username AS assigned_to, u.assigned_to_user_id, u.completed_at, u.call_status_name, u.call_sentiment, u.wrong_number_reason, u.follow_up_date, u.follow_up_time
          FROM unfiltered_contacts u
          LEFT JOIN users au ON au.id = u.assigned_to_user_id
          LEFT JOIN locations ld ON ld.id = u.district_id

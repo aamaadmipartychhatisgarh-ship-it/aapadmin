@@ -90,7 +90,7 @@ export async function GET(req) {
     let unfRows = [];
     if (callerOnly || !scope.where) {
       await ensureUnfilteredCallLogSchema();
-      const uw = ["u.call_status_name = 'Wrong Number'", "u.completed_at IS NOT NULL"], up = [];
+      const uw = ["(u.call_status_name = 'Wrong Number' OR (u.call_status_name = 'Phone Picked' AND u.call_sentiment = 'wrong_number'))", "u.completed_at IS NOT NULL"], up = [];
       if (callerOnly) { uw.push("u.assigned_to_user_id = ?"); up.push(callerId); }
       if (search) { const q = String(search).trim().toLowerCase(); uw.push(`(u.person_name LIKE ? OR u.phone_number LIKE ?${q.length >= 4 && "unfiltered calls".includes(q) ? " OR 1 = 1" : ""})`); up.push(`%${search}%`, `%${search}%`); }
       if (sourceF && sourceF !== "unfiltered_calls") uw.push("1 = 0"); // every row here originated from Unfiltered Calls

@@ -1,6 +1,7 @@
 "use client";
 
 import { unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
+import { UNFILTERED_STATUS_FILTERS, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -228,6 +229,7 @@ export default function UnfilteredContactsPage() {
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
   const [search, setSearch] = useState("");
+  const [statusF, setStatusF] = useState(""); // saved-status filter (combines with the search)
   const [page, setPage] = useState(1);
   const [showImport, setShowImport] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0); // re-reads Assigned Calls after an import
@@ -320,6 +322,7 @@ export default function UnfilteredContactsPage() {
     try {
       const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
       if (search) p.set("q", search);
+      if (statusF) p.set("status", statusF);
       const r = await fetch(`/api/unfiltered-contacts?${p}`, { cache: "no-store" });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(d.message || "Could not load Unfiltered Contacts."); return; }
@@ -329,7 +332,7 @@ export default function UnfilteredContactsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search]);
+  }, [page, search, statusF]);
   useEffect(() => { if (ready && allowed) load(); }, [ready, allowed, load]);
   // After a delete the current page can end up empty: step back one page.
   useEffect(() => { if (data && data.contacts.length === 0 && page > 1) setPage(page - 1); }, [data, page]);
@@ -451,8 +454,13 @@ export default function UnfilteredContactsPage() {
           </div>
           <button className="px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">Search</button>
         </form>
+        <select value={statusF} onChange={(e) => { setStatusF(e.target.value); setPage(1); }} aria-label="Status" data-testid="unfiltered-status-filter"
+          className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white">
+          <option value="">All statuses</option>
+          {UNFILTERED_STATUS_FILTERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
         <div className="text-sm text-gray-500" data-testid="unfiltered-total">
-          {search ? <>{total} match{total === 1 ? "" : "es"} · </> : null}<span className="font-semibold text-gray-900">{data?.all_total ?? 0}</span> unfiltered contact{data?.all_total === 1 ? "" : "s"}
+          {search || statusF ? <>{total} match{total === 1 ? "" : "es"} · </> : null}<span className="font-semibold text-gray-900">{data?.all_total ?? 0}</span> unfiltered contact{data?.all_total === 1 ? "" : "s"}
         </div>
       </div>
 
@@ -489,6 +497,7 @@ export default function UnfilteredContactsPage() {
                 <th className="px-4 py-2.5 font-semibold">Assembly</th>
                 <th className="px-4 py-2.5 font-semibold">Designation</th>
                 <th className="px-4 py-2.5 font-semibold">Address</th>
+                <th className="px-4 py-2.5 font-semibold">Status</th>
                 <th className="px-4 py-2.5 font-semibold">Imported</th>
                 <th className="px-4 py-2.5 font-semibold">Assigned to</th>
                 <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
@@ -496,9 +505,9 @@ export default function UnfilteredContactsPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading && !data ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
+                <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">{search ? "No unfiltered contacts match this search." : "No unfiltered contacts yet — use Bulk Import to add some."}</td></tr>
+                <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">{search || statusF ? "No unfiltered contacts match these filters." : "No unfiltered contacts yet — use Bulk Import to add some."}</td></tr>
               ) : rows.map((r) => (
                 <tr key={r.id} data-testid="unfiltered-row" className="hover:bg-gray-50">
                   <td className="px-3 py-2"><input type="checkbox" checked={allMatching || sel.has(r.id)} disabled={allMatching} onChange={() => toggleRow(r)} aria-label={`Select ${r.person_name || r.phone_key}`} data-testid="bulk-select-row" /></td>
@@ -508,6 +517,13 @@ export default function UnfilteredContactsPage() {
                   <td className="px-4 py-2 text-gray-600">{r.assembly || "—"}</td>
                   <td className="px-4 py-2 text-gray-600">{r.designation || "—"}</td>
                   <td className="px-4 py-2 text-gray-600 max-w-xs truncate">{r.address || "—"}</td>
+                  <td className="px-4 py-2 text-xs whitespace-nowrap" data-testid="unfiltered-status">
+                    {r.call_status_name
+                      ? <span className="font-semibold text-gray-800">{r.call_status_name === "Phone Picked" && r.call_sentiment ? phonePickedLabel(r.call_sentiment) : r.call_status_name}</span>
+                      : <span className="text-gray-300">—</span>}
+                    {r.call_status_name === "Phone Picked" && r.call_sentiment ? <div className="text-gray-400">Phone Picked</div> : null}
+                    {r.follow_up_date ? <div className="text-[#164FA3]">Follow-up {String(r.follow_up_date).slice(0, 10)}</div> : null}
+                  </td>
                   <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">{fmtDate(r.created_at)}{r.file_name ? <div className="truncate max-w-[180px]">{r.file_name}</div> : null}</td>
                   <td className="px-4 py-2 text-xs whitespace-nowrap" data-testid="unfiltered-assignee">
                     {r.assigned_to ? <span className="font-medium text-gray-800">{r.assigned_to}</span> : <span className="text-gray-400">Unassigned</span>}
