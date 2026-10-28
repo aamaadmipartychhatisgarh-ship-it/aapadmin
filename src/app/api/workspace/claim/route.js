@@ -172,6 +172,8 @@ export async function POST(req) {
         // filter, the caller is fully caught up across all tiers.
         const message = explicitId
           ? "That contact is no longer available."
+          : String(body.filters?.designation_id || "").trim()
+          ? "No more calls are available for this designation."
           : af.active
           ? "No more contacts available for the selected filters."
           : "No calls are available right now — you're all caught up.";

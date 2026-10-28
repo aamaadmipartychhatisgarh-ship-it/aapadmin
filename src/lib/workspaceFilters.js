@@ -49,10 +49,13 @@ export function buildAssignedFilters(f = {}, alias = "c") {
       const nameMatch = ids.map(() => `FIND_IN_SET((SELECT name FROM designations WHERE id = ?), ${pos})`).join(" OR ");
       // ...OR the contact's own primary designation is one of the selected ids.
       const ownMatch = `${a}designation_id IN (${ids.map(() => "?").join(",")})`;
-      parts.push(`((${nameMatch}) OR ${ownMatch})`);
-      params.push(...ids, ...ids);
+      // ...OR it is one of the contact's designations in the join table (the authority for multi-designation
+      // contacts: a secondary designation is not mirrored to the single column).
+      const setMatch = `EXISTS (SELECT 1 FROM contact_designations cdf WHERE cdf.contact_id = ${a}id AND cdf.designation_id IN (${ids.map(() => "?").join(",")}))`;
+      parts.push(`((${nameMatch}) OR ${ownMatch} OR ${setMatch})`);
+      params.push(...ids, ...ids, ...ids);
     }
-    if (hasNone) parts.push(`${a}designation_id IS NULL`);
+    if (hasNone) parts.push(`(${a}designation_id IS NULL AND NOT EXISTS (SELECT 1 FROM contact_designations cdn WHERE cdn.contact_id = ${a}id))`);
     if (parts.length) clauses.push(`(${parts.join(" OR ")})`);
   }
 

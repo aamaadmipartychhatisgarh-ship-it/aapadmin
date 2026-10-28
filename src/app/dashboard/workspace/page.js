@@ -347,7 +347,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // filter active.
   function effectiveDesignationParam() {
     const picked = qDesignation.map(String);
-    if (!qWing.length) return picked.length ? picked.join(",") : "";
+    // A selected designation is the calling context: it is never widened by a Wing selection.
+    if (picked.length || !qWing.length) return picked.length ? picked.join(",") : "";
     const wingSet = new Set(qWing);
     const wingIds = designations.filter((d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).some((w) => wingSet.has(w))).map((d) => String(d.id));
     const merged = [...new Set([...picked, ...wingIds])];
@@ -467,6 +468,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     };
   }
 
+  const lastClaimMsg = useRef("");
   async function claim(contact_id) {
     setMessage("");
     setError("");
@@ -478,9 +480,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     });
     const data = await r.json();
     if (!r.ok) {
+      lastClaimMsg.current = data.message || "";
       setError(data.message || "Could not claim a contact");
       return false;
     }
+    lastClaimMsg.current = "";
     startActive(data.contact);
     loadQueue();
     return true;
@@ -634,7 +638,10 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       if (claimed) {
         setMessage(`Saved (${savedDuration}s).${followMsg} Next contact ready.`);
       } else {
-        setMessage(`Saved (${savedDuration}s).${followMsg} No calls are available right now — you're all caught up.`);
+        // With a designation selected the server says "No more calls are available for this designation." — the
+        // designation itself stays selected until the caller clears it.
+        setError("");
+        setMessage(`Saved (${savedDuration}s).${followMsg} ${qDesignation.length ? (lastClaimMsg.current || "No more calls are available for this designation.") : "No calls are available right now — you're all caught up."}`);
         loadQueue();
       }
     } finally {
@@ -892,8 +899,23 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               <MultiSelect options={lokSabhaOptions} value={qLokSabha} onChange={setQLokSabha} allLabel="All Lok Sabhas" />
               <MultiSelect options={districtOptions} value={qDistrict} onChange={setQDistrict} allLabel="All Districts" />
               <MultiSelect options={assemblyOptions} value={qAssembly} onChange={setQAssembly} allLabel="All Assemblies" />
-              <MultiSelect options={designationOptions} value={qDesignation} onChange={setQDesignation} allLabel="All Designations" />
-              <MultiSelect options={wingOptions} value={qWing} onChange={setQWing} allLabel="All Wings" />
+              {qDesignation.length === 0 ? (
+                <MultiSelect options={designationOptions} value={qDesignation} onChange={setQDesignation} allLabel="All Designations" />
+              ) : (
+                /* A designation is selected: it stays the calling context (Start Next Call and Save & Next only
+                   serve this designation) until the caller clears it. Another one can be picked only after that. */
+                <div className="col-span-2 flex items-center justify-between gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm" data-testid="designation-locked">
+                  <span className="min-w-0 truncate text-[#164FA3]" title={qDesignation.map((id) => designationOptions.find((o) => o.id === String(id))?.name || id).join(", ")}>
+                    Designation: <strong>{qDesignation.map((id) => designationOptions.find((o) => o.id === String(id))?.name || id).join(", ")}</strong>
+                  </span>
+                  <button onClick={() => setQDesignation([])} data-testid="clear-designation" className="shrink-0 text-xs font-semibold text-[#164FA3] border border-[#164FA3]/30 hover:bg-blue-100 rounded-md px-2 py-1">
+                    Clear Designation
+                  </button>
+                </div>
+              )}
+              <div className={qDesignation.length ? "opacity-50 pointer-events-none" : ""} title={qDesignation.length ? "Clear the designation to filter by Wing" : undefined}>
+                <MultiSelect options={wingOptions} value={qWing} onChange={setQWing} allLabel="All Wings" />
+              </div>
             </div>
             {/* Call History — filters the assigned list by the contact's complete
                 past-call history. "" shows all; Blank = never called. */}
@@ -914,7 +936,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
             <div className="text-gray-400 text-sm">Loading…</div>
           ) : queue.assigned.length === 0 ? (
             <div className="text-gray-400 text-sm">
-              {qSearch || qLokSabha.length || qDistrict.length || qAssembly.length || qDesignation.length || qWing.length || qCallHistory ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
+              {qDesignation.length ? "No more calls are available for this designation." : qSearch || qLokSabha.length || qDistrict.length || qAssembly.length || qWing.length || qCallHistory ? "No assigned contacts match your search/filters." : "Nothing due today. Click Start Next Call to pull from the pool."}
             </div>
           ) : (
             <>
