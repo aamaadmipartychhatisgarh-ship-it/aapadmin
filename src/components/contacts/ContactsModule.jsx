@@ -12,6 +12,7 @@ import { vehicleLabel } from "@/lib/vehicleOptions";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
+import { usePageAccess } from "@/components/usePageAccess";
 import WingMultiSelect from "@/components/WingMultiSelect";
 import DesignationWingRows from "@/components/contacts/DesignationWingRows";
 import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
@@ -143,6 +144,9 @@ export default function ContactsModule({ session, mode }) {
   // Contacts → Worker & Voter Registration: generate (or reuse) a registration link
   // for a selected Contact. genBusyId = the contact whose link is being generated;
   // genResult = the returned link/credentials to show once.
+  // The Generate Link action: Admin mode as before, or a Supervisor who holds the "contact_registration_link" permission (the API re-checks it).
+  const { pages: myPagesForLink } = usePageAccess();
+  const canGenerateLink = mode === "supervisor" && Array.isArray(myPagesForLink) && myPagesForLink.includes("contact_registration_link");
   const [genBusyId, setGenBusyId] = useState(null);
   const [genResult, setGenResult] = useState(null);
   async function generateLink(c) {
@@ -1285,7 +1289,7 @@ export default function ContactsModule({ session, mode }) {
                     {/* Generate (or reuse) a Worker & Voter Registration link for this
                         Contact — uses the Contact's existing name/phone/photo; the
                         worker row keeps the stable contact_id (admin only). */}
-                    {mode === "admin" && (
+                    {(mode === "admin" || canGenerateLink) && (
                       <button onClick={() => generateLink(c)} disabled={genBusyId === c.id}
                         className="inline-flex items-center gap-1 text-xs text-[#164FA3] hover:bg-blue-50 px-2 py-1 rounded-lg font-medium disabled:opacity-50">
                         {genBusyId === c.id ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} Generate Link

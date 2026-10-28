@@ -61,6 +61,11 @@ export const PAGES = [
   // These are the only two SEPARATELY-ACCESSIBLE sections; the individual
   // disposition reasons (Opponent / Switched Off / Rude Behavior / …) are call
   // outcome CATEGORIES used to filter these lists, not routable pages.
+  // Contacts -> Generate Link (Worker & Voter Registration link for a contact). Central admins already have it through the
+  // registration module; a Supervisor holds it by role (and a Super Admin can switch it off per user in Page Access), within
+  // the Supervisor's own territory (enforced by the API).
+  { key: "contact_registration_link", label: "Contacts · Generate Registration Link", href: "/dashboard/supervisor/contacts", prefixes: [], tab: true, parent: "contacts", hideFromNav: true, icon: "Link2",
+    roles: [ROLES.SUPERVISOR] },
   { key: "wn_wrong_list", label: "Wrong Numbers · List", href: "/dashboard/admin/wrong-numbers", prefixes: [], tab: true, parent: "wrong_numbers", icon: "AlertCircle",
     roles: [...OVERSIGHT] },
   { key: "not_interested", label: "Wrong Numbers · Not Interested", href: "/dashboard/admin/wrong-numbers", prefixes: [], tab: true, parent: "wrong_numbers", icon: "HeartCrack",

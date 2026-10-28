@@ -1,6 +1,12 @@
 import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { isSupervisorRole } from "@/lib/permissions";
+import { pageAllowed } from "@/lib/pageAccess";
+import { supervisorScopeFilter } from "@/lib/supervisorScope";
+import { ensureRegistrationSchema } from "@/lib/registrationSchema";
 import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
 import { newLinkToken, workerCodeFor, normalizeMobile } from "@/lib/registrationSchema";
 import { phoneKey, last10Sql } from "@/lib/phone";
@@ -25,8 +31,20 @@ function linkMobile(v) {
 // User ID / link.
 export async function POST(req) {
   try {
-    const { error } = await requireRegistrationAccess();
-    if (error) return error;
+    // A Supervisor generates links through the same logic as an Admin, but through their own capability
+    // ("contact_registration_link", held by role, switchable in Page Access) and ONLY for contacts inside their territory.
+    // Everyone else keeps the registration-module gate exactly as before.
+    const sess = await getServerSession(authOptions);
+    const supervisor = !!sess && isSupervisorRole(sess);
+    if (supervisor) {
+      if (!(await pageAllowed(sess, "contact_registration_link", true))) {
+        return NextResponse.json({ message: "You do not have permission to generate registration links." }, { status: 403, headers: NO_STORE });
+      }
+      await ensureRegistrationSchema();
+    } else {
+      const { error } = await requireRegistrationAccess();
+      if (error) return error;
+    }
     const d = await req.json().catch(() => null);
     const contactId = /^\d+$/.test(String(d?.contact_id || "")) ? Number(d.contact_id) : null;
     if (!contactId) return NextResponse.json({ message: "No contact selected." }, { status: 400, headers: NO_STORE });
@@ -50,6 +68,13 @@ export async function POST(req) {
       [contactId]
     );
     if (!contact) return NextResponse.json({ message: "That contact no longer exists." }, { status: 404, headers: NO_STORE });
+    if (supervisor) {
+      // Territory: the contact must be one this Supervisor can see (same scope filter as their Contacts list); otherwise it is
+      // reported exactly like a missing contact, never revealing it.
+      const sc = supervisorScopeFilter(sess.user, "c");
+      const [inScope] = await query(`SELECT 1 AS ok FROM contacts c WHERE c.id = ? ${sc.where} LIMIT 1`, [contactId, ...sc.params]);
+      if (!inScope) return NextResponse.json({ message: "That contact is outside your territory." }, { status: 403, headers: NO_STORE });
+    }
 
     // §13 — a valid phone is required; never mint a broken login account.
     const mobile = linkMobile(contact.phone);
