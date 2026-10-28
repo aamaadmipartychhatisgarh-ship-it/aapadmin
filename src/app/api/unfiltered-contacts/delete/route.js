@@ -22,7 +22,7 @@ export async function POST(req) {
     if (!all && (!Array.isArray(body.ids) || body.ids.some((x) => !Number.isInteger(Number(x)) || Number(x) <= 0))) {
       return NextResponse.json({ message: "Invalid selection." }, { status: 400, headers: NO_STORE });
     }
-    const r = await deleteUnfilteredContacts({ ids: body.ids, allMatching: all, q: body.q });
+    const r = await deleteUnfilteredContacts({ ids: body.ids, allMatching: all, q: body.q, status: body.status });
     if (r.status === 200 && r.deleted > 0) {
       await logAudit(session, {
         action: "unfiltered_contacts.delete", entityType: "unfiltered_contacts", entityId: null,

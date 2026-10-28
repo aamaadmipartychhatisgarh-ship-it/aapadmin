@@ -446,7 +446,7 @@ export async function ensureUnfilteredCallLogSchema() {
 export const UNFILTERED_SOURCE = "unfiltered_calls";
 export const CONTACT_SENTIMENTS = ["positive", "supporter"]; // outcomes that create / update a Contact
 export const UNFILTERED_SENTIMENTS = ["positive", "supporter", "neutral", "negative", "opponent", "not_supporter", "wrong_number"];
-const SENTIMENT_LABEL = { positive: "Positive", supporter: "Supporter", neutral: "Neutral", negative: "Negative", opponent: "Opponent", not_supporter: "Not a Supporter", wrong_number: "Wrong Number" };
+const SENTIMENT_LABEL = { active: "Active", positive: "Positive", supporter: "Supporter", neutral: "Neutral", negative: "Negative", opponent: "Opponent", not_supporter: "Not a Supporter", wrong_number: "Wrong Number" };
 
 let linkEnsured = false;
 export async function ensureUnfilteredContactLinkSchema() {
@@ -845,7 +845,7 @@ export async function assignUnfilteredToCaller({ id, callerId, expectedCallerId 
 // `ids` = the chosen records; or `allMatching` (+ optional search `q`) = every ASSIGNED record the list
 // shows for that search, across all pages. Returns { removed, skipped (already unassigned / unknown) }.
 const BULK_MAX = 20000;
-export async function bulkRemoveUnfilteredAssignments({ ids = [], allMatching = false, q = "" }) {
+export async function bulkRemoveUnfilteredAssignments({ ids = [], allMatching = false, q = "", status = "" }) {
   await ensureUnfilteredCallLogSchema();
   const conn = await getPool().getConnection();
   try {
@@ -860,6 +860,8 @@ export async function bulkRemoveUnfilteredAssignments({ ids = [], allMatching = 
         params.push(`%${term}%`);
         if (digits.length >= 3) params.push(`%${digits.slice(-10)}%`);
       }
+      // the list's Status filter is part of "all matching" - never widen the action beyond what the admin is looking at
+      if (status) { const sc = unfilteredStatusCondition(status, ""); if (!sc) { await conn.rollback(); return { status: 400, message: "Invalid status filter." }; } where.push(sc); }
       const [rows] = await conn.query(`SELECT id FROM unfiltered_contacts WHERE ${where.join(" AND ")} ORDER BY id LIMIT ${BULK_MAX} FOR UPDATE`, params);
       target = rows.map((r) => r.id);
     } else {
@@ -893,7 +895,7 @@ export async function bulkRemoveUnfilteredAssignments({ ids = [], allMatching = 
 // all its data stay). Runs in ONE transaction with the rows locked, so it is all-or-nothing: any failure
 // rolls back and nothing is deleted. `ids` = the chosen records, or `allMatching` (+ search `q`) = every
 // record the list shows for that search. Returns the ACTUAL result: { deleted, deleted_ids?, not_found }.
-export async function deleteUnfilteredContacts({ ids = [], allMatching = false, q = "" }) {
+export async function deleteUnfilteredContacts({ ids = [], allMatching = false, q = "", status = "" }) {
   await ensureUnfilteredCallLogSchema();
   const conn = await getPool().getConnection();
   try {
@@ -908,6 +910,8 @@ export async function deleteUnfilteredContacts({ ids = [], allMatching = false, 
         params.push(`%${term}%`);
         if (digits.length >= 3) params.push(`%${digits.slice(-10)}%`);
       }
+      // the list's Status filter is part of "all matching" - never widen the action beyond what the admin is looking at
+      if (status) { const sc = unfilteredStatusCondition(status, ""); if (!sc) { await conn.rollback(); return { status: 400, message: "Invalid status filter." }; } where.push(sc); }
       const [rows] = await conn.query(`SELECT id FROM unfiltered_contacts WHERE ${where.join(" AND ")} ORDER BY id LIMIT ${BULK_MAX} FOR UPDATE`, params);
       target = rows.map((r) => r.id);
     } else {
@@ -1000,4 +1004,77 @@ export function unfilteredStatusCondition(value, alias = "u") {
     case "incoming_off": return `${t}call_status_name = 'Incoming Off'`;
     default: return "";
   }
+}
+
+
+// BULK CONVERT Active records to Contacts, through the SAME conversion the Positive / Supporter outcome uses
+// (syncUnfilteredToContact): links the record to its Contact both ways, reuses an existing Contact with the same number
+// (never a duplicate), keeps the Contact's own source and records contacts.source = Unfiltered Calls only where blank.
+// Eligible = saved status Active (Phone Picked -> Active) and not yet converted. Everything else is skipped with a reason.
+// dryRun = classify only (the confirmation dialog). Each record is converted in its own transaction under a row lock, so a
+// repeated / concurrent request converts it at most once; a failure rolls back only that record and is reported.
+export async function convertActiveUnfilteredToContacts({ ids = [], allMatching = false, q = "", status = "", userId = null, dryRun = false }) {
+  await ensureUnfilteredCallLogSchema();
+  let target;
+  if (allMatching) {
+    const where = ["1=1"], params = [];
+    const term = String(q || "").trim();
+    if (term) {
+      const digits = term.replace(/\D/g, "");
+      where.push(digits.length >= 3 ? "(person_name LIKE ? OR phone_key LIKE ?)" : "person_name LIKE ?");
+      params.push(`%${term}%`);
+      if (digits.length >= 3) params.push(`%${digits.slice(-10)}%`);
+    }
+    if (status) { const sc = unfilteredStatusCondition(status, ""); if (!sc) return { status: 400, message: "Invalid status filter." }; where.push(sc); }
+    target = (await query(`SELECT id FROM unfiltered_contacts WHERE ${where.join(" AND ")} ORDER BY id LIMIT ${BULK_MAX}`, params)).map((r) => r.id);
+  } else {
+    target = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter((x) => Number.isInteger(x) && x > 0))].slice(0, BULK_MAX);
+    if (!target.length) return { status: 400, message: "Select at least one record." };
+  }
+  const classify = (row) => {
+    if (!row) return "not_found";
+    if (!(row.call_status_name === "Phone Picked" && row.call_sentiment === "active")) return "not_active";
+    if (row.contact_id) return "already_converted";
+    if (!String(row.phone_key || "").trim()) return "no_phone";
+    if (!String(row.person_name || "").trim()) return "no_name";
+    return "eligible";
+  };
+  const counts = { eligible: 0, not_active: 0, already_converted: 0, no_phone: 0, no_name: 0, not_found: 0 };
+  const eligibleIds = [], skipped = [];
+  for (let i = 0; i < target.length; i += 500) {
+    const chunk = target.slice(i, i + 500);
+    // eslint-disable-next-line no-await-in-loop
+    const rows = await query(`SELECT id, person_name, phone_key, call_status_name, call_sentiment, contact_id FROM unfiltered_contacts WHERE id IN (${chunk.map(() => "?").join(",")})`, chunk);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const id of chunk) { const c = classify(byId.get(id)); counts[c]++; if (c === "eligible") eligibleIds.push(id); else skipped.push({ id, reason: c }); }
+  }
+  if (dryRun) return { status: 200, dry_run: true, selected: target.length, eligible: counts.eligible, eligible_ids: eligibleIds, counts, skipped: skipped.slice(0, 200) };
+
+  let created = 0, linked = 0; const failed = [], convertedIds = [];
+  for (const id of eligibleIds) {
+    const conn = await getPool().getConnection();
+    try {
+      await conn.beginTransaction();
+      const [[row]] = await conn.query("SELECT * FROM unfiltered_contacts WHERE id = ? FOR UPDATE", [id]);
+      const c = classify(row);                 // re-checked under the lock: a concurrent conversion makes this "already_converted"
+      if (c !== "eligible") { await conn.rollback(); skipped.push({ id, reason: c }); counts[c]++; counts.eligible--; continue; }
+      const r = await syncUnfilteredToContact(conn, row, { sentiment: "active", userId });
+      if (r.action === "skipped") { await conn.rollback(); failed.push({ id, reason: r.reason || "skipped" }); continue; }
+      await conn.commit();
+      convertedIds.push(id);
+      if (r.action === "created") created++; else linked++;
+    } catch (e) {
+      await conn.rollback().catch(() => {});
+      failed.push({ id, reason: "error" });
+    } finally {
+      conn.release();
+    }
+  }
+  const converted = created + linked;
+  return {
+    status: 200, selected: target.length, converted, created, linked_existing: linked, converted_ids: convertedIds,
+    skipped, failed, counts,
+    message: `${converted} record${converted === 1 ? "" : "s"} converted (${created} new Contact${created === 1 ? "" : "s"}, ${linked} linked to an existing Contact).` +
+      `${skipped.length ? ` ${skipped.length} skipped.` : ""}${failed.length ? ` ${failed.length} failed.` : ""}`,
+  };
 }

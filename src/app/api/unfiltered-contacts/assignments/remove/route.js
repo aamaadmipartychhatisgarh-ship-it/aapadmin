@@ -18,7 +18,7 @@ export async function POST(req) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     }
     const body = await req.json().catch(() => ({}));
-    const r = await bulkRemoveUnfilteredAssignments({ ids: body.ids, allMatching: body.all_matching === true, q: body.q });
+    const r = await bulkRemoveUnfilteredAssignments({ ids: body.ids, allMatching: body.all_matching === true, q: body.q, status: body.status });
     if (r.status === 200 && r.removed > 0) {
       await logAudit(session, {
         action: "unfiltered_contacts.bulk_unassign", entityType: "unfiltered_contacts", entityId: null,

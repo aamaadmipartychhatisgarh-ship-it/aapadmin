@@ -13,6 +13,7 @@ import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
 import { usePageAccess } from "@/components/usePageAccess";
+import { contactSourceLabel } from "@/lib/sourceLabel";
 import WingMultiSelect from "@/components/WingMultiSelect";
 import DesignationWingRows from "@/components/contacts/DesignationWingRows";
 import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
@@ -1194,13 +1195,20 @@ export default function ContactsModule({ session, mode }) {
                       {/* Created by "Convert to Contact" on a Worker registration —
                           linked permanently to that Registration (contacts.source_registration_id). */}
                       {/* Added automatically from a Positive / Supporter Unfiltered Call. */}
+                      {/* The contact's OWN original source (any value other than Unfiltered Calls) is always shown as recorded. */}
+                      {c.source && c.source !== "unfiltered_calls" && contactSourceLabel({ source: c.source }) ? (
+                        <span data-testid="contact-own-source" title={`Source: ${contactSourceLabel({ source: c.source })}`}
+                          className="block w-fit mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-gray-50 text-gray-700 border border-gray-200 whitespace-nowrap">
+                          Source: {contactSourceLabel({ source: c.source })}
+                        </span>
+                      ) : null}
                       {c.source === "unfiltered_calls" || c.source_unfiltered_contact_id ? (
                         <span
-                          title={`Source: Unfiltered Calls (record #${c.source_unfiltered_contact_id || "?"})`}
+                          title={`${c.source === "unfiltered_calls" ? "Source" : "Linked to"}: Unfiltered Calls (record #${c.source_unfiltered_contact_id || "?"})`}
                           data-testid="from-unfiltered-calls"
                           className="block w-fit mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap"
                         >
-                          Source: Unfiltered Calls
+                          {c.source === "unfiltered_calls" ? "Source" : "Linked"}: Unfiltered Calls
                         </span>
                       ) : null}
                       {c.source_registration_id ? (

@@ -249,13 +249,45 @@ export default function UnfilteredContactsPage() {
       .then((d) => setCallers((d.callers || []).filter((c) => c.eligible))).catch(() => {});
   }, [ready, allowed, refreshKey]);
 
+  // Bulk conversion of Active records to Contacts: classify the selection first (dry run) so the dialog says exactly which
+  // records are eligible, then convert only those. Ineligible records (other statuses, already converted) are never touched.
+  const [convDlg, setConvDlg] = useState(null);   // { loading, preview } | null
+  const [convBusy, setConvBusy] = useState(false);
+  const convBody = (extra = {}) => ({ ...(allMatching ? { all_matching: true, q: search, status: statusF || undefined } : { ids: [...sel.keys()] }), ...extra });
+  async function openConvert() {
+    setNotice(null); setConvDlg({ loading: true, preview: null });
+    try {
+      const res = await fetch("/api/unfiltered-contacts/convert", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(convBody({ dry_run: true })) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setConvDlg(null); setNotice({ err: true, text: d.message || "Could not check the selection." }); return; }
+      setConvDlg({ loading: false, preview: d });
+    } catch { setConvDlg(null); setNotice({ err: true, text: "Could not check the selection - network error." }); }
+  }
+  async function confirmConvert() {
+    if (convBusy || !convDlg?.preview?.eligible) return;
+    setConvBusy(true);
+    try {
+      // only the eligible ids are sent; the server re-validates each one under a lock
+      const res = await fetch("/api/unfiltered-contacts/convert", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: convDlg.preview.eligible_ids }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setNotice({ err: true, text: `${d.message || "Could not convert the selected records."} Nothing was reported as converted.` }); }
+      else {
+        const bad = (d.failed || []).length;
+        setNotice({ err: bad > 0 && d.converted === 0, text: `${d.message}${bad ? " Failed records were left unchanged." : ""}` });
+        setSel(new Map()); setAllMatching(false);   // selection is cleared after the operation
+        load(); setRefreshKey((k) => k + 1);
+      }
+    } catch { setNotice({ err: true, text: "Could not convert the selected records - network error." }); }
+    finally { setConvBusy(false); setConvDlg(null); }
+  }
+
   async function bulkRemove() {
     if (bulkBusy) return;
     setBulkBusy(true); setNotice(null);
     try {
       const res = await fetch("/api/unfiltered-contacts/assignments/remove", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(allMatching ? { all_matching: true, q: search } : { ids: [...sel.keys()] }),
+        body: JSON.stringify(allMatching ? { all_matching: true, q: search, status: statusF || undefined } : { ids: [...sel.keys()] }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { setNotice({ err: true, text: d.message || "Could not remove the assignments." }); }
@@ -363,7 +395,7 @@ export default function UnfilteredContactsPage() {
         ? await fetch(`/api/unfiltered-contacts/${delConfirm.ids[0]}`, { method: "DELETE" })
         : await fetch("/api/unfiltered-contacts/delete", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(delConfirm.all ? { all_matching: true, q: search } : { ids: delConfirm.ids }),
+            body: JSON.stringify(delConfirm.all ? { all_matching: true, q: search, status: statusF || undefined } : { ids: delConfirm.ids }),
           });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -474,6 +506,11 @@ export default function UnfilteredContactsPage() {
           className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
           Bulk Delete{selCount ? ` (${selCount})` : ""}
         </button>
+        <button type="button" onClick={openConvert} disabled={!selCount || convBusy} data-testid="bulk-convert"
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed">
+          Convert Active to Contacts{selCount ? ` (${selCount})` : ""}
+        </button>
+        <span className="text-xs text-gray-600" data-testid="bulk-selected-count">{selCount} selected</span>
         {selCount > 0 && <button type="button" onClick={() => { setSel(new Map()); setAllMatching(false); }} className="text-xs text-gray-500 hover:underline" data-testid="bulk-clear">Clear selection</button>}
         {pageAllSelected && !allMatching && total > rows.length && (
           <button type="button" onClick={() => setAllMatching(true)} className="text-xs font-semibold text-[#164FA3] hover:underline" data-testid="bulk-select-all-matching">
@@ -482,6 +519,37 @@ export default function UnfilteredContactsPage() {
         )}
         {allMatching && <span className="text-xs text-gray-600" data-testid="bulk-all-note">All {total} call{total === 1 ? "" : "s"}{search ? " matching this search" : ""} are selected.</span>}
       </div>
+
+      {convDlg && (
+        <div className="fixed inset-0 z-[150] bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" data-testid="convert-confirm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
+            <h3 className="text-base font-bold text-gray-900">Convert Active records to Contacts</h3>
+            {convDlg.loading ? <div className="py-6 text-center"><Loader2 className="animate-spin inline text-gray-400" size={18} /></div> : (
+              <>
+                <p className="text-sm text-gray-700 mt-2" data-testid="convert-eligible">
+                  <span className="font-semibold">{convDlg.preview.eligible}</span> of {convDlg.preview.selected} selected record{convDlg.preview.selected === 1 ? " is" : "s are"} eligible (saved status Active, not yet converted).
+                </p>
+                {convDlg.preview.selected - convDlg.preview.eligible > 0 && (
+                  <ul className="text-xs text-gray-500 mt-2 list-disc pl-5 space-y-0.5" data-testid="convert-skipped">
+                    {convDlg.preview.counts.not_active > 0 && <li>{convDlg.preview.counts.not_active} not Active - will not be converted</li>}
+                    {convDlg.preview.counts.already_converted > 0 && <li>{convDlg.preview.counts.already_converted} already converted to a Contact</li>}
+                    {convDlg.preview.counts.no_phone + convDlg.preview.counts.no_name > 0 && <li>{convDlg.preview.counts.no_phone + convDlg.preview.counts.no_name} missing a name or phone number</li>}
+                    {convDlg.preview.counts.not_found > 0 && <li>{convDlg.preview.counts.not_found} no longer exist</li>}
+                  </ul>
+                )}
+                <p className="text-xs text-gray-500 mt-2">A Contact that already exists for the same number is linked, not duplicated, and keeps its own source.</p>
+              </>
+            )}
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setConvDlg(null)} disabled={convBusy} data-testid="convert-cancel" className="px-4 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={confirmConvert} disabled={convBusy || convDlg.loading || !convDlg.preview?.eligible} data-testid="convert-confirm-yes"
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50">
+                {convBusy ? "Converting…" : `Confirm${convDlg.preview?.eligible ? ` (${convDlg.preview.eligible})` : ""}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {err && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">{err}</div>}
 
