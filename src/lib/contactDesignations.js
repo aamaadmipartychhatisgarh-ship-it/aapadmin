@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { ensureDesignationWingsSchema } from "@/lib/designationWings";
+import { ensureDesignationWingsSchema, wingsMapFor } from "@/lib/designationWings";
 
 // PROMPT 5 — a contact can hold MANY designations. The relationship lives in
 // contact_designations(contact_id, designation_id) with UNIQUE(contact_id,
@@ -59,6 +59,25 @@ export function parseDesignationIds(input) {
   return out;
 }
 
+// Which of these designations belong to the Main wing (no other Wing), and the Main wing's name - from the Wing master.
+// Never throws: where the Wing tables are not there yet nothing is treated as Main.
+export async function mainWingFor(ids) {
+  const none = { name: null, ids: new Set() };
+  try {
+    if (!ids.length) return none;
+    const [main] = await query("SELECT name FROM wings WHERE is_main = 1 ORDER BY id LIMIT 1");
+    if (!main) return none;
+    const rows = await query(`SELECT id, wing FROM designations WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+    const map = await wingsMapFor(rows);
+    const ok = new Set();
+    for (const r of rows) {
+      const ws = (map.get(r.id) || []).map((w) => String(w).trim()).filter(Boolean);
+      if (ws.length === 0 || ws.some((w) => w.toLowerCase() === String(main.name).toLowerCase())) ok.add(Number(r.id));
+    }
+    return { name: main.name, ids: ok };
+  } catch { return none; }
+}
+
 // Replace a contact's designation set with exactly `ids` (empty clears them).
 // Removing one keeps the rest; adding one keeps the rest — it's a full sync of
 // the provided set, and UNIQUE prevents duplicates. Returns the final ids.
@@ -68,10 +87,15 @@ export async function syncContactDesignations(contactId, ids) {
   // A designation that stays keeps the Wing it is paired with.
   const kept = new Map((await query(`SELECT designation_id, wing FROM contact_designations WHERE contact_id = ?`, [contactId])).map((r) => [Number(r.designation_id), r.wing]));
   await query(`DELETE FROM contact_designations WHERE contact_id = ?`, [contactId]);
+  // Main is an ordinary Wing: a designation that belongs to no other Wing is saved on the Main wing (and the contact tagged with it),
+  // like any other designation is saved with its Wing - never as a blank placeholder.
+  const mainFor = await mainWingFor(wanted.filter((d) => !String(kept.get(d) ?? "").trim()));
   for (const d of wanted) {
+    const wing = String(kept.get(d) ?? "").trim() ? kept.get(d) : (mainFor.ids.has(d) ? mainFor.name : null);
     // eslint-disable-next-line no-await-in-loop
-    await query(`INSERT IGNORE INTO contact_designations (contact_id, designation_id, wing) VALUES (?, ?, ?)`, [contactId, d, kept.get(d) ?? null]);
+    await query(`INSERT IGNORE INTO contact_designations (contact_id, designation_id, wing) VALUES (?, ?, ?)`, [contactId, d, wing]);
   }
+  if (mainFor.ids.size) await query(`INSERT IGNORE INTO contact_wings (contact_id, wing) VALUES (?, ?)`, [contactId, mainFor.name]).catch(() => {});
   return wanted;
 }
 

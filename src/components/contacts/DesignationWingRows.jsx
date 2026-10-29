@@ -18,21 +18,23 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
   const designations = fresh || designationsProp;
   const reload = () => fetch("/api/designations", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.designations) setFresh(d.designations); return d?.designations || null; }).catch(() => null);
   const mainLc = new Set(wingMaster.filter((w) => w.is_main).map((w) => String(w.name).trim().toLowerCase()));
-  const wings = wingMaster.filter((w) => !w.is_main);
+  // Main is an ORDINARY Wing: it is one of the master's Wings, selectable and stored with its own name like every other Wing.
+  const wings = wingMaster;
+  const mainName = wingMaster.find((w) => w.is_main)?.name || "";
   // The Main Wing's name comes from Master Data (Administration -> Master Data -> Wing) - never a hardcoded list. While the
   // master is still loading (or unavailable) the blank option still reads "Main" so a selection is always possible.
-  const mainLabel = wingShortLabel(wingMaster.find((w) => w.is_main)?.name) || "Main";   // the Main option reads "Main" (the stored value stays blank = Main Organisation)
+  const effWing = (r) => String(r.wing || mainName || "");   // a new row starts on Main (a blank legacy value is Main)
   const wingsOf = (d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).map((w) => String(w).trim().toLowerCase());
   // Is this designation mapped to the Wing? A named Wing: the designation lists it. The Main Wing (blank): the designation
   // has no Wing at all, or lists the Main Wing (also when it is shared with other Wings). One that belongs ONLY to other
   // Wings is never offered.
   const inWing = (d, wingLc) => {
     const dw = wingsOf(d);
-    return wingLc ? dw.includes(wingLc) : (dw.length === 0 || dw.some((x) => mainLc.has(x)));
+    return mainLc.has(wingLc) || !wingLc ? (dw.length === 0 || dw.some((x) => mainLc.has(x))) : dw.includes(wingLc);
   };
   const optionsFor = (row, idx) => {
     const taken = new Set(rows.filter((_, i) => i !== idx).map((r) => String(r.designation_id || "")).filter(Boolean));
-    const w = String(row.wing || "").trim().toLowerCase();
+    const w = effWing(row).trim().toLowerCase();
     return designations.filter((d) => {
       if (taken.has(String(d.id))) return false;
       if (String(d.id) === String(row.designation_id)) return true; // keep the saved choice visible
@@ -50,7 +52,7 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
           <div className="space-y-2 min-w-0">
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1">Wings</label>
-              <select className={sel} aria-label={`Wing ${idx + 1}`} data-testid="dw-wing" value={r.wing || ""} title={r.wing ? wingShortLabel(r.wing) : mainLabel}
+              <select className={sel} aria-label={`Wing ${idx + 1}`} data-testid="dw-wing" value={effWing(r)} title={wingShortLabel(effWing(r))}
                 onChange={(e) => {
                   const wing = e.target.value;
                   const w = wing.trim().toLowerCase();
@@ -62,7 +64,7 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
                   apply(designations);
                   reload().then((list) => { const d = list?.find((x) => String(x.id) === String(r.designation_id)); if (d && !inWing(d, w)) apply(list); });   // refresh the options from Master Data
                 }}>
-                <option value="">{mainLabel}</option>
+                {wings.length === 0 && <option value="">Main</option>}
                 {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{wingShortLabel(w.name)}</option>)}
               </select>
             </div>

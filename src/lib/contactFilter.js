@@ -89,8 +89,12 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
           // A designation matches a wing by its own (first) wing OR any wing stored
           // against it in designation_wings (one entry can carry many wings).
           const wph = wingList.map(() => "?").join(",");
-          subs.push(`(dw.wing IN (${wph}) OR EXISTS (SELECT 1 FROM designation_wings dwx WHERE dwx.designation_id = dw.id AND dwx.wing IN (${wph})))`);
-          subParams.push(...wingList, ...wingList);
+          // Main is an ordinary Wing: a designation that belongs to no other Wing is a Main designation, so the Main filter
+          // also finds contacts holding one (whatever wrote the pair), exactly like any other Wing's designations.
+          subs.push(`(dw.wing IN (${wph}) OR EXISTS (SELECT 1 FROM designation_wings dwx WHERE dwx.designation_id = dw.id AND dwx.wing IN (${wph}))
+            OR ((dw.wing IS NULL OR TRIM(dw.wing) = '') AND NOT EXISTS (SELECT 1 FROM designation_wings dwy WHERE dwy.designation_id = dw.id AND dwy.wing NOT IN (SELECT mw.name FROM wings mw WHERE mw.is_main = 1))
+                AND EXISTS (SELECT 1 FROM wings mx WHERE mx.is_main = 1 AND mx.name IN (${wph}))))`);
+          subParams.push(...wingList, ...wingList, ...wingList);
         }
         const join = wingList.length ? "JOIN designations dw ON dw.id = cd.designation_id" : "";
         clauses.push(`EXISTS (SELECT 1 FROM contact_designations cd ${join} WHERE cd.contact_id = c.id AND (${subs.join(" OR ")}))`);

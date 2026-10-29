@@ -10,7 +10,7 @@ const lc = (w) => String(w ?? "").trim().toLowerCase();
 async function masterContext(designationIds) {
   const wingMaster = await listWings();
   const mainNames = wingMaster.filter((w) => Number(w.is_main) === 1).map((w) => w.name);
-  const enabled = wingMaster.filter((w) => Number(w.is_main) !== 1 && (w.enabled == null || Number(w.enabled) === 1)).map((w) => w.name);
+  const enabled = wingMaster.filter((w) => Number(w.is_main) !== 1 && (w.enabled == null || Number(w.enabled) === 1)).map((w) => w.name);   // non-Main Wings; Main is validated separately below
   let designations = [];
   if (designationIds.length) {
     const cols = new Set((await query("SHOW COLUMNS FROM designations")).map((r) => r.Field));
@@ -47,8 +47,15 @@ export async function validateRows(rows, existing = []) {
   for (const r of rows) {
     const isExisting = existing.some((e) => e.designation_id === r.designation_id && lc(e.wing) === lc(r.wing));
     let wing = r.wing;
-    if (wing && mainLc.has(lc(wing))) wing = "";
-    if (wing && !isExisting) {
+    const mainName = ctx.mainNames[0] || "";
+    // Main is an ordinary Wing carrying its own name; a blank Wing on a designation that belongs to no other Wing means Main.
+    if (wing && mainLc.has(lc(wing))) wing = mainName;
+    else if (!wing && r.designation_id && mainName) {
+      const dwAll = (ctx.wmap.get(r.designation_id) || []).filter(Boolean);
+      if (dwAll.length === 0 || dwAll.some((w) => mainLc.has(lc(w)))) wing = mainName;
+    }
+    const isMainWing = !!wing && mainLc.has(lc(wing));
+    if (wing && !isMainWing && !isExisting) {
       const canon = wingByLc.get(lc(wing));
       if (!canon) return { error: `"${wing}" is not a Wing in Master Data.` };
       wing = canon;
@@ -62,7 +69,9 @@ export async function validateRows(rows, existing = []) {
         if (d.enabled != null && Number(d.enabled) === 0) return { error: `"${d.name}" is disabled in Master Data.` };
         const dw = (ctx.wmap.get(r.designation_id) || []).filter(Boolean);
         const dwNonMain = dw.filter((w) => !mainLc.has(lc(w)));
-        if (wing && !dw.some((w) => lc(w) === lc(wing))) return { error: `"${d.name}" does not belong to the ${wing}.` };
+        if (isMainWing) {
+          if (dw.length && !dw.some((w) => mainLc.has(lc(w)))) return { error: `"${d.name}" belongs to ${dwNonMain.join(", ")}; choose that Wing for it.` };
+        } else if (wing && !dw.some((w) => lc(w) === lc(wing))) return { error: `"${d.name}" does not belong to the ${wing}.` };
         if (!wing && dwNonMain.length && dwNonMain.length === dw.length) return { error: `"${d.name}" belongs to ${dwNonMain.join(", ")}; choose that Wing for it.` };
       }
     } else {
@@ -80,7 +89,21 @@ export async function validateRows(rows, existing = []) {
 // Returns { error } | { none: true } (not sent / nothing to change) | { rows, conflict? }.
 export async function prepareDesignationRows(data, { contactId = null, canClear = true } = {}) {
   if (!data || !("designation_rows" in data)) return { none: true };
-  const sent = normalizeRows(data.designation_rows);
+  // A form (or client) from before Main became an ordinary Wing sends a BLANK Wing for a Main designation: read it as Main on both
+  // the submitted rows and the baseline, so such a form is neither refused as "changed meanwhile" nor seen as an edit.
+  const canonMain = async (rows) => {
+    const blank = rows.filter((r) => r.designation_id && !r.wing);
+    if (!blank.length) return rows;
+    const ctx = await masterContext([...new Set(blank.map((r) => r.designation_id))]);
+    const mainName = ctx.mainNames[0] || "";
+    const mainLc0 = new Set(ctx.mainNames.map(lc));
+    return rows.map((r) => {
+      if (!(r.designation_id && !r.wing && mainName)) return r;
+      const dw = (ctx.wmap.get(r.designation_id) || []).filter(Boolean);
+      return dw.length === 0 || dw.some((w) => mainLc0.has(lc(w))) ? { ...r, wing: mainName } : r;
+    });
+  };
+  const sent = await canonMain(normalizeRows(data.designation_rows));
   const strip = () => { delete data.designation_rows; delete data.designation_rows_prev; delete data.designation_ids; delete data.designation_ids_prev; delete data.designation_id; delete data.wings; };
   if (!contactId) {
     const v = await validateRows(sent);
@@ -92,17 +115,16 @@ export async function prepareDesignationRows(data, { contactId = null, canClear 
   }
   const cur = await currentRowsFor(contactId);
   if ("designation_rows_prev" in data) {
-    const prev = normalizeRows(data.designation_rows_prev);
+    const prev = await canonMain(normalizeRows(data.designation_rows_prev));
     if (sameRows(sent, prev)) { strip(); return { none: true }; }              // not edited: stale copy
     if (!sameRows(prev, cur.rows)) { strip(); return { none: true, conflict: true }; } // changed meanwhile
   } else if (sameRows(sent, cur.rows)) { strip(); return { none: true }; }
   if (!sent.length && !canClear) { strip(); return { none: true }; }
   const v = await validateRows(sent, cur.rows);
   if (v.error) return { error: v.error };
-  const mainKept = cur.wings.filter((w) => v.mainNames.some((m) => lc(m) === lc(w)));
   data.designation_ids = v.rows.filter((r) => r.designation_id).map((r) => r.designation_id);
   data.designation_ids_prev = cur.rows.filter((r) => r.designation_id).map((r) => r.designation_id);
-  data.wings = [...new Set([...v.rows.map((r) => r.wing).filter(Boolean), ...mainKept])];
+  data.wings = [...new Set(v.rows.map((r) => r.wing).filter(Boolean))];   // Main is stored like any other Wing
   delete data.designation_rows; delete data.designation_rows_prev; delete data.designation_id;
   return { rows: v.rows };
 }
