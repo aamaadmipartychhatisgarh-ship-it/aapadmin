@@ -88,7 +88,7 @@ export default function RfaReviewList({ compact = false }) {
               <th className="px-4 py-2 font-semibold">Assembly</th>
               <th className="px-4 py-2 font-semibold">District</th>
               <th className="px-4 py-2 font-semibold">Lok Sabha</th>
-              <th className="px-4 py-2 font-semibold">Zone</th>
+              <th className="px-4 py-2 font-semibold">Remark / Notes</th>
               <th className="px-4 py-2 font-semibold">Vehicle</th>
               <th className="px-4 py-2 font-semibold">Submitted By (Supervisor-2)</th>
               <th className="px-4 py-2 font-semibold">Status</th>
@@ -108,7 +108,7 @@ export default function RfaReviewList({ compact = false }) {
                 <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-assembly">{r.assembly_name || "—"}</td>
                 <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-district">{r.district_name || "—"}</td>
                 <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-lok-sabha">{r.lok_sabha_name || "—"}</td>
-                <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-zone">{r.zone_name || "—"}</td>
+                <td className="px-4 py-2.5 align-top text-gray-700 max-w-[260px] whitespace-pre-wrap break-words" data-testid="rfa-contact-remarks">{r.contact_remarks || "—"}</td>
                 <td className="px-4 py-2.5 align-top text-gray-700" data-testid="rfa-vehicle">{vehicleLabel(r.vehicle) || "—"}</td>
                 <td className="px-4 py-2.5 align-top"><div className="text-gray-900">{r.submitted_by_name || "—"}</div><div className="text-[11px] text-gray-400">{fmt(r.submitted_at)}</div></td>
                 <td className="px-4 py-2.5 align-top">

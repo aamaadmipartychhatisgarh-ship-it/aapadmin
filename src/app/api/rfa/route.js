@@ -29,20 +29,17 @@ export async function GET(req) {
     const rows = await query(
       // Everything about the Contact is read LIVE from the linked contacts row (never
       // copied onto the review), with the same geography derivation as the Contact
-      // List: district → Lok Sabha → Zone, the contact's own zone / Lok Sabha winning.
+      // List: district → Lok Sabha, the contact's own Lok Sabha winning. Remarks = the contact's saved Remarks / Notes (Add Contact).
       `SELECT r.*, c.person_name, c.phone_number, c.address, c.photo_url,
-              c.qualification, c.education_level, c.vehicle,
+              c.qualification, c.education_level, c.vehicle, c.remarks AS contact_remarks,
               la.name AS assembly_name, ld.name AS district_name,
               COALESCE(cls.name, lls.name) AS lok_sabha_name,
-              COALESCE(cz.name, lz.name) AS zone_name,
               (SELECT d.name FROM designations d WHERE d.id = c.designation_id) AS designation_name
          FROM contact_rfa_reviews r
          LEFT JOIN contacts c ON c.id = r.contact_id
          LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lls ON lls.id = ld.parent_id
-         LEFT JOIN locations lz ON lz.id = lls.parent_id
-         LEFT JOIN locations cz ON cz.id = c.zone_id
          LEFT JOIN locations cls ON cls.id = c.lok_sabha_id
          ${where}
         ORDER BY r.id DESC LIMIT 1000`,
