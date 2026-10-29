@@ -7,7 +7,7 @@ import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { UNFILTERED_WRONG_REASON_VALUES } from "@/lib/unfilteredWrongReasons";
-import { PHONE_PICKED_VALUES, UNFILTERED_FOLLOWUP_STATUSES, UNFILTERED_HIDDEN_STATUSES } from "@/lib/unfilteredPhonePicked";
+import { PHONE_PICKED_VALUES, UNFILTERED_FOLLOWUP_STATUSES, UNFILTERED_HIDDEN_STATUSES, UNFILTERED_FINAL_STATUSES } from "@/lib/unfilteredPhonePicked";
 import { dueClause, laterClause } from "@/lib/followup";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
@@ -383,7 +383,7 @@ export async function myUnfilteredCalls(userId, { view = "pending", onlyId = nul
     : `u.completed_at IS NULL AND ${dueClause("u", true)}`;
   if (onlyId) cond = `u.id = ${Number(onlyId) || 0}`;
   const rows = await query(
-    `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation,
+    `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation, u.call_status_id,
             COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
             u.photo_url, u.zone_id, u.lok_sabha_id, u.district_id, u.assembly_id, u.ward_id, u.contact_id,
             lz.name AS zone_name, lls.name AS lok_sabha_name, lw.name AS ward_name,
@@ -587,7 +587,7 @@ export async function syncUnfilteredToContact(conn, row, { sentiment, userId }) 
 // Same completion rule as a regular call (api/calls): these outcomes finish the
 // contact; any other status (Not Picked, Busy, Switched Off…) is an attempt and
 // the call stays pending for a retry.
-export const UNFILTERED_FINAL_STATUSES = ["Phone Picked", "Wrong Number", "Rudely Behaved"];
+export { UNFILTERED_FINAL_STATUSES };
 
 // Log a disposition for one of the acting caller's OWN pending Unfiltered Calls.
 // The row is locked for the check + write, so it can't be logged against
@@ -655,6 +655,75 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
     await conn.commit();
     const syncMsg = sync?.action === "created" ? " Added to the Contact List." : sync?.action === "updated" ? " Contact List record updated." : sync?.action === "skipped" ? ` Not added to the Contact List (${sync.reason}).` : "";
     return { status: 200, message: (final ? "Saved — call completed." : "Saved — kept pending for a retry.") + syncMsg, completed: final, log_id: ins.insertId, contact_sync: sync };
+  } catch (e) {
+    await conn.rollback().catch(() => {});
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// RE-EDIT a COMPLETED call's saved outcome (My Workspace -> Unfiltered Calls -> Completed). It UPDATES the same record and its
+// latest call log - never a new log, contact or call attempt - and keeps completed_at / completed_by, the assignment and the
+// call history. Rules:
+//   * only the assigned caller, and only a record that is already completed;
+//   * only fields the user really changed (compared with `prev`, the values the form was opened with) are written; a field
+//     someone else changed since is a conflict (409) - nothing is overwritten with stale data;
+//   * the same validation as saving a call: hidden statuses refused, Phone Picked needs its option, Wrong Number needs its
+//     reason, follow-ups only for the statuses that take one;
+//   * a completed call can only move to another COMPLETING outcome (Phone Picked / Wrong Number). Moving it to a status that
+//     leaves a call pending would silently reactivate it, so that is refused.
+// ---------------------------------------------------------------------------
+export async function updateCompletedUnfilteredCall({ id, callerId, data }) {
+  await ensureUnfilteredCallLogSchema();
+  data = data && typeof data === "object" ? data : {};
+  const prev = data.prev && typeof data.prev === "object" ? data.prev : null;
+  if (!prev) return { status: 400, message: "Reload the call and try again." };
+  const str = (v) => String(v ?? "").trim();
+  const FIELDS = ["status_id", "remarks", "sentiment", "wrong_number_reason", "follow_up_date", "follow_up_time"];
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const [[row]] = await conn.query("SELECT * FROM unfiltered_contacts WHERE id = ? FOR UPDATE", [Number(id) || 0]);
+    if (!row || Number(row.assigned_to_user_id) !== Number(callerId)) { await conn.rollback(); return { status: 404, message: "This call is not assigned to you." }; }
+    if (!row.completed_at) { await conn.rollback(); return { status: 409, message: "This call is not completed - use the call form to log it." }; }
+    const curOf = {
+      status_id: str(row.call_status_id), remarks: str(row.call_notes), sentiment: str(row.call_sentiment), wrong_number_reason: str(row.wrong_number_reason),
+      follow_up_date: str(row.follow_up_date).slice(0, 10), follow_up_time: str(row.follow_up_time).slice(0, 5),
+    };
+    const changed = FIELDS.filter((k) => k in data && str(data[k]) !== str(prev[k]));
+    if (!changed.length) { await conn.rollback(); return { status: 200, message: "No changes to save.", no_change: true }; }
+    // stale-form protection: a field the user changed must still hold what the form was opened with
+    const stale = changed.filter((k) => str(prev[k]).replace(/\r\n?/g, "\n") !== curOf[k].replace(/\r\n?/g, "\n"));
+    if (stale.length) { await conn.rollback(); return { status: 409, message: "This call was changed by someone else after you opened it. Reopen it to see the latest, then edit again.", conflict: stale }; }
+    const fin = { ...curOf };
+    for (const k of changed) fin[k] = str(data[k]);
+    const [[st]] = await conn.query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(fin.status_id) || 0]);
+    if (!st) { await conn.rollback(); return { status: 400, message: "Please pick a status." }; }
+    if (UNFILTERED_HIDDEN_STATUSES.includes(st.name)) { await conn.rollback(); return { status: 400, message: `"${st.name}" is not available on Unfiltered Calls.` }; }
+    if (!UNFILTERED_FINAL_STATUSES.includes(st.name)) { await conn.rollback(); return { status: 400, message: `A completed call can only be changed to Phone Picked or Wrong Number; "${st.name}" would reopen it as pending.` }; }
+    if (fin.wrong_number_reason && !UNFILTERED_WRONG_REASON_VALUES.includes(fin.wrong_number_reason)) { await conn.rollback(); return { status: 400, message: "Unsupported Wrong Number reason." }; }
+    const isWrong = st.name === "Wrong Number" || (st.name === "Phone Picked" && fin.sentiment === "wrong_number");
+    if (isWrong && !fin.wrong_number_reason) { await conn.rollback(); return { status: 400, message: "Please select the Wrong Number reason." }; }
+    if (st.name === "Phone Picked" && !PHONE_PICKED_VALUES.includes(fin.sentiment)) { await conn.rollback(); return { status: 400, message: fin.sentiment ? "Unsupported Phone Picked option." : "Please select Active, or Not Active with Wrong Number / Opponent / Not Interested." }; }
+    if (fin.follow_up_date || fin.follow_up_time) { await conn.rollback(); return { status: 400, message: "A completed call has no follow-up." }; }
+    const sent = st.name === "Phone Picked" ? fin.sentiment : null;
+    const wrongNo = isWrong ? fin.wrong_number_reason : null;
+    const notes = fin.remarks ? fin.remarks.slice(0, 2000) : null;
+    await conn.query(
+      "UPDATE unfiltered_contacts SET call_status_id = ?, call_status_name = ?, call_notes = ?, call_sentiment = ?, wrong_number_reason = ?, follow_up_date = NULL, follow_up_time = NULL WHERE id = ?",
+      [st.id, st.name, notes, sent, wrongNo, row.id]
+    );
+    // the SAME latest call log is corrected - no new attempt is recorded
+    await conn.query(
+      `UPDATE unfiltered_call_logs SET status_id = ?, status_name = ?, remarks = ?, sentiment = ?, wrong_number_reason = ?, follow_up_date = NULL, follow_up_time = NULL
+        WHERE id = (SELECT id FROM (SELECT MAX(id) AS id FROM unfiltered_call_logs WHERE unfiltered_contact_id = ?) x)`,
+      [st.id, st.name, notes, sent, wrongNo, row.id]
+    );
+    await conn.commit();
+    return { status: 200, message: "Completed call updated.", changed, record: (await myUnfilteredCalls(callerId, { view: "all", onlyId: row.id })).calls[0] || null };
   } catch (e) {
     await conn.rollback().catch(() => {});
     throw e;

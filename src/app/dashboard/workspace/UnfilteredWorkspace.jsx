@@ -1,6 +1,6 @@
 "use client";
 
-import { PHONE_PICKED_OPTIONS, NOT_ACTIVE_REASONS, UNFILTERED_FOLLOWUP_STATUSES, UNFILTERED_HIDDEN_STATUSES, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
+import { PHONE_PICKED_OPTIONS, NOT_ACTIVE_REASONS, UNFILTERED_FOLLOWUP_STATUSES, UNFILTERED_HIDDEN_STATUSES, UNFILTERED_FINAL_STATUSES, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
 import { UNFILTERED_WRONG_REASONS, unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -251,6 +251,48 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     } catch { setError("Could not update the option."); }
   }
 
+  // Re-edit a COMPLETED call: opens the saved record in edit mode with its saved outcome pre-filled. Nothing is logged or timed - saving
+  // updates that same record (PUT /outcome); the call stays completed.
+  function openCompleted(c) {
+    if (!c || active) return;
+    setMessage(""); setError("");
+    const sent = String(c.call_sentiment || "");
+    const pp = c.call_status_name === "Phone Picked" ? (sent === "active" ? "active" : sent ? "not_active" : "") : "";
+    const f = { status_id: c.call_status_id ? String(c.call_status_id) : "", remarks: c.call_notes || "", sentiment: pp === "not_active" ? sent : "", pp, wrong_number_reason: c.wrong_number_reason || "", follow_up_date: "", follow_up_time: "" };
+    setForm(f);
+    setEditing(false); setEditMsg(""); setEditErr("");
+    setElapsed(0);
+    setActive({ ...c, started_at: Date.now(), editCompleted: true, prev: {
+      status_id: c.call_status_id ? String(c.call_status_id) : "", remarks: c.call_notes || "", sentiment: sent, wrong_number_reason: c.wrong_number_reason || "",
+      follow_up_date: c.follow_up_date ? String(c.follow_up_date).slice(0, 10) : "", follow_up_time: c.follow_up_time ? String(c.follow_up_time).slice(0, 5) : "",
+    } });
+    setHistory([]); setHistoryOpen(false);
+    fetch(`/api/unfiltered-calls/${c.id}/history`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { history: [] })).then((d) => setHistory(d.history || [])).catch(() => {});
+  }
+  async function saveCompleted() {
+    if (!active?.editCompleted || submitting || submitLock.current) return;
+    if (!form.status_id) { setError("Please pick a status"); return; }
+    if (isPicked && !pickedValue) { setError(form.pp === "not_active" ? "Please select Wrong Number, Opponent or Not Interested" : "Please select Active or Not Active"); return; }
+    if (isWrongNo && !form.wrong_number_reason) { setError("Please select the Wrong Number reason"); return; }
+    submitLock.current = true; setSubmitting(true); setError("");
+    try {
+      const r = await fetch(`/api/unfiltered-calls/${active.id}/outcome`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status_id: form.status_id, remarks: form.remarks, sentiment: isPicked ? pickedValue : "", wrong_number_reason: isWrongNo ? form.wrong_number_reason : "", follow_up_date: "", follow_up_time: "", prev: active.prev }),
+      });
+      const d = await r.json().catch(() => ({}));
+      // On any failure the form stays open with everything the user entered.
+      if (!r.ok) { setError(d.message || "Could not save the changes."); return; }
+      setActive(null);
+      await load("completed");
+      setMessage(d.no_change ? "No changes to save." : "Completed call updated - same record, no new call was created.");
+    } catch {
+      setError("Could not save the changes - network error. Your edits are still on screen.");
+    } finally {
+      submitLock.current = false; setSubmitting(false);
+    }
+  }
+
   // Release (no log): let go of the current call without logging it - same as Regular Calls. Nothing is saved on the call;
   // it stays in the queue, and is not offered as "next" again this session.
   async function releaseNoLog() {
@@ -337,9 +379,10 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
               {calls.map((c) => (
                 <li key={c.id}>
                   <button
-                    onClick={() => (view === "pending" || view === "followups") && start(c)}
-                    disabled={(view !== "pending" && view !== "followups") || !!active}
+                    onClick={() => (view === "pending" || view === "followups" ? start(c) : view === "completed" ? openCompleted(c) : null)}
+                    disabled={!!active}
                     data-testid="uw-row"
+                    title={view === "completed" ? "Open to edit this completed call" : undefined}
                     className={`w-full text-left flex items-center gap-3 p-2.5 rounded-xl border ${active?.id === c.id ? "border-[#164FA3] bg-blue-50" : "border-gray-100 hover:bg-gray-50"} disabled:cursor-default`}
                   >
                     <Avatar name={c.person_name || c.phone_key} size={34} />
@@ -400,7 +443,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs uppercase tracking-wider text-blue-200 mb-1 flex items-center gap-2">
-                    Calling · Unfiltered
+                    {active.editCompleted ? "Editing completed call · Unfiltered" : "Calling · Unfiltered"}
                     {history.length > 0 && <span className="bg-[#FCB712] text-[#164FA3] text-[10px] font-bold px-2 py-0.5 rounded-full">RETRY ×{history.length}</span>}
                   </div>
                   <h2 className="text-3xl font-bold">{active.person_name || "Unnamed"}</h2>
@@ -422,10 +465,11 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                     </button>
                   </div>
                 </div>
+                {!active.editCompleted && (
                 <div className="text-right shrink-0">
                   <div className="text-xs uppercase tracking-wider text-blue-200">Duration</div>
                   <div className="text-2xl font-mono font-bold">{formatDurationHrMinSec(elapsed, "0 Sec")}</div>
-                </div>
+                </div>)}
               </div>
             </div>
 
@@ -522,13 +566,13 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
             )}
 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-4"><Square size={16} /> Log Outcome</h3>
+              <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-4"><Square size={16} /> {active.editCompleted ? "Edit Completed Call" : "Log Outcome"}</h3>
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Status *</label>
                   <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value, pp: "", sentiment: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" })} className={inputCls} aria-label="Status">
                     <option value="">Select…</option>
-                    {statuses.filter((s) => !UNFILTERED_HIDDEN_STATUSES.includes(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {statuses.filter((s) => !UNFILTERED_HIDDEN_STATUSES.includes(s.name) && (!active.editCompleted || UNFILTERED_FINAL_STATUSES.includes(s.name))).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
                 {isWrongNo && (
@@ -583,11 +627,13 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                 </div>
               </div>
               <div className="flex items-center justify-between gap-3 mt-5 flex-wrap">
-                <button onClick={releaseNoLog} disabled={submitting} data-testid="uw-release" className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center gap-2"><X size={16} /> Release (no log)</button>
+                {active.editCompleted
+                  ? <span className="text-[11px] text-gray-500">Editing a completed call updates the same record. It stays completed and is not a new call.</span>
+                  : <button onClick={releaseNoLog} disabled={submitting} data-testid="uw-release" className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center gap-2"><X size={16} /> Release (no log)</button>}
                 <button onClick={() => { setActive(null); setError(""); }} disabled={submitting} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-                <button onClick={submit} disabled={submitting} data-testid="uw-save"
+                <button onClick={active.editCompleted ? saveCompleted : submit} disabled={submitting} data-testid="uw-save"
                   className="px-6 py-2.5 bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white font-semibold rounded-xl flex items-center gap-2">
-                  {submitting ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />} Save &amp; Next
+                  {submitting ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />} {active.editCompleted ? "Save changes" : "Save & Next"}
                 </button>
               </div>
             </div>

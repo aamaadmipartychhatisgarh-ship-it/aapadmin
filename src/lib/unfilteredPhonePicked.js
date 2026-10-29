@@ -31,3 +31,6 @@ export const UNFILTERED_STATUS_FILTERS = [
 export const UNFILTERED_HIDDEN_STATUSES = ["Rudely Behaved", "Busy"];
 // Statuses that take a Follow-up date (Busy was added earlier; kept so existing Busy follow-ups still work).
 export const UNFILTERED_FOLLOWUP_STATUSES = ["Busy", "Not Picked", "Not in Service", "Switched Off", "Incoming Off"];
+
+// Outcomes that COMPLETE an Unfiltered call (any other status leaves it pending for a retry).
+export const UNFILTERED_FINAL_STATUSES = ["Phone Picked", "Wrong Number", "Rudely Behaved"];
