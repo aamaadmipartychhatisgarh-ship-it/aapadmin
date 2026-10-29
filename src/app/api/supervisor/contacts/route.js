@@ -11,7 +11,7 @@ import { addedDateClause } from "@/lib/contactDateFilter";
 import { logAudit } from "@/lib/audit";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
-import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureContactRemarksColumn } from "@/lib/contactExtras";
 import { supervisorScopeFilter, supervisorCallerScopeFilter, supervisorTerritory } from "@/lib/supervisorScope";
 import { ensureRfaSchema, RFA_STATUS_SQL } from "@/lib/rfa";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
@@ -350,6 +350,9 @@ export async function POST(req) {
     if (veh.error) return NextResponse.json({ message: veh.error }, { status: 400 });
     await ensureVehicleColumn();
     const existingColumns = await getContactColumns();
+    // The Remarks column may not exist yet on this deployment: create it so a Remark is never silently dropped.
+    if (await ensureContactRemarksColumn()) existingColumns.add("remarks");
+    else if (typeof data.remarks === "string" && data.remarks.trim() !== "") return NextResponse.json({ message: "The Remark could not be saved because the Remarks column is unavailable on this database. Nothing was changed." }, { status: 500 });
     const cols = [];
     const vals = [];
     const add = (col, val) => { if (existingColumns.has(col)) { cols.push(col); vals.push(val); } };

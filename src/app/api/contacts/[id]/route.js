@@ -9,7 +9,7 @@ import { query, getPool } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
-import { isContactNotInterested } from "@/lib/contactExtras";
+import { isContactNotInterested, ensureContactRemarksColumn } from "@/lib/contactExtras";
 import { isContactRepeatOff } from "@/lib/repeatOff";
 import { assignSingleContact } from "@/lib/contactAssign";
 import { resolveContactCard } from "@/lib/contactCard";
@@ -241,6 +241,9 @@ export async function PUT(req, { params }) {
     const fields = isAdminTier ? [...DETAIL_FIELDS, ...ADMIN_ONLY_FIELDS] : DETAIL_FIELDS;
     // Only touch columns this deployment's schema actually has.
     const existingColumns = await getContactColumns();
+    // The Remarks column may not exist yet on this deployment: create it so a Remark is never silently dropped.
+    if (await ensureContactRemarksColumn()) existingColumns.add("remarks");
+    else if ("remarks" in data && String(data.remarks ?? "").trim() !== "") return NextResponse.json({ message: "The Remark could not be saved because the Remarks column is unavailable on this database. Nothing was changed." }, { status: 500 });
     const sets = [];
     const vals = [];
     for (const f of fields) {

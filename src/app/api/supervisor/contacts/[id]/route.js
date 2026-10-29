@@ -1,3 +1,4 @@
+import { ensureContactRemarksColumn } from "@/lib/contactExtras";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -121,6 +122,9 @@ export async function PUT(req, { params }) {
 
     const fields = [...DETAIL_FIELDS, "qualification", "education_level", "vehicle", "assigned_to_user_id"];
     const existingColumns = await getContactColumns();
+    // The Remarks column may not exist yet on this deployment: create it so a Remark is never silently dropped.
+    if (await ensureContactRemarksColumn()) existingColumns.add("remarks");
+    else if ("remarks" in data && String(data.remarks ?? "").trim() !== "") return NextResponse.json({ message: "The Remark could not be saved because the Remarks column is unavailable on this database. Nothing was changed." }, { status: 500 });
     const sets = [];
     const vals = [];
     for (const f of fields) {

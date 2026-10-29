@@ -10,7 +10,7 @@ import { addedDateClause } from "@/lib/contactDateFilter";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { ACTIVE_STATUS_VALUES, normalizeActiveStatus } from "@/lib/activeStatus";
-import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureContactActiveStatusColumns, findRejectedContactByPhone, hasApprovalStatusColumn } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureContactActiveStatusColumns, findRejectedContactByPhone, hasApprovalStatusColumn, ensureContactRemarksColumn } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
@@ -390,6 +390,10 @@ export async function POST(req) {
     // Only ever write columns this deployment's schema actually has — a hardcoded
     // column that a given environment lacks was a source of intermittent 500s.
     const existing = await getContactColumns();
+    // The Remarks column may not exist yet on this deployment: create it so a Remark is never silently dropped.
+    const wantsRemarks = typeof data.remarks === "string" && data.remarks.trim() !== "";
+    if (await ensureContactRemarksColumn()) existing.add("remarks");
+    else if (wantsRemarks) return NextResponse.json({ message: "The Remark could not be saved because the Remarks column is unavailable on this database. Nothing was changed." }, { status: 500 });
     const desired = {
       person_name: person_name.trim(),
       phone_number: phone_number.trim(),

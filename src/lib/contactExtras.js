@@ -18,18 +18,32 @@ export async function hasWrongNumberColumn() {
   return _wrongCol;
 }
 
-// Optional contacts.remarks column (the Add Contact "Remarks / Notes" field, scripts/add-contact-profile-fields.mjs). A deployment
-// that has not run that migration has no such column, so readers must not select it blindly. Only a positive answer is cached.
+// contacts.remarks is the Add Contact "Remarks / Notes" field. It comes from scripts/add-contact-profile-fields.mjs, and a
+// deployment that never ran that script has NO such column - every writer then silently dropped the Remark ("saved" but
+// gone, the root cause of the Remark never persisting). The column is therefore created on demand (additive, nullable,
+// idempotent, no data touched), exactly like the other optional contact columns (ensureQualificationColumns, ...).
+// Returns true when the column exists afterwards. Only a positive answer is cached.
 let _remarksCol = false;
-export async function hasContactRemarksColumn() {
+let _remarksEnsuring = null;
+export async function ensureContactRemarksColumn() {
   if (_remarksCol) return true;
-  try {
-    const rows = await query("SHOW COLUMNS FROM contacts LIKE 'remarks'");
-    _remarksCol = rows.length > 0;
-  } catch {
-    _remarksCol = false;
-  }
-  return _remarksCol;
+  if (_remarksEnsuring) return _remarksEnsuring;
+  _remarksEnsuring = (async () => {
+    const has = async () => (await query("SHOW COLUMNS FROM contacts LIKE 'remarks'")).length > 0;
+    try {
+      if (!(await has())) await query("ALTER TABLE contacts ADD COLUMN remarks TEXT NULL");
+      _remarksCol = true;
+    } catch (e) {
+      // a concurrent request may have added it first
+      try { if (await has()) _remarksCol = true; } catch {}
+      if (!_remarksCol) console.error("[contacts] cannot ensure contacts.remarks:", e?.sqlMessage || e?.message || e);
+    }
+    return _remarksCol;
+  })().finally(() => { _remarksEnsuring = null; });
+  return _remarksEnsuring;
+}
+export async function hasContactRemarksColumn() {
+  return ensureContactRemarksColumn();
 }
 
 // Optional contacts.photo_url column (scripts/add-contact-photo-url.mjs) —
