@@ -18,6 +18,20 @@ export async function hasWrongNumberColumn() {
   return _wrongCol;
 }
 
+// Optional contacts.remarks column (the Add Contact "Remarks / Notes" field, scripts/add-contact-profile-fields.mjs). A deployment
+// that has not run that migration has no such column, so readers must not select it blindly. Only a positive answer is cached.
+let _remarksCol = false;
+export async function hasContactRemarksColumn() {
+  if (_remarksCol) return true;
+  try {
+    const rows = await query("SHOW COLUMNS FROM contacts LIKE 'remarks'");
+    _remarksCol = rows.length > 0;
+  } catch {
+    _remarksCol = false;
+  }
+  return _remarksCol;
+}
+
 // Optional contacts.photo_url column (scripts/add-contact-photo-url.mjs) —
 // gives contacts their own native photo, decoupled from the (removed)
 // Worker Management module.

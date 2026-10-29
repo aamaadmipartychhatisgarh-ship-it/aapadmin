@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isSuperAdmin, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
-import { notPendingClause } from "@/lib/contactExtras";
+import { notPendingClause, hasContactRemarksColumn } from "@/lib/contactExtras";
 import { supervisorScopeFilter } from "@/lib/supervisorScope";
 import { ensureRfaSchema, RFA_STATUSES } from "@/lib/rfa";
 import { ensureQualificationColumns } from "@/lib/contactQualification";
@@ -31,7 +31,7 @@ export async function GET(req) {
       // copied onto the review), with the same geography derivation as the Contact
       // List: district → Lok Sabha, the contact's own Lok Sabha winning. Remarks = the contact's saved Remarks / Notes (Add Contact).
       `SELECT r.*, c.person_name, c.phone_number, c.address, c.photo_url,
-              c.qualification, c.education_level, c.vehicle, c.remarks AS contact_remarks,
+              c.qualification, c.education_level, c.vehicle, ${(await hasContactRemarksColumn()) ? "c.remarks" : "NULL"} AS contact_remarks,
               la.name AS assembly_name, ld.name AS district_name,
               COALESCE(cls.name, lls.name) AS lok_sabha_name,
               (SELECT d.name FROM designations d WHERE d.id = c.designation_id) AS designation_name
