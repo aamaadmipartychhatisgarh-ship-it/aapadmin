@@ -216,6 +216,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
 
   // Tasks pinned to the active contact
   const [contactTasks, setContactTasks] = useState([]);
+  // Ids of the tasks the "Today's Tasks" panel is already showing - the same task is never listed again under the contact.
+  const [todayTaskIds, setTodayTaskIds] = useState([]);
 
   // Inline contact edit state. Callers can edit every detail of the contact
   // (like an admin) except its queue assignment — and they can't delete it.
@@ -312,6 +314,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     loadContactTasks(active.id);
   }, [active?.id]);
 
+  // Tasks pinned to this contact that are NOT already in the Today's Tasks panel, one entry per task id.
+  const contactOnlyTasks = [...new Map(contactTasks.filter((t) => !todayTaskIds.includes(t.id)).map((t) => [t.id, t])).values()];
   async function setTaskStatus(taskId, newStatus) {
     await fetch(`/api/tasks/${taskId}`, {
       method: "PUT",
@@ -1286,19 +1290,19 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         )}
 
         {/* Permanent Today's Task panel — always visible, reads from My Tasks */}
-        <TodaysTaskPanel onLogComplaint={() => setShowComplaint(true)} />
+        <TodaysTaskPanel onLogComplaint={() => setShowComplaint(true)} onVisibleIds={setTodayTaskIds} />
 
         {active && (
           <>
             {/* Tasks assigned on this contact */}
-            {contactTasks.length > 0 && (
+            {contactOnlyTasks.length > 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-emerald-200 p-4">
                 <div className="flex items-center gap-2 text-emerald-700 mb-3">
                   <ListChecks size={16} />
-                  <span className="font-bold text-sm">Assigned tasks for this contact ({contactTasks.length})</span>
+                  <span className="font-bold text-sm">Assigned tasks for this contact ({contactOnlyTasks.length})</span>
                 </div>
                 <ul className="space-y-2">
-                  {contactTasks.map((t) => (
+                  {contactOnlyTasks.map((t) => (
                     <li key={t.id} className="flex items-start justify-between gap-3 border border-gray-100 rounded-xl p-3">
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-gray-900 text-sm break-words">
@@ -1310,6 +1314,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                           }`}>{t.priority}</span>
                         </div>
                         {t.deadline && <div className="text-[11px] text-gray-400 mt-0.5">Due {t.deadline.slice(0, 10)}</div>}
+                        {t.assignee_name && <div className="text-[11px] text-gray-400 mt-0.5">Assigned to {t.assignee_name}</div>}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         {["pending", "in_progress", "completed"].map((s) => (
@@ -1695,7 +1700,7 @@ function fmtTaskAssigned(v) {
 // open tasks whose date range (start_date … deadline) includes today, plus any
 // overdue task (past deadline, not completed). Date-driven from the DB via
 // view=mine (server-scoped to this caller — never another caller's tasks).
-function TodaysTaskPanel({ onLogComplaint }) {
+function TodaysTaskPanel({ onLogComplaint, onVisibleIds }) {
   const [tasks, setTasks] = useState(undefined); // undefined = loading
   const [busy, setBusy] = useState({});
   const today = new Date().toISOString().slice(0, 10);
@@ -1718,7 +1723,9 @@ function TodaysTaskPanel({ onLogComplaint }) {
         (b.is_overdue - a.is_overdue) || (b.due_today - a.due_today) ||
         String(a.deadline || "9999-12-31").localeCompare(String(b.deadline || "9999-12-31"))
       );
-      setTasks(relevant);
+      // one entry per task id (a repeated load can never list the same task twice)
+      const uniq = [...new Map(relevant.map((t) => [t.id, t])).values()];
+      setTasks(uniq); onVisibleIds?.(uniq.map((t) => t.id));
     } catch { setTasks([]); }
   }
   useEffect(() => {
