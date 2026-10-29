@@ -13,8 +13,11 @@ export const MEMBER_PICKED = [
 export const MEMBER_PICKED_VALUES = MEMBER_PICKED.map((o) => o.value);
 export const MEMBER_ONLY_SENTIMENTS = ["active", "not_active", "member_opponent", "not_interested"]; // not available to other designations
 export const MEMBER_FOLLOWUP_STATUSES = ["Not Picked", "Not in Service", "Switched Off", "Incoming Off"];
-export const MEMBER_ONLY_STATUSES = ["Not in Service"];
+// Calling Status options offered only for a Member on Regular Calls (hidden for every other designation, and refused by POST /api/calls).
+// Historical calls that already carry these statuses are untouched.
+export const MEMBER_ONLY_STATUSES = ["Not in Service", "Rudely Behaved", "Busy", "Wrong Number"];
 export const memberPickedLabel = (v) => MEMBER_PICKED.find((o) => o.value === v)?.label || null;
+export const hasMemberName = (csv) => String(csv || "").split(",").some((n) => isMemberName(n));
 export const isMemberName = (n) => String(n || "").trim().toLowerCase() === MEMBER_DESIGNATION;
 
 // Wrong Number reasons offered for a MEMBER on Regular Calls - exactly these two (existing wrong_number_reason values, so both keep

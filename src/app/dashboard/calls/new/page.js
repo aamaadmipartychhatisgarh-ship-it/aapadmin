@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { PhoneCall, MapPin, Save, User, FileText } from "lucide-react";
+import { MEMBER_ONLY_STATUSES, isMemberName } from "@/lib/memberWorkflowShared";
 import { isAdmin, isSupervisorRole, isOversight } from "@/lib/permissions";
 import { useCallerPreview, isPreviewingCallerNow } from "@/lib/useCallerPreview";
 
@@ -98,9 +99,17 @@ export default function LogCall() {
   const handleStatusChange = (e) => {
     setFormData({ ...formData, status_id: e.target.value, sentiment: "" });
   };
+  // Rudely Behaved / Busy / Wrong Number (and Not in Service) are offered only when the chosen designation is Member.
+  const isMemberDesig = isMemberName(designations.find((d) => String(d.id) === String(formData.designation_id))?.name);
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData({ ...formData, [name]: type === "checkbox" ? checked : value });
+    const next = { ...formData, [name]: type === "checkbox" ? checked : value };
+    if (name === "designation_id") {
+      const nowMember = isMemberName(designations.find((d) => String(d.id) === String(value))?.name);
+      const cur = statuses.find((s) => String(s.id) === String(next.status_id))?.name;
+      if (!nowMember && MEMBER_ONLY_STATUSES.includes(cur)) next.status_id = "";
+    }
+    setFormData(next);
   };
 
   const handleSubmit = async (e) => {
@@ -226,7 +235,7 @@ export default function LogCall() {
               <label className="block text-sm font-semibold text-gray-700 mb-1">Status *</label>
               <select name="status_id" required value={formData.status_id} onChange={handleStatusChange} className="w-full bg-gray-50 border border-gray-200 text-gray-900 h-11 rounded-xl px-4 focus:ring-2 focus:ring-[#FCB712] outline-none transition-all">
                 <option value="">Select Outcome</option>
-                {statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {statuses.filter((s) => isMemberDesig || !MEMBER_ONLY_STATUSES.includes(s.name)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div>

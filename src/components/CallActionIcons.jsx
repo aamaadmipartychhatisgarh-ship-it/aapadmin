@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Phone, MessageCircle, MessageSquare, Copy, UserRound, ClipboardCheck, Loader2, Check, History, Flag } from "lucide-react";
 import FloatingPopover from "@/components/FloatingPopover";
+import { MEMBER_ONLY_STATUSES, MEMBER_WRONG_REASONS } from "@/lib/memberWorkflowShared";
 
 // Indian 10-digit mobile → wa.me international format (91XXXXXXXXXX, no '+').
 // Falls back to stripping non-digits if the number already carries a prefix.
@@ -53,7 +54,7 @@ export const WRONG_NUMBER_REASONS = [
 //   dark         true on a colored/dark card background (e.g. the workspace's
 //                active-call header) — swaps the per-action colors for a
 //                uniform white/translucent style that reads on dark backgrounds.
-export default function CallActionIcons({ phone, personName, contactId, canLog = false, onLogged, size = 15, profileHref, dark = false }) {
+export default function CallActionIcons({ phone, personName, contactId, canLog = false, onLogged, size = 15, profileHref, dark = false, isMember = false }) {
   const [logOpen, setLogOpen] = useState(false);
   const [waOpen, setWaOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -131,6 +132,7 @@ export default function CallActionIcons({ phone, personName, contactId, canLog =
           </button>
           <FloatingPopover anchorRef={logRef} open={logOpen} onClose={() => setLogOpen(false)} width={256} estimatedHeight={220}>
             <QuickLogPopover
+              isMember={isMember}
               phone={phone}
               personName={personName}
               contactId={contactId}
@@ -288,7 +290,7 @@ function ReportIssuePopover({ contactId, onClose }) {
   );
 }
 
-function QuickLogPopover({ phone, personName, contactId, onClose, onLogged }) {
+function QuickLogPopover({ phone, personName, contactId, onClose, onLogged, isMember = false }) {
   const [statuses, setStatuses] = useState([]);
   const [statusId, setStatusId] = useState("");
   const [remarks, setRemarks] = useState("");
@@ -343,7 +345,7 @@ function QuickLogPopover({ phone, personName, contactId, onClose, onLogged }) {
             className="w-full h-8 px-2 rounded-lg border border-gray-200 text-sm outline-none focus:ring-1 focus:ring-[#164FA3]"
           >
             <option value="">Select status…</option>
-            {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {statuses.filter((s) => isMember || !MEMBER_ONLY_STATUSES.includes(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           {isWrongNumber && (
             <select
@@ -352,7 +354,7 @@ function QuickLogPopover({ phone, personName, contactId, onClose, onLogged }) {
               className="w-full h-8 px-2 rounded-lg border border-amber-200 bg-amber-50 text-sm outline-none focus:ring-1 focus:ring-amber-500"
             >
               <option value="">Reason (optional)…</option>
-              {WRONG_NUMBER_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              {(isMember ? MEMBER_WRONG_REASONS : WRONG_NUMBER_REASONS).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           )}
           <textarea

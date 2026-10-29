@@ -1,4 +1,4 @@
-import { isMemberContact, MEMBER_PICKED_VALUES, MEMBER_ONLY_SENTIMENTS, MEMBER_FOLLOWUP_STATUSES, MEMBER_ONLY_STATUSES } from "@/lib/memberWorkflow";
+import { isMemberContact, MEMBER_PICKED_VALUES, MEMBER_ONLY_SENTIMENTS, MEMBER_FOLLOWUP_STATUSES, MEMBER_ONLY_STATUSES, isMemberName } from "@/lib/memberWorkflow";
 import { MEMBER_WRONG_REASON_VALUES } from "@/lib/memberWorkflowShared";
 import { NextResponse as Response } from "next/server";
 import { getServerSession } from "next-auth/next";
@@ -297,8 +297,10 @@ export async function POST(req) {
     if (member && statusName === "Wrong Number" && data.wrong_number_reason && !MEMBER_WRONG_REASON_VALUES.includes(String(data.wrong_number_reason))) {
       return Response.json({ message: "For a Member, the Wrong Number reason must be Invalid/Wrong Number or Belongs to Someone Else." }, { status: 400 });
     }
+    // A call logged without a contact record (Log a Call) takes its designation from the chosen designation.
+    const memberStatusOk = member || (!contact_id && designation_id ? isMemberName((await query("SELECT name FROM designations WHERE id = ?", [designation_id]))[0]?.name) : false);
     if (!member) {
-      if (MEMBER_ONLY_STATUSES.includes(statusName)) return Response.json({ message: `"${statusName}" is available only for Member contacts.` }, { status: 400 });
+      if (!memberStatusOk && MEMBER_ONLY_STATUSES.includes(statusName)) return Response.json({ message: `"${statusName}" is available only for Member contacts.` }, { status: 400 });
       if (MEMBER_ONLY_SENTIMENTS.includes(String(sentiment || "").toLowerCase()) && statusName === "Phone Picked") {
         return Response.json({ message: "This Phone Picked option is available only for Member contacts." }, { status: 400 });
       }

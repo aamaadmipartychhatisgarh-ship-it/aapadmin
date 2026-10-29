@@ -23,6 +23,7 @@ import { CONTACT_EXPORT_COLUMNS } from "@/lib/contactExportColumns";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import { isCaller, isSuperAdmin, isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
 import CallActionIcons from "@/components/CallActionIcons";
+import { hasMemberName } from "@/lib/memberWorkflowShared";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
 
@@ -1237,7 +1238,7 @@ export default function ContactsModule({ session, mode }) {
                       <span>{c.phone_number}</span>
                       <CallActionIcons
                         phone={c.phone_number} personName={c.person_name} contactId={c.id}
-                        canLog={isCaller(session)} onLogged={load}
+                        canLog={isCaller(session)} onLogged={load} isMember={hasMemberName(c.designation_name)}
                       />
                     </div>
                   </td>
