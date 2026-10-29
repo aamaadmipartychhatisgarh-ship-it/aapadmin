@@ -436,7 +436,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
           head={visibleWorkerColumns().map((c) => c.label)}
           rows={data.workers.map((w) => visibleWorkerColumns().map((c) => {
             if (c.display === "rank") return <RankBadge key={c.key} rank={w.rank} compact />;
-            if (c.display === "name") return <span key={c.key} className="font-semibold text-gray-900">{w.name}<span className="block text-[11px] font-normal text-gray-400 font-mono">{w.worker_code}</span></span>;
+            if (c.display === "name") return <span key={c.key} className="font-semibold text-gray-900">{w.name}{w.mobile ? <span className="block text-[11px] font-normal text-gray-500" data-testid="wp-name-phone">{w.mobile}</span> : null}</span>;
             if (c.display === "total") return <span key={c.key} className="font-bold text-gray-900">{c.value(w)}</span>;
             const v = c.value(w);
             return v === "" ? "—" : v;
