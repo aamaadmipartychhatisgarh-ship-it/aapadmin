@@ -49,7 +49,8 @@ async function detectRestoreCols() {
 export async function ensureRepeatOffSchema() {
   if (ensured) return;
   try {
-    await query(`INSERT IGNORE INTO call_statuses (name) VALUES ('Incoming Off')`);
+    // call_statuses has no UNIQUE key on name, so INSERT IGNORE would add another 'Incoming Off' row on every process start.
+    await query(`INSERT INTO call_statuses (name) SELECT 'Incoming Off' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM call_statuses WHERE name = 'Incoming Off')`);
     try {
       const idx = await query(
         `SELECT COUNT(*) AS n FROM information_schema.STATISTICS

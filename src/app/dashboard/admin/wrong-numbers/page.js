@@ -5,18 +5,15 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { isOversight, isAdmin, isCaller } from "@/lib/permissions";
 import { usePageGuard } from "@/components/usePageGuard";
-import { usePageAccess } from "@/components/usePageAccess";
 import { AlertCircle, Search, Loader2, RotateCcw, Pencil, Trash2, History, UserCog, Download, FileText, X, GitMerge, Send, HeartCrack, PhoneOff } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import Avatar from "@/components/Avatar";
-import NotInterestedView from "@/components/NotInterestedView";
-import RepeatOffPanel from "@/components/RepeatOffPanel";
 import { WRONG_NUMBER_REASONS } from "@/components/CallActionIcons";
 import { unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
-import { SOURCE_NOT_AVAILABLE } from "@/lib/sourceLabel";
 
+const CAT_LABEL = { wrong_number: "Wrong Number", not_interested: "Not Interested", switched_off: "10+ Switched Off", incoming_off: "10+ Incoming Off" };
 const REASON_LABEL = Object.fromEntries(WRONG_NUMBER_REASONS.map((r) => [r.value, r.label]));
 
 export default function Page() {
@@ -36,94 +33,12 @@ export default function Page() {
   return <WrongNumbersDashboard session={session} oversight={isOversight(session)} canDelete={isAdmin(session)} />;
 }
 
-// Tabs: "Wrong Numbers" (oversight only — the existing module) + "Not Interested"
-// (all roles, data role-scoped server-side) + the two "10+ Times" repeat-off
-// views. A caller only ever sees Not Interested. Exported so the Contacts page can
-// render the SAME dashboard as its "Wrong Number" tab — one component, no
-// duplicate Wrong Number module/data source.
+// Status Management - the ONE consolidated page for the former Wrong Number, Not Interested, 10+ Times Switched Off and
+// 10+ Times Incoming Off pages: a single Status dropdown (every calling status + Not Interested) and a single Source dropdown
+// (Contact Page / Worker & Voter Registration Page / Unfiltered Calls) over one server-side list (/api/admin/status-management).
+// Exported so the Contacts page can render the SAME dashboard as its Status Management tab - one component, one data source.
 export function WrongNumbersDashboard({ session, oversight, canDelete }) {
-  const [tab, setTab] = useState(oversight ? "wrong" : "not_interested");
-  const [niCount, setNiCount] = useState(null);
-  // Sub-tab visibility follows Page Access: a MANAGED user sees only the tabs
-  // whose sub-page was granted (wn_wrong_list / not_interested); an unmanaged or
-  // role-based user keeps the existing behaviour (oversight sees both, callers
-  // see Not Interested).
-  const { pages: myPages, restricted: pageRestricted } = usePageAccess();
-  const has = (k) => Array.isArray(myPages) && myPages.includes(k);
-  // A Caller also gets the Wrong Numbers tab, showing only THEIR OWN Unfiltered Calls marked Wrong Number (server-scoped).
-  const showWrong = oversight ? (pageRestricted ? has("wn_wrong_list") : true) : true;
-  const showNI = pageRestricted ? has("not_interested") : true;
-  // The "10+ Times" repeat-off views (spec §4) — the same oversight audience as
-  // the Wrong Numbers list (and honoring the same Page-Access restriction), so a
-  // managed user gains NO new access. Callers only ever see Not Interested, so
-  // these never show for them.
-  const showRepeat = oversight && showWrong;
-  // ?tab=wrong opens the Wrong Numbers tab directly (used by the Unfiltered Calls redirect).
-  useEffect(() => {
-    try { const tp = new URLSearchParams(window.location.search).get("tab"); if (tp === "wrong" && showWrong) setTab("wrong"); else if (tp === "not_interested" && showNI) setTab("not_interested"); } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    // Keep the active tab valid for what this user may see.
-    if (tab === "wrong" && !showWrong) setTab(showNI ? "not_interested" : "wrong");
-    else if (tab === "not_interested" && !showNI && showWrong) setTab("wrong");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageRestricted, myPages]);
-  // Eager, unfiltered count so the tab shows "Not Interested (N)" immediately —
-  // before the tab is ever opened. Refreshed live by the view's onCount below.
-  useEffect(() => {
-    fetch("/api/not-interested?page_size=1", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d) setNiCount(d.total || 0); })
-      .catch(() => {});
-  }, []);
-  const Tab = ({ id, children }) => (
-    <button
-      onClick={() => setTab(id)}
-      className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-        tab === id ? "border-[#164FA3] text-[#164FA3]" : "border-transparent text-gray-500 hover:text-gray-800"
-      }`}
-    >
-      {children}
-    </button>
-  );
-  return (
-    <div className="space-y-4 animate-in fade-in duration-500">
-      {/* Tabs scroll horizontally on narrow screens so every tab (incl. the two
-          10+ views) stays reachable on mobile without hiding any (spec §10/§13). */}
-      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto">
-        {showWrong && <Tab id="wrong">Wrong Numbers</Tab>}
-        {showNI && <Tab id="not_interested">Not Interested{niCount != null ? ` (${niCount.toLocaleString()})` : ""}</Tab>}
-        {showRepeat && <Tab id="switched">10+ Times Switched Off</Tab>}
-        {showRepeat && <Tab id="incoming">10+ Times Incoming Off</Tab>}
-      </div>
-      {tab === "wrong" && showWrong ? (
-        <Body canDelete={canDelete} readOnly={!oversight} embedded />
-      ) : (tab === "switched" || tab === "incoming") && showRepeat ? (
-        <div className="space-y-4">
-          <PageHeader
-            icon={PhoneOff}
-            title={tab === "incoming" ? "10+ Times Incoming Off" : "10+ Times Switched Off"}
-            description="Contacts whose calls crossed the 10+ repeat-off threshold — counted from the call history, one row per unique contact. Nothing is deleted."
-            breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "Contacts", href: "/dashboard/admin/contacts" }, { label: "Wrong Numbers" }, { label: tab === "incoming" ? "10+ Times Incoming Off" : "10+ Times Switched Off" }]}
-          />
-          <RepeatOffPanel type={tab} />
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <PageHeader
-            icon={HeartCrack}
-            title="Not Interested"
-            description="Contacts flagged by their call outcomes — switched off (5+), negative sentiment, opponent, not a supporter, or rudely behaved."
-            breadcrumb={oversight
-              ? [{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Not Interested" }]
-              : [{ label: "Dashboard", href: "/dashboard" }, { label: "Not Interested" }]}
-          />
-          <NotInterestedView session={session} onCount={setNiCount} />
-        </div>
-      )}
-    </div>
-  );
+  return <Body canDelete={canDelete} readOnly={!oversight} embedded />;
 }
 
 const fmt = (d) => d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -137,10 +52,28 @@ function Body({ canDelete, readOnly = false }) {
   const [districtId, setDistrictId] = useState("");
   const [assemblyId, setAssemblyId] = useState("");
   const [caller, setCaller] = useState("");
-  const [statusF, setStatusF] = useState("");
+  const [assignF, setAssignF] = useState("");   // assigned | unassigned
   const [reasonF, setReasonF] = useState("");
-  const [sourceF, setSourceF] = useState("");
-  const [savedF, setSavedF] = useState(""); // saved status filter: "" | not_in_service
+  // The ONE Status filter (any calling status, or Not Interested) and the ONE Source filter. Legacy links
+  // (?tab=wrong | not_interested, ?type=switched | incoming, ?status=...) open the page with that Status selected.
+  const [statusF, setStatusF] = useState(() => {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const st = q.get("status"); if (st) return st;
+      const tp = q.get("tab"), ty = q.get("type");
+      if (tp === "wrong") return "Wrong Number";
+      if (tp === "not_interested") return "Not Interested";
+      if (tp === "switched" || ty === "switched") return "Switched Off";
+      if (tp === "incoming" || ty === "incoming") return "Incoming Off";
+    } catch {}
+    return "";
+  });
+  const [sourceF, setSourceF] = useState(() => { try { return new URLSearchParams(window.location.search).get("source") || ""; } catch { return ""; } });
+  const [statusOpts, setStatusOpts] = useState([]);
+  const [sourceOpts, setSourceOpts] = useState([]);
+  const [pg, setPg] = useState(1);
+  const [pageInfo, setPageInfo] = useState({ total: 0, total_pages: 1, counts: null });
+  const PAGE_SIZE = 50;
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [zones, setZones] = useState([]);
@@ -172,9 +105,9 @@ function Body({ canDelete, readOnly = false }) {
     if (assemblyId) p.set("assembly_id", assemblyId);
     if (caller) p.set("caller", caller);
     if (statusF) p.set("status", statusF);
+    if (assignF) p.set("assignment", assignF);
     if (reasonF) p.set("reason", reasonF);
     if (sourceF) p.set("source", sourceF);
-    if (savedF) p.set("saved_status", savedF);
     if (from) p.set("date_from", from);
     if (to) p.set("date_to", to);
     return p;
@@ -182,15 +115,24 @@ function Body({ canDelete, readOnly = false }) {
 
   async function load() {
     setLoading(true);
-    const r = await fetch(`/api/admin/wrong-numbers?${qs()}`);
-    if (r.ok) setRows((await r.json()).wrong_numbers || []);
+    const p = qs(); p.set("page", String(pg)); p.set("page_size", String(PAGE_SIZE));
+    const r = await fetch(`/api/admin/status-management?${p}`, { cache: "no-store" });
+    if (r.ok) {
+      const d = await r.json();
+      setRows(d.rows || []); setPageInfo({ total: d.total || 0, total_pages: d.total_pages || 1, counts: d.counts || null });
+      if (d.status_options) setStatusOpts(d.status_options);
+      if (d.source_options) setSourceOpts(d.source_options);
+      if (d.page && d.page !== pg) setPg(d.page);
+    } else { setRows([]); setPageInfo({ total: 0, total_pages: 1, counts: null }); }
     setLoading(false);
   }
+  // any filter change returns to page 1
+  useEffect(() => { setPg(1); }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, assignF, reasonF, sourceF, from, to]);
   useEffect(() => {
     const t = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, reasonF, sourceF, savedF, from, to]);
+  }, [search, zoneId, lokSabhaId, districtId, assemblyId, caller, statusF, assignF, reasonF, sourceF, from, to, pg]);
 
   // Restore Not-in-Service contacts to the Contact List (the same contact rows - nothing is inserted). Eligible rows carry a checkbox;
   // the dialog is built from a server-side dry run so it states exactly what will be restored.
@@ -225,6 +167,16 @@ function Body({ canDelete, readOnly = false }) {
     const r = await fetch(`/api/admin/wrong-numbers/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "restore" }) });
     if (r.ok) { setMsg("Contact restored to the calling queue."); load(); }
   }
+  // Restore from Not Interested / a 10+ list: the same endpoints the old pages used (a true move of the SAME contact row).
+  async function restoreCategory(c, cat) {
+    const label = cat === "not_interested" ? "Not Interested" : cat === "switched_off" ? "10+ Times Switched Off" : "10+ Times Incoming Off";
+    if (!confirm(`Restore ${c.person_name || "this contact"} from ${label}? Its call history stays intact.`)) return;
+    const url = cat === "not_interested" ? `/api/not-interested/${c.id}` : `/api/contacts/repeat-off/${c.id}`;
+    const body = cat === "not_interested" ? { action: "restore" } : { type: cat === "incoming_off" ? "incoming" : "switched" };
+    const r = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (r.ok) { setMsg(`Contact restored from ${label}.`); load(); }
+    else { const d = await r.json().catch(() => ({})); setMsg(d.message || "Could not restore this contact."); }
+  }
   async function del(id) {
     if (!confirm("Permanently delete this record? This cannot be undone.")) return;
     const r = await fetch(`/api/admin/wrong-numbers/${id}`, { method: "DELETE" });
@@ -250,12 +202,12 @@ function Body({ canDelete, readOnly = false }) {
     <div className="space-y-6 animate-in fade-in duration-500">
       <PageHeader
         icon={AlertCircle}
-        title="Wrong Numbers"
-        description={readOnly ? `${rows.length} of your Unfiltered Calls marked Wrong Number.` : `${rows.length} records marked wrong by callers. Restore, reassign, edit or export.`}
-        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Wrong Numbers" }]}
+        title="Status Management"
+        description={`${pageInfo.total.toLocaleString()} record${pageInfo.total === 1 ? "" : "s"} — Wrong Number, Not Interested, 10+ Times Switched Off and 10+ Times Incoming Off in one place. Filter by Status and Source.`}
+        breadcrumb={[{ label: "Dashboard", href: "/dashboard/admin" }, { label: "People" }, { label: "Status Management" }]}
         actions={readOnly ? null : <ActionBar items={[
-          { key: "xlsx", label: "Excel", icon: Download, href: `/api/admin/wrong-numbers/export/xlsx?${qs()}` },
-          { key: "pdf", label: "PDF", icon: FileText, href: `/api/admin/wrong-numbers/export/pdf?${qs()}` },
+          { key: "xlsx", label: "Wrong Numbers Excel", icon: Download, href: `/api/admin/wrong-numbers/export/xlsx?${qs()}` },
+          { key: "pdf", label: "Wrong Numbers PDF", icon: FileText, href: `/api/admin/wrong-numbers/export/pdf?${qs()}` },
         ]} />}
       />
 
@@ -300,9 +252,9 @@ function Body({ canDelete, readOnly = false }) {
         <select value={districtId} onChange={(e) => setDistrictId(e.target.value)} className={sel}><option value="">All districts</option>{districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
         <select value={assemblyId} onChange={(e) => setAssemblyId(e.target.value)} className={sel}><option value="">All assemblies</option>{assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select value={caller} onChange={(e) => setCaller(e.target.value)} className={sel}><option value="">All callers</option>{callers.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}</select>
-        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className={sel}><option value="">Any status</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select>
-        <select value={savedF} onChange={(e) => setSavedF(e.target.value)} className={sel} aria-label="Saved status" data-testid="wn-saved-filter"><option value="">Any saved status</option><option value="not_in_service">Not in Service</option></select>
-        <select value={sourceF} onChange={(e) => setSourceF(e.target.value)} className={sel} aria-label="Source" data-testid="wn-source-filter"><option value="">Any source</option><option value="unfiltered_calls">Unfiltered Calls</option><option value="registration">Worker &amp; Voter Registration</option><option value="none">{SOURCE_NOT_AVAILABLE}</option></select>
+        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className={sel} aria-label="Status" data-testid="sm-status-filter"><option value="">All statuses</option>{statusOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}{statusF && !statusOpts.some((o) => o.value === statusF) && <option value={statusF}>{statusF}</option>}</select>
+        <select value={sourceF} onChange={(e) => setSourceF(e.target.value)} className={sel} aria-label="Source" data-testid="sm-source-filter"><option value="">All sources</option>{(sourceOpts.length ? sourceOpts : [{ value: "contact_page", label: "Contact Page" }, { value: "registration", label: "Worker & Voter Registration Page" }, { value: "unfiltered_calls", label: "Unfiltered Calls" }]).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+        <select value={assignF} onChange={(e) => setAssignF(e.target.value)} className={sel} aria-label="Assignment" data-testid="sm-assign-filter"><option value="">Any assignment</option><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option></select>
         <select value={reasonF} onChange={(e) => setReasonF(e.target.value)} className={sel}><option value="">Any reason</option>{WRONG_NUMBER_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</select>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} title="Marked from" className={sel} />
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="Marked to" className={sel} />
@@ -313,7 +265,7 @@ function Body({ canDelete, readOnly = false }) {
         {loading ? (
           <div className="p-12 text-center text-gray-400"><Loader2 className="inline animate-spin" /></div>
         ) : rows.length === 0 ? (
-          <div className="p-12 text-center text-gray-400"><AlertCircle size={36} className="mx-auto text-gray-300 mb-3" />No wrong numbers match.</div>
+          <div className="p-12 text-center text-gray-400"><AlertCircle size={36} className="mx-auto text-gray-300 mb-3" />No records match the selected Status and Source.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm whitespace-nowrap">
@@ -336,7 +288,7 @@ function Body({ canDelete, readOnly = false }) {
                       </div>
                     </td>
                     <td className="px-3 py-3 font-mono text-xs text-gray-700">{c.phone_number}</td>
-                    <td className="px-3 py-3 text-xs" data-testid="wn-source">{c.source_label ? <span className="font-semibold text-gray-700">{c.source_label}</span> : <span className="text-gray-400">{SOURCE_NOT_AVAILABLE}</span>}</td>
+                    <td className="px-3 py-3 text-xs" data-testid="wn-source"><span className="font-semibold text-gray-700">{c.source_label || "—"}</span></td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.designation_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.zone_name || "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600">{c.lok_sabha_name || "—"}</td>
@@ -350,11 +302,18 @@ function Body({ canDelete, readOnly = false }) {
                     <td className="px-3 py-3 text-xs text-gray-600">{c.wrong_number_reason ? (c.row_type === "unfiltered" ? (unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason) : (REASON_LABEL[c.wrong_number_reason] || c.wrong_number_reason)) : "—"}</td>
                     <td className="px-3 py-3 text-xs text-gray-600 max-w-[160px] truncate" title={c.wrong_number_notes || c.last_remarks || ""}>{c.wrong_number_notes || c.last_remarks || "—"}</td>
                     <td className="px-3 py-3 text-center font-bold text-gray-700">{c.wrong_attempts}</td>
-                    <td className="px-3 py-3"><span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">{c.not_in_service && c.row_type !== "unfiltered" ? "Not in Service" : "Wrong Number"}</span></td>
+                    <td className="px-3 py-3" data-testid="sm-status-cell">
+                      <div className="flex flex-wrap gap-1">
+                        {(c.categories || []).map((k) => <span key={k} data-testid={`sm-cat-${k}`} className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">{CAT_LABEL[k]}</span>)}
+                        {c.not_in_service && c.row_type !== "unfiltered" ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">Not in Service</span> : null}
+                      </div>
+                      {c.latest_status && <div className="text-[10px] text-gray-400 mt-0.5" data-testid="sm-latest-status">Latest: {c.latest_status}</div>}
+                    </td>
                     <td className="px-3 py-3">
                       {c.row_type === "unfiltered" ? <span className="text-[11px] text-gray-400">Unfiltered record</span> : readOnly ? <span className="text-[11px] text-gray-400">View only</span> : (
                       <div className="flex items-center gap-1">
-                        <IconBtn title="Restore to queue" onClick={() => restore(c.id)} className="text-emerald-600 hover:bg-emerald-50"><RotateCcw size={15} /></IconBtn>
+                        {(c.categories || []).includes("wrong_number") && <IconBtn title="Restore from Wrong Number to queue" onClick={() => restore(c.id)} className="text-emerald-600 hover:bg-emerald-50"><RotateCcw size={15} /></IconBtn>}
+                        {(c.categories || []).filter((k) => k !== "wrong_number").map((k) => <IconBtn key={k} title={`Restore from ${CAT_LABEL[k]}`} onClick={() => restoreCategory(c, k)} className="text-emerald-600 hover:bg-emerald-50"><RotateCcw size={15} /></IconBtn>)}
                         <IconBtn title="Edit contact / mobile number" onClick={() => setEditRow(c)} className="text-[#164FA3] hover:bg-blue-50"><Pencil size={15} /></IconBtn>
                         <IconBtn title="Reassign caller" onClick={() => setReassign(c)} className="text-amber-600 hover:bg-amber-50"><UserCog size={15} /></IconBtn>
                         <IconBtn title="Merge into another contact" onClick={() => setMergeRow(c)} className="text-violet-600 hover:bg-violet-50"><GitMerge size={15} /></IconBtn>
@@ -372,6 +331,16 @@ function Body({ canDelete, readOnly = false }) {
           </div>
         )}
       </div>
+
+      {pageInfo.total_pages > 1 && (
+        <div className="flex items-center justify-between text-sm text-gray-600" data-testid="sm-pagination">
+          <span>Page {pg} of {pageInfo.total_pages} · {pageInfo.total.toLocaleString()} records</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPg((x) => Math.max(1, x - 1))} disabled={pg <= 1} data-testid="sm-prev" className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white disabled:opacity-40">Previous</button>
+            <button type="button" onClick={() => setPg((x) => Math.min(pageInfo.total_pages, x + 1))} disabled={pg >= pageInfo.total_pages} data-testid="sm-next" className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white disabled:opacity-40">Next</button>
+          </div>
+        </div>
+      )}
 
       {reassign && <ReassignModal row={reassign} callers={callers} onClose={() => setReassign(null)} onSaved={() => { setReassign(null); setMsg("Contact reassigned."); load(); }} />}
       {editRow && <EditModal row={editRow} onClose={() => setEditRow(null)} onSaved={() => { setEditRow(null); setMsg("Contact updated."); load(); }} />}

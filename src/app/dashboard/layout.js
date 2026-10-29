@@ -51,7 +51,7 @@ const SUPERVISOR_NAV = [
     children: [
       { name: "Follow-Ups", href: "/dashboard/supervisor/follow-ups", icon: PhoneCall },
       { name: "Remarks", href: "/dashboard/supervisor/remarks", icon: FileText },
-      { name: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+      { name: "Status Management", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
     ],
   },
   // Pending Approval — caller-submitted contacts the Supervisor reviews (approve /
@@ -97,7 +97,7 @@ const CALLER_NAV = [
   { name: "Voter Registration", href: "/dashboard/admin/voter-registration?tab=people", icon: Vote },
   { name: "Worker Registration", href: "/dashboard/admin/voter-registration?tab=workers", icon: UserCheck },
   // The Not Interested tab of the Wrong Numbers dashboard, scoped to this caller.
-  { name: "Not Interested", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
+  { name: "Status Management", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
 ];
 
 // Quick Dashboard Switch — Super Admin only. Sets which nav/layout renders

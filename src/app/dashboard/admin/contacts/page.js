@@ -61,7 +61,7 @@ export default function Page() {
         <button className={tabCls(tab === "all")} onClick={() => setTab("all")}><UserCheck size={15} /> All Contacts</button>
         <Link href="/dashboard/admin/active-workers" className={tabCls(false)}><UsersIcon size={15} /> Active Workers</Link>
         {isSuper && <Link href="/dashboard/admin/influencers" className={tabCls(false)}><Star size={15} /> Influencers</Link>}
-        <button className={tabCls(tab === "wrong")} onClick={() => setTab("wrong")}><AlertCircle size={15} /> Wrong Number</button>
+        <button className={tabCls(tab === "wrong")} onClick={() => setTab("wrong")}><AlertCircle size={15} /> Status Management</button>
         {/* Incomplete Designation is reached from the page's top navigation group
             (and the sidebar); it was removed from this tab bar to avoid showing the
             same entry twice on the Contacts page. */}

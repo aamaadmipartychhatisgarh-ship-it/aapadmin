@@ -55,7 +55,7 @@ export const PAGES = [
     roles: [ROLES.CALLER] },
   { key: "vacancies", label: "Designation Vacancies", href: "/dashboard/admin/vacancies", prefixes: ["/dashboard/admin/vacancies"], icon: "UserCog",
     roles: [...OVERSIGHT] },
-  { key: "wrong_numbers", label: "Wrong Numbers", href: "/dashboard/admin/wrong-numbers", prefixes: ["/dashboard/admin/wrong-numbers"], icon: "AlertCircle",
+  { key: "wrong_numbers", label: "Status Management", href: "/dashboard/admin/wrong-numbers", prefixes: ["/dashboard/admin/wrong-numbers"], icon: "AlertCircle",
     roles: [...OVERSIGHT, ROLES.CALLER] },
   // Wrong Numbers sub-tabs (in-page tabs of /dashboard/admin/wrong-numbers).
   // These are the only two SEPARATELY-ACCESSIBLE sections; the individual
@@ -66,9 +66,9 @@ export const PAGES = [
   // the Supervisor's own territory (enforced by the API).
   { key: "contact_registration_link", label: "Contacts · Generate Registration Link", href: "/dashboard/supervisor/contacts", prefixes: [], tab: true, parent: "contacts", hideFromNav: true, icon: "Link2",
     roles: [ROLES.SUPERVISOR] },
-  { key: "wn_wrong_list", label: "Wrong Numbers · List", href: "/dashboard/admin/wrong-numbers", prefixes: [], tab: true, parent: "wrong_numbers", icon: "AlertCircle",
+  { key: "wn_wrong_list", label: "Status Management · Wrong Numbers", href: "/dashboard/admin/wrong-numbers", prefixes: [], tab: true, parent: "wrong_numbers", icon: "AlertCircle",
     roles: [...OVERSIGHT] },
-  { key: "not_interested", label: "Wrong Numbers · Not Interested", href: "/dashboard/admin/wrong-numbers", prefixes: [], tab: true, parent: "wrong_numbers", icon: "HeartCrack",
+  { key: "not_interested", label: "Status Management · Not Interested", href: "/dashboard/admin/wrong-numbers", prefixes: [], tab: true, parent: "wrong_numbers", icon: "HeartCrack",
     roles: [...OVERSIGHT, ROLES.CALLER] },
   { key: "call_records", label: "Call Records", href: "/dashboard/admin/calls", prefixes: ["/dashboard/admin/calls"], icon: "Database",
     roles: [...OVERSIGHT] },

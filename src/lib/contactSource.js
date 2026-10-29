@@ -77,3 +77,19 @@ export async function wrongNumberSourceFilter(value, alias = "c") {
   if (v === "registration") return `(${reg} AND NOT ${unf})`;
   return `(NOT ${unf} AND NOT (${reg}) AND (${col("source")} IS NULL OR TRIM(${col("source")}) = ''))`;
 }
+
+// Unified Status Management page: every record maps to exactly one of three origins, from the existing fields only -
+//   unfiltered_calls : contacts.source = 'unfiltered_calls' OR contacts.source_unfiltered_contact_id set (Unfiltered rows themselves)
+//   registration     : contacts.source_registration_id set (Worker & Voter Registration), and not from Unfiltered Calls
+//   contact_page     : every other contact - it lives in the Contact module with no other recorded origin marker
+export const STATUS_SOURCES = [
+  { value: "contact_page", label: "Contact Page" },
+  { value: "registration", label: "Worker & Voter Registration Page" },
+  { value: "unfiltered_calls", label: "Unfiltered Calls" },
+];
+export async function sourceKeySql(alias = "c") {
+  const have = await wnSourceColumns();
+  const col = (n) => (have.has(n) ? `${alias}.${n}` : "NULL");
+  return `(CASE WHEN COALESCE(${col("source")}, '') = '${SOURCE_UNFILTERED}' OR ${col("source_unfiltered_contact_id")} IS NOT NULL THEN 'unfiltered_calls'
+                WHEN ${col("source_registration_id")} IS NOT NULL THEN 'registration' ELSE 'contact_page' END)`;
+}
