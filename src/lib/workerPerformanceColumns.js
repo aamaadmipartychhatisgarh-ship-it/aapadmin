@@ -6,18 +6,19 @@
 //   pdfValue    - optional: the PDF shows this instead of value(row) (Excel / CSV keep value)
 //   pdfFlex     - relative width in the PDF
 //   numeric     - exported as a number in Excel
+//   w           - share of the dashboard table's width (%, sums to 100) so every column fits without scrolling
 export const WORKER_PERFORMANCE_COLUMNS = [
-  { key: "rank", label: "Rank", value: (r) => r.rank, display: "rank", pdfFlex: 0.5, numeric: true },
+  { key: "rank", w: 10, label: "Rank", value: (r) => r.rank, display: "rank", pdfFlex: 0.5, numeric: true },
   // The screen shows the Worker ID under the name, so the exported cell carries it too.
-  { key: "name", label: "Worker Name", value: (r) => (r.worker_code ? `${r.name} (${r.worker_code})` : r.name || ""), display: "name", pdfFlex: 2.0, bold: true,
+  { key: "name", w: 19, label: "Worker Name", value: (r) => (r.worker_code ? `${r.name} (${r.worker_code})` : r.name || ""), display: "name", pdfFlex: 2.0, bold: true,
     // The PDF shows the Worker Name only - no Worker ID.
     pdfValue: (r) => r.name || "" },
-  { key: "mobile", label: "Mobile", value: (r) => r.mobile || "", pdfFlex: 1.0 },
-  { key: "zone", label: "Zone", value: (r) => r.zone_name || "", pdfFlex: 1.1 },
-  { key: "assembly", label: "Assembly", value: (r) => r.assembly_name || "", pdfFlex: 1.3 },
-  { key: "workers", label: "Workers", value: (r) => r.new_workers ?? 0, pdfFlex: 0.75, numeric: true },
-  { key: "voters", label: "Voters", value: (r) => r.voters ?? 0, pdfFlex: 0.75, numeric: true },
-  { key: "total", label: "Total", value: (r) => r.total ?? 0, display: "total", pdfFlex: 0.6, bold: true, numeric: true },
+  { key: "mobile", w: 14, label: "Mobile", value: (r) => r.mobile || "", pdfFlex: 1.0 },
+  { key: "zone", w: 13, label: "Zone", value: (r) => r.zone_name || "", pdfFlex: 1.1 },
+  { key: "assembly", w: 15, label: "Assembly", value: (r) => r.assembly_name || "", pdfFlex: 1.3 },
+  { key: "workers", w: 9, label: "Workers", value: (r) => r.new_workers ?? 0, pdfFlex: 0.75, numeric: true },
+  { key: "voters", w: 9, label: "Voters", value: (r) => r.voters ?? 0, pdfFlex: 0.75, numeric: true },
+  { key: "total", w: 11, label: "Total", value: (r) => r.total ?? 0, display: "total", pdfFlex: 0.6, bold: true, numeric: true },
 ];
 
 export const visibleWorkerColumns = () => WORKER_PERFORMANCE_COLUMNS.filter((c) => c.visible !== false);

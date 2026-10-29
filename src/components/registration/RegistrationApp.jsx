@@ -160,10 +160,10 @@ function LinkSwitch({ drive, drives, reload, onError }) {
   );
 }
 
-function RankBadge({ rank }) {
+function RankBadge({ rank, compact = false }) {
   const tone = rank === 1 ? "bg-amber-100 text-amber-800" : rank === 2 ? "bg-gray-200 text-gray-700"
     : rank === 3 ? "bg-orange-100 text-orange-800" : "bg-gray-100 text-gray-500";
-  return <span className={`inline-flex w-7 h-7 rounded-full items-center justify-center text-xs font-bold ${tone}`}>{rank}</span>;
+  return <span className={`inline-flex ${compact ? "w-6 h-6 sm:w-7 sm:h-7 text-[11px] sm:text-xs" : "w-7 h-7 text-xs"} rounded-full items-center justify-center font-bold ${tone}`}>{rank}</span>;
 }
 
 export default function RegistrationApp() {
@@ -430,11 +430,12 @@ function DashboardTab({ filterQs, onWard, onError }) {
           exportLabel="Export Excel"
           pdfHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200, format: "pdf" })}`}
           testId="worker-performance"
+          fit={visibleWorkerColumns().map((c) => c.w)}
           // Columns come from the shared configuration (lib/workerPerformanceColumns) - the same one the
           // Excel and PDF exports use, so display and export can never drift apart.
           head={visibleWorkerColumns().map((c) => c.label)}
           rows={data.workers.map((w) => visibleWorkerColumns().map((c) => {
-            if (c.display === "rank") return <RankBadge key={c.key} rank={w.rank} />;
+            if (c.display === "rank") return <RankBadge key={c.key} rank={w.rank} compact />;
             if (c.display === "name") return <span key={c.key} className="font-semibold text-gray-900">{w.name}<span className="block text-[11px] font-normal text-gray-400 font-mono">{w.worker_code}</span></span>;
             if (c.display === "total") return <span key={c.key} className="font-bold text-gray-900">{c.value(w)}</span>;
             const v = c.value(w);
@@ -495,7 +496,7 @@ function AssemblyRegistrationGraph({ assemblies }) {
   );
 }
 
-function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel = "CSV", pdfHref, testId }) {
+function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel = "CSV", pdfHref, testId, fit }) {
   return (
     <div className={cardCls} data-testid={testId}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -518,11 +519,13 @@ function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel
           </div>
         ) : null}
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className={fit ? "" : "overflow-x-auto"}>
+        {/* fit: fixed layout with per-column % widths - every column stays inside the box (no horizontal scroll); long text wraps */}
+        <table className={fit ? "w-full table-fixed text-xs sm:text-sm" : "w-full text-sm"}>
+          {fit ? <colgroup>{fit.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup> : null}
           <thead>
             <tr className="text-left text-xs text-gray-500 bg-gray-50">
-              {head.map((h) => <th key={h} className="px-4 py-2 font-semibold whitespace-nowrap">{h}</th>)}
+              {head.map((h) => <th key={h} className={fit ? "px-1 sm:px-2.5 py-2 font-semibold [overflow-wrap:anywhere]" : "px-4 py-2 font-semibold whitespace-nowrap"}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -530,7 +533,7 @@ function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel
               <tr><td colSpan={head.length} className="px-4 py-8 text-center text-gray-500">{empty}</td></tr>
             ) : rows.map((cells, i) => (
               <tr key={i} className="border-t border-gray-100">
-                {cells.map((c, j) => <td key={j} className="px-4 py-2.5 whitespace-nowrap">{c}</td>)}
+                {cells.map((c, j) => <td key={j} className={fit ? "px-1 sm:px-2.5 py-2 align-top [overflow-wrap:anywhere]" : "px-4 py-2.5 whitespace-nowrap"}>{c}</td>)}
               </tr>
             ))}
           </tbody>
