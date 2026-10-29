@@ -19,6 +19,7 @@ import { syncContactWings } from "@/lib/contactWings";
 import { contactEffectiveZoneId, releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
+import { remarksForGeneralEdit } from "@/lib/contactRemarks";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
@@ -232,7 +233,7 @@ export async function PUT(req, { params }) {
 
     // Descriptive + geographic details anyone with edit rights may change.
     const DETAIL_FIELDS = ["qualification", "education_level", "vehicle", 
-      "person_name", "phone_number", "pincode", "village", "remarks", "designation_id",
+      "person_name", "phone_number", "pincode", "village", "designation_id",
       "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id", "booth_id",
     ];
     // Queue assignment + completion state stay admin-only (not "contact details").
@@ -275,6 +276,16 @@ export async function PUT(req, { params }) {
       if (ar.value !== undefined) { sets.push("address = IF(address <=> ?, ?, address)"); vals.push(curAddr?.address ?? null, ar.value); addressWanted = ar.value; }
       addressConflict = !!ar.conflict;
     }
+    // REMARKS / NOTES: written only when the user actually edited them (see remarksForGeneralEdit) - an edit of another
+    // field, an omitted field or a stale form never clears or reverts a saved Remark; emptying the box and saving removes it.
+    let remarksConflict = false, remarksWanted;
+    if ("remarks" in data && existingColumns.has("remarks")) {
+      const [curRem] = await query("SELECT remarks FROM contacts WHERE id = ?", [id]);
+      const rr = remarksForGeneralEdit(data, curRem?.remarks);
+      // Compare-and-set: replaced only if the Remark still is what was read above (racing edits can't overwrite each other).
+      if (rr.value !== undefined) { sets.push("remarks = IF(remarks <=> ?, ?, remarks)"); vals.push(curRem?.remarks ?? null, rr.value); remarksWanted = rr.value; }
+      remarksConflict = !!rr.conflict;
+    }
     // PHOTO: a general edit never changes the photo, except to attach one just uploaded in
     // the same form (and never reverting a newer photo from a stale form) — see
     // photoForGeneralEdit. Setting/removing a photo otherwise goes through the photo endpoint.
@@ -295,8 +306,8 @@ export async function PUT(req, { params }) {
     if (sets.length === 0) {
       // Nothing to write because the only fields sent were an unchanged / protected Address or Photo
       // (see above) — that is a successful no-op, not an error. Return the current record.
-      if ("address" in data || "photo_url" in data || designationConflict || hadRows || "designation_ids_prev" in data || "designation_id_prev" in data) {
-        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
+      if ("address" in data || "remarks" in data || "photo_url" in data || designationConflict || hadRows || "designation_ids_prev" in data || "designation_id_prev" in data) {
+        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(remarksConflict ? { remarks_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
       }
       return NextResponse.json({ message: "No fields to update" }, { status: 400 });
     }
@@ -320,6 +331,10 @@ export async function PUT(req, { params }) {
       if (addressWanted !== undefined) {
         const [[nowRow]] = await conn.query("SELECT address FROM contacts WHERE id = ?", [id]);
         if (norm0(nowRow?.address) !== norm0(addressWanted)) addressConflict = true; // someone else's newer address won
+      }
+      if (remarksWanted !== undefined) {
+        const [[nowRem]] = await conn.query("SELECT remarks FROM contacts WHERE id = ?", [id]);
+        if (String(nowRem?.remarks ?? "").replace(/\r\n?/g, "\n") !== String(remarksWanted ?? "").replace(/\r\n?/g, "\n")) remarksConflict = true; // a newer Remark won
       }
       await conn.commit();
     } catch (e) {
@@ -358,7 +373,7 @@ export async function PUT(req, { params }) {
     // username, resolved photo) — the exact shape the list renders — so the
     // client replaces its row with fresh data and never shows a stale name.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
+    return NextResponse.json({ ok: true, contact: updated, ...(releasedFrom ? { released_assignment: releasedFrom } : {}), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(remarksConflict ? { remarks_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
   } catch (err) {
     console.error("contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

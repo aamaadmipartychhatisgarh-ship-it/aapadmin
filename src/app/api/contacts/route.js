@@ -394,6 +394,8 @@ export async function POST(req) {
       person_name: person_name.trim(),
       phone_number: phone_number.trim(),
       address: address || null,
+      // Remarks / Notes entered in Add Contact: saved exactly as typed (blank = none).
+      ...(typeof data.remarks === "string" && data.remarks.trim() ? { remarks: data.remarks.slice(0, 5000) } : {}),
       designation_id: primaryDesignation,
       // Full location hierarchy (Zone → Lok Sabha → District → Assembly → Block).
       zone_id: zone_id || null,

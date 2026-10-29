@@ -1890,7 +1890,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
   const districtLocked = !!(territory && territory.district); // district/assembly anchor → fixed
   const zoneLevel = !!(territory && territory.level === "zone"); // may pick a district in-zone
   const [form, setForm] = useState({
-    person_name: "", phone_number: "", address: "", designation_rows: [{ designation_id: "", wing: "" }], photo_url: "",
+    person_name: "", phone_number: "", address: "", remarks: "", designation_rows: [{ designation_id: "", wing: "" }], photo_url: "",
     qualification: "", education_level: "", vehicle: "",
     // Full location hierarchy. For a supervisor the levels their territory fixes
     // are pre-filled (and shown locked); the rest cascade from what's chosen.
@@ -2010,6 +2010,7 @@ export function AddContactModal({ addUrl, territory = null, territoryLabel = "",
         <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
         <VehicleField value={form.vehicle} onChange={(v) => setForm((f) => ({ ...f, vehicle: v }))} />
+        <textarea rows={2} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="Remarks / Notes" aria-label="Remarks / Notes" data-testid="add-remarks" value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
         {/* Designation + Wing — one combined row per combination; "Add Designation" adds another row below. */}
         <DesignationWingRows rows={form.designation_rows} onChange={(rows) => setForm({ ...form, designation_rows: rows })} designations={designations} wingMaster={wingMaster} />
         {/* Location hierarchy: Zone → Lok Sabha → District → Assembly → Block.

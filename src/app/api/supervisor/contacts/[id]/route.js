@@ -15,6 +15,7 @@ import { syncContactWings } from "@/lib/contactWings";
 import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
+import { remarksForGeneralEdit } from "@/lib/contactRemarks";
 import { ensurePhotoVerifiedColumn } from "@/lib/contactPhotoRecovery";
 import { deleteLocalUpload } from "@/lib/uploadCleanup";
 
@@ -47,7 +48,7 @@ async function getContactColumns() {
 // Rather than add a second scope check against the requested new values,
 // geography simply isn't editable here — a supervisor can relocate/reassign
 // WHO owns a contact, not WHERE it lives.
-const DETAIL_FIELDS = ["person_name", "phone_number", "pincode", "village", "remarks", "designation_id"];
+const DETAIL_FIELDS = ["person_name", "phone_number", "pincode", "village", "designation_id"];
 
 export async function PUT(req, { params }) {
   try {
@@ -155,6 +156,18 @@ export async function PUT(req, { params }) {
         addressConflict = !!ar.conflict;
       }
     }
+    // REMARKS / NOTES: written only when the user actually edited them (see remarksForGeneralEdit) - an omitted field, an
+    // unrelated edit or a stale form never clears or reverts a saved Remark; emptying the box and saving removes it.
+    let remarksConflict = false, remarksWanted;
+    if ("remarks" in data && existingColumns.has("remarks")) {
+      const scR = supervisorScopeFilter(session.user, "c");
+      const [curRem] = await query(`SELECT c.remarks FROM contacts c WHERE c.id = ? ${scR.where}`, [id, ...scR.params]);
+      if (curRem) {
+        const rr = remarksForGeneralEdit(data, curRem.remarks);
+        if (rr.value !== undefined) { sets.push("c.remarks = IF(c.remarks <=> ?, ?, c.remarks)"); vals.push(curRem.remarks ?? null, rr.value); remarksWanted = rr.value; }
+        remarksConflict = !!rr.conflict;
+      }
+    }
     // PHOTO: a general edit never changes the photo, except to attach one just uploaded in the same
     // form, and never reverting a newer photo from a stale form (see photoForGeneralEdit). The
     // contact is read through the same territory scope as the UPDATE below.
@@ -181,11 +194,11 @@ export async function PUT(req, { params }) {
     if (sets.length === 0) {
       // Only an unchanged / protected Address or Photo was sent — a successful no-op (inside the
       // supervisor's territory), not an error.
-      if ("address" in data || "photo_url" in data || designationConflict || hadRows || "designation_ids_prev" in data || "designation_id_prev" in data) {
+      if ("address" in data || "remarks" in data || "photo_url" in data || designationConflict || hadRows || "designation_ids_prev" in data || "designation_id_prev" in data) {
         const scn = supervisorScopeFilter(session.user, "c");
         const [inScope] = await query(`SELECT c.id FROM contacts c WHERE c.id = ? ${scn.where}`, [id, ...scn.params]);
         if (!inScope) return NextResponse.json({ message: "Contact not found or outside your territory." }, { status: 404 });
-        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
+        return NextResponse.json({ ok: true, no_change: true, contact: await resolveContactCard(id), ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(remarksConflict ? { remarks_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
       }
       return NextResponse.json({ message: "No fields to update" }, { status: 400 });
     }
@@ -212,6 +225,10 @@ export async function PUT(req, { params }) {
         const norm0 = (v) => String(v ?? "").replace(/\r\n?/g, "\n").trim();
         const [[nowRow]] = await conn.query("SELECT address FROM contacts WHERE id = ?", [id]);
         if (norm0(nowRow?.address) !== norm0(addressWanted)) addressConflict = true;
+      }
+      if (affected && remarksWanted !== undefined) {
+        const [[nowRem]] = await conn.query("SELECT remarks FROM contacts WHERE id = ?", [id]);
+        if (String(nowRem?.remarks ?? "").replace(/\r\n?/g, "\n") !== String(remarksWanted ?? "").replace(/\r\n?/g, "\n")) remarksConflict = true;
       }
       await conn.commit();
     } catch (e) {
@@ -241,7 +258,7 @@ export async function PUT(req, { params }) {
     await logAudit(session, { action: "contact.update", entityType: "contact", entityId: id, details: { supervisor: true, fields: Object.keys(data) } });
     // Fully-resolved record (all display names) so the client shows fresh data.
     updated = await resolveContactCard(id);
-    return NextResponse.json({ ok: true, contact: updated, ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
+    return NextResponse.json({ ok: true, contact: updated, ...(photoIgnored ? { photo_ignored: true } : {}), ...(addressConflict ? { address_conflict: true } : {}), ...(remarksConflict ? { remarks_conflict: true } : {}), ...(designationConflict ? { designation_conflict: true } : {}) });
   } catch (err) {
     console.error("supervisor contacts PUT error:", err);
     if (err?.code === "ER_DUP_ENTRY") return duplicatePhoneResponse();

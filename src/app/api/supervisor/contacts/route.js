@@ -358,6 +358,8 @@ export async function POST(req) {
     add("person_name", person_name.trim());
     add("phone_number", phone_number.trim());
     add("address", address || null);
+    // Remarks / Notes entered in Add Contact: saved exactly as typed (blank = none).
+    if (typeof data.remarks === "string" && data.remarks.trim()) add("remarks", data.remarks.slice(0, 5000));
     add("designation_id", designationIds[0] || null); // primary = first (multi below)
     add("photo_url", photo_url || null);
     for (const [col, val] of Object.entries(geo)) add(col, val);
