@@ -14,7 +14,7 @@ import { AddContactModal } from "@/components/contacts/ContactsModule";
 import { MultiSelect } from "@/components/MultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
 import DesignationWingRows from "@/components/contacts/DesignationWingRows";
-import { MEMBER_PICKED, MEMBER_FOLLOWUP_STATUSES, MEMBER_ONLY_STATUSES, MEMBER_WRONG_REASONS, isMemberName, memberPickedLabel } from "@/lib/memberWorkflowShared";
+import { MEMBER_PICKED, MEMBER_FOLLOWUP_STATUSES, MEMBER_ONLY_STATUSES, MEMBER_HIDDEN_STATUSES, MEMBER_WRONG_REASONS, isMemberName, memberPickedLabel } from "@/lib/memberWorkflowShared";
 import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
 import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
@@ -1446,7 +1446,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                           className={inputCls}
                         >
                           <option value="">Select…</option>
-                          {statuses.filter((s) => isMember || !MEMBER_ONLY_STATUSES.includes(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          {statuses.filter((s) => isMember ? !MEMBER_HIDDEN_STATUSES.includes(s.name) : !MEMBER_ONLY_STATUSES.includes(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                       </Field>
                       {isPicked && isMember && (

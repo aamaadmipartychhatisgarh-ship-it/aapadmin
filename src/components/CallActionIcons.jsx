@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Phone, MessageCircle, MessageSquare, Copy, UserRound, ClipboardCheck, Loader2, Check, History, Flag } from "lucide-react";
 import FloatingPopover from "@/components/FloatingPopover";
-import { MEMBER_ONLY_STATUSES, MEMBER_WRONG_REASONS } from "@/lib/memberWorkflowShared";
+import { MEMBER_ONLY_STATUSES, MEMBER_HIDDEN_STATUSES, MEMBER_WRONG_REASONS } from "@/lib/memberWorkflowShared";
 
 // Indian 10-digit mobile → wa.me international format (91XXXXXXXXXX, no '+').
 // Falls back to stripping non-digits if the number already carries a prefix.
@@ -345,7 +345,7 @@ function QuickLogPopover({ phone, personName, contactId, onClose, onLogged, isMe
             className="w-full h-8 px-2 rounded-lg border border-gray-200 text-sm outline-none focus:ring-1 focus:ring-[#164FA3]"
           >
             <option value="">Select status…</option>
-            {statuses.filter((s) => isMember || !MEMBER_ONLY_STATUSES.includes(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {statuses.filter((s) => isMember ? !MEMBER_HIDDEN_STATUSES.includes(s.name) : !MEMBER_ONLY_STATUSES.includes(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           {isWrongNumber && (
             <select

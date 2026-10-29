@@ -12,6 +12,9 @@ export const MEMBER_PICKED = [
 ];
 export const MEMBER_PICKED_VALUES = MEMBER_PICKED.map((o) => o.value);
 export const MEMBER_ONLY_SENTIMENTS = ["active", "not_active", "member_opponent", "not_interested"]; // not available to other designations
+// ...but of those, Rudely Behaved and Busy are NOT offered to a Member in My Workspace (nor accepted for a Member contact's call);
+// Not in Service and Wrong Number stay. Historical calls carrying them are untouched.
+export const MEMBER_HIDDEN_STATUSES = ["Rudely Behaved", "Busy"];
 export const MEMBER_FOLLOWUP_STATUSES = ["Not Picked", "Not in Service", "Switched Off", "Incoming Off"];
 // Calling Status options offered only for a Member on Regular Calls (hidden for every other designation, and refused by POST /api/calls).
 // Historical calls that already carry these statuses are untouched.
