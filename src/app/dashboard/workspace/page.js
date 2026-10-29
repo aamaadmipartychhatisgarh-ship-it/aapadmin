@@ -14,7 +14,7 @@ import { AddContactModal } from "@/components/contacts/ContactsModule";
 import { MultiSelect } from "@/components/MultiSelect";
 import { wingShortLabel } from "@/lib/wingLabel";
 import DesignationWingRows from "@/components/contacts/DesignationWingRows";
-import { MEMBER_PICKED, MEMBER_FOLLOWUP_STATUSES, MEMBER_ONLY_STATUSES, isMemberName, memberPickedLabel } from "@/lib/memberWorkflowShared";
+import { MEMBER_PICKED, MEMBER_FOLLOWUP_STATUSES, MEMBER_ONLY_STATUSES, MEMBER_WRONG_REASONS, isMemberName, memberPickedLabel } from "@/lib/memberWorkflowShared";
 import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
 import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
@@ -1478,9 +1478,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                       )}
                       {isWrongNum && (
                         <Field label="Reason">
-                          <select value={form.wrong_number_reason} onChange={(e) => setForm({ ...form, wrong_number_reason: e.target.value })} className={inputCls}>
+                          <select value={form.wrong_number_reason} onChange={(e) => setForm({ ...form, wrong_number_reason: e.target.value })} className={inputCls} data-testid="wrong-number-reason">
                             <option value="">Select reason (optional)…</option>
-                            {WRONG_NUMBER_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                            {(isMember ? MEMBER_WRONG_REASONS : WRONG_NUMBER_REASONS).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                           </select>
                         </Field>
                       )}

@@ -17,3 +17,10 @@ export const MEMBER_ONLY_STATUSES = ["Not in Service"];
 export const memberPickedLabel = (v) => MEMBER_PICKED.find((o) => o.value === v)?.label || null;
 export const isMemberName = (n) => String(n || "").trim().toLowerCase() === MEMBER_DESIGNATION;
 
+// Wrong Number reasons offered for a MEMBER on Regular Calls - exactly these two (existing wrong_number_reason values, so both keep
+// their existing workflow); every other designation keeps the full list.
+export const MEMBER_WRONG_REASONS = [
+  { value: "invalid_number", label: "Invalid/Wrong Number" },
+  { value: "belongs_to_someone_else", label: "Belongs to Someone Else" },
+];
+export const MEMBER_WRONG_REASON_VALUES = MEMBER_WRONG_REASONS.map((o) => o.value);
