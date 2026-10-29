@@ -12,6 +12,8 @@ import { dueClause, laterClause } from "@/lib/followup";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
 import { logAudit } from "@/lib/audit";
+import { validateRows } from "@/lib/contactDesignationRows";
+import { syncContactWings } from "@/lib/contactWings";
 
 // Unfiltered Contacts — raw bulk-imported numbers kept in their OWN table,
 // logically separate from `contacts` (nothing here reads-for-write or writes the
@@ -706,6 +708,49 @@ export async function updateUnfilteredContact({ session, id, callerId, data, can
     if (ph.ignored) flags.photo_ignored = true;
     if (ph.set) sets.photo_url = ph.set;
 
+    // Name / Phone Number / Designation (+ Wing): each is applied only when it differs from the form's baseline (`*_prev`), so an
+    // untouched field - or a stale copy of one - never overwrites a newer saved value. A blank name / number is refused (never clears).
+    if ("person_name" in data) {
+      const want = String(data.person_name ?? "").trim();
+      const base = "person_name_prev" in data ? String(data.person_name_prev ?? "").trim() : String(row.person_name || "").trim();
+      if (want !== base) {
+        if (!want) { await conn.rollback(); return { status: 400, message: "Name is required." }; }
+        if (want.length > 100) { await conn.rollback(); return { status: 400, message: "Name is too long (max 100 characters)." }; }
+        if (base !== String(row.person_name || "").trim()) flags.name_conflict = true;
+        else if (want !== String(row.person_name || "").trim()) sets.person_name = want;
+      }
+    }
+    if ("phone_number" in data) {
+      const wantRaw = String(data.phone_number ?? "").trim();
+      const baseRaw = "phone_prev" in data ? String(data.phone_prev ?? "").trim() : String(row.phone_key || "").trim();
+      const wantKey = normalizeIndianMobile(wantRaw);
+      if (wantKey !== normalizeIndianMobile(baseRaw) || (!wantKey && wantRaw !== baseRaw)) {
+        if (!wantKey) { await conn.rollback(); return { status: 400, message: "Enter a valid 10-digit mobile number." }; }
+        if (normalizeIndianMobile(baseRaw) !== row.phone_key) flags.phone_conflict = true;
+        else if (wantKey !== row.phone_key) {
+          const [dupU] = await conn.query("SELECT id FROM unfiltered_contacts WHERE phone_key = ? AND id <> ? LIMIT 1", [wantKey, row.id]);
+          let linked = row.contact_id || null;
+          if (!linked) { const [[x]] = await conn.query("SELECT id FROM contacts WHERE source_unfiltered_contact_id = ? LIMIT 1", [row.id]); linked = x?.id || null; }
+          const [dupC] = await conn.query(`SELECT id FROM contacts WHERE ${last10Sql("phone_number")} = ? AND id <> ? LIMIT 1`, [wantKey, linked || 0]);
+          if (dupU.length || dupC.length) { await conn.rollback(); return { status: 409, message: "Another contact already uses this phone number." }; }
+          sets.phone_number = wantKey; sets.phone_key = wantKey;
+        }
+      }
+    }
+    let desigNew = null;
+    if (data.designation_row && typeof data.designation_row === "object") {
+      const rowIn = { designation_id: Number(data.designation_row.designation_id) || null, wing: String(data.designation_row.wing || "").trim() };
+      const prevIn = data.designation_row_prev && typeof data.designation_row_prev === "object" ? { designation_id: Number(data.designation_row_prev.designation_id) || null, wing: String(data.designation_row_prev.wing || "").trim() } : null;
+      const changed = !prevIn || prevIn.designation_id !== rowIn.designation_id || prevIn.wing.toLowerCase() !== rowIn.wing.toLowerCase();
+      if (changed && rowIn.designation_id) {
+        const v = await validateRows([rowIn]);
+        if (v.error) { await conn.rollback(); return { status: 400, message: v.error }; }
+        const [[d]] = await conn.query("SELECT name FROM designations WHERE id = ?", [rowIn.designation_id]);
+        if (d?.name && d.name !== row.designation) sets.designation = d.name;
+        desigNew = { id: rowIn.designation_id, wing: v.rows[0]?.wing || "" };
+      }
+    }
+
     // Geography: only fields whose value differs from the form's baseline (or, with no baseline, the record)
     const prev = data.geo_prev && typeof data.geo_prev === "object" ? data.geo_prev : null;
     const next = {};
@@ -748,17 +793,19 @@ export async function updateUnfilteredContact({ session, id, callerId, data, can
     if (next.assembly_id && !("ward_id" in sets) && curWardName) sets.ward_id = await resolveOrCreateWard(curWardName, next.assembly_id);
 
     const cols = Object.keys(sets);
-    if (!cols.length) {
+    if (!cols.length && !desigNew) {
       await conn.commit();
       return { status: 200, message: "No changes to save.", no_change: true, ...flags, record: (await myUnfilteredCalls(callerId, { view: "all", onlyId: row.id })).calls[0] || null };
     }
-    await conn.query(`UPDATE unfiltered_contacts SET ${cols.map((c) => `\`${c}\` = ?`).join(", ")} WHERE id = ?`, [...cols.map((c) => sets[c]), row.id]);
+    if (cols.length) await conn.query(`UPDATE unfiltered_contacts SET ${cols.map((c) => `\`${c}\` = ?`).join(", ")} WHERE id = ?`, [...cols.map((c) => sets[c]), row.id]);
 
     // The same changes onto the linked Contact List record (never a new record)
     let linkedId = row.contact_id || null;
     if (!linkedId) { const [[x]] = await conn.query("SELECT id FROM contacts WHERE source_unfiltered_contact_id = ? LIMIT 1", [row.id]); linkedId = x?.id || null; }
     if (linkedId) {
       const cset = {};
+      if ("person_name" in sets) cset.person_name = sets.person_name;
+      if ("phone_number" in sets) cset.phone_number = sets.phone_number;
       for (const k of ["address", "photo_url", "zone_id", "lok_sabha_id", "district_id", "assembly_id", "ward_id"]) if (k in sets) cset[k] = sets[k];
       const ck = Object.keys(cset);
       if (ck.length) {
@@ -767,8 +814,17 @@ export async function updateUnfilteredContact({ session, id, callerId, data, can
       }
     }
     await conn.commit();
+    if (linkedId && desigNew) {
+      // Designation on the SAME linked contact: replaces its single designation, or is added to a multi-designation set (never clears the others).
+      const cur = (await query("SELECT designation_id FROM contact_designations WHERE contact_id = ?", [linkedId])).map((r) => Number(r.designation_id));
+      const ids = cur.length <= 1 ? [desigNew.id] : [...new Set([...cur, desigNew.id])];
+      await syncContactDesignations(linkedId, ids).catch(() => {});
+      await query("UPDATE contact_designations SET wing = ? WHERE contact_id = ? AND designation_id = ?", [desigNew.wing || null, linkedId, desigNew.id]).catch(() => {});
+      if (cur.length <= 1) await query("UPDATE contacts SET designation_id = ? WHERE id = ?", [desigNew.id, linkedId]).catch(() => {});
+      if (desigNew.wing) { const ws = (await query("SELECT wing FROM contact_wings WHERE contact_id = ?", [linkedId]).catch(() => [])).map((r) => r.wing); await syncContactWings(linkedId, [...new Set([...ws, desigNew.wing])]).catch(() => {}); }
+    }
     if (zoneChanged) await releaseOutOfZoneAssignment(session, zoneChanged.contactId, zoneChanged.zoneId).catch(() => {});
-    logAudit(session, { action: "unfiltered.update", entityType: "unfiltered_contact", entityId: String(row.id), details: `Edited ${cols.join(", ")}${linkedId ? ` (contact #${linkedId})` : ""}` });
+    logAudit(session, { action: "unfiltered.update", entityType: "unfiltered_contact", entityId: String(row.id), details: `Edited ${[...cols, ...(desigNew ? ["designation"] : [])].join(", ")}${linkedId ? ` (contact #${linkedId})` : ""}` });
     return { status: 200, message: "Saved.", ...flags, record: (await myUnfilteredCalls(callerId, { view: "all", onlyId: row.id })).calls[0] || null };
   } catch (e) {
     await conn.rollback().catch(() => {});

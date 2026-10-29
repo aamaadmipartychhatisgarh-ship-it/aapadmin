@@ -11,7 +11,7 @@ import { wingShortLabel } from "@/lib/wingLabel";
 // designations: the Designation master (each with .wings / .wing); wingMaster: /api/wings entries.
 const sel = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white";
 
-export default function DesignationWingRows({ rows, onChange, designations: designationsProp = [], wingMaster = [] }) {
+export default function DesignationWingRows({ rows, onChange, designations: designationsProp = [], wingMaster = [], single = false }) {
   // The Designation options ALWAYS come from Master Data (/api/designations): the list the form was given, re-read
   // whenever a Wing is changed so a designation added / re-mapped / disabled in Master Data shows up without reopening.
   const [fresh, setFresh] = useState(null);
@@ -75,16 +75,16 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
               </select>
             </div>
           </div>
-          <button type="button" onClick={() => onChange(rows.length > 1 ? rows.filter((_, i) => i !== idx) : [{ designation_id: "", wing: "" }])}
+          {!single && <button type="button" onClick={() => onChange(rows.length > 1 ? rows.filter((_, i) => i !== idx) : [{ designation_id: "", wing: "" }])}
             className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50" aria-label={`Remove row ${idx + 1}`} data-testid="dw-remove" title="Remove this row">
             <X size={15} />
-          </button>
+          </button>}
         </div>
       ))}
-      <button type="button" onClick={() => onChange([...rows, { designation_id: "", wing: "" }])} data-testid="dw-add"
+      {!single && <button type="button" onClick={() => onChange([...rows, { designation_id: "", wing: "" }])} data-testid="dw-add"
         className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#164FA3] hover:bg-blue-50 rounded-lg px-2.5 py-1.5">
         <Plus size={15} /> Add Designation
-      </button>
+      </button>}
     </div>
   );
 }

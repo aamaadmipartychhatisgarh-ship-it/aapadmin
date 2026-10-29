@@ -8,6 +8,7 @@ import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, Chevro
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
+import DesignationWingRows from "@/components/contacts/DesignationWingRows";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
 
 // My Workspace → Unfiltered Calls. The same workspace layout and calling
@@ -58,7 +59,31 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     fetch(`/api/locations?parent_id=${edit.district_id}`).then((r) => r.json()).then((d) => setEditAssemblies(d.locations || [])).catch(() => {});
   }, [editing, edit?.district_id]);
 
+  // Designation + Wing masters (Master Data) for the Designation field of the edit form.
+  const [desigs, setDesigs] = useState([]);
+  const [wingMaster, setWingMaster] = useState([]);
+  useEffect(() => {
+    if (!editing || desigs.length) return;
+    fetch("/api/designations", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.designations) setDesigs(d.designations); }).catch(() => {});
+    fetch("/api/wings", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.wings) setWingMaster(d.wings); }).catch(() => {});
+  }, [editing, desigs.length]);
+  // The record's saved designation (a name) as a Designation + Wing row, once the master has loaded.
+  const rowFor = (name) => {
+    const d = desigs.find((x) => String(x.name).trim().toLowerCase() === String(name || "").trim().toLowerCase());
+    if (!d) return { designation_id: "", wing: "" };
+    const mainLc = new Set(wingMaster.filter((w) => w.is_main).map((w) => String(w.name).trim().toLowerCase()));
+    const w = (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).find((x) => !mainLc.has(String(x).trim().toLowerCase()));
+    return { designation_id: d.id, wing: w || "" };
+  };
+  useEffect(() => {
+    // The master finished loading after the form opened: fill the saved designation in (the baseline too, so it is not seen as an edit).
+    if (!editing || !desigs.length || !edit || edit.drow) return;
+    const r = rowFor(active?.designation);
+    setEdit((e) => (e ? { ...e, drow: [r] } : e)); setEditBase((b) => (b ? { ...b, drow: [r] } : b));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, desigs.length, wingMaster.length, edit?.drow]);
   const snapshot = (c) => ({
+    person_name: c.person_name || "", phone_number: c.phone_key || "", drow: desigs.length ? [rowFor(c.designation)] : null,
     address: c.address || "", zone_id: c.zone_id ? String(c.zone_id) : "", lok_sabha_id: c.lok_sabha_id ? String(c.lok_sabha_id) : "",
     district_id: c.district_id ? String(c.district_id) : "", assembly_id: c.assembly_id ? String(c.assembly_id) : "", ward_name: c.ward_name || "",
   });
@@ -82,6 +107,9 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          person_name: edit.person_name, person_name_prev: editBase.person_name,
+          phone_number: edit.phone_number, phone_prev: editBase.phone_number,
+          ...(edit.drow && edit.drow[0] ? { designation_row: edit.drow[0], designation_row_prev: editBase.drow?.[0] || { designation_id: "", wing: "" } } : {}),
           address: edit.address, address_prev: editBase.address,
           zone_id: edit.zone_id, lok_sabha_id: edit.lok_sabha_id, district_id: edit.district_id, assembly_id: edit.assembly_id,
           geo_prev: { zone_id: editBase.zone_id, lok_sabha_id: editBase.lok_sabha_id, district_id: editBase.district_id, assembly_id: editBase.assembly_id },
@@ -91,9 +119,10 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setEditErr(d.message || "Could not save the details."); return; }
       applyRecord(d.record);
-      if (d.address_conflict) { setEditErr("The address was changed by someone else after you opened this form, so your address edit was not applied. Reopen to see the latest."); }
+      const conflict = d.address_conflict || d.name_conflict || d.phone_conflict;
+      if (conflict) { setEditErr(`The ${[d.address_conflict && "address", d.name_conflict && "name", d.phone_conflict && "phone number"].filter(Boolean).join(" / ")} was changed by someone else after you opened this form, so that edit was not applied. Reopen to see the latest.`); }
       else { setEditMsg(d.no_change ? "No changes to save." : "Details saved."); }
-      if (!d.address_conflict) setEditing(false);
+      if (!conflict) setEditing(false);
     } catch {
       setEditErr("Could not save the details.");
     } finally {
@@ -409,6 +438,17 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                 <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-4"><Pencil size={16} /> Edit details</h3>
                 {editErr && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm mb-3" data-testid="uw-edit-error">{editErr}</div>}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Name</label>
+                    <input value={edit.person_name} onChange={(e) => setEdit({ ...edit, person_name: e.target.value })} className={inputCls} aria-label="Name" data-testid="uw-edit-name" maxLength={100} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Phone Number</label>
+                    <input value={edit.phone_number} onChange={(e) => setEdit({ ...edit, phone_number: e.target.value })} inputMode="tel" className={inputCls} aria-label="Phone Number" data-testid="uw-edit-phone" maxLength={20} />
+                  </div>
+                  <div className="sm:col-span-2" data-testid="uw-edit-designation">
+                    <DesignationWingRows single rows={edit.drow || [{ designation_id: "", wing: "" }]} onChange={(rows) => setEdit({ ...edit, drow: rows })} designations={desigs} wingMaster={wingMaster} />
+                  </div>
                   <div className="sm:col-span-2">
                     <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Address</label>
                     <textarea value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} rows={2} aria-label="Address" data-testid="uw-edit-address"
@@ -447,7 +487,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                     <input value={edit.ward_name} onChange={(e) => setEdit({ ...edit, ward_name: e.target.value })} className={inputCls} aria-label="Block" data-testid="uw-edit-block" maxLength={150} />
                   </div>
                 </div>
-                <p className="text-[11px] text-gray-500 mt-3">The photo is changed from the picture above. Only the fields you change are saved; empty fields never clear existing data.</p>
+                <p className="text-[11px] text-gray-500 mt-3">The photo is changed from the picture above. Only the fields you change are saved; empty fields never clear existing data. Changes also update the linked Contact List record (never a new one).</p>
                 <div className="flex items-center justify-end gap-3 mt-4">
                   <button onClick={() => setEditing(false)} disabled={editSaving} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                   <button onClick={saveEdit} disabled={editSaving} data-testid="uw-edit-save"
