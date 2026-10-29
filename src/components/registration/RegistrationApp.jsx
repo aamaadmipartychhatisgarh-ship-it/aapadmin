@@ -1,6 +1,6 @@
 "use client";
 
-import { visibleWorkerColumns } from "@/lib/workerPerformanceColumns";
+import { screenWorkerColumns } from "@/lib/workerPerformanceColumns";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -430,11 +430,11 @@ function DashboardTab({ filterQs, onWard, onError }) {
           exportLabel="Export Excel"
           pdfHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200, format: "pdf" })}`}
           testId="worker-performance"
-          fit={visibleWorkerColumns().map((c) => c.w)}
+          fit={screenWorkerColumns().map((c) => c.w)}
           // Columns come from the shared configuration (lib/workerPerformanceColumns) - the same one the
           // Excel and PDF exports use, so display and export can never drift apart.
-          head={visibleWorkerColumns().map((c) => c.label)}
-          rows={data.workers.map((w) => visibleWorkerColumns().map((c) => {
+          head={screenWorkerColumns().map((c) => c.label)}
+          rows={data.workers.map((w) => screenWorkerColumns().map((c) => {
             if (c.display === "rank") return <RankBadge key={c.key} rank={w.rank} compact />;
             if (c.display === "name") return <span key={c.key} className="font-semibold text-gray-900">{w.name}{w.mobile ? <span className="block text-[11px] font-normal text-gray-500" data-testid="wp-name-phone">{w.mobile}</span> : null}</span>;
             if (c.display === "total") return <span key={c.key} className="font-bold text-gray-900">{c.value(w)}</span>;
