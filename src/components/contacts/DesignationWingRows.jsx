@@ -50,7 +50,7 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
           <div className="space-y-2 min-w-0">
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1">Wings</label>
-              <select className={sel} aria-label={`Wing ${idx + 1}`} data-testid="dw-wing" value={r.wing || ""} title={r.wing || mainLabel}
+              <select className={sel} aria-label={`Wing ${idx + 1}`} data-testid="dw-wing" value={r.wing || ""} title={r.wing ? wingShortLabel(r.wing) : mainLabel}
                 onChange={(e) => {
                   const wing = e.target.value;
                   const w = wing.trim().toLowerCase();
@@ -63,7 +63,7 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
                   reload().then((list) => { const d = list?.find((x) => String(x.id) === String(r.designation_id)); if (d && !inWing(d, w)) apply(list); });   // refresh the options from Master Data
                 }}>
                 <option value="">{mainLabel}</option>
-                {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{w.name}</option>)}
+                {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{wingShortLabel(w.name)}</option>)}
               </select>
             </div>
             <div>
