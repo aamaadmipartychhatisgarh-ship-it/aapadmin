@@ -26,5 +26,8 @@ export const UNFILTERED_STATUS_FILTERS = [
   { value: "switched_off", label: "Switched Off" },
   { value: "incoming_off", label: "Incoming Off" },
 ];
-// Statuses that take a Follow-up date (Busy was added earlier).
+// Calling Statuses no longer offered (or accepted) on Unfiltered Calls. Regular Calls and every other module keep them, and
+// historical Unfiltered calls that already carry them are left untouched.
+export const UNFILTERED_HIDDEN_STATUSES = ["Rudely Behaved", "Busy"];
+// Statuses that take a Follow-up date (Busy was added earlier; kept so existing Busy follow-ups still work).
 export const UNFILTERED_FOLLOWUP_STATUSES = ["Busy", "Not Picked", "Not in Service", "Switched Off", "Incoming Off"];

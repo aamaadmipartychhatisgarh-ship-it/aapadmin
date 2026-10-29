@@ -7,7 +7,7 @@ import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { UNFILTERED_WRONG_REASON_VALUES } from "@/lib/unfilteredWrongReasons";
-import { PHONE_PICKED_VALUES, UNFILTERED_FOLLOWUP_STATUSES } from "@/lib/unfilteredPhonePicked";
+import { PHONE_PICKED_VALUES, UNFILTERED_FOLLOWUP_STATUSES, UNFILTERED_HIDDEN_STATUSES } from "@/lib/unfilteredPhonePicked";
 import { dueClause, laterClause } from "@/lib/followup";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
@@ -594,6 +594,7 @@ export async function logUnfilteredCall({ id, callerId, loggedBy, statusId, rema
   await ensureUnfilteredCallLogSchema();
   const [st] = await query("SELECT id, name FROM call_statuses WHERE id = ?", [Number(statusId) || 0]);
   if (!st) return { status: 400, message: "Please pick a status." };
+  if (UNFILTERED_HIDDEN_STATUSES.includes(st.name)) return { status: 400, message: `"${st.name}" is not available on Unfiltered Calls.` };
   // Ownership first: someone else's call is a 404 whatever the payload (validation never masks it).
   const [own] = await query("SELECT assigned_to_user_id FROM unfiltered_contacts WHERE id = ?", [Number(id) || 0]);
   if (!own || Number(own.assigned_to_user_id) !== Number(callerId)) return { status: 404, message: "This call is not assigned to you." };

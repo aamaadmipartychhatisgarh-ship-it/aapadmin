@@ -1,6 +1,6 @@
 "use client";
 
-import { PHONE_PICKED_OPTIONS, NOT_ACTIVE_REASONS, UNFILTERED_FOLLOWUP_STATUSES, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
+import { PHONE_PICKED_OPTIONS, NOT_ACTIVE_REASONS, UNFILTERED_FOLLOWUP_STATUSES, UNFILTERED_HIDDEN_STATUSES, phonePickedLabel } from "@/lib/unfilteredPhonePicked";
 import { UNFILTERED_WRONG_REASONS, unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -488,7 +488,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
                   <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Status *</label>
                   <select value={form.status_id} onChange={(e) => setForm({ ...form, status_id: e.target.value, pp: "", sentiment: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" })} className={inputCls} aria-label="Status">
                     <option value="">Select…</option>
-                    {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {statuses.filter((s) => !UNFILTERED_HIDDEN_STATUSES.includes(s.name)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
                 {isWrongNo && (
