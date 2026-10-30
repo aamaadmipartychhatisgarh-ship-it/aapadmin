@@ -11,6 +11,7 @@ import { isDesignatedContact } from "@/lib/designatedContacts";
 import { hasWrongNumberColumn, hasWrongNumberDetailColumns, hasFollowUpTimeColumn, ensureNotInterestedColumns } from "@/lib/contactExtras";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { normalizeDurationSeconds } from "@/lib/callDuration";
+import { callTextLimits, fitToColumn } from "@/lib/callColumns";
 
 // One-time, idempotent cleanup of historical INVALID durations: any row whose
 // stored duration_seconds is negative (a legacy start/end pair that resolved
@@ -240,6 +241,7 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  let insertedCallId = null, ctx = {};
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
@@ -254,6 +256,7 @@ export async function POST(req) {
     }
 
     const data = await req.json();
+    ctx = { user: actingUserId, contact: data?.contact_id ?? null, status: data?.status_id ?? null };
     const {
       destination,
       designation_id,
@@ -320,6 +323,20 @@ export async function POST(req) {
     if (regularCaller && statusName === "Phone Picked" && sentiment && !["positive", "neutral", "negative"].includes(String(sentiment).toLowerCase())) {
       return Response.json({ message: "Phone Picked allows Positive, Neutral or Negative." }, { status: 400 });
     }
+    // Follow-up date / time: a malformed value is a clear 400 (and the form keeps its entries), not a database error.
+    if (follow_up_date && !/^\d{4}-\d{2}-\d{2}/.test(String(follow_up_date))) return Response.json({ message: "The follow-up date is not valid. Please pick it again." }, { status: 400 });
+    if (follow_up_time && !/^\d{2}:\d{2}(:\d{2})?$/.test(String(follow_up_time))) return Response.json({ message: "The follow-up time is not valid. Please pick it again." }, { status: 400 });
+    // Retry protection: the same caller re-submitting the identical call on the same contact within a few seconds (a double click, or a
+    // retry after an uncertain response) returns the call that was already saved instead of adding a second one.
+    if (contact_id) {
+      const [dup] = await query(
+        `SELECT id FROM calls WHERE contact_id = ? AND user_id = ? AND status_id = ? AND COALESCE(remarks,'') = ? AND COALESCE(duration_seconds,0) = ?
+            AND called_at >= (NOW() - INTERVAL 10 SECOND) ORDER BY id DESC LIMIT 1`,
+        [contact_id, actingUserId, status_id, remarks || "", normalizeDurationSeconds(duration_seconds) || 0]
+      );
+      if (dup) return Response.json({ message: "Call logged successfully", id: dup.id, duplicate: true }, { status: 200 });
+    }
+    const lim = await callTextLimits();
     const memberOpponent = member && statusName === "Phone Picked" && finalSentiment === "member_opponent";
     const memberNotInterested = member && statusName === "Phone Picked" && finalSentiment === "not_interested";
 
@@ -332,11 +349,11 @@ export async function POST(req) {
         contact_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        destination || null,
+        fitToColumn(destination, lim.destination) || null,
         designation_id || null,
-        person_name,
-        address || null,
-        phone_number,
+        fitToColumn(person_name, lim.person_name),
+        fitToColumn(address, lim.address) || null,
+        fitToColumn(phone_number, lim.phone_number),
         zone_id || null,
         lok_sabha_id || null,
         district_id || null,
@@ -357,6 +374,7 @@ export async function POST(req) {
       ]
     );
 
+    insertedCallId = res.insertId;
     // Persist the optional exact follow-up time on the call (feature-detected).
     const hasFupTime = await hasFollowUpTimeColumn();
     if (hasFupTime) {
@@ -473,7 +491,12 @@ export async function POST(req) {
 
     return Response.json({ message: "Call logged successfully", id: res.insertId }, { status: 201 });
   } catch (error) {
-    console.error("Error logging call:", error);
-    return Response.json({ message: "Internal server error" }, { status: 500 });
+    // Log WHAT failed (ids + the database's own code/message - never the call content), so a worker-specific failure can be traced.
+    const ref = Date.now().toString(36);
+    console.error(`[calls] save failed ref=${ref} user=${ctx.user} contact=${ctx.contact} status=${ctx.status} code=${error?.code || ""} sql="${error?.sqlMessage || error?.message || error}"`);
+    // A failure after the call row went in must not leave a half-saved call behind (the retry would otherwise duplicate it).
+    if (insertedCallId) { await query("DELETE FROM calls WHERE id = ?", [insertedCallId]).catch(() => {}); }
+    if (error instanceof SyntaxError) return Response.json({ message: "The request was not valid. Please try again." }, { status: 400 });
+    return Response.json({ message: `The call could not be saved - your entries are still on screen, please try again (ref ${ref}).` }, { status: 500 });
   }
 }

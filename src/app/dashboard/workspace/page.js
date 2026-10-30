@@ -665,8 +665,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await r.json();
-      if (!r.ok) { setError(data.message || "Failed to save"); return; }
+      const data = await r.json().catch(() => ({}));
+      // On any failure the form stays exactly as entered so the caller can retry.
+      if (!r.ok) { setError(data.message || `Failed to save (error ${r.status}). Your entries are still here - please try again.`); return; }
       setProgressKey((k) => k + 1); // refresh outcome progress
       const savedDuration = elapsed;
       const scheduledFor = form.is_follow_up_required && form.follow_up_date ? form.follow_up_date : null;
@@ -695,6 +696,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         setMessage(`Saved (${savedDuration}s).${followMsg} ${qDesignation.length ? (lastClaimMsg.current || "No more calls are available for this designation.") : "No calls are available right now — you're all caught up."}`);
         loadQueue();
       }
+    } catch {
+      setError("Could not reach the server - the call was not confirmed saved. Your entries are still here; please try again (a repeat will not create a duplicate).");
     } finally {
       setSubmitting(false);
     }
