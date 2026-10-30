@@ -100,10 +100,10 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
   const hourly = [];
   for (let h = 0; h <= maxHour; h++) hourly.push({ hour: h, calls: hourCounts[h] || 0 });
 
-  // ---- Top 5 callers by CONNECTED-CALL % (actual caller roles only) ----
-  // connected_pct = connected ("Phone Picked") ÷ total call attempts × 100. The
-  // Top 5 are ranked by that percentage (highest first), tie-broken by call
-  // volume so a higher-volume caller leads at an equal rate. Every returned row
+  // ---- Top 5 callers by TOTAL CALLS = Regular (RC) + Unfiltered (UC) (actual caller roles only) ----
+  // `src` already holds every call attempt of BOTH kinds exactly once (calls rows + unfiltered_call_logs rows, attributed to the
+  // calling user), so COUNT(*) is RC + UC and the SUMs split it. Ranked by that combined total (highest first), ties broken by
+  // connected ("Phone Picked") calls. connected_pct = connected ÷ total attempts × 100 is still shown. Every returned row
   // has ≥1 call (they come from `calls`), so the SQL ratio never divides by
   // zero; the JS still guards total===0 → 0% for safety. Photo/designation come
   // from the caller's linked worker when available.
@@ -119,9 +119,8 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
        LEFT JOIN workers w ON w.user_id = u.id
       ${where} AND u.role IN ('caller','user','agent')
       GROUP BY u.id
-      -- Rank STRICTLY by number of connected ('Phone Picked') calls, highest
-      -- first; ties broken by total call volume. (Not by percentage/total.)
-      ORDER BY SUM(cs.name = 'Phone Picked') DESC, COUNT(*) DESC LIMIT 5`,
+      -- Rank by COMBINED calls (Regular + Unfiltered), highest first; ties by connected calls, then id (stable).
+      ORDER BY COUNT(*) DESC, SUM(cs.name = 'Phone Picked') DESC, u.id ASC LIMIT 5`,
     params
   );
   const top_callers = topRows.map((r) => {

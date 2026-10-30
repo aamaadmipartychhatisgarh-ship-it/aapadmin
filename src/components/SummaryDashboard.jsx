@@ -263,7 +263,12 @@ export default function SummaryDashboard({
                         <Avatar name={cc.name} src={cc.photo_url} size={40} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-gray-900 text-sm truncate">{cc.name}</div>
-                          <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · {cc.total.toLocaleString()} / {cc.connected.toLocaleString()} · {cc.follow_ups} follow-ups</div>
+                          <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · {cc.connected.toLocaleString()} connected · {cc.follow_ups} follow-ups</div>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap" data-testid="top-caller-counts">
+                            <span title="Regular Calls" className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-[#164FA3]" data-testid="tc-rc">RC {(cc.regular_calls || 0).toLocaleString()}</span>
+                            <span title="Unfiltered Calls" className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700" data-testid="tc-uc">UC {(cc.unfiltered_calls || 0).toLocaleString()}</span>
+                            <span title="Regular + Unfiltered" className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700" data-testid="tc-total">Total {cc.total.toLocaleString()}</span>
+                          </div>
                         </div>
                       </button>
                       <div className="text-right shrink-0">
