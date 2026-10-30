@@ -436,7 +436,15 @@ function DashboardTab({ filterQs, onWard, onError }) {
           head={screenWorkerColumns().map((c) => c.label)}
           rows={data.workers.map((w) => screenWorkerColumns().map((c) => {
             if (c.display === "rank") return <RankBadge key={c.key} rank={w.rank} compact />;
-            if (c.display === "name") return <span key={c.key} className="font-semibold text-gray-900">{w.name}{w.mobile ? <span className="block text-[11px] font-normal text-gray-500" data-testid="wp-name-phone">{w.mobile}</span> : null}</span>;
+            if (c.display === "name") return (
+              // The worker's own profile photo (the one already stored for this worker - same source as the Workers & Links roster, mapped by
+              // the worker's own record, never by name or phone) right before the name. Avatar falls back to initials for a missing or
+              // broken photo at the same fixed size, so the row never shifts.
+              <span key={c.key} className="flex items-center gap-2 min-w-0" data-testid="wp-name-cell">
+                <Avatar name={w.name} src={w.photo_url} size={28} className="bg-[#164FA3]/10 border border-gray-200 shrink-0" textClassName="text-[#164FA3] text-[10px]" />
+                <span className="font-semibold text-gray-900 min-w-0 break-words">{w.name}</span>
+              </span>
+            );
             if (c.display === "total") return <span key={c.key} className="font-bold text-gray-900">{c.value(w)}</span>;
             const v = c.value(w);
             return v === "" ? "—" : v;
