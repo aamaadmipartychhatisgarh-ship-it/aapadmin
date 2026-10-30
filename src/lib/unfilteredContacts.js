@@ -1133,6 +1133,62 @@ export function unfilteredStatusCondition(value, alias = "u") {
 }
 
 
+// USER-wise / DATE-wise Active and Follow-up counts (admin Unfiltered Contacts). Only unfiltered_contacts rows are read, one row = one
+// record (phone_key is unique), so nothing is counted twice.
+//   Active    = saved status Phone Picked + Active (the same definition as the "Active" status filter); its date is completed_at
+//               (the day the call was completed as Active).
+//   Follow-up = a PENDING record (not completed) with a scheduled follow_up_date; its date is that follow-up date.
+//   User      = assigned_to_user_id (the id, never the displayed name).
+export const UNFILTERED_ACTIVE_SQL = (a = "u") => `(${a}.call_status_name = 'Phone Picked' AND ${a}.call_sentiment = 'active')`;
+export const UNFILTERED_FOLLOWUP_SQL = (a = "u") => `(${a}.completed_at IS NULL AND ${a}.follow_up_date IS NOT NULL)`;
+export function parseCountFilters({ user, date }) {
+  const userId = /^\d+$/.test(String(user || "")) ? Number(user) : null;
+  const d = String(date || "");
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? d : null;
+  return { userId, day, bad: (!!user && userId == null) || (!!date && day == null) };
+}
+// WHERE fragment for the LIST: the records that count for the chosen user and/or date (Active on that date or Follow-up on that date).
+export function unfilteredUserDateCondition({ userId, day }, a = "u") {
+  const where = [], params = [];
+  if (userId != null) { where.push(`${a}.assigned_to_user_id = ?`); params.push(userId); }
+  if (day) { where.push(`((${UNFILTERED_ACTIVE_SQL(a)} AND DATE(${a}.completed_at) = ?) OR (${UNFILTERED_FOLLOWUP_SQL(a)} AND ${a}.follow_up_date = ?))`); params.push(day, day); }
+  return { where, params };
+}
+export async function unfilteredActiveFollowupCounts({ userId, day }) {
+  await ensureUnfilteredAssignmentSchema();
+  const f = (cond, dateCol) => {
+    const where = [cond], params = [];
+    if (userId != null) { where.push("u.assigned_to_user_id = ?"); params.push(userId); }
+    if (day) { where.push(`${dateCol} = ?`); params.push(day); }
+    return { sql: where.join(" AND "), params };
+  };
+  const A = f(UNFILTERED_ACTIVE_SQL("u"), "DATE(u.completed_at)"), F = f(UNFILTERED_FOLLOWUP_SQL("u"), "u.follow_up_date");
+  const [[a], [fu]] = await Promise.all([
+    query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u WHERE ${A.sql}`, A.params),
+    query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u WHERE ${F.sql}`, F.params),
+  ]);
+  // Per user (honours the date; a chosen user narrows it to that user).
+  const byUser = await query(
+    `SELECT u.assigned_to_user_id AS user_id, us.username,
+            SUM(${UNFILTERED_ACTIVE_SQL("u")} ${day ? "AND DATE(u.completed_at) = ?" : ""}) AS active,
+            SUM(${UNFILTERED_FOLLOWUP_SQL("u")} ${day ? "AND u.follow_up_date = ?" : ""}) AS followup
+       FROM unfiltered_contacts u LEFT JOIN users us ON us.id = u.assigned_to_user_id
+      WHERE u.assigned_to_user_id IS NOT NULL ${userId != null ? "AND u.assigned_to_user_id = ?" : ""}
+      GROUP BY u.assigned_to_user_id, us.username
+     HAVING active > 0 OR followup > 0
+      ORDER BY us.username`,
+    [...(day ? [day, day] : []), ...(userId != null ? [userId] : [])]
+  );
+  const users = await query(
+    `SELECT DISTINCT u.assigned_to_user_id AS id, us.username FROM unfiltered_contacts u JOIN users us ON us.id = u.assigned_to_user_id ORDER BY us.username`
+  );
+  return {
+    active: Number(a.n), followup: Number(fu.n),
+    by_user: byUser.map((r) => ({ user_id: r.user_id, username: r.username, active: Number(r.active), followup: Number(r.followup) })),
+    users,
+  };
+}
+
 // BULK CONVERT Active records to Contacts, through the SAME conversion the Positive / Supporter outcome uses
 // (syncUnfilteredToContact): links the record to its Contact both ways, reuses an existing Contact with the same number
 // (never a duplicate), keeps the Contact's own source and records contacts.source = Unfiltered Calls only where blank.

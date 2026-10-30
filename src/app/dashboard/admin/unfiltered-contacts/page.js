@@ -230,6 +230,9 @@ export default function UnfilteredContactsPage() {
   const [q, setQ] = useState("");
   const [search, setSearch] = useState("");
   const [statusF, setStatusF] = useState(""); // saved-status filter (combines with the search)
+  const [userF, setUserF] = useState("");   // User filter (assignee id) - drives the list and the Active / Follow-up counts
+  const [dateF, setDateF] = useState("");   // Date filter (YYYY-MM-DD) - Active by completed day, Follow-up by its scheduled date
+  const [counts, setCounts] = useState(null);
   const [page, setPage] = useState(1);
   const [showImport, setShowImport] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0); // re-reads Assigned Calls after an import
@@ -355,6 +358,8 @@ export default function UnfilteredContactsPage() {
       const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
       if (search) p.set("q", search);
       if (statusF) p.set("status", statusF);
+      if (userF) p.set("user", userF);
+      if (dateF) p.set("date", dateF);
       const r = await fetch(`/api/unfiltered-contacts?${p}`, { cache: "no-store" });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(d.message || "Could not load Unfiltered Contacts."); return; }
@@ -364,8 +369,19 @@ export default function UnfilteredContactsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusF]);
+  }, [page, search, statusF, userF, dateF]);
   useEffect(() => { if (ready && allowed) load(); }, [ready, allowed, load]);
+  // Active / Follow-up counts for the chosen user and date; they re-read whenever either filter (or the data) changes.
+  useEffect(() => {
+    if (!ready || !allowed) return;
+    const p = new URLSearchParams();
+    if (userF) p.set("user", userF);
+    if (dateF) p.set("date", dateF);
+    let live = true;
+    fetch(`/api/unfiltered-contacts/counts?${p}`, { cache: "no-store" }).then((r) => r.json()).then((d) => { if (live && d && d.active != null) setCounts(d); }).catch(() => {});
+    return () => { live = false; };
+  }, [ready, allowed, userF, dateF, refreshKey, data]);
+  useEffect(() => { setAllMatching(false); setSel(new Map()); setPage(1); }, [userF, dateF]); // a new user/date filter starts a new selection
   // After a delete the current page can end up empty: step back one page.
   useEffect(() => { if (data && data.contacts.length === 0 && page > 1) setPage(page - 1); }, [data, page]);
   useEffect(() => { setAllMatching(false); setSel(new Map()); }, [search]); // a new search starts a new selection
@@ -491,9 +507,47 @@ export default function UnfilteredContactsPage() {
           <option value="">All statuses</option>
           {UNFILTERED_STATUS_FILTERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
+        <select value={userF} onChange={(e) => setUserF(e.target.value)} aria-label="User" data-testid="unfiltered-user-filter"
+          className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white">
+          <option value="">All users</option>
+          {(counts?.users || []).map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+        </select>
+        <input type="date" value={dateF} onChange={(e) => setDateF(e.target.value)} aria-label="Date" data-testid="unfiltered-date-filter"
+          className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white" />
+        {(userF || dateF) && <button type="button" onClick={() => { setUserF(""); setDateF(""); }} data-testid="unfiltered-clear-filters" className="text-xs text-gray-500 hover:underline">Clear user/date</button>}
         <div className="text-sm text-gray-500" data-testid="unfiltered-total">
-          {search || statusF ? <>{total} match{total === 1 ? "" : "es"} · </> : null}<span className="font-semibold text-gray-900">{data?.all_total ?? 0}</span> unfiltered contact{data?.all_total === 1 ? "" : "s"}
+          {search || statusF || userF || dateF ? <>{total} match{total === 1 ? "" : "es"} · </> : null}<span className="font-semibold text-gray-900">{data?.all_total ?? 0}</span> unfiltered contact{data?.all_total === 1 ? "" : "s"}
         </div>
+      </div>
+
+      {/* User-wise / Date-wise counts (Unfiltered Contacts only) */}
+      <div className="bg-white border border-gray-200 rounded-xl p-3" data-testid="unfiltered-counts">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Active</div>
+            <div className="text-2xl font-extrabold text-emerald-800" data-testid="count-active">{counts ? counts.active : "…"}</div>
+          </div>
+          <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Follow-up</div>
+            <div className="text-2xl font-extrabold text-blue-800" data-testid="count-followup">{counts ? counts.followup : "…"}</div>
+          </div>
+          <p className="text-xs text-gray-500 flex-1 min-w-[220px]">
+            {userF ? `User: ${(counts?.users || []).find((u) => String(u.id) === String(userF))?.username || userF}` : "All users"} · {dateF ? `Date: ${dateF}` : "All dates"}.
+            Active = Phone Picked → Active, counted on the day the call was completed. Follow-up = pending records, counted on their scheduled follow-up date.
+          </p>
+        </div>
+        {counts?.by_user?.length > 0 && (
+          <table className="mt-3 text-sm w-full max-w-md" data-testid="count-by-user">
+            <thead><tr className="text-left text-xs text-gray-500"><th className="py-1 pr-4">User</th><th className="py-1 pr-4">Active</th><th className="py-1">Follow-up</th></tr></thead>
+            <tbody>
+              {counts.by_user.map((r) => (
+                <tr key={r.user_id} className="border-t border-gray-100">
+                  <td className="py-1 pr-4">{r.username}</td><td className="py-1 pr-4 font-semibold">{r.active}</td><td className="py-1 font-semibold">{r.followup}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Bulk Remove Assignment */}
@@ -512,7 +566,7 @@ export default function UnfilteredContactsPage() {
         </button>
         <span className="text-xs text-gray-600" data-testid="bulk-selected-count">{selCount} selected</span>
         {selCount > 0 && <button type="button" onClick={() => { setSel(new Map()); setAllMatching(false); }} className="text-xs text-gray-500 hover:underline" data-testid="bulk-clear">Clear selection</button>}
-        {pageAllSelected && !allMatching && total > rows.length && (
+        {pageAllSelected && !allMatching && total > rows.length && !userF && !dateF && (
           <button type="button" onClick={() => setAllMatching(true)} className="text-xs font-semibold text-[#164FA3] hover:underline" data-testid="bulk-select-all-matching">
             Select all {total} call{total === 1 ? "" : "s"}{search ? " matching this search" : ""} (all pages)
           </button>

@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { ensureUnfilteredAssignmentSchema, ensureUnfilteredCallLogSchema, unfilteredStatusCondition } from "@/lib/unfilteredContacts";
+import { ensureUnfilteredAssignmentSchema, ensureUnfilteredCallLogSchema, unfilteredStatusCondition, parseCountFilters, unfilteredUserDateCondition } from "@/lib/unfilteredContacts";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -39,6 +39,11 @@ export async function GET(req) {
       if (!sc) return NextResponse.json({ message: "Invalid status filter." }, { status: 400, headers: NO_STORE });
       where.push(sc);
     }
+    // User / Date filter (additive; empty = unchanged): the records that count as Active / Follow-up for that user and date.
+    const uf = parseCountFilters({ user: searchParams.get("user"), date: searchParams.get("date") });
+    if (uf.bad) return NextResponse.json({ message: "Invalid user or date filter." }, { status: 400, headers: NO_STORE });
+    const ud = unfilteredUserDateCondition(uf, "u");
+    where.push(...ud.where); params.push(...ud.params);
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const [{ n }] = await query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u ${whereSql}`, params);
     const rows = await query(
