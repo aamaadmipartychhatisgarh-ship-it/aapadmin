@@ -140,6 +140,7 @@ export default function ContactsModule({ session, mode }) {
   const [assemblyIds, setAssemblyIds] = useState([]);
   const [assignedTo, setAssignedTo] = useState([]); // selected caller ids (strings) - any of them
   const [sourceF, setSourceF] = useState(""); // "" = any source | "unfiltered_calls"
+  const [rfaF, setRfaF] = useState("");       // "" = any | pending | correct | incorrect (the contact's saved RfA review status)
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -228,11 +229,11 @@ export default function ContactsModule({ session, mode }) {
   }, []);
 
   // Reload the page of results whenever a filter or the page number changes.
-  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, sourceF, addedMode, addedOn, addedFrom, addedTo, page, pageSize, flagFilter, sortKey, sortDir]);
+  useEffect(() => { if (!scopeLoading) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scopeLoading, filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, sourceF, rfaF, addedMode, addedOn, addedFrom, addedTo, page, pageSize, flagFilter, sortKey, sortDir]);
   // Any filter change (not a page change) jumps back to page 1 and drops any
   // bulk selection — a selection made under one filter view shouldn't silently
   // carry over and get acted on under a different one.
-  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, sourceF, search, flagFilter, addedMode, addedOn, addedFrom, addedTo]);
+  useEffect(() => { setPage(1); setSelectedIds(new Set()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, zoneId, lokSabhaId, districtId, assemblyIds, designationIds, wingSel, assignedTo, sourceF, rfaF, search, flagFilter, addedMode, addedOn, addedFrom, addedTo]);
   // A SORT change re-orders the whole set, so jump to page 1 — but KEEP the
   // selection (it's tracked by id and stays valid regardless of order/page).
   useEffect(() => { setPage(1); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sortKey, sortDir]);
@@ -270,6 +271,7 @@ export default function ContactsModule({ session, mode }) {
     // differ from the actual filtered/pooled records.
     if (assignedTo.length) base.set("assigned_to", assignedTo.join(","));
     if (sourceF) base.set("source", sourceF);
+    if (rfaF) base.set("rfa_status", rfaF);
     base.set("page_size", "1");
     const fetchCount = async (status) => {
       const p = new URLSearchParams(base);
@@ -528,6 +530,7 @@ export default function ContactsModule({ session, mode }) {
     if (wingSel.size) params.set("wings", [...wingSel].join(","));
     if (assignedTo.length) params.set("assigned_to", assignedTo.join(","));
     if (sourceF) params.set("source", sourceF);
+    if (rfaF) params.set("rfa_status", rfaF);
     // Added-date filter (sent to the list, the select-all ids call and the exports alike).
     if (addedMode === "single") { if (addedOn) params.set("added_on", addedOn); }
     else if (!addedRangeInvalid) {
@@ -962,6 +965,13 @@ export default function ContactsModule({ session, mode }) {
           <option value="">Any source</option>
           <option value="unfiltered_calls">Source: Unfiltered Calls</option>
         </select>
+        {/* RfA Status — the contact's saved Review-for-Announce status (set to Pending when Supervisor-2 submits it). */}
+        <select value={rfaF} onChange={(e) => setRfaF(e.target.value)} data-testid="rfa-status-filter" aria-label="RfA Status" className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
+          <option value="">RfA Status</option>
+          <option value="pending">RfA Pending</option>
+          <option value="correct">RfA Correct</option>
+          <option value="incorrect">RfA Incorrect</option>
+        </select>
         {/* Added date — contacts.created_at: one date or a start–end range. */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <select value={addedMode} onChange={(e) => { setAddedMode(e.target.value); clearAdded(); }} className="h-9 px-2 rounded-lg border border-gray-200 text-sm bg-white" aria-label="Added date mode">
@@ -1174,6 +1184,7 @@ export default function ContactsModule({ session, mode }) {
                 {sortTh("Address", "address")}
                 <th className="px-4 py-3 font-semibold text-gray-600">Qualification</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Vehicle</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">RfA Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
                 {isSuperAdmin(session) && <th className="px-4 py-3 font-semibold text-gray-600">Convert</th>}
@@ -1264,6 +1275,11 @@ export default function ContactsModule({ session, mode }) {
                   <td className="px-4 py-3 text-gray-600 min-w-[180px] max-w-[280px]"><div className="whitespace-normal break-words line-clamp-3" title={c.address || ""}>{c.address || "—"}</div></td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{qualificationLabel(c.qualification, c.education_level) || "—"}</td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{vehicleLabel(c.vehicle) || "—"}</td>
+                  <td className="px-4 py-3 whitespace-nowrap" data-testid="rfa-status-cell">
+                    {c.rfa_status && RFA_CHIP[c.rfa_status]
+                      ? <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-md border ${RFA_CHIP[c.rfa_status]}`}>RfA {c.rfa_status}</span>
+                      : <span className="text-gray-400">—</span>}
+                  </td>
                   <td className="px-4 py-3">
                     {c.is_completed ? (
                       <span className="text-emerald-700 font-medium text-xs">Done</span>

@@ -22,7 +22,7 @@ import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { callerZoneAccess, zoneContactClause } from "@/lib/callerZoneScope";
-import { ensureRfaSchema, RFA_STATUS_SQL } from "@/lib/rfa";
+import { ensureRfaSchema, RFA_STATUS_SQL, rfaStatusFilterClause } from "@/lib/rfa";
 
 // Cached feature-detect: does contacts.photo_verified exist yet? The Photo Update
 // Count reflects RETRIEVABLE photos (not just a populated field) once recovery has
@@ -141,6 +141,7 @@ export async function GET(req) {
     { const ac = parseIdList(assigned_to); if (ac.invalid) return NextResponse.json({ message: "Invalid caller selection." }, { status: 400 }); if (ac.ids.length) { where += ` AND c.assigned_to_user_id IN (${ac.ids.map(() => "?").join(",")})`; params.push(...ac.ids); } }
     // Source filter (?source=unfiltered_calls): contacts that came from / were updated from Unfiltered Calls.
     { const sf = await sourceFilterClause(searchParams.get("source"), "c"); where += sf.where; params.push(...sf.params); }
+    { const rf = await rfaStatusFilterClause(searchParams.get("rfa_status"), "c"); if (rf.error) return Response.json({ message: rf.error }, { status: 400 }); where += rf.where; params.push(...rf.params); }
     // Active Workers page: only workers with one of the four real statuses —
     // "Not Set" (NULL/blank) workers stay stored but are left out of the view.
     if (searchParams.get("worker_status_set") === "1") {

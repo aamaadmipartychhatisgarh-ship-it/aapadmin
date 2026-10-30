@@ -1,5 +1,6 @@
 import { parseIdList } from "@/lib/idList";
 import { NextResponse } from "next/server";
+import { rfaStatusFilterClause } from "@/lib/rfa";
 import { sourceFilterClause, sourceSearchOr } from "@/lib/contactSource";
 import { getServerSession } from "next-auth/next";
 import { authOptions, isSupervisor } from "@/lib/auth";
@@ -64,6 +65,7 @@ export async function GET(req) {
     { const ac = parseIdList(assigned_to); if (ac.invalid) return NextResponse.json({ message: "Invalid caller selection." }, { status: 400 }); if (ac.ids.length) { where += ` AND c.assigned_to_user_id IN (${ac.ids.map(() => "?").join(",")})`; params.push(...ac.ids); } }
     // Source filter (?source=unfiltered_calls): contacts that came from / were updated from Unfiltered Calls.
     { const sf = await sourceFilterClause(searchParams.get("source"), "c"); where += sf.where; params.push(...sf.params); }
+    { const rf = await rfaStatusFilterClause(searchParams.get("rfa_status"), "c"); if (rf.error) return Response.json({ message: rf.error }, { status: 400 }); where += rf.where; params.push(...rf.params); }
     if (search) {
       where += ` AND (c.person_name LIKE ? OR c.phone_number LIKE ?${await sourceSearchOr(search, "c")})`;
       params.push(`%${search}%`, `%${search}%`);

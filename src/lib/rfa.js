@@ -43,3 +43,16 @@ export async function ensureRfaSchema() {
 
 // SQL expression: the Contact's CURRENT review status (its latest review), or NULL.
 export const RFA_STATUS_SQL = `(SELECT r.status FROM contact_rfa_reviews r WHERE r.contact_id = c.id ORDER BY r.id DESC LIMIT 1)`;
+
+// The Contact List's RfA Status filter: ?rfa_status=pending|correct|incorrect -> the contact's CURRENT (latest) review has that status.
+// A contact that was never submitted has no review, so it matches none of the three. Returns { where, params } for " AND ...", or
+// { error } for any other value (nothing is guessed).
+export const RFA_FILTER_VALUES = { pending: "Pending", correct: "Correct", incorrect: "Incorrect" };
+export async function rfaStatusFilterClause(value, alias = "c") {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (!v) return { where: "", params: [] };
+  const status = RFA_FILTER_VALUES[v];
+  if (!status) return { error: "Unknown RfA status." };
+  await ensureRfaSchema();
+  return { where: ` AND (SELECT r.status FROM contact_rfa_reviews r WHERE r.contact_id = ${alias}.id ORDER BY r.id DESC LIMIT 1) = ?`, params: [status] };
+}
