@@ -240,7 +240,34 @@ export async function GET(req) {
   }
 }
 
+// A deadlock / lock wait / dropped connection is a momentary database condition, not a problem with the call: the save is
+// repeated (after its half-written rows are removed) instead of failing a valid submission.
+const TRANSIENT_CODES = ["ER_LOCK_DEADLOCK", "ER_LOCK_WAIT_TIMEOUT", "ECONNRESET", "PROTOCOL_CONNECTION_LOST", "ETIMEDOUT", "EPIPE"];
+const isTransient = (e) => TRANSIENT_CODES.includes(e?.code) || e?.errno === 1213 || e?.errno === 1205;
+// What the caller is told, from the database's own error class (never the SQL or the call content).
+function explainSaveError(e) {
+  const m = String(e?.sqlMessage || e?.message || "");
+  if (e?.code === "ER_DATA_TOO_LONG" || e?.errno === 1406) return "one of the entries is too long for the database";
+  if (e?.code === "ER_NO_REFERENCED_ROW_2" || e?.errno === 1452) return "this contact refers to a record (designation, zone, district or similar) that no longer exists";
+  if (e?.code === "ER_TRUNCATED_WRONG_VALUE" || /Incorrect (date|time|datetime|integer)/i.test(m) || e?.errno === 1292) return "a date, time or number entry is not valid";
+  if (/Data truncated/i.test(m) || e?.errno === 1265) return "one of the selected options is not accepted by the database";
+  if (isTransient(e) || /timeout|timed out|too many connections/i.test(m)) return "the database is busy";
+  return "";
+}
+const validDate = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v)); if (!m) return false; const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3]; };
+const validTime = (v) => { const m = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(v)); return !!m && +m[1] < 24 && +m[2] < 60 && (m[3] == null || +m[3] < 60); };
+
 export async function POST(req) {
+  let body;
+  try { body = await req.text(); } catch { return Response.json({ message: "The request was not valid. Please try again." }, { status: 400 }); }
+  for (let attempt = 0; ; attempt++) {
+    const res = await postOnce(req, body, attempt < 2);
+    if (res) return res;
+    await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+  }
+}
+
+async function postOnce(req, body, canRetry) {
   let insertedCallId = null, ctx = {};
   try {
     const session = await getServerSession(authOptions);
@@ -255,7 +282,7 @@ export async function POST(req) {
       return Response.json({ message: "Admins and supervisors cannot log calls. Use a caller account." }, { status: 403 });
     }
 
-    const data = await req.json();
+    const data = JSON.parse(body);
     ctx = { user: actingUserId, contact: data?.contact_id ?? null, status: data?.status_id ?? null };
     const {
       destination,
@@ -324,8 +351,8 @@ export async function POST(req) {
       return Response.json({ message: "Phone Picked allows Positive, Neutral or Negative." }, { status: 400 });
     }
     // Follow-up date / time: a malformed value is a clear 400 (and the form keeps its entries), not a database error.
-    if (follow_up_date && !/^\d{4}-\d{2}-\d{2}/.test(String(follow_up_date))) return Response.json({ message: "The follow-up date is not valid. Please pick it again." }, { status: 400 });
-    if (follow_up_time && !/^\d{2}:\d{2}(:\d{2})?$/.test(String(follow_up_time))) return Response.json({ message: "The follow-up time is not valid. Please pick it again." }, { status: 400 });
+    if (follow_up_date && !validDate(follow_up_date)) return Response.json({ message: "The follow-up date is not valid. Please pick it again." }, { status: 400 });
+    if (follow_up_time && !validTime(follow_up_time)) return Response.json({ message: "The follow-up time is not valid. Please pick it again." }, { status: 400 });
     // Retry protection: the same caller re-submitting the identical call on the same contact within a few seconds (a double click, or a
     // retry after an uncertain response) returns the call that was already saved instead of adding a second one.
     if (contact_id) {
@@ -368,7 +395,7 @@ export async function POST(req) {
         normalizeDurationSeconds(duration_seconds),
         finalSentiment,
         is_follow_up_required ? 1 : 0,
-        follow_up_date || null,
+        follow_up_date ? String(follow_up_date).slice(0, 10) : null,
         is_vip ? 1 : 0,
         contact_id || null,
       ]
@@ -422,7 +449,7 @@ export async function POST(req) {
           WHERE id = ?`,
         [
           isFinal ? 1 : 0, wantsFollowUp ? 1 : 0,
-          wantsFollowUp ? 1 : 0, follow_up_date || null,
+          wantsFollowUp ? 1 : 0, follow_up_date ? String(follow_up_date).slice(0, 10) : null,
           wantsFollowUp ? 1 : 0, session.user.id,
           is_vip ? 1 : 0,
           contact_id,
@@ -497,6 +524,8 @@ export async function POST(req) {
     // A failure after the call row went in must not leave a half-saved call behind (the retry would otherwise duplicate it).
     if (insertedCallId) { await query("DELETE FROM calls WHERE id = ?", [insertedCallId]).catch(() => {}); }
     if (error instanceof SyntaxError) return Response.json({ message: "The request was not valid. Please try again." }, { status: 400 });
-    return Response.json({ message: `The call could not be saved - your entries are still on screen, please try again (ref ${ref}).` }, { status: 500 });
+    if (canRetry && isTransient(error)) return null;
+    const why = explainSaveError(error);
+    return Response.json({ message: `The call could not be saved${why ? ` because ${why}` : ""} - your entries are still on screen, please try again (ref ${ref}${error?.code ? `, ${error.code}` : ""}).` }, { status: 500 });
   }
 }

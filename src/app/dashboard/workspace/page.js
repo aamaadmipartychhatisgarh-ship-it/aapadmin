@@ -620,7 +620,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     }
   }
 
+  const submitLock = useRef(false);
   async function submit() {
+    if (submitLock.current) return; // synchronous guard: a double click must not send two saves
     if (!form.status_id) { setError("Please pick a status"); return; }
     if (form.follow_up_time && !form.follow_up_date) {
       setError("Please select a Follow-up Date before choosing a Follow-up Time.");
@@ -629,6 +631,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     // Sentiment and follow-up date are both optional. A follow-up date, when
     // set, implies a follow-up is required (the two are no longer coupled to a
     // separate checkbox).
+    submitLock.current = true;
     setSubmitting(true);
     setError("");
     try {
@@ -699,6 +702,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     } catch {
       setError("Could not reach the server - the call was not confirmed saved. Your entries are still here; please try again (a repeat will not create a duplicate).");
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   }
