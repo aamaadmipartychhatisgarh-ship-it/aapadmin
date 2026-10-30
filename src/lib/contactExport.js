@@ -10,6 +10,7 @@ import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { qualificationLabel as qualOnly } from "@/lib/qualificationOptions";
 import { CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
+import { ensureFonts, FONT_FAMILY, cleanPdfText } from "@/lib/pdf/generatePdf";
 
 // Shared Excel export for the Contacts module (admin + supervisor). Both list
 // routes build the SAME WHERE clause + params they use for the on-screen table;
@@ -220,7 +221,7 @@ const pdfStyles = StyleSheet.create({
   page: { paddingTop: PDF_HEADER_HEIGHT + 10, paddingBottom: 22, paddingHorizontal: 22, fontSize: 8, fontFamily: "Helvetica" },
   title: { fontSize: 15, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   subtitle: { fontSize: 9, color: "#555", marginBottom: 10 },
-  row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 3, alignItems: "center" },
+  row: { flexDirection: "row", borderBottom: 1, borderColor: "#eee", paddingVertical: 3, alignItems: "flex-start" },
   headerRow: { backgroundColor: "#164FA3", paddingVertical: 5, alignItems: "center" },
   cell: { paddingHorizontal: 3 },
   cellHeader: { paddingHorizontal: 3, color: "#fff", fontFamily: "Helvetica-Bold" },
@@ -248,20 +249,55 @@ export function PdfPhotoCell({ dataUri, name }) {
       React.createElement(Text, { style: pdfStyles.photoInitials }, photoInitials(name))));
 }
 
+// Rough number of text lines a cell needs in its column (8pt text, ~4.4pt per character), counting every paragraph. Used only to decide
+// whether a row can be kept on one page; the real wrapping is done by the PDF library.
+const PAGE_CONTENT_WIDTH = 842 - 44;
+const MAX_KEEP_TOGETHER_LINES = 30;
+// Unbroken runs (ids, URLs, "aaaa…") cannot wrap on their own and would be clipped by the
+// cell. Put them on separate lines every few characters; no character is added or dropped
+// (a hyphen from automatic hyphenation would alter the saved value).
+function breakLongTokens(text, widthPt) {
+  const chunk = Math.max(6, Math.min(20, Math.floor(widthPt / 6.5)));
+  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  return text.replace(new RegExp(`\\S{${chunk + 4},}`, "g"), (t) => {
+    const g = Array.from(seg.segment(t), (x) => x.segment);
+    const out = [];
+    for (let i = 0; i < g.length; i += chunk) out.push(g.slice(i, i + chunk).join(""));
+    return out.join("\n");
+  });
+}
+function estimateLines(text, widthPt) {
+  const cpl = Math.max(4, Math.floor(widthPt / 4.4));
+  return String(text ?? "").split("\n").reduce((n, para) => n + Math.max(1, Math.ceil(para.length / cpl)), 0);
+}
+
 function ContactsPdfDoc({ rows, photos, subtitle, columns, includePhoto, headerPhoto }) {
+  // The Address (like every free-text column) used Helvetica, which has NO Devanagari glyphs, so Hindi addresses came out blank or
+  // garbled. Use the bundled Noto Sans Devanagari (it carries the Latin glyphs too) whenever it is available.
+  const uni = ensureFonts();
+  const font = uni ? { fontFamily: FONT_FAMILY } : {};
+  const fontBold = uni ? { fontFamily: FONT_FAMILY, fontWeight: 700 } : { fontFamily: "Helvetica-Bold" };
+  const totalFlex = columns.reduce((a, c) => a + c.flex, includePhoto ? PHOTO_FLEX : 0);
   return React.createElement(Document, null,
-    React.createElement(Page, { size: "A4", orientation: "landscape", style: pdfStyles.page },
+    React.createElement(Page, { size: "A4", orientation: "landscape", style: [pdfStyles.page, font] },
       React.createElement(PdfHeader, { photo: headerPhoto, subtitle: "Contacts Export" }),
       React.createElement(Text, { style: pdfStyles.title }, "Contacts Export"),
       React.createElement(Text, { style: pdfStyles.subtitle }, subtitle),
       React.createElement(View, { style: [pdfStyles.row, pdfStyles.headerRow] },
-        [includePhoto && React.createElement(Text, { key: "ph", style: [pdfStyles.cellHeader, { flex: PHOTO_FLEX, textAlign: "center" }] }, "Photo"),
-         ...columns.map((c, i) => React.createElement(Text, { key: i, style: [pdfStyles.cellHeader, { flex: c.flex }] }, c.header))]),
+        [includePhoto && React.createElement(Text, { key: "ph", style: [pdfStyles.cellHeader, fontBold, { flex: PHOTO_FLEX, textAlign: "center" }] }, "Photo"),
+         ...columns.map((c, i) => React.createElement(Text, { key: i, style: [pdfStyles.cellHeader, fontBold, { flex: c.flex }] }, c.header))]),
       rows.length === 0
         ? React.createElement(Text, { style: pdfStyles.empty }, "No contacts match the current selection.")
-        : rows.map((r, i) => React.createElement(View, { key: i, style: pdfStyles.row, wrap: false },
-            [includePhoto && React.createElement(PdfPhotoCell, { key: "ph", dataUri: photos[i], name: r.person_name }),
-             ...columns.map((col, j) => React.createElement(Text, { key: j, style: [pdfStyles.cell, { flex: col.flex }] }, String(col.get(r) ?? "")))]))
+        : rows.map((r, i) => {
+            // The complete saved value, only cleaned of control characters (never shortened); long text wraps inside its column and the
+            // row grows with it. A row is kept on one page unless it is so tall it could not fit one - then it flows onto the next page
+            // (nothing is ever cut off).
+            const texts = columns.map((col, j) => breakLongTokens(cleanPdfText(col.get(r)), PAGE_CONTENT_WIDTH * col.flex / totalFlex - 6));
+            const maxLines = Math.max(...texts.map((tx, j) => estimateLines(tx, PAGE_CONTENT_WIDTH * columns[j].flex / totalFlex - 6)));
+            return React.createElement(View, { key: i, style: pdfStyles.row, wrap: maxLines > MAX_KEEP_TOGETHER_LINES },
+              [includePhoto && React.createElement(PdfPhotoCell, { key: "ph", dataUri: photos[i], name: r.person_name }),
+               ...columns.map((col, j) => React.createElement(Text, { key: j, style: [pdfStyles.cell, { flex: col.flex }] }, texts[j]))]);
+          })
     )
   );
 }
