@@ -403,11 +403,15 @@ export async function myUnfilteredCalls(userId, { view = "pending", onlyId = nul
   const [c] = await query(
     `SELECT COUNT(*) AS assigned, SUM(u.completed_at IS NOT NULL) AS completed,
             SUM(u.completed_at IS NULL AND ${dueClause("u", true)}) AS pending,
-            SUM(u.completed_at IS NULL AND ${laterClause("u", true)}) AS followups
+            SUM(u.completed_at IS NULL AND ${laterClause("u", true)}) AS followups,
+            SUM(${UNFILTERED_ACTIVE_SQL("u")}) AS active
        FROM unfiltered_contacts u WHERE u.assigned_to_user_id = ?`,
     [userId]
   );
-  return { calls: rows, counts: { assigned: Number(c?.assigned || 0), completed: Number(c?.completed || 0), pending: Number(c?.pending || 0), followups: Number(c?.followups || 0) } };
+  // assigned  = every record CURRENTLY assigned to this caller (the assignment is the single column assigned_to_user_id, so a removed or
+  //             reassigned record is no longer counted); one row = one record, no joins, nothing counted twice.
+  // active    = of those, the saved status Phone Picked -> Active (the same definition as the admin "Active" filter).
+  return { calls: rows, counts: { assigned: Number(c?.assigned || 0), completed: Number(c?.completed || 0), pending: Number(c?.pending || 0), followups: Number(c?.followups || 0), active: Number(c?.active || 0) } };
 }
 
 // ---------------------------------------------------------------------------

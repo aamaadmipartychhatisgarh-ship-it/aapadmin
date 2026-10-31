@@ -162,6 +162,15 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     }
   }, [view, onCounts, fuFilter]);
   useEffect(() => { load(); }, [load]);
+  // Changes made elsewhere (an admin assigns, reassigns or removes calls) show up without a manual reload: re-read when the tab
+  // becomes visible again and every minute, but never while a call is open (the open call and its form are left alone).
+  useEffect(() => {
+    if (active) return undefined;
+    const refresh = () => { if (document.visibilityState === "visible") load(); };
+    const t = setInterval(refresh, 60000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", refresh); };
+  }, [active, load]);
   useEffect(() => { onBusy?.(!!active); }, [active, onBusy]);
 
   useEffect(() => {
@@ -313,7 +322,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     }
   }
 
-  const counts = data?.counts || { assigned: 0, completed: 0, pending: 0 };
+  const counts = data?.counts || { assigned: 0, completed: 0, pending: 0, active: 0 };
   const calls = data?.calls || [];
   const firstPending = view === "pending" ? calls[0] : null;
 
@@ -334,19 +343,19 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
           >
             <Play size={18} /> Start Next Call
           </button>
-          <div className="mt-4 grid grid-cols-3 gap-2 text-sm" data-testid="uw-counts">
-            <div className="bg-blue-50 rounded-xl p-3">
-              <div className="text-blue-900 font-bold text-2xl">{counts.assigned}</div>
-              <div className="text-blue-700 text-[11px] uppercase tracking-wide font-medium">Assigned</div>
-            </div>
-            <div className="bg-emerald-50 rounded-xl p-3">
-              <div className="text-emerald-900 font-bold text-2xl">{counts.completed}</div>
-              <div className="text-emerald-700 text-[11px] uppercase tracking-wide font-medium">Completed</div>
-            </div>
-            <div className="bg-amber-50 rounded-xl p-3">
-              <div className="text-amber-900 font-bold text-2xl">{counts.pending}</div>
-              <div className="text-amber-700 text-[11px] uppercase tracking-wide font-medium">Pending</div>
-            </div>
+          {/* Exactly four cards: Pending, Completed, Assigned, Active (each its own count from the server). */}
+          <div className="mt-4 grid grid-cols-2 gap-2 text-sm" data-testid="uw-counts">
+            {[
+              ["pending", "Pending", counts.pending, "bg-amber-50", "text-amber-900", "text-amber-700"],
+              ["completed", "Completed", counts.completed, "bg-emerald-50", "text-emerald-900", "text-emerald-700"],
+              ["assigned", "Assigned", counts.assigned, "bg-blue-50", "text-blue-900", "text-blue-700"],
+              ["active", "Active", counts.active, "bg-violet-50", "text-violet-900", "text-violet-700"],
+            ].map(([k, label, n, bg, big, small]) => (
+              <div key={k} className={`${bg} rounded-xl p-3 min-w-0`} data-testid={`uw-count-${k}`}>
+                <div className={`${big} font-bold text-2xl`}>{n}</div>
+                <div className={`${small} text-[11px] uppercase tracking-wide font-medium`}>{label}</div>
+              </div>
+            ))}
           </div>
         </div>
 
