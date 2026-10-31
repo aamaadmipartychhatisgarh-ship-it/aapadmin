@@ -336,11 +336,23 @@ export async function handleRegLogin(body) {
     const password = String(body?.password || "");
     if (!username || !password) return json({ message: "Enter your username and password." }, 400);
 
-    const [w] = await query(
-      `SELECT id AS worker_id, name AS worker_name, worker_code, mobile, contact_id, password_hash, status, password_set_at, created_at
-         FROM reg_workers WHERE campaign_id = ? AND username = ? LIMIT 1`,
-      [entry.campaign_id, username]
-    );
+    // The "username" box also accepts the worker's 10-digit mobile number. A
+    // mobile is unique per drive (uq_reg_worker_campaign_mobile), so the match
+    // is unambiguous; anything that is not a mobile is matched as a username,
+    // exactly as before. The password check below is unchanged either way.
+    const asMobile = phoneKey(username);
+    const byMobile = /^\+?[\d\s-]+$/.test(username) && asMobile && asMobile.length === 10;
+    const [w] = byMobile
+      ? await query(
+          `SELECT id AS worker_id, name AS worker_name, worker_code, mobile, contact_id, password_hash, status, password_set_at, created_at
+             FROM reg_workers WHERE campaign_id = ? AND ${last10Sql("mobile")} = ? LIMIT 1`,
+          [entry.campaign_id, asMobile]
+        )
+      : await query(
+          `SELECT id AS worker_id, name AS worker_name, worker_code, mobile, contact_id, password_hash, status, password_set_at, created_at
+             FROM reg_workers WHERE campaign_id = ? AND username = ? LIMIT 1`,
+          [entry.campaign_id, username]
+        );
     const ok = !!w && w.status === "active" && !!w.password_hash && (await bcrypt.compare(password, w.password_hash));
     if (!ok) return json({ message: "Incorrect username or password." }, 401);
     // Enforce the 3-month password validity on the backend (§6): a correct but
