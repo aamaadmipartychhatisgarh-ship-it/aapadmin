@@ -1,7 +1,7 @@
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import React from "react";
 import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
-import { ensureFonts, FONT_FAMILY, cleanPdfText } from "@/lib/pdf/generatePdf";
+import { ensureFonts, FONT_FAMILY, cleanPdfText, breakLongTokens } from "@/lib/pdf/generatePdf";
 import { visibleWorkerColumns } from "@/lib/workerPerformanceColumns";
 
 // PDF of Worker / Voter registration records — shared by the admin Registrations
@@ -16,7 +16,7 @@ const fmtDateTime = (v) => {
 };
 const dash = (v) => (v == null || String(v).trim() === "" ? "—" : cleanPdfText(v));
 
-// A4 landscape; flex widths. Long values wrap inside their own cell.
+// A4 landscape (Worker-wise Performance: portrait); flex widths. Long values wrap inside their own cell.
 const COLS = [
   { key: "n", label: "#", flex: 0.35, get: (r, i) => String(i + 1) },
   { key: "name", label: "Name", flex: 1.6, get: (r) => dash(r.name), bold: true },
@@ -47,21 +47,28 @@ const styles = StyleSheet.create({
   footer: { position: "absolute", bottom: 14, left: 18, right: 18, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#888" },
 });
 
-function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols = COLS }) {
+// Printable width of an A4 page (pt) minus the 18pt side padding, per orientation.
+const CONTENT_WIDTH = { landscape: 842 - 36, portrait: 595 - 36 };
+
+function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols = COLS, orientation = "landscape", fontSize = 7.5 }) {
   const u = ensureFonts() ? { fontFamily: FONT_FAMILY } : {};
+  const totalFlex = cols.reduce((a, c) => a + c.flex, 0);
+  // Long unbroken words are broken to fit their own column (no overflow into the next one).
+  const fit = (c, v) => (typeof v === "string" ? breakLongTokens(v, (CONTENT_WIDTH[orientation] * c.flex / totalFlex - 8) / (fontSize * 0.62)) : v);
+  const al = (c) => (c.align ? { textAlign: c.align } : null);
   const T = (style, children, extra = {}) => React.createElement(Text, { style: [u, ...[].concat(style)], ...extra }, children);
   return React.createElement(Document, { title },
-    React.createElement(Page, { size: "A4", orientation: "landscape", style: [styles.page, u], wrap: true },
+    React.createElement(Page, { size: "A4", orientation, style: [styles.page, { fontSize }, u], wrap: true },
       React.createElement(PdfHeader, { photo: headerPhoto, subtitle: title }),
       T(styles.title, title),
       T(styles.subtitle, subtitle),
       criteria?.length ? React.createElement(View, { style: styles.criteria }, criteria.map((c, i) => T(styles.chip, cleanPdfText(c), { key: i }))) : null,
       // Column headings repeat on every page.
-      React.createElement(View, { style: styles.headerRow, fixed: true }, cols.map((c) => T([styles.hcell, { flex: c.flex }], c.label, { key: c.key }))),
+      React.createElement(View, { style: styles.headerRow, fixed: true }, cols.map((c) => T([styles.hcell, { flex: c.flex }, al(c)].filter(Boolean), c.label, { key: c.key }))),
       rows.length === 0
         ? T(styles.empty, "No records to export for the current selection.")
         : rows.map((r, i) => React.createElement(View, { key: r.id ?? i, wrap: false, style: i % 2 ? [styles.row, styles.rowAlt] : styles.row },
-            cols.map((c) => T([styles.cell, { flex: c.flex }, c.bold ? styles.bold : null].filter(Boolean), c.get(r, i), { key: c.key })))),
+            cols.map((c) => T([styles.cell, { flex: c.flex }, al(c), c.bold ? styles.bold : null].filter(Boolean), fit(c, c.get(r, i)), { key: c.key })))),
       React.createElement(View, { style: styles.footer, fixed: true },
         T([], "Aam Aadmi Party, Chhattisgarh — Worker & Voter Registration"),
         T([], null, { render: ({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}` }))
@@ -85,13 +92,13 @@ export async function buildRegistrationPdf(rows, { title = "Registrations", crit
 
 // Worker-wise Performance (the dashboard ranking): the columns come from the SAME configuration as the
 // dashboard table (lib/workerPerformanceColumns), so the PDF holds exactly the displayed columns.
-const workerPerfCols = () => visibleWorkerColumns().map((c) => ({ key: c.key, label: c.label, flex: c.pdfFlex || 1, bold: c.bold, get: (r) => dash((c.pdfValue || c.value)(r)) }));
+const workerPerfCols = () => visibleWorkerColumns().map((c) => ({ key: c.key, label: c.label, flex: c.pdfFlex || 1, bold: c.bold, align: c.numeric ? "center" : undefined, get: (r) => dash((c.pdfValue || c.value)(r)) }));
 
 export async function buildWorkerPerformancePdf(rows, { criteria = [] } = {}) {
   const title = "Worker-wise Performance";
   const subtitle = `${rows.length} worker${rows.length === 1 ? "" : "s"} · ranked by total registrations · exported ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}`;
   const headerPhoto = await loadPdfHeaderPhoto();
-  return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows, title, subtitle, criteria, headerPhoto, cols: workerPerfCols() }));
+  return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows, title, subtitle, criteria, headerPhoto, cols: workerPerfCols(), orientation: "portrait", fontSize: 8 }));
 }
 
 export function registrationPdfFilename(prefix = "AAP_Registrations") {

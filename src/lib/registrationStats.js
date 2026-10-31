@@ -120,21 +120,45 @@ export async function getRegSummary({ campaignId, from, to, ward, scope } = {}) 
 // Rank | Worker | Mobile | Voters Added | Workers Added | Total.
 // LEFT JOIN from the worker side so a worker with zero registrations still
 // appears (ranked last) — the roster is the denominator of the drive.
-export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10, offset = 0, search, workerScope } = {}) {
-  await ensureRegistrationSchema();
-
-  // People-side conditions live in the JOIN (not WHERE) to preserve the LEFT JOIN.
+// The people-join / worker WHERE of the Worker-wise Performance dataset, shared by the ranking rows, its totals and its count so
+// they are always computed over exactly the same workers. `workerIds` (from workerIdsForLocation) is the Lok Sabha / Assembly
+// filter: null = no location filter, [] = nothing matches.
+function workerRankingParts({ campaignId, from, to, ward, search, workerScope, workerIds }) {
   const on = ["p.worker_id = w.id", "p.status = 'active'"];
   const params = [];
   if (from) { on.push("p.registered_at >= ?"); params.push(`${from} 00:00:00`); }
   if (to) { on.push("p.registered_at < DATE_ADD(?, INTERVAL 1 DAY)"); params.push(`${to} 00:00:00`); }
-
   const where = ["1 = 1"];
   if (campaignId) { where.push("w.campaign_id = ?"); params.push(campaignId); }
   if (ward) { where.push("w.ward_number = ?"); params.push(ward); }
   if (search) { where.push("(w.name LIKE ? OR w.mobile LIKE ? OR w.worker_code LIKE ?)"); const l = `%${search}%`; params.push(l, l, l); }
   // Zone-wise access control: a caller sees only workers active in their territory.
   if (workerScope && workerScope.cond) { where.push(workerScope.cond); params.push(...(workerScope.params || [])); }
+  if (Array.isArray(workerIds)) where.push(workerIds.length ? `w.id IN (${workerIds.map((n) => Number(n) || 0).join(",")})` : "1 = 0");
+  return { on, where, params };
+}
+
+// Totals of the SAME dataset (every matching worker, not just the Top-N rows): workers, voters, workers added, total.
+export async function getWorkerPerformanceTotals(opts = {}) {
+  await ensureRegistrationSchema();
+  const { on, where, params } = workerRankingParts(opts);
+  const [r] = await query(
+    `SELECT COUNT(DISTINCT w.id) AS workers,
+            COALESCE(SUM(p.person_type = 'voter'), 0) AS voters,
+            COALESCE(SUM(p.person_type = 'worker'), 0) AS new_workers,
+            COUNT(p.id) AS total
+       FROM reg_workers w LEFT JOIN reg_people p ON ${on.join(" AND ")}
+      WHERE ${where.join(" AND ")}`,
+    params
+  );
+  return { workers: Number(r?.workers || 0), voters: Number(r?.voters || 0), new_workers: Number(r?.new_workers || 0), total: Number(r?.total || 0) };
+}
+
+export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10, offset = 0, search, workerScope, workerIds = null } = {}) {
+  await ensureRegistrationSchema();
+
+  // People-side conditions live in the JOIN (not WHERE) to preserve the LEFT JOIN.
+  const { on, where, params } = workerRankingParts({ campaignId, from, to, ward, search, workerScope, workerIds });
 
   const lim = Math.min(500, Math.max(1, Number(limit) || 10));
   const off = Math.max(0, Number(offset) || 0);
@@ -161,8 +185,8 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
   return rows.map((r, i) => ({
     rank: off + i + 1,
     id: r.id, name: r.name, mobile: r.mobile, worker_code: r.worker_code,
-    // Zone / Assembly from the worker's Contact record (see workerContactLocations).
-    zone_name: loc.get(r.id)?.zone_name || null,
+    // Lok Sabha / Assembly from the worker's Contact record (see workerContactLocations).
+    lok_sabha_name: loc.get(r.id)?.lok_sabha_name || null,
     assembly_name: loc.get(r.id)?.assembly_name || null,
     location_contact_id: loc.get(r.id)?.contact_id || null,
     ward_number: r.ward_number, area_booth: r.area_booth, status: r.status, token: r.token,
@@ -173,24 +197,26 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
   }));
 }
 
-// Zone + Assembly of each worker, read from the Contact page's own record and
-// shown exactly as the Contact List shows them (Zone = the contact's zone, else
-// the one above its district; Assembly = the contact's assembly). Matched by:
+// Lok Sabha + Assembly of each worker, read from the Contact page's own record. Lok Sabha = the contact's own Lok Sabha, else the
+// Lok Sabha above its district (as the Contact List shows it), else the one above its Assembly's district - the real
+// assembly -> district -> Lok Sabha hierarchy, never derived from the Zone. Assembly = the contact's assembly. Matched by:
 //   1. reg_workers.contact_id — the worker↔Contact link (workers generated from a
 //      Contact carry it), else
 //   2. the worker's mobile (last 10 digits) when it belongs to EXACTLY ONE live
 //      contact. Never by name. No match / no location → null ("—" on screen).
-// Returns Map<worker id, { zone_name, assembly_name, contact_id }>.
+// Returns Map<worker id, { lok_sabha_id, lok_sabha_name, assembly_id, assembly_name, contact_id }>.
 async function workerContactLocations(rows) {
   const out = new Map();
   if (!rows.length) return out;
-  const LOC_SELECT = `c.id, COALESCE(cz.name, lz.name) AS zone_name, la.name AS assembly_name
+  const LOC_SELECT = `c.id, COALESCE(cls.id, lls.id, als.id) AS lok_sabha_id, COALESCE(cls.name, lls.name, als.name) AS lok_sabha_name,
+         c.assembly_id AS assembly_id, la.name AS assembly_name
          FROM contacts c
          LEFT JOIN locations ld ON ld.id = c.district_id
-         LEFT JOIN locations lls ON lls.id = ld.parent_id
-         LEFT JOIN locations lz ON lz.id = lls.parent_id
-         LEFT JOIN locations cz ON cz.id = c.zone_id
-         LEFT JOIN locations la ON la.id = c.assembly_id`;
+         LEFT JOIN locations lls ON lls.id = ld.parent_id AND lls.type = 'lok_sabha'
+         LEFT JOIN locations cls ON cls.id = c.lok_sabha_id AND cls.type = 'lok_sabha'
+         LEFT JOIN locations la ON la.id = c.assembly_id
+         LEFT JOIN locations lad ON lad.id = la.parent_id
+         LEFT JOIN locations als ON als.id = lad.parent_id AND als.type = 'lok_sabha'`;
   const ids = [...new Set(rows.map((r) => r.contact_id).filter(Boolean).map(Number))];
   const byId = new Map();
   if (ids.length) {
@@ -213,9 +239,49 @@ async function workerContactLocations(rows) {
   }
   for (const r of rows) {
     const c = (r.contact_id && byId.get(Number(r.contact_id))) || byKey.get(phoneKey(r.mobile));
-    if (c) out.set(r.id, { zone_name: c.zone_name || null, assembly_name: c.assembly_name || null, contact_id: Number(c.id) });
+    if (c) out.set(r.id, { lok_sabha_id: c.lok_sabha_id ? Number(c.lok_sabha_id) : null, lok_sabha_name: c.lok_sabha_name || null, assembly_id: c.assembly_id && c.assembly_name ? Number(c.assembly_id) : null, assembly_name: c.assembly_name || null, contact_id: Number(c.id) });
   }
   return out;
+}
+
+// The Lok Sabha / Assembly filter of Worker-wise Performance. Returns null when no location filter is chosen, else the ids of the
+// workers (campaign + access scope applied) whose mapped Lok Sabha AND/OR Assembly equal the chosen ids - the same mapping the
+// table's columns show, resolved on the unique worker id (contact link, else a unique mobile), never by name. The filter is applied
+// to the underlying query (not the loaded rows), so every matching worker is included. When both are chosen the Assembly must
+// belong to that Lok Sabha in the real hierarchy, otherwise nothing matches.
+export async function workerIdsForLocation({ campaignId, lokSabhaId, assemblyId, workerScope } = {}) {
+  if (!lokSabhaId && !assemblyId) return null;
+  if (lokSabhaId && assemblyId) {
+    const [a] = await query(
+      `SELECT ls.id AS lok_sabha_id FROM locations a JOIN locations d ON d.id = a.parent_id JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+        WHERE a.id = ? AND a.type = 'assembly'`, [assemblyId]);
+    if (!a || Number(a.lok_sabha_id) !== Number(lokSabhaId)) return [];
+  }
+  const where = ["1 = 1"], params = [];
+  if (campaignId) { where.push("w.campaign_id = ?"); params.push(campaignId); }
+  if (workerScope && workerScope.cond) { where.push(workerScope.cond); params.push(...(workerScope.params || [])); }
+  const workers = await query(`SELECT w.id, w.mobile, w.contact_id FROM reg_workers w WHERE ${where.join(" AND ")}`, params);
+  const loc = await workerContactLocations(workers);
+  return workers.filter((w) => {
+    const l = loc.get(w.id);
+    if (!l) return false;
+    if (lokSabhaId && Number(l.lok_sabha_id) !== Number(lokSabhaId)) return false;
+    if (assemblyId && Number(l.assembly_id) !== Number(assemblyId)) return false;
+    return true;
+  }).map((w) => w.id);
+}
+
+// Lok Sabha and Assembly options from the Master Data (locations), each Assembly with the Lok Sabha above it (assembly -> district ->
+// Lok Sabha) so the Assembly list can follow the chosen Lok Sabha.
+export async function getLocationFilterOptions() {
+  const lok = await query(`SELECT id, name FROM locations WHERE type = 'lok_sabha' ORDER BY name`);
+  const asm = await query(
+    `SELECT a.id, a.name, ls.id AS lok_sabha_id FROM locations a
+       LEFT JOIN locations d ON d.id = a.parent_id
+       LEFT JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+      WHERE a.type = 'assembly' ORDER BY a.name`
+  );
+  return { lok_sabhas: lok.map((r) => ({ id: r.id, name: r.name })), assemblies: asm.map((r) => ({ id: r.id, name: r.name, lok_sabha_id: r.lok_sabha_id || null })) };
 }
 
 export async function countWorkers({ campaignId, ward, search, workerScope } = {}) {

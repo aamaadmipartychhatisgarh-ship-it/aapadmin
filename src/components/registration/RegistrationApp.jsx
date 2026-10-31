@@ -359,17 +359,33 @@ export default function RegistrationApp() {
 function DashboardTab({ filterQs, onWard, onError }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Worker-wise Performance Lok Sabha / Assembly filters (master-data ids). They go to the server with the dashboard request and the
+  // exports, so the rows, their totals and the PDF/Excel are all the same filtered dataset.
+  const [lsF, setLsF] = useState("");
+  const [asmF, setAsmF] = useState("");
+  const [locOpts, setLocOpts] = useState({ lok_sabhas: [], assemblies: [] });
+  useEffect(() => {
+    fetch("/api/registration/location-options", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setLocOpts(d); }).catch(() => {});
+  }, []);
+  // Assemblies follow the chosen Lok Sabha (assembly -> district -> Lok Sabha); with none chosen all are offered.
+  const asmOptions = lsF ? locOpts.assemblies.filter((a) => String(a.lok_sabha_id) === String(lsF)) : locOpts.assemblies;
+  const onLs = (v) => {
+    setLsF(v);
+    // An Assembly that no longer belongs to the new Lok Sabha is cleared; a still-valid one is kept.
+    if (v && asmF && !locOpts.assemblies.some((a) => String(a.id) === String(asmF) && String(a.lok_sabha_id) === String(v))) setAsmF("");
+  };
+  const wpQs = (extra = {}) => filterQs({ ...extra, lok_sabha_id: lsF, assembly_id: asmF });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/registration/dashboard?${filterQs({ worker_limit: 200, block_limit: 100 })}`, { cache: "no-store" });
+      const r = await fetch(`/api/registration/dashboard?${filterQs({ worker_limit: 200, block_limit: 100, lok_sabha_id: lsF, assembly_id: asmF })}`, { cache: "no-store" });
       if (!r.ok) throw new Error();
       setData(await r.json());
     } catch {
       onError("Could not load the dashboard. Please try again.");
     } finally { setLoading(false); }
-  }, [filterQs, onError]);
+  }, [filterQs, onError, lsF, asmF]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -425,10 +441,31 @@ function DashboardTab({ filterQs, onWard, onError }) {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
         <RankTable
           title="Worker-wise Performance"
-          subtitle={`Top ${Math.min(200, data.workers.length)}`}
-          exportHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200, format: "xlsx" })}`}
+          subtitle={`Top ${Math.min(200, data.workers.length)}${data.worker_totals && data.worker_totals.workers > data.workers.length ? ` of ${data.worker_totals.workers}` : ""}`}
+          exportHref={`/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "xlsx" })}`}
           exportLabel="Export Excel"
-          pdfHref={`/api/registration/export?${filterQs({ report: "workers", worker_limit: 200, format: "pdf" })}`}
+          pdfHref={`/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "pdf" })}`}
+          filters={(
+            <div className="flex flex-wrap items-center gap-2" data-testid="wp-filters">
+              <select value={lsF} onChange={(e) => onLs(e.target.value)} aria-label="Lok Sabha" data-testid="wp-filter-ls" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white max-w-[11rem]">
+                <option value="">All Lok Sabhas</option>
+                {locOpts.lok_sabhas.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+              <select value={asmF} onChange={(e) => setAsmF(e.target.value)} aria-label="Assembly" data-testid="wp-filter-asm" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white max-w-[11rem]">
+                <option value="">All Assemblies</option>
+                {asmOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+              {(lsF || asmF) && <button type="button" onClick={() => { setLsF(""); setAsmF(""); }} data-testid="wp-filter-clear" className="text-xs text-gray-500 hover:underline">Clear</button>}
+            </div>
+          )}
+          meta={data.worker_totals ? (
+            <p className="px-4 py-2 text-xs text-gray-600 border-b border-gray-100 bg-gray-50/60" data-testid="wp-totals">
+              <span className="font-semibold text-gray-900">{data.worker_totals.workers}</span> worker{data.worker_totals.workers === 1 ? "" : "s"} · Workers added{" "}
+              <span className="font-semibold text-gray-900">{data.worker_totals.new_workers}</span> · Voters{" "}
+              <span className="font-semibold text-gray-900">{data.worker_totals.voters}</span> · Total{" "}
+              <span className="font-semibold text-gray-900">{data.worker_totals.total}</span>
+            </p>
+          ) : null}
           testId="worker-performance"
           fit={screenWorkerColumns().map((c) => c.w)}
           // Columns come from the shared configuration (lib/workerPerformanceColumns) - the same one the
@@ -504,7 +541,7 @@ function AssemblyRegistrationGraph({ assemblies }) {
   );
 }
 
-function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel = "CSV", pdfHref, testId, fit }) {
+function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel = "CSV", pdfHref, testId, fit, filters, meta }) {
   return (
     <div className={cardCls} data-testid={testId}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -527,6 +564,8 @@ function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel
           </div>
         ) : null}
       </div>
+      {filters ? <div className="px-4 py-2 border-b border-gray-100">{filters}</div> : null}
+      {meta || null}
       <div className={fit ? "" : "overflow-x-auto"}>
         {/* fit: fixed layout with per-column % widths - every column stays inside the box (no horizontal scroll); long text wraps */}
         <table className={fit ? "w-full table-fixed text-xs sm:text-sm" : "w-full text-sm"}>

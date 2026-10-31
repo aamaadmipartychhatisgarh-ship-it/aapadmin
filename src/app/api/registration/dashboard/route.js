@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
-import { getRegSummary, getWorkerRanking, getBlockRanking, getWardOptions, getAssemblyRegistrationCounts } from "@/lib/registrationStats";
+import { getRegSummary, getWorkerRanking, getWorkerPerformanceTotals, workerIdsForLocation, getBlockRanking, getWardOptions, getAssemblyRegistrationCounts } from "@/lib/registrationStats";
 import { peopleScopeCond, workerScopeCond } from "@/lib/registrationScope";
 
 // One payload for the whole dashboard — KPIs, the Top 10 worker ranking, the
@@ -25,15 +25,18 @@ export async function GET(req) {
     const workerLimit = Math.min(200, Math.max(1, parseInt(searchParams.get("worker_limit") || "200", 10) || 200));
     const blockLimit = Math.min(100, Math.max(1, parseInt(searchParams.get("block_limit") || "100", 10) || 100));
 
-    const [summary, workers, blocks, wardOptions, assemblies] = await Promise.all([
+    // Worker-wise Performance Lok Sabha / Assembly filter: resolved to worker ids, then applied to the ranking AND its totals.
+    const workerIds = await workerIdsForLocation({ campaignId: f.campaignId, lokSabhaId: f.lokSabhaId, assemblyId: f.assemblyId, workerScope });
+    const [summary, workers, worker_totals, blocks, wardOptions, assemblies] = await Promise.all([
       getRegSummary({ ...f, scope }),
-      getWorkerRanking({ ...f, limit: workerLimit, workerScope }),
+      getWorkerRanking({ ...f, limit: workerLimit, workerScope, workerIds }),
+      getWorkerPerformanceTotals({ ...f, workerScope, workerIds }),
       getBlockRanking({ ...f, limit: blockLimit, scope }), // Top 100 blocks by area_booth (§9B)
       getWardOptions(f.campaignId, scope),
       getAssemblyRegistrationCounts({ ...f, scope }), // all 90 assemblies, voter/worker counts (§8)
     ]);
 
-    return NextResponse.json({ summary, workers, blocks, wardOptions, assemblies }, { headers: NO_STORE });
+    return NextResponse.json({ summary, workers, worker_totals, blocks, wardOptions, assemblies }, { headers: NO_STORE });
   } catch (e) {
     console.error("[registration] dashboard GET error:", e);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

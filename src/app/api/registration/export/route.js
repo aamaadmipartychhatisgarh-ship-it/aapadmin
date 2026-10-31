@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { query } from "@/lib/db";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
-import { defaultPeopleSort, getPeoplePage, getWorkerRanking, getBlockRanking } from "@/lib/registrationStats";
+import { defaultPeopleSort, getPeoplePage, getWorkerRanking, workerIdsForLocation, getBlockRanking } from "@/lib/registrationStats";
 import { peopleScopeCond, workerScopeCond } from "@/lib/registrationScope";
 import { buildRegistrationPdf, buildWorkerPerformancePdf, registrationPdfFilename } from "@/lib/registrationPdf";
 import { isCaller } from "@/lib/permissions";
@@ -59,9 +60,17 @@ export async function GET(req) {
       // Exactly the rows the dashboard's Worker-wise Performance shows: same
       // filters, same scope, same ranking order and the same Top-N limit.
       const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("worker_limit") || "200", 10) || 200));
-      const rows = await getWorkerRanking({ ...f, limit, workerScope });
+      // The same Lok Sabha / Assembly filter as the screen (one resolution, applied in the query).
+      const workerIds = await workerIdsForLocation({ campaignId: f.campaignId, lokSabhaId: f.lokSabhaId, assemblyId: f.assemblyId, workerScope });
+      const rows = await getWorkerRanking({ ...f, limit, workerScope, workerIds });
       if (searchParams.get("format") === "pdf") {
         const criteria = describeFilters(searchParams, session).filter((c) => !/^(Type|Source|Status):/.test(c));
+        if (f.lokSabhaId || f.assemblyId) {
+          const names = await query(`SELECT id, name FROM locations WHERE id IN (?, ?)`, [f.lokSabhaId || 0, f.assemblyId || 0]);
+          const nm = (id) => names.find((n) => Number(n.id) === Number(id))?.name || `#${id}`;
+          if (f.lokSabhaId) criteria.push(`Lok Sabha: ${nm(f.lokSabhaId)}`);
+          if (f.assemblyId) criteria.push(`Assembly: ${nm(f.assemblyId)}`);
+        }
         criteria.push(`Top ${limit}`);
         const buf = await buildWorkerPerformancePdf(rows, { criteria });
         return new NextResponse(new Uint8Array(buf), {

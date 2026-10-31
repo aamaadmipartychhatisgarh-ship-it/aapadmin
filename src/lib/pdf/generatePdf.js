@@ -298,3 +298,17 @@ export async function generateCommonPDF(payload = {}) {
     })
   );
 }
+
+// An unbroken run (an id, a long word) cannot wrap on its own and would run out of its cell. Put it on separate lines every
+// `chunk` characters - grapheme-safe (never splits a Devanagari cluster) and without adding any visible character (automatic
+// hyphenation would). Words shorter than chunk + 4 are left alone.
+export function breakLongTokens(text, chunk) {
+  const n = Math.max(6, Math.floor(chunk) || 20);
+  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  return String(text ?? "").replace(new RegExp(`\\S{${n + 4},}`, "g"), (t) => {
+    const g = Array.from(seg.segment(t), (x) => x.segment);
+    const out = [];
+    for (let i = 0; i < g.length; i += n) out.push(g.slice(i, i + n).join(""));
+    return out.join("\n");
+  });
+}

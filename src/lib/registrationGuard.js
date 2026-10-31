@@ -78,6 +78,9 @@ export function parseRegFilters(searchParams) {
     source: ["worker", "direct"].includes(searchParams.get("source")) ? searchParams.get("source") : null,
     status: ["active", "duplicate", "rejected"].includes(searchParams.get("status")) ? searchParams.get("status") : "active",
     search: str("search"),
+    // Worker-wise Performance location filters (unique master-data ids).
+    lokSabhaId: num("lok_sabha_id"),
+    assemblyId: num("assembly_id"),
   };
 }
 
