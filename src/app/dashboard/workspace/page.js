@@ -660,7 +660,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         booth_id: active.booth_id,
         address: active.address,
         duration_seconds: elapsed,
-        is_follow_up_required: !!form.is_follow_up_required,
+        // A follow-up flag left over from a previously selected status (the controls are hidden for this one) is never sent.
+        is_follow_up_required: fuAllowed ? !!form.is_follow_up_required : false,
         is_vip: !!form.is_vip,
       };
       const r = await fetch("/api/calls", {
@@ -673,8 +674,8 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       if (!r.ok) { setError(data.message || `Failed to save (error ${r.status}). Your entries are still here - please try again.`); return; }
       setProgressKey((k) => k + 1); // refresh outcome progress
       const savedDuration = elapsed;
-      const scheduledFor = form.is_follow_up_required && form.follow_up_date ? form.follow_up_date : null;
-      const followMsg = scheduledFor ? ` Reminder set for ${scheduledFor}${form.follow_up_time ? ` at ${form.follow_up_time}` : ""}.` : "";
+      const scheduledFor = payload.is_follow_up_required && payload.follow_up_date ? payload.follow_up_date : null;
+      const followMsg = scheduledFor ? ` Reminder set for ${scheduledFor}${payload.follow_up_time ? ` at ${payload.follow_up_time}` : ""}.` : "";
       // Member outcomes that move the contact to the Wrong Number / Not Interested page: go straight there (already saved).
       if (isMember) {
         const goWrong = statusNameNow === "Wrong Number" || (isPicked && (memberSentiment === "wrong_number" || memberSentiment === "member_opponent"));
@@ -1453,7 +1454,12 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                           onChange={(e) => {
                             const picked = statuses.find((s) => String(s.id) === String(e.target.value))?.name === "Phone Picked";
                             // Reset sentiment whenever the status is not Phone Picked.
-                            setForm({ ...form, status_id: e.target.value, sentiment: picked ? form.sentiment : "", member_pp: "", wrong_number_reason: "" });
+                            // A Member's follow-up exists only for Not Picked / Not in Service / Switched Off / Incoming Off: moving to any other
+                            // status (e.g. Phone Picked -> Active) drops the date/time chosen under the previous one, so no hidden value is left behind.
+                            const nextName = statuses.find((s) => String(s.id) === String(e.target.value))?.name;
+                            const keepFu = !isMember || MEMBER_FOLLOWUP_STATUSES.includes(nextName);
+                            setForm({ ...form, status_id: e.target.value, sentiment: picked ? form.sentiment : "", member_pp: "", wrong_number_reason: "",
+                              ...(keepFu ? {} : { is_follow_up_required: false, follow_up_date: "", follow_up_time: "" }) });
                           }}
                           className={inputCls}
                         >
