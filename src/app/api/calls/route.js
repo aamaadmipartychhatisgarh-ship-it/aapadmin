@@ -257,6 +257,22 @@ function explainSaveError(e) {
 const validDate = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v)); if (!m) return false; const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])); return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3]; };
 const validTime = (v) => { const m = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(v)); return !!m && +m[1] < 24 && +m[2] < 60 && (m[3] == null || +m[3] < 60); };
 
+// Keeps an id only if the row it refers to still exists (designations table for designation_id, locations for the rest).
+async function existingSnapshotIds(ids) {
+  const out = {}, locIds = new Set();
+  for (const [k, v] of Object.entries(ids)) { out[k] = v ? Number(v) || null : null; if (k !== "designation_id" && out[k]) locIds.add(out[k]); }
+  if (locIds.size) {
+    const rows = await query(`SELECT id FROM locations WHERE id IN (${[...locIds].map(() => "?").join(",")})`, [...locIds]);
+    const have = new Set(rows.map((r) => r.id));
+    for (const k of Object.keys(out)) if (k !== "designation_id" && out[k] && !have.has(out[k])) { console.warn(`[calls] snapshot ${k}=${out[k]} no longer exists - stored empty on the call`); out[k] = null; }
+  }
+  if (out.designation_id) {
+    const [d] = await query("SELECT id FROM designations WHERE id = ?", [out.designation_id]);
+    if (!d) { console.warn(`[calls] snapshot designation_id=${out.designation_id} no longer exists - stored empty on the call`); out.designation_id = null; }
+  }
+  return out;
+}
+
 export async function POST(req) {
   let body;
   try { body = await req.text(); } catch { return Response.json({ message: "The request was not valid. Please try again." }, { status: 400 }); }
@@ -363,6 +379,11 @@ async function postOnce(req, body, canRetry) {
       );
       if (dup) return Response.json({ message: "Call logged successfully", id: dup.id, duplicate: true }, { status: 200 });
     }
+    // The call row keeps a SNAPSHOT of the contact's location / designation ids, and the database enforces them as foreign keys.
+    // A contact whose saved zone / Lok Sabha / district / designation was since removed would make the INSERT fail
+    // (ER_NO_REFERENCED_ROW_2) - for that contact alone. Ids that no longer exist are stored as empty on the call only; the
+    // contact itself is not touched and the call stays linked to it by contact_id.
+    const snap = await existingSnapshotIds({ designation_id, zone_id, lok_sabha_id, district_id, assembly_id, ward_id, polling_station_id, booth_id });
     const lim = await callTextLimits();
     const memberOpponent = member && statusName === "Phone Picked" && finalSentiment === "member_opponent";
     const memberNotInterested = member && statusName === "Phone Picked" && finalSentiment === "not_interested";
@@ -377,17 +398,17 @@ async function postOnce(req, body, canRetry) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         fitToColumn(destination, lim.destination) || null,
-        designation_id || null,
+        snap.designation_id,
         fitToColumn(person_name, lim.person_name),
         fitToColumn(address, lim.address) || null,
         fitToColumn(phone_number, lim.phone_number),
-        zone_id || null,
-        lok_sabha_id || null,
-        district_id || null,
-        assembly_id || null,
-        ward_id || null,
-        polling_station_id || null,
-        booth_id || null,
+        snap.zone_id,
+        snap.lok_sabha_id,
+        snap.district_id,
+        snap.assembly_id,
+        snap.ward_id,
+        snap.polling_station_id,
+        snap.booth_id,
         status_id,
         remarks || null,
         actingUserId,
