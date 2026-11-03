@@ -172,7 +172,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [dwPrev, setDwPrev] = useState(null);
   // Member workflow: only a contact whose Designation is Member gets the Member status / Phone Picked / follow-up options.
   const activeDesigIds = String(active?.designation_ids || active?.designation_id || "").split(",").map((x) => x.trim()).filter(Boolean);
-  const isMember = !!active && activeDesigIds.some((id) => isMemberName(designations.find((d) => String(d.id) === id)?.name));
+  // Derived from the contact's designation set once the designation list is loaded (so it follows a designation edit); until then the
+  // server's own verdict (is_member, from the same rule POST /api/calls validates with) is used - never a silent "not a Member".
+  const isMember = !!active && (designations.length
+    ? activeDesigIds.some((id) => isMemberName(designations.find((d) => String(d.id) === id)?.name))
+    : active.is_member === true);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -522,6 +526,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
 
   const lastClaimMsg = useRef("");
   const claimingRef = useRef(false);
+  const claimBrokeRef = useRef(false); // the last claim FAILED (network / wrong contact) - as opposed to "nothing available"
   // claim()          -> Start Next Call (the next contact of the filtered list).
   // claim(contactId) -> EXACTLY that contact. An explicit id that is missing / invalid is refused with a message - it never falls back to
   //                     "the next contact" - and the contact the server returns must be the one asked for, or nothing is opened.
@@ -535,7 +540,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       if (cid == null) { setError("This contact could not be opened: its id is missing or not valid."); return false; }
     }
     if (claimingRef.current) return false;
-    claimingRef.current = true; setClaiming(true);
+    claimingRef.current = true; setClaiming(true); claimBrokeRef.current = false;
     setMessage("");
     setError("");
     try {
@@ -552,6 +557,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         return false;
       }
       if (!data.contact || (explicit && Number(data.contact.id) !== cid)) {
+        claimBrokeRef.current = true;
         setError("The contact that came back is not the one you chose, so nothing was opened. Please try again.");
         return false;
       }
@@ -560,6 +566,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       loadQueue();
       return true;
     } catch {
+      claimBrokeRef.current = true;
       setError("Could not reach the server. Please try again.");
       return false;
     } finally {
@@ -685,6 +692,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     submitLock.current = true;
     setSubmitting(true);
     setError("");
+    let savedOk = false;
     try {
       // Sentiment only applies to a connected ("Phone Picked") call — never save
       // a stale sentiment for any other status.
@@ -723,6 +731,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       const data = await r.json().catch(() => ({}));
       // On any failure the form stays exactly as entered so the caller can retry.
       if (!r.ok) { setError(data.message || `Failed to save (error ${r.status}). Your entries are still here - please try again.`); return; }
+      savedOk = true; // from here on the call IS saved: a later problem must never be reported as "not saved"
       setProgressKey((k) => k + 1); // refresh outcome progress
       const savedDuration = elapsed;
       const scheduledFor = payload.is_follow_up_required && payload.follow_up_date ? payload.follow_up_date : null;
@@ -744,6 +753,10 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       const claimed = await claim();
       if (claimed) {
         setMessage(`Saved (${savedDuration}s).${followMsg} Next contact ready.`);
+      } else if (claimBrokeRef.current) {
+        // The call IS saved; loading the next contact failed (claim() already showed why). Never claim "all caught up" here.
+        setMessage(`Saved (${savedDuration}s).${followMsg} The next contact could not be loaded - use Start Next Call.`);
+        loadQueue();
       } else {
         // With a designation selected the server says "No more calls are available for this designation." — the
         // designation itself stays selected until the caller clears it.
@@ -752,7 +765,9 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
         loadQueue();
       }
     } catch {
-      setError("Could not reach the server - the call was not confirmed saved. Your entries are still here; please try again (a repeat will not create a duplicate).");
+      setError(savedOk
+        ? "The call was saved, but the next contact could not be loaded. Please reload the page."
+        : "Could not reach the server - the call was not confirmed saved. Your entries are still here; please try again (a repeat will not create a duplicate).");
     } finally {
       submitLock.current = false;
       setSubmitting(false);

@@ -11,6 +11,7 @@ import { repeatOffExclusion } from "@/lib/repeatOff";
 import { dueClause } from "@/lib/followup";
 import { buildAssignedFilters } from "@/lib/workspaceFilters";
 import { parseContactId } from "@/lib/contactId";
+import { isMemberContact } from "@/lib/memberWorkflow";
 
 // Body: { contact_id?: number }
 // If contact_id given: claim that specific contact (must be assigned to user OR in pool with same district).
@@ -220,9 +221,13 @@ export async function POST(req) {
         wingsCsv = wr[0]?.w ?? null;
       } catch {}
       await conn.commit();
+      // The server's own verdict on "is this a Member" - the SAME function POST /api/calls validates with - so the options the page shows
+      // can never differ from the rules applied when the call is saved.
+      const is_member = await isMemberContact(row.id).catch(() => null);
       return NextResponse.json({
         contact: {
           ...row,
+          is_member,
           ward_name: nameRows[0]?.ward_name ?? null,
           district_name: nameRows[0]?.district_name ?? null,
           // Show the contact's OWN photo first, falling back to the linked worker's

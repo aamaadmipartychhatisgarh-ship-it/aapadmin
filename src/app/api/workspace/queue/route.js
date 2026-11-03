@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isMemberContact } from "@/lib/memberWorkflow";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
@@ -241,7 +242,7 @@ export async function GET(req) {
       // The caller's zone — used to auto-scope the Lok Sabha filter on the client.
       zone_id: me?.scope_zone_id ?? null,
       zone_name: me?.scope_zone_name ?? null,
-      active_lock: lockedRows[0] || null,
+      active_lock: lockedRows[0] ? { ...lockedRows[0], is_member: await isMemberContact(lockedRows[0].id).catch(() => null) } : null,
     });
   } catch (err) {
     console.error("workspace queue error:", err);

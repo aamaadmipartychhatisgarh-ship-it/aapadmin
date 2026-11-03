@@ -248,7 +248,14 @@ const isTransient = (e) => TRANSIENT_CODES.includes(e?.code) || e?.errno === 121
 function explainSaveError(e) {
   const m = String(e?.sqlMessage || e?.message || "");
   if (e?.code === "ER_DATA_TOO_LONG" || e?.errno === 1406) return "one of the entries is too long for the database";
-  if (e?.code === "ER_NO_REFERENCED_ROW_2" || e?.errno === 1452) return "this contact refers to a record (designation, zone, district or similar) that no longer exists";
+  if (e?.code === "ER_NO_REFERENCED_ROW_2" || e?.errno === 1452) {
+    // Name the record that is really missing (the constraint's own column) instead of always blaming the contact's location / designation.
+    const col = (/FOREIGN KEY \(`([^`]+)`\)/.exec(m) || [])[1];
+    if (col === "status_id") return "the selected status no longer exists";
+    if (col === "user_id") return "your account could not be matched";
+    if (col === "contact_id") return "this contact no longer exists";
+    return "this contact refers to a record (designation, zone, district or similar) that no longer exists";
+  }
   if (e?.code === "ER_TRUNCATED_WRONG_VALUE" || /Incorrect (date|time|datetime|integer)/i.test(m) || e?.errno === 1292) return "a date, time or number entry is not valid";
   if (/Data truncated/i.test(m) || e?.errno === 1265) return "one of the selected options is not accepted by the database";
   if (isTransient(e) || /timeout|timed out|too many connections/i.test(m)) return "the database is busy";
@@ -331,7 +338,11 @@ async function postOnce(req, body, canRetry) {
     // Resolve the status name up front. Sentiment only applies to a connected
     // ("Phone Picked") call — for every other status we store NULL, never a
     // stale sentiment value.
-    const [statusRow] = await query("SELECT name FROM call_statuses WHERE id = ?", [status_id]);
+    // The status must be a clean id of an EXISTING status. ("82abc" would be cast to 82 and an unknown id would be saved as-is - or, with a
+    // database constraint, surface as an unrelated error.) Anything else is a clear 400 and nothing is written.
+    const statusIdNum = typeof status_id === "number" || /^[1-9]\d{0,9}$/.test(String(status_id)) ? Number(status_id) : null;
+    const [statusRow] = statusIdNum ? await query("SELECT name FROM call_statuses WHERE id = ?", [statusIdNum]) : [];
+    if (!statusRow) return Response.json({ message: "That status is not valid. Please pick a status from the list and save again." }, { status: 400 });
     const statusName = statusRow?.name;
     const finalSentiment = statusName === "Phone Picked" ? (sentiment || null) : null;
 
@@ -471,7 +482,7 @@ async function postOnce(req, body, canRetry) {
         [
           isFinal ? 1 : 0, wantsFollowUp ? 1 : 0,
           wantsFollowUp ? 1 : 0, follow_up_date ? String(follow_up_date).slice(0, 10) : null,
-          wantsFollowUp ? 1 : 0, session.user.id,
+          wantsFollowUp ? 1 : 0, actingUserId,
           is_vip ? 1 : 0,
           contact_id,
         ]
