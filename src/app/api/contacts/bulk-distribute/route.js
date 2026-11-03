@@ -9,6 +9,7 @@ import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
+import { ensureContactAssignmentsSchema, recordAssignments } from "@/lib/contactAssignments";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
@@ -157,6 +158,7 @@ export async function POST(req) {
     // below is a locking read (FOR UPDATE), so once we've picked the rows
     // no other transaction can touch them until we commit — no double-
     // assignment race between selection and the update either.
+    await ensureContactAssignmentsSchema();
     const conn = await getPool().getConnection();
     try {
       await conn.beginTransaction();
@@ -214,6 +216,7 @@ export async function POST(req) {
             mismatches.push({ caller: c.username, intended: chunk.length, dbAffected: result.affectedRows, ids: chunk });
           }
           dbUpdatedTotal += result.affectedRows;
+          await recordAssignments(conn, chunk, c.id, session.user.id);
         }
         assigned += ids.length;
       }

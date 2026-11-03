@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
+import { isTemporaryAssignment, endAssignments } from "@/lib/contactAssignments";
 
 // A contact's Zone exactly as the Contact Page shows it: its OWN Zone when set, else
 // the Zone of its district (district → Lok Sabha → Zone). Null when it has neither.
@@ -28,10 +29,13 @@ export async function releaseOutOfZoneAssignment(session, contactId, newZoneId) 
   );
   if (!c?.assigned_to_user_id || !c.scope_zone_id) return null;
   if (String(c.scope_zone_id) === String(newZoneId ?? "")) return null;
+  // A deliberate temporary other-Zone assignment (made by an admin/supervisor) is never dropped by a Zone edit.
+  if (await isTemporaryAssignment(contactId)) return null;
   const cols = new Set((await query("SHOW COLUMNS FROM contacts")).map((r) => r.Field));
   const sets = ["assigned_to_user_id = NULL"];
   for (const k of ["assigned_at", "assigned_by_user_id", "locked_by_user_id", "locked_at"]) if (cols.has(k)) sets.push(`${k} = NULL`);
   await query(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ? AND assigned_to_user_id = ?`, [contactId, c.assigned_to_user_id]);
+  await endAssignments(null, [contactId], "zone_changed").catch(() => {});
   logAudit(session, { action: "contact.zone_release", entityType: "contact", entityId: String(contactId), details: `Zone changed — released from caller ${c.username} (Zone #${c.scope_zone_id}) back to the pool` });
   return { caller_id: c.assigned_to_user_id, caller_name: c.username };
 }

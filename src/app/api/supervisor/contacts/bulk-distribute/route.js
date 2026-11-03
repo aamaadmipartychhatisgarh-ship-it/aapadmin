@@ -8,6 +8,7 @@ import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
+import { ensureContactAssignmentsSchema, recordAssignments } from "@/lib/contactAssignments";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
@@ -40,16 +41,20 @@ export async function POST(req) {
       return NextResponse.json({ message: "Enter how many contacts per caller." }, { status: 400 });
     }
 
-    // Validate every target is a caller AND within this supervisor's territory.
+    // Every target must be an ACTIVE caller. A caller outside this supervisor's territory (a different permanent
+    // Zone) may still receive an explicit, hand-picked selection of contacts from this territory as a TEMPORARY
+    // other-Zone assignment - the caller's own Zone is never changed. Automatic/filtered distribution keeps the
+    // territory rule.
     const placeholders = callerIds.map(() => "?").join(",");
-    const callerScope = supervisorCallerScopeFilter(session.user, "u");
+    const hasExplicit = Array.isArray(body.contact_ids) && body.contact_ids.length > 0;
+    const callerScope = hasExplicit ? { where: "AND u.is_active <> 0", params: [] } : supervisorCallerScopeFilter(session.user, "u");
     const validRows = await query(
       `SELECT id, role, username FROM users u WHERE u.id IN (${placeholders}) ${callerScope.where}`,
       [...callerIds, ...callerScope.params]
     );
     const callers = validRows.filter((u) => normalizeRole(u.role) === ROLES.CALLER);
     if (callers.length !== callerIds.length) {
-      return NextResponse.json({ message: "One or more selected callers are not in your territory." }, { status: 403 });
+      return NextResponse.json({ message: hasExplicit ? "One or more selected callers are not active callers." : "One or more selected callers are not in your territory." }, { status: 403 });
     }
 
     // Default FALSE (§8): preserve existing assignments unless the request
@@ -113,6 +118,7 @@ export async function POST(req) {
     const perCounts = {};
     const mismatches = [];
 
+    await ensureContactAssignmentsSchema();
     const conn = await getPool().getConnection();
     try {
       await conn.beginTransaction();
@@ -157,6 +163,7 @@ export async function POST(req) {
             mismatches.push({ caller: c.username, intended: chunk.length, dbAffected: result.affectedRows, ids: chunk });
           }
           dbUpdatedTotal += result.affectedRows;
+          await recordAssignments(conn, chunk, c.id, session.user.id);
         }
         assigned += ids.length;
       }
