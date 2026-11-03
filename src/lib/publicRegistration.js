@@ -552,8 +552,9 @@ export async function updateOwnRegistration(req, token) {
         return NextResponse.json({ message: "Please verify the mobile number first.", otp_required: true }, { status: 403, headers: NO_STORE });
       }
     }
-    // Photo: worker records only; omitted → keep the saved photo.
-    const photo = rec.person_type === "worker" && d.photo_url !== undefined ? v.photoUrl : rec.photo_url;
+    // Photo: worker records only. Omitted, empty or unusable -> keep the saved photo: a photo is OPTIONAL and an empty value must never
+    // wipe one that is already stored (only a real, valid replacement changes it).
+    const photo = rec.person_type === "worker" && d.photo_url !== undefined && v.photoUrl ? v.photoUrl : rec.photo_url;
 
     await query(
       `UPDATE reg_people

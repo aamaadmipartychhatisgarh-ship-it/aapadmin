@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Languages, Loader2, ShieldAlert, UserPlus, Vote, ImagePlus, Camera, List as ListIcon, ArrowLeft, FileDown, Pencil } from "lucide-react";
 import { RatingScale } from "@/components/KaryakartaRating";
+import { prepareImageForUpload } from "@/lib/clientImage";
 import PhoneActions from "@/components/PhoneActions";
 import { postContactAction, contactActionText } from "@/lib/contactActionClient";
 
@@ -39,6 +40,7 @@ const STRINGS = {
     workerSavedBody: "धन्यवाद. आपका पंजीयन सफलतापूर्वक जमा हो गया है.",
     photo: "फोटो", choosePhoto: "फोटो चुनें", changePhoto: "फोटो बदलें", capturePhoto: "फोटो खींचें", retakePhoto: "दोबारा खींचें",
     photoHint: "JPG, PNG या WEBP · अधिकतम 5 MB", uploading: "अपलोड हो रहा है…",
+    optional: "(वैकल्पिक)", photoCameraHint: "कैमरा न खुले तो “फोटो चुनें” से गैलरी/फाइल से फोटो चुनें. फोटो ज़रूरी नहीं है.",
     photoFromContacts: "यह फोटो Contacts से स्वतः ली गई है",
     workerId: "Worker आईडी", contactId: "कॉन्टैक्ट आईडी", matchedFromContacts: "Contacts से मिलान",
     photoTooLarge: "फोटो का आकार बहुत बड़ा है. कृपया छोटी छवि अपलोड करें.",
@@ -112,6 +114,7 @@ const STRINGS = {
     workerSavedBody: "Thank you. Your registration has been submitted successfully.",
     photo: "Photo", choosePhoto: "Choose Photo", changePhoto: "Change Photo", capturePhoto: "Capture Photo", retakePhoto: "Retake",
     photoHint: "JPG, PNG or WEBP · up to 5 MB", uploading: "Uploading…",
+    optional: "(optional)", photoCameraHint: "If the camera does not open, use “Choose Photo” to pick a photo from your gallery or files. A photo is not required.",
     photoFromContacts: "Photo taken automatically from Contacts",
     workerId: "Worker ID", contactId: "Contact ID", matchedFromContacts: "Matched from Contacts",
     photoTooLarge: "Photo size is too large. Please upload a smaller image.",
@@ -189,6 +192,17 @@ function Field({ label, children, required }) {
       </span>
       {children}
     </label>
+  );
+}
+
+// The Rating group: a plain block, NOT a <label>. Field wraps its content in a <label>, and inside a label a tap on the heading text or the
+// gaps between the 1-10 buttons is forwarded to the FIRST button on some Android browsers, selecting / clearing the wrong rating.
+function RatingField({ label, children }) {
+  return (
+    <div role="group" aria-label={typeof label === "string" ? label : undefined} data-testid="rating-field">
+      <span className="block text-sm font-semibold text-gray-800 mb-1.5">{label}</span>
+      {children}
+    </div>
   );
 }
 
@@ -447,19 +461,22 @@ export default function PublicRegistrationForm({ token }) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  // Upload the chosen photo to the persistent store; keep a local preview.
+  // Upload the chosen photo to the persistent store; keep a local preview. The photo is OPTIONAL: any problem here only shows a message
+  // and the form can still be submitted without it. prepareImageForUpload accepts what phones really hand over (empty mime type, HEIC,
+  // 3-10 MB camera shots) and sends a normalised JPEG.
   async function onPhoto(e) {
     const file = e.target.files?.[0];
-    e.target.value = "";
+    e.target.value = ""; // so the same photo / a retake fires onChange again
     if (!file) return;
     setPhotoErr("");
-    if (file.size > 5 * 1024 * 1024) { setPhotoErr(t.photoTooLarge); return; }
-    if (!/^image\/(jpeg|png|webp)$/.test(file.type || "")) { setPhotoErr(t.photoBadType); return; }
+    let blob;
+    try { blob = await prepareImageForUpload(file); }
+    catch (er) { setPhotoErr(er?.code === "size" ? t.photoTooLarge : er?.code === "type" ? t.photoBadType : t.photoFailed); return; }
     try { if (photoPreview) URL.revokeObjectURL(photoPreview); } catch { /* ignore */ }
-    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoPreview(URL.createObjectURL(blob));
     setPhotoBusy(true);
     try {
-      const fd = new FormData(); fd.append("file", file);
+      const fd = new FormData(); fd.append("file", blob, "photo.jpg");
       const r = await fetch("/api/public/registration/photo", { method: "POST", body: fd });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setPhotoErr(d?.message || t.photoFailed); setPhotoPreview(""); return; }
@@ -931,8 +948,10 @@ export default function PublicRegistrationForm({ token }) {
               state from surfacing in the Voter flow. */}
           {personType === "worker" && (
           <div>
-            <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo}</span>
-            <div className="flex items-center gap-3">
+            <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo} <span className="font-normal text-gray-500">{t.optional}</span></span>
+            {/* flex-wrap + full-width buttons: on a 320-360px phone the row used to be wider than the card, so the second button was pushed
+                off-screen. Both buttons are always visible (stacked when narrow) and are 44px tall touch targets. */}
+            <div className="flex flex-wrap items-center gap-3">
               {/* Priority: a fresh manual capture/upload → the photo already stored
                   against this person's Contact (auto-filled, no re-upload) → the
                   empty placeholder. The Contact photo comes straight from the
@@ -947,14 +966,14 @@ export default function PublicRegistrationForm({ token }) {
                   <ImagePlus size={24} />
                 </div>
               )}
-              <div className="flex flex-col gap-2">
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => cameraInput.current?.click()} disabled={photoBusy}
-                          className="h-10 px-3 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5 disabled:opacity-60">
-                    <Camera size={15} /> {t.capturePhoto}
+              <div className="flex flex-col gap-2 min-w-0 flex-1 basis-44">
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" data-testid="photo-capture" onClick={() => cameraInput.current?.click()} disabled={photoBusy}
+                          className="h-11 px-3 flex-1 min-w-[8.5rem] justify-center rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5 disabled:opacity-60">
+                    <Camera size={16} /> {t.capturePhoto}
                   </button>
-                  <button type="button" onClick={() => photoInput.current?.click()} disabled={photoBusy}
-                          className="h-10 px-3 rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5 disabled:opacity-60">
+                  <button type="button" data-testid="photo-upload" onClick={() => photoInput.current?.click()} disabled={photoBusy}
+                          className="h-11 px-3 flex-1 min-w-[8.5rem] justify-center rounded-xl border border-gray-300 bg-white text-sm font-semibold text-gray-700 inline-flex items-center gap-1.5 disabled:opacity-60">
                     {photoBusy ? <Loader2 size={15} className="animate-spin" /> : <ImagePlus size={15} />}
                     {photoBusy ? t.uploading : ((photoPreview || workerPhoto?.photo_url) ? t.changePhoto : t.choosePhoto)}
                   </button>
@@ -967,10 +986,11 @@ export default function PublicRegistrationForm({ token }) {
                 ) : (
                   <p className="text-[11px] text-gray-500">{t.photoHint}</p>
                 )}
+                <p className="text-[11px] text-gray-500">{t.photoCameraHint}</p>
               </div>
               {/* Camera capture vs library choose — same handler, different source. */}
-              <input ref={cameraInput} type="file" accept="image/*" capture="user" className="hidden" onChange={onPhoto} />
-              <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onPhoto} />
+              <input ref={cameraInput} type="file" accept="image/*" capture="user" className="hidden" onChange={onPhoto} data-testid="photo-camera-input" />
+              <input ref={photoInput} type="file" accept="image/*" className="hidden" onChange={onPhoto} data-testid="photo-file-input" />
             </div>
             {photoErr ? <p className="text-[12px] text-red-700 mt-1.5">{photoErr}</p> : null}
           </div>
@@ -979,10 +999,10 @@ export default function PublicRegistrationForm({ token }) {
           {/* Karyakarta Rating (1–10) — worker branch only. Green scale, darker as
               the rating rises; the selected value is highlighted in its shade. */}
           {personType === "worker" && (
-            <Field label={t.workerRating}>
+            <RatingField label={t.workerRating}>
               <RatingScale value={workerRating} onChange={setWorkerRating} />
               <p className="text-[11px] text-gray-500 mt-1.5">{t.workerRatingHint}</p>
-            </Field>
+            </RatingField>
           )}
 
           {/* On a karyakarta's link, who the entry is credited to — the name and
@@ -1173,11 +1193,13 @@ function EditRegistration({ record, token, t, lang, constituencies, onCancel, on
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { setError(t.photoTooLarge); return; }
-    if (!/^image\/(jpeg|png|webp)$/.test(file.type || "")) { setError(t.photoBadType); return; }
-    setPhotoBusy(true); setError("");
+    setError("");
+    let blob;
+    try { blob = await prepareImageForUpload(file); }
+    catch (er) { setError(er?.code === "size" ? t.photoTooLarge : er?.code === "type" ? t.photoBadType : t.photoFailed); return; }
+    setPhotoBusy(true);
     try {
-      const fd = new FormData(); fd.append("file", file);
+      const fd = new FormData(); fd.append("file", blob, "photo.jpg");
       const r = await fetch("/api/public/registration/photo", { method: "POST", body: fd });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setError(d?.message || t.photoFailed); return; }
@@ -1238,18 +1260,22 @@ function EditRegistration({ record, token, t, lang, constituencies, onCancel, on
               </select>
             </Field>
             <div>
-              <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo}</span>
-              <div className="flex items-center gap-3">
+              <span className="block text-sm font-semibold text-gray-800 mb-2">{t.photo} <span className="font-normal text-gray-500">{t.optional}</span></span>
+              <div className="flex flex-wrap items-center gap-3">
                 <ContactPhotoThumb src={photoUrl} />
-                <label className="h-10 px-3 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 bg-white inline-flex items-center gap-1.5 cursor-pointer">
+                <label className="h-11 px-3 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 bg-white inline-flex items-center gap-1.5 cursor-pointer">
                   {photoBusy ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}{photoUrl ? t.changePhoto : t.choosePhoto}
-                  <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={onPhoto} />
+                  <input type="file" accept="image/*" className="hidden" onChange={onPhoto} />
+                </label>
+                <label className="h-11 px-3 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 bg-white inline-flex items-center gap-1.5 cursor-pointer">
+                  <Camera size={14} />{t.capturePhoto}
+                  <input type="file" accept="image/*" capture="user" className="hidden" onChange={onPhoto} />
                 </label>
               </div>
             </div>
-            <Field label={t.workerRating}>
+            <RatingField label={t.workerRating}>
               <RatingScale value={rating} onChange={setRating} />
-            </Field>
+            </RatingField>
           </>
         )}
         {error ? <div className="rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2" data-testid="edit-error">{error}</div> : null}
