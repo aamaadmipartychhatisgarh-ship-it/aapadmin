@@ -19,6 +19,7 @@ import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designat
 import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
 import UnfilteredWorkspace from "./UnfilteredWorkspace";
+import { parseContactId } from "@/lib/contactId";
 
 // Friendly labels for who assigned a contact.
 const ROLE_LABELS = { super_admin: "Super Admin", supervisor: "Supervisor", caller: "Caller" };
@@ -128,6 +129,11 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const [submissionsKey, setSubmissionsKey] = useState(0); // bump to refresh "My submitted contacts"
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
+  // The id of the contact currently on screen, readable from async callbacks: a response for any OTHER contact (a slow request for the
+  // contact that was open before) must never be written into the contact that is open now.
+  const activeIdRef = useRef(null);
+  activeIdRef.current = active?.id ?? null;
+  const [claiming, setClaiming] = useState(false); // a claim request is in flight: the list can't start a second one
   // Regular Calls ↔ Unfiltered Calls. Kept in the URL (?calls=unfiltered) so a
   // refresh / shared link reopens the same list. The two lists never mix: the
   // Unfiltered view has its own data, APIs and call records.
@@ -266,10 +272,13 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const wantEditOnOpen = useRef(false);
   useEffect(() => {
     if (didAutoOpen.current) return;
-    const cid = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("contact_id") : null;
-    if (!cid) return;
+    const raw = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("contact_id") : null;
+    if (raw == null) return;
     didAutoOpen.current = true;
-    openContactForEdit(Number(cid));
+    // A malformed / empty id in the link is refused with a message - it must NOT open some other (e.g. the next) contact.
+    const cid = parseContactId(raw);
+    if (cid == null) { setError("This contact link is not valid, so no contact was opened."); return; }
+    openContactForEdit(cid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -306,11 +315,17 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
 
   // Tasks assigned on this contact — shown so the caller can act during the call.
   async function loadContactTasks(contactId) {
-    const r = await fetch(`/api/tasks?contact_id=${contactId}`);
-    if (r.ok) setContactTasks((await r.json()).tasks || []);
+    try {
+      const r = await fetch(`/api/tasks?contact_id=${contactId}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      // Only if that contact is still the one on screen (a late response for the previous contact is dropped).
+      if (activeIdRef.current === contactId) setContactTasks(d.tasks || []);
+    } catch { /* leave the panel as it was */ }
   }
   useEffect(() => {
-    if (!active) { setContactTasks([]); return; }
+    setContactTasks([]); // never keep the previous contact's tasks while the new one's load
+    if (!active) return;
     loadContactTasks(active.id);
   }, [active?.id]);
 
@@ -328,16 +343,20 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // Whenever a contact becomes active, fetch its prior call history
   useEffect(() => {
     setReportOpen(false); setReportReason("wrong_number"); setReportNote(""); setReportErr("");
-    if (!active) { setHistory([]); setHistoryOpen(false); return; }
+    setHistory([]); // never show the previous contact's call history under this one while it loads
+    if (!active) { setHistoryOpen(false); return; }
     setHistoryLoading(true);
+    let alive = true; // dropped when another contact opens first (or this one closes)
     fetch(`/api/contacts/${active.id}/history`)
       .then((r) => r.json())
       .then((d) => {
+        if (!alive) return;
         setHistory(d.history || []);
         // Auto-open if there are prior attempts so the caller knows context
         setHistoryOpen((d.history || []).length > 0);
       })
-      .finally(() => setHistoryLoading(false));
+      .catch(() => {})
+      .finally(() => { if (alive) setHistoryLoading(false); });
     setEdit({
       person_name: active.person_name || "",
       phone_number: active.phone_number || "",
@@ -353,6 +372,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     // deep link opens straight on the edit form.
     setEditing(wantEditOnOpen.current);
     wantEditOnOpen.current = false;
+    return () => { alive = false; };
   }, [active?.id]);
 
   // Merge the explicit Designation filter with the Wing filter into one
@@ -501,25 +521,50 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   }
 
   const lastClaimMsg = useRef("");
-  async function claim(contact_id) {
+  const claimingRef = useRef(false);
+  // claim()          -> Start Next Call (the next contact of the filtered list).
+  // claim(contactId) -> EXACTLY that contact. An explicit id that is missing / invalid is refused with a message - it never falls back to
+  //                     "the next contact" - and the contact the server returns must be the one asked for, or nothing is opened.
+  // One claim at a time: a second tap while one is in flight is ignored, so two answers can never arrive out of order and replace the
+  // contact the caller chose last.
+  async function claim(...args) {
+    const explicit = args.length > 0;
+    let cid = null;
+    if (explicit) {
+      cid = parseContactId(args[0]);
+      if (cid == null) { setError("This contact could not be opened: its id is missing or not valid."); return false; }
+    }
+    if (claimingRef.current) return false;
+    claimingRef.current = true; setClaiming(true);
     setMessage("");
     setError("");
-    const r = await fetch("/api/workspace/claim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // A specific contact is claimed directly; "next" carries the active filters.
-      body: JSON.stringify(contact_id ? { contact_id } : { filters: currentQueueFilters() }),
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      lastClaimMsg.current = data.message || "";
-      setError(data.message || "Could not claim a contact");
+    try {
+      const r = await fetch("/api/workspace/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // A specific contact is claimed directly; "next" carries the active filters.
+        body: JSON.stringify(explicit ? { contact_id: cid } : { filters: currentQueueFilters() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        lastClaimMsg.current = data.message || "";
+        setError(data.message || "Could not claim a contact");
+        return false;
+      }
+      if (!data.contact || (explicit && Number(data.contact.id) !== cid)) {
+        setError("The contact that came back is not the one you chose, so nothing was opened. Please try again.");
+        return false;
+      }
+      lastClaimMsg.current = "";
+      startActive(data.contact);
+      loadQueue();
+      return true;
+    } catch {
+      setError("Could not reach the server. Please try again.");
       return false;
+    } finally {
+      claimingRef.current = false; setClaiming(false);
     }
-    lastClaimMsg.current = "";
-    startActive(data.contact);
-    loadQueue();
-    return true;
   }
 
   // Open a specific contact for EDITING from the "Edit in Workspace" deep link.
@@ -535,7 +580,13 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
     try {
       const r = await fetch(`/api/contacts/${cid}`);
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(data.message || "Could not open that contact."); return; }
+      if (!r.ok) {
+        // A missing record (404) - or one this caller may not read (401) - is reported as "not found / not available", never as a bare
+        // "Unauthorized", and nothing else is opened in its place.
+        setError(r.status === 404 || r.status === 401 ? "That contact could not be found, or is not available to you." : (data.message || "Could not open that contact."));
+        return;
+      }
+      if (Number(data.contact?.id) !== cid) { setError("The contact that came back is not the one you chose, so nothing was opened."); return; }
       wantEditOnOpen.current = true; // land on the edit form (the active effect honors this)
       startActive(data.contact);
       setError("");
@@ -883,7 +934,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
 
           <button
             onClick={next}
-            disabled={!!active}
+            disabled={!!active || claiming}
             className="w-full bg-[#164FA3] hover:bg-blue-800 disabled:opacity-50 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2"
           >
             <Play size={18} /> Start Next Call
@@ -1021,7 +1072,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
                 const renderCard = (c) => (
                   <li key={c.id}>
                     <button
-                      disabled={!!active}
+                      disabled={!!active || claiming}
                       onClick={() => claim(c.id)}
                       className={`w-full text-left p-3 rounded-lg border disabled:opacity-60 flex items-center gap-2 ${c.is_daily ? "bg-amber-50 border-amber-300 hover:bg-amber-100" : "border-gray-100 hover:bg-blue-50 disabled:hover:bg-white"}`}
                     >
@@ -1106,7 +1157,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
 
         {/* What happened to the contacts this caller submitted (pending / approved / rejected). */}
         <MySubmittedContacts refreshKey={submissionsKey} />
-        <FollowUpCalls scheduled={queue.scheduled || []} disabled={!!active} onOpen={(id) => claim(id)} />
+        <FollowUpCalls scheduled={queue.scheduled || []} disabled={!!active || claiming} onOpen={(id) => claim(id)} />
 
         <ProgressPanel refreshKey={progressKey} />
       </div>

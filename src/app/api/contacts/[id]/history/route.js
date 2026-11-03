@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseContactId } from "@/lib/contactId";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
@@ -14,7 +15,10 @@ export async function GET(req, { params }) {
     if (!session) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    const { id } = await params;
+    const { id: rawId } = await params;
+    // Strict id: a loosely formatted one ("12abc") would be cast by the database to ANOTHER contact's id.
+    const id = parseContactId(rawId);
+    if (id == null) return NextResponse.json({ message: "Invalid contact id." }, { status: 400 });
     // A caller only sees the history of a contact they work on or one in their
     // current Zone — never another Zone's contact by changing the id. Every other
     // role keeps its existing access.

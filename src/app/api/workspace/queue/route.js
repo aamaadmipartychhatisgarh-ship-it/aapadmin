@@ -202,6 +202,7 @@ export async function GET(req) {
          LEFT JOIN locations lw ON lw.id = c.ward_id
          LEFT JOIN workers w ON w.id = c.worker_id
         WHERE c.locked_by_user_id = ?${notWrong}
+        ORDER BY c.locked_at DESC, c.id DESC
         LIMIT 1`,
       [userId]
     );

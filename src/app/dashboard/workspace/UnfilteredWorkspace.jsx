@@ -24,6 +24,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [data, setData] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [active, setActive] = useState(null); // { ...unfiltered call, started_at }
+  const openIdRef = useRef(null); // id of the call most recently opened (guards late history responses)
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -188,9 +189,10 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     setElapsed(0);
     setActive({ ...call, started_at: Date.now() });
     setHistory([]); setHistoryOpen(false);
+    openIdRef.current = call.id; // a late history answer for a previously opened call is dropped below
     fetch(`/api/unfiltered-calls/${call.id}/history`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { history: [] }))
-      .then((d) => { setHistory(d.history || []); setHistoryOpen((d.history || []).length > 0); })
+      .then((d) => { if (openIdRef.current !== call.id) return; setHistory(d.history || []); setHistoryOpen((d.history || []).length > 0); })
       .catch(() => {});
   }
 
@@ -276,7 +278,8 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       follow_up_date: c.follow_up_date ? String(c.follow_up_date).slice(0, 10) : "", follow_up_time: c.follow_up_time ? String(c.follow_up_time).slice(0, 5) : "",
     } });
     setHistory([]); setHistoryOpen(false);
-    fetch(`/api/unfiltered-calls/${c.id}/history`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { history: [] })).then((d) => setHistory(d.history || [])).catch(() => {});
+    openIdRef.current = c.id;
+    fetch(`/api/unfiltered-calls/${c.id}/history`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : { history: [] })).then((d) => { if (openIdRef.current === c.id) setHistory(d.history || []); }).catch(() => {});
   }
   async function saveCompleted() {
     if (!active?.editCompleted || submitting || submitLock.current) return;

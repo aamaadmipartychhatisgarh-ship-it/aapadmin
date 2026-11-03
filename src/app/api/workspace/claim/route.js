@@ -10,6 +10,7 @@ import { hasWrongNumberColumn, hasFollowUpTimeColumn, ensureNotInterestedColumns
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { dueClause } from "@/lib/followup";
 import { buildAssignedFilters } from "@/lib/workspaceFilters";
+import { parseContactId } from "@/lib/contactId";
 
 // Body: { contact_id?: number }
 // If contact_id given: claim that specific contact (must be assigned to user OR in pool with same district).
@@ -30,7 +31,13 @@ export async function POST(req) {
       return NextResponse.json({ message: "Only callers can claim contacts." }, { status: 403 });
     }
     const body = await req.json().catch(() => ({}));
-    const explicitId = body.contact_id;
+    // A specific contact was asked for (the key is present) -> it must be a clean positive id, and ONLY that contact may ever be opened.
+    // An invalid / empty id is refused (400) - it must never fall through to "the next contact", and "12abc" must never be cast to 12.
+    const asked = Object.prototype.hasOwnProperty.call(body, "contact_id") && body.contact_id !== undefined;
+    const explicitId = asked ? parseContactId(body.contact_id) : null;
+    if (asked && explicitId == null) {
+      return NextResponse.json({ message: "That contact link is not valid, so no contact was opened." }, { status: 400 });
+    }
     // The caller's active "Assigned to You" filters travel with Start Next Call
     // so it opens the NEXT contact from the SAME filtered dataset the caller sees
     // — never a random/unfiltered one. Same builder the queue list uses.
@@ -180,6 +187,13 @@ export async function POST(req) {
         return NextResponse.json({ message }, { status: 409 });
       }
 
+      // A caller works ONE contact at a time: claiming this one releases any other contact the caller still holds (an earlier claim, a
+      // deep link opened over another contact, a second tab). Otherwise several locks pile up and a refresh resumes an arbitrary one -
+      // a different contact than the one the caller last opened.
+      await conn.execute(
+        `UPDATE contacts SET locked_by_user_id = NULL, locked_at = NULL WHERE locked_by_user_id = ? AND id <> ?`,
+        [userId, row.id]
+      );
       await conn.execute(
         `UPDATE contacts SET locked_by_user_id = ?, locked_at = NOW() WHERE id = ?`,
         [userId, row.id]

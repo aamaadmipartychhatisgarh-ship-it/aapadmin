@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseContactId } from "@/lib/contactId";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight } from "@/lib/permissions";
@@ -49,7 +50,10 @@ export async function GET(_req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
-    const { id } = await params;
+    const { id: rawId } = await params;
+    // Strict id: a loosely formatted one ("12abc") would be cast by the database to ANOTHER contact's id.
+    const id = parseContactId(rawId);
+    if (id == null) return NextResponse.json({ message: "Invalid contact id." }, { status: 400 });
     if (!(await canTouch(session, id))) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     if (!(await ensureContactActiveStatusColumns())) return NextResponse.json({ active_status: null }, { headers: NO_STORE });
     const s = await readStatus(id);
@@ -66,7 +70,10 @@ export async function POST(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
-    const { id } = await params;
+    const { id: rawId } = await params;
+    // Strict id: a loosely formatted one ("12abc") would be cast by the database to ANOTHER contact's id.
+    const id = parseContactId(rawId);
+    if (id == null) return NextResponse.json({ message: "Invalid contact id." }, { status: 400 });
     if (!(await canTouch(session, id))) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     if (!(await ensureContactActiveStatusColumns())) {
       return NextResponse.json({ message: "Worker status is not available on this database." }, { status: 500, headers: NO_STORE });

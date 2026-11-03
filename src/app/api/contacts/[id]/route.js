@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseContactId } from "@/lib/contactId";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin, isOversight } from "@/lib/permissions";
@@ -43,7 +44,10 @@ export async function GET(_req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-    const { id } = await params;
+    const { id: rawId } = await params;
+    // Strict id: a loosely formatted one ("12abc") would be cast by the database to ANOTHER contact's id.
+    const id = parseContactId(rawId);
+    if (id == null) return NextResponse.json({ message: "Invalid contact id." }, { status: 400 });
 
     // Admins AND Supervisors (oversight) — or a "contacts" Page-Access grant —
     // get full Contact-Details access; otherwise a caller may only read a contact
@@ -106,7 +110,10 @@ export async function PUT(req, { params }) {
     if (!session) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    const { id } = await params;
+    const { id: rawId } = await params;
+    // Strict id: a loosely formatted one ("12abc") would be cast by the database to ANOTHER contact's id.
+    const id = parseContactId(rawId);
+    if (id == null) return NextResponse.json({ message: "Invalid contact id." }, { status: 400 });
     // Admins + Supervisors (oversight) OR a "contacts" Page-Access grant → full
     // management of any contact, INCLUDING removing the Address. isOversight covers
     // the Supervisor role explicitly (the Address spec: only Caller + Supervisor
@@ -391,10 +398,13 @@ export async function DELETE(req, { params }) {
     if (!(await pageAllowed(session, "contacts", session && isAdmin(session)))) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
-    const { id } = await params;
+    const { id: rawId } = await params;
+    // Strict id: a loosely formatted one ("12abc") would be cast by the database to ANOTHER contact's id.
+    const id = parseContactId(rawId);
+    if (id == null) return NextResponse.json({ message: "Invalid contact id." }, { status: 400 });
     const [existing] = await query("SELECT person_name, phone_number FROM contacts WHERE id = ?", [id]);
     await query("DELETE FROM contacts WHERE id = ?", [id]);
-    await logAudit(session, { action: "contact.delete", entityType: "contact", entityId: id, details: existing || null });
+    await logAudit(session, { action: "contact.delete", entityType: "contact", entityId: String(id), details: existing || null });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("contacts DELETE error:", err);
