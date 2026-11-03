@@ -156,7 +156,7 @@ export default function AdminDashboard() {
         // Overview is the default — also the fallback for any stale tab value
         // (e.g. the removed "supervisor" view) so no blank panel can show.
         <>
-          <SummaryDashboard summaryUrl="/api/admin/state-summary" exportUrl="/api/supervisor/export/summary" title={title} />
+          <SummaryDashboard summaryUrl="/api/admin/state-summary" exportUrl="/api/supervisor/export/summary" title={title} statusGroups />
           {/* Bottom section: Worker by Assembly + Influencer by Assembly. */}
           <AssemblyBreakdown />
         </>

@@ -26,6 +26,8 @@ const TerritoryMap = dynamic(() => import("@/components/TerritoryMap"), {
 //   summaryUrl  API that returns the overview shape (buildOverviewSummary)
 //   exportUrl   PDF export endpoint (receives ?date_from&date_to)
 //   title       heading text ("Supervisor Overview" / "State Overview")
+//   statusGroups  State Overview only: the Call Status card shows Active (Busy + Active) and Not Active (Rudely Behaved + Not Active),
+//               and Follow-up / Wrong Number include the Unfiltered calls; the Supervisor Overview keeps its original labels
 
 const BUCKET_LABELS = {
   connected: "Connected",
@@ -34,6 +36,8 @@ const BUCKET_LABELS = {
   rejected: "Rude/Rejected",
   busy: "Busy",
   switched_off: "Switched Off",
+  active: "Active",
+  not_active: "Not Active",
   other: "Other",
 };
 const BUCKET_COLORS = {
@@ -43,6 +47,8 @@ const BUCKET_COLORS = {
   rejected: "#EF4444",
   busy: "#8B5CF6",
   switched_off: "#0EA5E9",
+  active: "#8B5CF6",
+  not_active: "#EF4444",
   other: "#A1A1AA",
 };
 
@@ -79,6 +85,7 @@ export default function SummaryDashboard({
   exportUrl = "/api/supervisor/export/summary",
   title = "Supervisor Overview",
   subtitle = "Live calling performance",
+  statusGroups = false,
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -123,15 +130,21 @@ export default function SummaryDashboard({
     { label: "Connected", value: tally?.connected, icon: PhoneForwarded, accent: "text-emerald-600 bg-emerald-50" },
     { label: "Not Picked", value: tally?.no_answer, icon: PhoneOff, accent: "text-amber-600 bg-amber-50" },
     { label: "Switched Off", value: tally?.switched_off, icon: PowerOff, accent: "text-sky-600 bg-sky-50" },
-    { label: "Busy Calls", value: tally?.busy, icon: Clock, accent: "text-violet-600 bg-violet-50" },
-    { label: "Wrong Number", value: tally?.wrong_number, icon: AlertTriangle, accent: "text-gray-600 bg-gray-100" },
-    { label: "Rude/Rejected", value: tally?.rejected, icon: ThumbsDown, accent: "text-red-600 bg-red-50" },
-    { label: "Follow-up Scheduled", value: tally?.follow_up, icon: CalendarClock, accent: "text-[#FCB712] bg-[#FCB712]/10" },
+    statusGroups
+      ? { label: "Active", value: tally?.active, icon: Clock, accent: "text-violet-600 bg-violet-50" }
+      : { label: "Busy Calls", value: tally?.busy, icon: Clock, accent: "text-violet-600 bg-violet-50" },
+    { label: "Wrong Number", value: statusGroups ? tally?.wrong_number_all : tally?.wrong_number, icon: AlertTriangle, accent: "text-gray-600 bg-gray-100" },
+    statusGroups
+      ? { label: "Not Active", value: tally?.not_active, icon: ThumbsDown, accent: "text-red-600 bg-red-50" }
+      : { label: "Rude/Rejected", value: tally?.rejected, icon: ThumbsDown, accent: "text-red-600 bg-red-50" },
+    { label: "Follow-up Scheduled", value: statusGroups ? tally?.follow_up_all : tally?.follow_up, icon: CalendarClock, accent: "text-[#FCB712] bg-[#FCB712]/10" },
   ];
 
-  const pieData = tally
-    ? Object.entries(tally)
-        .filter(([k, v]) => !["total", "follow_up"].includes(k) && v > 0)
+  // State Overview charts the exclusive breakdown (each call in one slice); the Supervisor Overview its original tally buckets.
+  const pieSource = statusGroups ? data?.breakdown : (tally && Object.fromEntries(Object.entries(tally).filter(([k]) => !["total", "follow_up", "regular_calls", "unfiltered_calls", "wrong_number_all", "active", "not_active", "follow_up_all"].includes(k))));
+  const pieData = pieSource
+    ? Object.entries(pieSource)
+        .filter(([k, v]) => v > 0 && BUCKET_LABELS[k])
         .map(([k, v]) => ({ name: BUCKET_LABELS[k], value: v, color: BUCKET_COLORS[k] }))
     : [];
 
@@ -246,16 +259,16 @@ export default function SummaryDashboard({
               </div>
             </div>
 
-            {/* Top 5 Callers (replaces Best Caller) */}
+            {/* Top Callers - every caller with calls in the range (no 5-caller cap), ranked by RC + UC */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center"><Award size={20} /></div>
-                <span className="font-bold text-lg text-gray-900">Top 5 Callers</span>
+                <span className="font-bold text-lg text-gray-900">Top Callers</span>
               </div>
               {topCallers.length === 0 ? (
                 <p className="text-gray-400 text-sm">No calls in range</p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="space-y-2 max-h-[34rem] overflow-y-auto pr-1" data-testid="top-callers-list">
                   {topCallers.map((cc, i) => (
                     <li key={cc.id} className="flex items-center gap-3 py-1.5">
                       <span className="w-6 text-center text-sm font-bold shrink-0">{["🥇", "🥈", "🥉"][i] || (i + 1)}</span>
@@ -263,7 +276,7 @@ export default function SummaryDashboard({
                         <Avatar name={cc.name} src={cc.photo_url} size={40} className="bg-[#164FA3]/10" textClassName="text-[#164FA3]" />
                         <div className="min-w-0 flex-1">
                           <div className="font-semibold text-gray-900 text-sm truncate">{cc.name}</div>
-                          <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · {cc.connected.toLocaleString()} connected · {cc.follow_ups} follow-ups</div>
+                          <div className="text-[11px] text-gray-400 truncate">{cc.designation || "Caller"} · {cc.connected.toLocaleString()} connected · <span data-testid="tc-fu">{cc.follow_ups} follow-ups</span> (RC {cc.rc_follow_ups ?? 0} · UC {cc.uc_follow_ups ?? 0})</div>
                           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap" data-testid="top-caller-counts">
                             <span title="Regular Calls" className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-[#164FA3]" data-testid="tc-rc">RC {(cc.regular_calls || 0).toLocaleString()}</span>
                             <span title="Unfiltered Calls" className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-50 text-violet-700" data-testid="tc-uc">UC {(cc.unfiltered_calls || 0).toLocaleString()}</span>

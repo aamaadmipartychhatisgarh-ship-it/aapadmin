@@ -42,6 +42,23 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
 
   const n = (v) => Number(v) || 0;
 
+  // Status groups of the Call Status card. Each is a condition on one call row of the unified source (alias c, statuses cs):
+  //   Follow-up      a call that scheduled a follow-up: a regular call's follow_up_date, or an unfiltered call's own follow-up date
+  //                  (uc_follow_up_date) - counted per call record, exactly like the regular calls were.
+  //   Wrong Number   status "Wrong Number", or an unfiltered Phone Picked saved as "Not Active -> Wrong Number" (sentiment wrong_number).
+  //   Active         status "Busy" + a Phone Picked saved as Active (sentiment active - Member / Unfiltered workflows).
+  //   Not Active     status "Rudely Behaved" + a Phone Picked saved as Not Active (opponent / not interested / plain not_active).
+  // The stored statuses and options are unchanged - only these card groups read them. The groups cannot overlap (different statuses, or
+  // different sentiments of Phone Picked), so no call is counted twice across the cards or the breakdown.
+  const SENT = "COALESCE(c.sentiment, c.uc_sentiment)";
+  const PICKED = "cs.name = 'Phone Picked'";
+  const FOLLOW_UP = "(c.follow_up_date IS NOT NULL OR c.uc_follow_up_date IS NOT NULL)";
+  // COALESCE(..., 0): a call with no status / no sentiment must evaluate to FALSE, never NULL (NOT (NULL) would drop it from the
+  // exclusive Connected slice).
+  const WRONG = `COALESCE(cs.name = 'Wrong Number' OR (c.call_type = 'unfiltered' AND ${PICKED} AND c.uc_sentiment = 'wrong_number'), 0)`;
+  const ACTIVE = `COALESCE(cs.name = 'Busy' OR (${PICKED} AND ${SENT} = 'active'), 0)`;
+  const NOT_ACTIVE = `COALESCE(cs.name = 'Rudely Behaved' OR (${PICKED} AND ${SENT} IN ('not_active','opponent','member_opponent','not_interested')), 0)`;
+
   // ---- KPI tally (8 cards) — one grouped pass over the selected range ----
   const [agg] = await query(
     `SELECT
@@ -53,7 +70,14 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
        SUM(cs.name = 'Busy')               AS busy,
        SUM(cs.name = 'Wrong Number')       AS wrong_number,
        SUM(cs.name = 'Rudely Behaved')     AS rejected,
-       SUM(c.follow_up_date IS NOT NULL)   AS follow_up
+       SUM(c.follow_up_date IS NOT NULL)   AS follow_up,
+       -- State Overview's grouped Call Status card (see the group definitions above); the plain fields above are unchanged
+       SUM(${WRONG})                       AS wrong_number_all,
+       SUM(${ACTIVE})                      AS active,
+       SUM(${NOT_ACTIVE})                  AS not_active,
+       SUM(${FOLLOW_UP})                   AS follow_up_all,
+       -- exclusive groups for the Status Breakdown chart (each call in exactly one slice)
+       SUM(COALESCE(${PICKED}, 0) AND NOT ${ACTIVE} AND NOT ${NOT_ACTIVE} AND NOT ${WRONG}) AS b_connected
      FROM ${src} c
      LEFT JOIN call_statuses cs ON cs.id = c.status_id
      ${where}`,
@@ -70,12 +94,22 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
     wrong_number: n(agg?.wrong_number),
     rejected: n(agg?.rejected),
     follow_up: n(agg?.follow_up),
+    wrong_number_all: n(agg?.wrong_number_all),
+    active: n(agg?.active),
+    not_active: n(agg?.not_active),
+    follow_up_all: n(agg?.follow_up_all),
   };
-  // "other" = statuses not covered above (kept for the Status Breakdown pie).
+  // "other" = statuses not covered above (kept for the Supervisor Overview's Status Breakdown pie, unchanged).
   tally.other = Math.max(
     0,
     tally.total - (tally.connected + tally.no_answer + tally.switched_off + tally.busy + tally.wrong_number + tally.rejected)
   );
+  // State Overview's Status Breakdown: mutually exclusive slices (each call in exactly one), "other" = whatever none covers.
+  const breakdown = {
+    connected: n(agg?.b_connected), active: tally.active, not_active: tally.not_active,
+    no_answer: tally.no_answer, switched_off: tally.switched_off, wrong_number: tally.wrong_number_all,
+  };
+  breakdown.other = Math.max(0, tally.total - Object.values(breakdown).reduce((a, b) => a + b, 0));
 
   // ---- Calls over time (grouped by IST date across the range) ----
   const timelineRows = await query(
@@ -100,34 +134,37 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
   const hourly = [];
   for (let h = 0; h <= maxHour; h++) hourly.push({ hour: h, calls: hourCounts[h] || 0 });
 
-  // ---- Top 5 callers by TOTAL CALLS = Regular (RC) + Unfiltered (UC) (actual caller roles only) ----
+  // ---- Top callers by TOTAL CALLS = Regular (RC) + Unfiltered (UC) (actual caller roles only) - EVERY caller with calls in the range ----
   // `src` already holds every call attempt of BOTH kinds exactly once (calls rows + unfiltered_call_logs rows, attributed to the
   // calling user), so COUNT(*) is RC + UC and the SUMs split it. Ranked by that combined total (highest first), ties broken by
-  // connected ("Phone Picked") calls. connected_pct = connected ÷ total attempts × 100 is still shown. Every returned row
-  // has ≥1 call (they come from `calls`), so the SQL ratio never divides by
-  // zero; the JS still guards total===0 → 0% for safety. Photo/designation come
-  // from the caller's linked worker when available.
+  // connected ("Phone Picked") calls. connected_pct = connected / total attempts x 100 is still shown. Follow-ups are split the same
+  // way: RC = the regular call's follow_up_date, UC = the unfiltered call's own follow-up date, attributed to the calling user
+  // (caller_id / user_id of the record, never the viewer). Photo / designation come from the caller's linked worker through
+  // subqueries (one value per caller), so a user with several worker rows can never multiply the call counts.
   const topRows = await query(
-    `SELECT u.id, u.username AS name, w.photo_url AS photo_url, w.position AS designation,
+    `SELECT u.id, u.username AS name,
+            (SELECT w.photo_url FROM workers w WHERE w.user_id = u.id ORDER BY w.id LIMIT 1) AS photo_url,
+            (SELECT w.position FROM workers w WHERE w.user_id = u.id ORDER BY w.id LIMIT 1) AS designation,
             COUNT(*) AS total,
             ${CALL_TYPE_SPLIT},
             SUM(cs.name = 'Phone Picked') AS connected,
-            SUM(c.follow_up_date IS NOT NULL) AS follow_ups
+            SUM(c.call_type = 'regular' AND c.follow_up_date IS NOT NULL) AS rc_follow_ups,
+            SUM(c.uc_follow_up_date IS NOT NULL) AS uc_follow_ups
        FROM ${src} c
        JOIN users u ON u.id = c.user_id
        LEFT JOIN call_statuses cs ON cs.id = c.status_id
-       LEFT JOIN workers w ON w.user_id = u.id
       ${where} AND u.role IN ('caller','user','agent')
-      GROUP BY u.id
+      GROUP BY u.id, u.username
       -- Rank by COMBINED calls (Regular + Unfiltered), highest first; ties by connected calls, then id (stable).
-      ORDER BY COUNT(*) DESC, SUM(cs.name = 'Phone Picked') DESC, u.id ASC LIMIT 5`,
+      ORDER BY COUNT(*) DESC, SUM(cs.name = 'Phone Picked') DESC, u.id ASC`,
     params
   );
   const top_callers = topRows.map((r) => {
     const total = n(r.total), connected = n(r.connected);
     return {
       id: r.id, name: r.name, photo_url: r.photo_url || null, designation: r.designation || null,
-      total, regular_calls: n(r.regular_calls), unfiltered_calls: n(r.unfiltered_calls), connected, follow_ups: n(r.follow_ups),
+      total, regular_calls: n(r.regular_calls), unfiltered_calls: n(r.unfiltered_calls), connected,
+      rc_follow_ups: n(r.rc_follow_ups), uc_follow_ups: n(r.uc_follow_ups), follow_ups: n(r.rc_follow_ups) + n(r.uc_follow_ups),
       // Connected-call percentage; 0 when there are no attempts (never NaN/Infinity).
       connected_pct: total ? Math.round((connected / total) * 100) : 0,
     };
@@ -172,6 +209,7 @@ export async function buildOverviewSummary({ date_from, date_to, scope, includeT
 
   return {
     tally,
+    breakdown,
     hourly,
     timeline,
     top_callers,

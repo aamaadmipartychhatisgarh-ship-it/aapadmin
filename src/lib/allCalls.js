@@ -23,6 +23,10 @@ import { ensureUnfilteredCallLogSchema } from "@/lib/unfilteredContacts";
 //   the same way. Fields only regular calls have (sentiment, follow-up, VIP,
 //   designation) are NULL / 0 there.
 //
+// • uc_sentiment / uc_follow_up_date carry the Unfiltered call's own Phone Picked option (active / not_active / wrong_number …) and
+//   follow-up date (NULL on regular rows). The shared `sentiment` / `follow_up_date` / `is_follow_up_required` columns stay as they were
+//   (no sentiment / follow-up on unfiltered rows) so every screen that already reads them is unchanged; only the overview reads these two.
+//
 // Per-contact logic (a contact's call history, queue rules, wrong-number /
 // repeat-off detection) must keep using `calls` directly — this is for counts.
 
@@ -61,7 +65,8 @@ export async function callsUnion({ where = "", params = [] } = {}) {
   const regular = `SELECT c.* FROM (
       SELECT c.id AS id, ${txt("'regular'")} AS call_type, NULL AS unfiltered_contact_id,
              ${txt(`CONCAT('c', COALESCE(${reg("contact_id")}, CONCAT('x', c.id)))`)} AS reach_key,
-             ${COLS.map((k) => `${TEXT_COLS.has(k) ? txt(reg(k)) : reg(k)} AS ${k}`).join(", ")}
+             ${COLS.map((k) => `${TEXT_COLS.has(k) ? txt(reg(k)) : reg(k)} AS ${k}`).join(", ")},
+             NULL AS uc_sentiment, NULL AS uc_follow_up_date
         FROM calls c
     ) c WHERE 1=1 ${where}`;
   const unfiltered = `SELECT c.* FROM (
@@ -70,7 +75,8 @@ export async function callsUnion({ where = "", params = [] } = {}) {
              l.status_id AS status_id, l.created_at AS called_at, l.caller_id AS user_id,
              uc.district_id AS district_id, uc.assembly_id AS assembly_id, lls.parent_id AS zone_id, ld.parent_id AS lok_sabha_id,
              NULL AS designation_id, ${txt("l.remarks")} AS remarks, l.duration_seconds AS duration_seconds,
-             0 AS is_follow_up_required, NULL AS follow_up_date, 0 AS is_vip
+             0 AS is_follow_up_required, NULL AS follow_up_date, 0 AS is_vip,
+             ${txt("l.sentiment")} AS uc_sentiment, l.follow_up_date AS uc_follow_up_date
         FROM unfiltered_call_logs l
         JOIN unfiltered_contacts uc ON uc.id = l.unfiltered_contact_id
         LEFT JOIN locations ld ON ld.id = uc.district_id

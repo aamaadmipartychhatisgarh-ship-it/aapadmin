@@ -2,7 +2,7 @@ import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-p
 import React from "react";
 import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
 import { ensureFonts, FONT_FAMILY, cleanPdfText, breakLongTokens } from "@/lib/pdf/generatePdf";
-import { visibleWorkerColumns } from "@/lib/workerPerformanceColumns";
+import { pdfWorkerColumns } from "@/lib/workerPerformanceColumns";
 
 // PDF of Worker / Voter registration records — shared by the admin Registrations
 // list and a karyakarta's own "My Voters / My Workers" list. The CALLER decides
@@ -92,7 +92,7 @@ export async function buildRegistrationPdf(rows, { title = "Registrations", crit
 
 // Worker-wise Performance (the dashboard ranking): the columns come from the SAME configuration as the
 // dashboard table (lib/workerPerformanceColumns), so the PDF holds exactly the displayed columns.
-const workerPerfCols = () => visibleWorkerColumns().map((c) => ({ key: c.key, label: c.label, flex: c.pdfFlex || 1, bold: c.bold, align: c.numeric ? "center" : undefined, get: (r) => dash((c.pdfValue || c.value)(r)) }));
+const workerPerfCols = () => pdfWorkerColumns().map((c) => ({ key: c.key, label: c.label, flex: c.pdfFlex || 1, bold: c.bold, align: c.numeric ? "center" : undefined, get: (r) => dash((c.pdfValue || c.value)(r)) }));
 
 export async function buildWorkerPerformancePdf(rows, { criteria = [] } = {}) {
   const title = "Worker-wise Performance";
