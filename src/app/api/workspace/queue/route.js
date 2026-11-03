@@ -106,6 +106,16 @@ export async function GET(req) {
       [userId, ...qParams]
     );
 
+    // The SAME due list with NO search/geography/designation/call-history filter: what is really assigned to this
+    // caller. The page uses it to say so when saved filters (they persist in the browser) are hiding assignments -
+    // an assignment is never lost, but a stale filter must never make it look lost.
+    const [{ all_total }] = await query(
+      `SELECT COUNT(*) AS all_total FROM contacts c
+        WHERE c.assigned_to_user_id = ? AND c.is_completed = 0
+          AND ${dueSql}${notWrong}${notInterested}${repeatOff}${notPending}`,
+      [userId]
+    );
+
     // A contact is a "daily assignment" if it matches one of this caller's
     // active standing rules — those should be worked first. Build the match
     // expression (degrades to "0" / no rules if the feature isn't set up).
@@ -188,7 +198,13 @@ export async function GET(req) {
         -- then newest assignment first among the same date.
         ORDER BY c.follow_up_date DESC${hasFupTime ? ", c.follow_up_time DESC" : ""},
                  c.assigned_at IS NULL ASC, c.assigned_at DESC
-        LIMIT 50`,
+        LIMIT 500`,
+      [userId]
+    );
+    const [{ scheduled_total }] = await query(
+      `SELECT COUNT(*) AS scheduled_total FROM contacts c
+        WHERE c.assigned_to_user_id = ? AND c.is_completed = 0
+          AND ${laterSql}${notWrong}${notInterested}${repeatOff}${notPending}`,
       [userId]
     );
 
@@ -230,7 +246,9 @@ export async function GET(req) {
     return NextResponse.json({
       assigned,
       assigned_total,
+      assigned_all_total: all_total,
       scheduled,
+      scheduled_total,
       pool_count: poolCount,
       // territory label the workspace header shows — zone takes precedence.
       territory: me?.scope_zone_id

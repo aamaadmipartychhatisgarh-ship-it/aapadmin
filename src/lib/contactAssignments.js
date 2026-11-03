@@ -74,3 +74,13 @@ export async function isTemporaryAssignment(contactId) {
   // Legacy rows (no record): assigned by someone other than the caller themself = explicit assignment.
   return r.rec == null && r.assigned_by_user_id != null && String(r.assigned_by_user_id) !== String(r.assigned_to_user_id);
 }
+
+// Of these just-assigned contacts, how many will NOT show in the caller's My Workspace queue because of the
+// existing lifecycle rules (already completed). Future follow-ups are not hidden: they sit in "Scheduled"
+// until their date. Used to tell the assigner the truth instead of a bare success.
+export async function completedAmong(conn, contactIds) {
+  const ids = [...new Set((contactIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return 0;
+  const [rows] = await conn.query(`SELECT COUNT(*) AS n FROM contacts WHERE is_completed = 1 AND id IN (${ids.map(() => "?").join(",")})`, ids);
+  return Number(rows[0]?.n || 0);
+}

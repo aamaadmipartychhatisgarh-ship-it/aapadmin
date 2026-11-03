@@ -8,7 +8,7 @@ import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
-import { ensureContactAssignmentsSchema, recordAssignments } from "@/lib/contactAssignments";
+import { ensureContactAssignmentsSchema, recordAssignments, completedAmong } from "@/lib/contactAssignments";
 import { logAudit } from "@/lib/audit";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 import { supervisorScopeFilter, supervisorCallerScopeFilter } from "@/lib/supervisorScope";
@@ -114,6 +114,7 @@ export async function POST(req) {
 
     let matchedTotal = 0;
     let assigned = 0;
+    let completedCount = 0;
     let dbUpdatedTotal = 0;
     const perCounts = {};
     const mismatches = [];
@@ -160,7 +161,10 @@ export async function POST(req) {
             stampAssignedBy ? [c.id, session.user.id, ...chunk] : [c.id, ...chunk]
           );
           if (result.affectedRows !== chunk.length) {
+            // The database did not touch every row we meant to move: undo the whole batch and fail - never report
+            // an assignment that did not fully persist.
             mismatches.push({ caller: c.username, intended: chunk.length, dbAffected: result.affectedRows, ids: chunk });
+            throw new Error(`assignment not fully saved (${result.affectedRows}/${chunk.length})`);
           }
           dbUpdatedTotal += result.affectedRows;
           await recordAssignments(conn, chunk, c.id, session.user.id);
@@ -168,6 +172,7 @@ export async function POST(req) {
         assigned += ids.length;
       }
 
+      completedCount = await completedAmong(conn, idRows.map((r) => r.id));
       await conn.commit();
     } catch (e) {
       await conn.rollback();
@@ -192,7 +197,7 @@ export async function POST(req) {
     if (assigned > 0) emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: assigned });
     return NextResponse.json({
       assigned, matched_total: matchedTotal, db_updated: dbUpdatedTotal,
-      per_caller_counts: perCounts, failed: assigned - dbUpdatedTotal,
+      per_caller_counts: perCounts, failed: assigned - dbUpdatedTotal, completed_not_in_workspace: completedCount,
     });
   } catch (err) {
     console.error("supervisor bulk-distribute error:", err);

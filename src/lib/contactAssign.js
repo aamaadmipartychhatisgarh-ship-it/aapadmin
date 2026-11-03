@@ -4,7 +4,7 @@ import { contactsHaveAssignedAt, contactsHaveAssignedBy, zoneMatch } from "@/lib
 import { notWrongNumberClause, notNotInterestedClause, notPendingClause } from "@/lib/contactExtras";
 import { repeatOffExclusion } from "@/lib/repeatOff";
 import { logAudit } from "@/lib/audit";
-import { ensureContactAssignmentsSchema, recordAssignments, endAssignments } from "@/lib/contactAssignments";
+import { ensureContactAssignmentsSchema, recordAssignments, endAssignments, completedAmong } from "@/lib/contactAssignments";
 import { emitLiveEvent, LIVE_EVENTS } from "@/lib/liveEvents";
 
 // SINGLE contact assignment (the Contacts page's per-row "Assigned to" control) - the same rules as the
@@ -61,10 +61,11 @@ export async function assignSingleContact(session, contactId, userId) {
     );
     if (target !== null) await recordAssignments(conn, [cid], target, session.user.id);
     else await endAssignments(conn, [cid], "returned_to_pool");
+    const completedNote = target !== null && (await completedAmong(conn, [cid])) > 0;
     await conn.commit();
     logAudit(session, { action: target !== null ? "contact.assign" : "contact.unassign", entityType: "contact", entityId: String(cid), details: { assigned_to_user_id: target, previous_user_id: previous } }).catch(() => {});
     if (target !== null) emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: 1, contact_id: cid });
-    return { status: 200, message: target !== null ? `Assigned to ${assignee.username}.` : "Returned to the pool.", changed: true, assigned_to_user_id: target, previous_user_id: previous };
+    return { status: 200, message: target !== null ? `Assigned to ${assignee.username}.${completedNote ? " Note: this contact is already completed, so it will not appear in their My Workspace queue." : ""}` : "Returned to the pool.", changed: true, assigned_to_user_id: target, previous_user_id: previous };
   } catch (e) {
     await conn.rollback().catch(() => {});
     throw e;

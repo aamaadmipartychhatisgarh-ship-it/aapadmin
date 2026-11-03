@@ -421,7 +421,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   loadQueueRef.current = loadQueue;
   useEffect(() => {
     const tick = () => loadQueueRef.current({ silent: true });
-    const iv = setInterval(tick, 20000);
+    const iv = setInterval(tick, 10000);
     const onFocus = () => tick();
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(iv); window.removeEventListener("focus", onFocus); };
@@ -1064,6 +1064,13 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
               <option value="busy">Busy Call</option>
             </select>
           </div>
+
+          {!loading && (queue.assigned_all_total ?? 0) > (queue.assigned_total ?? 0) && (qSearch.trim() || qLokSabha.length || qDistrict.length || qAssembly.length || qDesignation.length || qWing.length || qCallHistory) && (
+            <div data-testid="filters-hiding" className="mb-2 flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-900">
+              <span>{queue.assigned_all_total - (queue.assigned_total ?? 0)} of your {queue.assigned_all_total} assigned contacts are hidden by the filters above.</span>
+              <button onClick={() => { setQSearch(""); setQLokSabha([]); setQDistrict([]); setQAssembly([]); setQDesignation([]); setQWing([]); setQCallHistory(""); }} data-testid="clear-all-filters" className="shrink-0 font-semibold text-[#164FA3] border border-[#164FA3]/30 hover:bg-blue-100 rounded px-2 py-1">Clear filters</button>
+            </div>
+          )}
 
           {loading ? (
             <div className="text-gray-400 text-sm">Loading…</div>
