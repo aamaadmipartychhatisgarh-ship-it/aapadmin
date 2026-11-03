@@ -72,10 +72,12 @@ export async function GET(req) {
           if (f.assemblyId) criteria.push(`Assembly: ${nm(f.assemblyId)}`);
         }
         criteria.push(`Top ${limit}`);
-        const buf = await buildWorkerPerformancePdf(rows, { criteria });
+        // ?group=lok_sabha | assembly: the Lok Sabha-wise / Assembly-wise PDF - the same filtered rows, preceded by a count summary.
+        const group = ["lok_sabha", "assembly"].includes(searchParams.get("group")) ? searchParams.get("group") : null;
+        const buf = await buildWorkerPerformancePdf(rows, { criteria, group });
         return new NextResponse(new Uint8Array(buf), {
           status: 200,
-          headers: { ...NO_STORE, "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${registrationPdfFilename("AAP_Worker_Performance")}"` },
+          headers: { ...NO_STORE, "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${registrationPdfFilename(group === "lok_sabha" ? "AAP_LokSabha_wise_Performance" : group === "assembly" ? "AAP_Assembly_wise_Performance" : "AAP_Worker_Performance")}"` },
         });
       }
       // Columns = the dashboard table's (one shared configuration), for Excel and CSV alike.

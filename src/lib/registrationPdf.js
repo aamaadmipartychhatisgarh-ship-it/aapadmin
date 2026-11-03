@@ -43,6 +43,12 @@ const styles = StyleSheet.create({
   rowAlt: { backgroundColor: "#F6F8FC" },
   cell: { paddingHorizontal: 3 },
   bold: { fontWeight: 700, color: "#111" },
+  statRow: { flexDirection: "row", marginBottom: 8 },
+  stat: { flex: 1, marginRight: 6, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: "#EEF3FB", borderRadius: 4 },
+  statLabel: { fontSize: 7.5, color: "#555" },
+  statValue: { fontSize: 16, fontWeight: 700, color: "#164FA3", marginTop: 2 },
+  note: { fontSize: 7.5, color: "#666", marginTop: 6 },
+  totalRow: { flexDirection: "row", backgroundColor: "#EEF3FB", borderTopWidth: 1.5, borderColor: "#164FA3", paddingVertical: 4.5 },
   empty: { marginTop: 14, color: "#888", fontSize: 10 },
   footer: { position: "absolute", bottom: 14, left: 18, right: 18, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: "#888" },
 });
@@ -50,14 +56,38 @@ const styles = StyleSheet.create({
 // Printable width of an A4 page (pt) minus the 18pt side padding, per orientation.
 const CONTENT_WIDTH = { landscape: 842 - 36, portrait: 595 - 36 };
 
-function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols = COLS, orientation = "landscape", fontSize = 7.5 }) {
+function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols = COLS, orientation = "landscape", fontSize = 7.5, summary = null }) {
   const u = ensureFonts() ? { fontFamily: FONT_FAMILY } : {};
   const totalFlex = cols.reduce((a, c) => a + c.flex, 0);
   // Long unbroken words are broken to fit their own column (no overflow into the next one).
   const fit = (c, v) => (typeof v === "string" ? breakLongTokens(v, (CONTENT_WIDTH[orientation] * c.flex / totalFlex - 8) / (fontSize * 0.62)) : v);
   const al = (c) => (c.align ? { textAlign: c.align } : null);
   const T = (style, children, extra = {}) => React.createElement(Text, { style: [u, ...[].concat(style)], ...extra }, children);
+  const footer = () => React.createElement(View, { style: styles.footer, fixed: true },
+    T([], "Aam Aadmi Party, Chhattisgarh — Worker & Voter Registration"),
+    T([], null, { render: ({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}` }));
+  // Optional first section: overall totals in their own box, then the per-group (Lok Sabha / Assembly) counts. It is a page of its own,
+  // so the worker table that follows keeps exactly its layout and pagination.
+  const summaryPages = summary ? [React.createElement(Page, { key: "summary", size: "A4", orientation, style: [styles.page, { fontSize }, u], wrap: true },
+    React.createElement(PdfHeader, { photo: headerPhoto, subtitle: summary.title }),
+    T(styles.title, summary.title),
+    T(styles.subtitle, subtitle),
+    criteria?.length ? React.createElement(View, { style: styles.criteria }, criteria.map((c, i) => T(styles.chip, cleanPdfText(c), { key: i }))) : null,
+    // Overall totals - a separate summary section.
+    React.createElement(View, { style: styles.statRow, wrap: false },
+      [["Overall Total Workers", summary.totals.new_workers], ["Overall Total Voters", summary.totals.voters], ["Total Registrations", summary.totals.total], [summary.groupLabel === "Assembly" ? "Assemblies" : `${summary.groupLabel}s`, summary.groups.length]].map(([l, v], i) =>
+        React.createElement(View, { key: i, style: styles.stat }, T(styles.statLabel, l), T(styles.statValue, Number(v).toLocaleString("en-IN"))))),
+    React.createElement(View, { style: styles.headerRow, fixed: true }, summary.cols.map((c) => T([styles.hcell, { flex: c.flex }, al(c)].filter(Boolean), c.label, { key: c.key }))),
+    summary.groups.length === 0
+      ? T(styles.empty, "No records to export for the current selection.")
+      : summary.groups.map((g, i) => React.createElement(View, { key: g.key, wrap: false, style: i % 2 ? [styles.row, styles.rowAlt] : styles.row },
+          summary.cols.map((c) => T([styles.cell, { flex: c.flex }, al(c), c.bold ? styles.bold : null].filter(Boolean), fit(c, c.get(g, i)), { key: c.key })))),
+    // Grand-total row: the sum of the groups above (it equals the sum of the worker table that follows).
+    summary.groups.length ? React.createElement(View, { style: styles.totalRow, wrap: false }, summary.cols.map((c) => T([styles.cell, { flex: c.flex }, al(c), styles.bold].filter(Boolean), c.total(summary.totals, summary.groups), { key: c.key }))) : null,
+    T(styles.note, `Workers and Voters are the registrations added by the karyakartas mapped to each ${summary.groupLabel}, i.e. the same figures as the Workers and Voters columns of the worker table that follows. Karyakartas = number of workers listed.`),
+    footer())] : [];
   return React.createElement(Document, { title },
+    ...summaryPages,
     React.createElement(Page, { size: "A4", orientation, style: [styles.page, { fontSize }, u], wrap: true },
       React.createElement(PdfHeader, { photo: headerPhoto, subtitle: title }),
       T(styles.title, title),
@@ -69,9 +99,7 @@ function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols
         ? T(styles.empty, "No records to export for the current selection.")
         : rows.map((r, i) => React.createElement(View, { key: r.id ?? i, wrap: false, style: i % 2 ? [styles.row, styles.rowAlt] : styles.row },
             cols.map((c) => T([styles.cell, { flex: c.flex }, al(c), c.bold ? styles.bold : null].filter(Boolean), fit(c, c.get(r, i)), { key: c.key })))),
-      React.createElement(View, { style: styles.footer, fixed: true },
-        T([], "Aam Aadmi Party, Chhattisgarh — Worker & Voter Registration"),
-        T([], null, { render: ({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}` }))
+      footer()
     )
   );
 }
@@ -94,11 +122,46 @@ export async function buildRegistrationPdf(rows, { title = "Registrations", crit
 // dashboard table (lib/workerPerformanceColumns), so the PDF holds exactly the displayed columns.
 const workerPerfCols = () => pdfWorkerColumns().map((c) => ({ key: c.key, label: c.label, flex: c.pdfFlex || 1, bold: c.bold, align: c.numeric ? "center" : undefined, get: (r) => dash((c.pdfValue || c.value)(r)) }));
 
-export async function buildWorkerPerformancePdf(rows, { criteria = [] } = {}) {
+// Lok Sabha-wise / Assembly-wise counts of the exported rows. One worker row per unique worker id (a worker can never be counted twice);
+// grouped by the unique Lok Sabha / Assembly id (workers with no mapping fall under "Not mapped"). Overall totals are summed from the
+// SAME rows, so groups and totals always reconcile with the worker table.
+export function groupWorkerRows(rows, group) {
+  const list = uniqueById(rows);
+  const idKey = group === "lok_sabha" ? "lok_sabha_id" : "assembly_id", nameKey = group === "lok_sabha" ? "lok_sabha_name" : "assembly_name";
+  const map = new Map();
+  for (const r of list) {
+    const id = r[idKey] || null, k = id ?? "none";
+    const g = map.get(k) || { key: String(k), label: id ? (r[nameKey] || `#${id}`) : "Not mapped", karyakartas: 0, new_workers: 0, voters: 0, total: 0 };
+    g.karyakartas += 1; g.new_workers += Number(r.new_workers) || 0; g.voters += Number(r.voters) || 0; g.total += Number(r.total) || 0;
+    map.set(k, g);
+  }
+  const groups = [...map.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+  const totals = list.reduce((t, r) => ({ karyakartas: t.karyakartas + 1, new_workers: t.new_workers + (Number(r.new_workers) || 0), voters: t.voters + (Number(r.voters) || 0), total: t.total + (Number(r.total) || 0) }), { karyakartas: 0, new_workers: 0, voters: 0, total: 0 });
+  return { groups, totals };
+}
+
+export async function buildWorkerPerformancePdf(rows, { criteria = [], group = null } = {}) {
   const title = "Worker-wise Performance";
+  let summary = null;
+  if (group === "lok_sabha" || group === "assembly") {
+    const groupLabel = group === "lok_sabha" ? "Lok Sabha" : "Assembly";
+    const { groups, totals } = groupWorkerRows(rows, group);
+    const num = (v) => Number(v).toLocaleString("en-IN");
+    summary = {
+      title: `${groupLabel}-wise Summary`, groupLabel, groups, totals,
+      cols: [
+        { key: "n", label: "#", flex: 0.5, align: "center", get: (g, i) => String(i + 1), total: () => "" },
+        { key: "label", label: groupLabel, flex: 3, bold: true, get: (g) => dash(g.label), total: () => "Overall Total" },
+        { key: "karyakartas", label: "Karyakartas", flex: 1.1, align: "center", get: (g) => num(g.karyakartas), total: (t) => num(t.karyakartas) },
+        { key: "workers", label: "Workers", flex: 1, align: "center", get: (g) => num(g.new_workers), total: (t) => num(t.new_workers) },
+        { key: "voters", label: "Voters", flex: 1, align: "center", get: (g) => num(g.voters), total: (t) => num(t.voters) },
+        { key: "total", label: "Total", flex: 1, align: "center", bold: true, get: (g) => num(g.total), total: (t) => num(t.total) },
+      ],
+    };
+  }
   const subtitle = `${rows.length} worker${rows.length === 1 ? "" : "s"} · ranked by total registrations · exported ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}`;
   const headerPhoto = await loadPdfHeaderPhoto();
-  return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows, title, subtitle, criteria, headerPhoto, cols: workerPerfCols(), orientation: "portrait", fontSize: 8 }));
+  return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows, title, subtitle, criteria, headerPhoto, cols: workerPerfCols(), orientation: "portrait", fontSize: 8, summary }));
 }
 
 export function registrationPdfFilename(prefix = "AAP_Registrations") {

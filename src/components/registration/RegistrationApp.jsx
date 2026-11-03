@@ -445,6 +445,10 @@ function DashboardTab({ filterQs, onWard, onError }) {
           exportHref={`/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "xlsx" })}`}
           exportLabel="Export Excel"
           pdfHref={`/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "pdf" })}`}
+          extraPdfs={[
+            { label: "Lok Sabha-wise PDF", testId: "export-pdf-ls", href: `/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "pdf", group: "lok_sabha" })}` },
+            { label: "Assembly-wise PDF", testId: "export-pdf-asm", href: `/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "pdf", group: "assembly" })}` },
+          ]}
           filters={(
             <div className="flex flex-wrap items-center gap-2" data-testid="wp-filters">
               <select value={lsF} onChange={(e) => onLs(e.target.value)} aria-label="Lok Sabha" data-testid="wp-filter-ls" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white max-w-[11rem]">
@@ -541,16 +545,16 @@ function AssemblyRegistrationGraph({ assemblies }) {
   );
 }
 
-function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel = "CSV", pdfHref, testId, fit, filters, meta }) {
+function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel = "CSV", pdfHref, extraPdfs, testId, fit, filters, meta }) {
   return (
     <div className={cardCls} data-testid={testId}>
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-gray-100">
         <div>
           <h3 className="text-sm font-bold text-gray-900">{title}</h3>
           <p className="text-xs text-gray-500">{subtitle}</p>
         </div>
         {exportHref || pdfHref ? (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {exportHref ? (
               <a href={exportHref} data-testid="export-csv" className="text-xs font-semibold inline-flex items-center gap-1.5 text-gray-600 hover:text-gray-900">
                 <Download size={14} />{exportLabel}
@@ -561,6 +565,11 @@ function RankTable({ title, subtitle, head, rows, empty, exportHref, exportLabel
                 <FileText size={14} />Export PDF
               </a>
             ) : null}
+            {(extraPdfs || []).map((x) => (
+              <a key={x.testId} href={x.href} data-testid={x.testId} className="text-xs font-semibold inline-flex items-center gap-1.5 text-gray-600 hover:text-gray-900">
+                <FileText size={14} />{x.label}
+              </a>
+            ))}
           </div>
         ) : null}
       </div>
