@@ -5,7 +5,7 @@ import { isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { contactsByAssembly, workerAssemblyReconciliation } from "@/lib/workerCounts";
-import { ensureInfluencerSchema } from "@/lib/influencerSchema";
+import { influencerAssemblyCounts } from "@/lib/influencerCounts";
 
 // GET /api/dashboard/assembly-breakdown
 // Assembly-wise counts for the Dashboard's bottom section:
@@ -43,22 +43,16 @@ export async function GET() {
       workers = asmRows.map((a) => ({ id: a.id, assembly: a.name, workers: 0 }));
     }
 
-    // Influencers by Assembly — live count from the influencers table, every
-    // assembly included (0 where none). Recomputed each call, so add/edit/remove is
-    // reflected automatically.
-    let influencers = [];
+    // Influencers by Assembly + the overall total, from ONE shared dataset (lib/influencerCounts): every influencer record once, under its
+    // own valid assembly_id; records with no / an invalid assembly are reported separately (influencers_overall), never under an assembly.
+    let influencers = [], influencers_overall = null;
     try {
-      await ensureInfluencerSchema();
-      const rows = await query(
-        `SELECT a.id, a.name AS assembly, COUNT(i.id) AS influencers
-           FROM locations a
-           LEFT JOIN influencers i ON i.assembly_id = a.id
-          WHERE a.type = 'assembly'
-          GROUP BY a.id, a.name`
-      );
-      influencers = rows
-        .map((r) => ({ id: r.id, assembly: r.assembly, influencers: Number(r.influencers) || 0 }))
+      const ic = await influencerAssemblyCounts();
+      influencers = asmRows
+        .map((a) => ({ id: a.id, assembly: a.name, influencers: ic.byAssembly.get(a.id) || 0 }))
         .sort((x, y) => y.influencers - x.influencers || String(x.assembly).localeCompare(String(y.assembly)));
+      influencers_overall = { total: ic.total, mapped: ic.mapped, unmapped: ic.unmapped, no_assembly: ic.no_assembly, invalid_assembly: ic.invalid_assembly,
+        sum_of_assemblies: influencers.reduce((acc, r) => acc + r.influencers, 0) };
     } catch (e) {
       console.error("[assembly-breakdown] influencers failed:", e?.code || e?.message || e);
       influencers = asmRows.map((a) => ({ id: a.id, assembly: a.name, influencers: 0 }));
@@ -71,7 +65,7 @@ export async function GET() {
       workers_overall = { ...rec, sum_of_assemblies: workers.reduce((a, w) => a + w.workers, 0) };
     } catch (e) { console.error("[assembly-breakdown] reconciliation failed:", e?.code || e?.message || e); }
 
-    return NextResponse.json({ workers, influencers, workers_overall }, { headers: NO_STORE });
+    return NextResponse.json({ workers, influencers, workers_overall, influencers_overall }, { headers: NO_STORE });
   } catch (err) {
     console.error("[assembly-breakdown] GET error:", err?.message || err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

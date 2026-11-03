@@ -23,9 +23,9 @@ function ChartTooltip({ active, payload, unitLabel, color }) {
   );
 }
 
-function AssemblyBarChart({ title, icon: Icon, rows, dataKey, unitLabel, color, note }) {
+function AssemblyBarChart({ title, icon: Icon, rows, dataKey, unitLabel, color, note, totalOverride }) {
   const data = useMemo(() => rows.map((r) => ({ assembly: r.assembly, value: Number(r[dataKey]) || 0 })), [rows, dataKey]);
-  const total = useMemo(() => data.reduce((s, r) => s + r.value, 0), [data]);
+  const total = useMemo(() => (totalOverride != null ? totalOverride : data.reduce((s, r) => s + r.value, 0)), [data, totalOverride]);
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
       <div className="flex items-center gap-2 mb-1">
@@ -101,7 +101,16 @@ export default function AssemblyBreakdown() {
                 {data.workers_overall.unmapped > 0 ? ` (${data.workers_overall.no_assembly.toLocaleString("en-IN")} with no assembly, ${data.workers_overall.invalid_assembly.toLocaleString("en-IN")} with an invalid one)` : ""}.
               </p>
             ) : null} />
-          <AssemblyBarChart title="Influencer by Assembly" icon={Star} rows={data?.influencers || []} dataKey="influencers" unitLabel="Influencers" color="#22a45d" />
+          <AssemblyBarChart title="Influencer by Assembly" icon={Star} rows={data?.influencers || []} dataKey="influencers" unitLabel="Influencers" color="#22a45d"
+            totalOverride={data?.influencers_overall?.total}
+            note={data?.influencers_overall ? (
+              <p className="text-xs text-gray-600 mb-2" data-testid="assembly-influencer-reconciliation">
+                Total influencers <strong className="text-gray-900">{data.influencers_overall.total.toLocaleString("en-IN")}</strong> = in an assembly{" "}
+                <strong className="text-gray-900">{data.influencers_overall.sum_of_assemblies.toLocaleString("en-IN")}</strong> + not mapped to an assembly{" "}
+                <strong className="text-gray-900">{data.influencers_overall.unmapped.toLocaleString("en-IN")}</strong>
+                {data.influencers_overall.unmapped > 0 ? ` (${data.influencers_overall.no_assembly.toLocaleString("en-IN")} with no assembly, ${data.influencers_overall.invalid_assembly.toLocaleString("en-IN")} with an invalid one)` : ""}.
+              </p>
+            ) : null} />
         </div>
       )}
     </div>
