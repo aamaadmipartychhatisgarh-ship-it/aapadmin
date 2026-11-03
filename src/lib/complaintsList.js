@@ -7,6 +7,34 @@ import { phoneKey } from "@/lib/phone";
 // geographic scope and the same Assembly rule for the on-screen list, its counts and
 // the PDF export — so what is exported is exactly what the viewer is allowed to see
 // under the filters they chose. `searchParams` is a URLSearchParams.
+// Name, Phone Number and Address search (partial, case-insensitive). Used by the list, the counts and the export.
+//  - A query made only of digits and phone punctuation ("98765 43210", "+91-98765-43210", "098765", "43210") is a
+//    PHONE search: matched on the digits alone against the stored number's digits, with a country code (+91 / 91 / 0)
+//    on the search dropped, so every way of writing a number finds it.
+//  - Anything else is a TEXT search: each word must appear in the name, the address, the Assembly name or the phone
+//    text (words in any order, any field), so "rahul raipur" finds Rahul at a Raipur address.
+// Joins are one-to-one with the complaint row, so a complaint can never appear twice.
+const PHONE_DIGITS = "REGEXP_REPLACE(IFNULL(c.citizen_phone,''), '[^0-9]', '')";
+export function complaintSearchClause(raw) {
+  const q = String(raw || "").trim().slice(0, 200);
+  if (!q) return { sql: "", params: [] };
+  const esc = (t) => t.replace(/[\\%_]/g, "\\$&");
+  if (/^[\d\s()+.\-]+$/.test(q)) {
+    let d = q.replace(/\D/g, "");
+    if (d.length > 10) d = d.slice(-10);                 // +91 98765 43210 / 0 98765 43210 -> the 10-digit number
+    if (!d) return { sql: "", params: [] };
+    return { sql: `${PHONE_DIGITS} LIKE ?`, params: [`%${d}%`] };
+  }
+  const words = q.split(/\s+/).filter(Boolean).slice(0, 8);
+  const parts = [], params = [];
+  for (const w of words) {
+    const like = `%${esc(w)}%`;
+    parts.push("(c.citizen_name LIKE ? OR c.citizen_address LIKE ? OR la.name LIKE ? OR c.citizen_phone LIKE ?)");
+    params.push(like, like, like, like);
+  }
+  return { sql: `(${parts.join(" AND ")})`, params };
+}
+
 export async function loadComplaintRows(session, searchParams) {
   const scope = scopeFilterSync(session.user, "c", { cols: ["district_id", "assembly_id"] });
   const statusF = searchParams.get("status");
@@ -17,7 +45,8 @@ export async function loadComplaintRows(session, searchParams) {
   if (statusF) { where.push("c.status = ?"); params.push(statusF); }
   if (typeF) { where.push("c.type = ?"); params.push(typeF); }
   if (districtId) { where.push("c.district_id = ?"); params.push(districtId); }
-  if (search) { where.push("(c.citizen_name LIKE ? OR c.citizen_phone LIKE ? OR la.name LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+  const sc = complaintSearchClause(search);
+  if (sc.sql) { where.push(sc.sql); params.push(...sc.params); }
   // complaints table has district_id + assembly_id (no zone_id)
   if (scope.where) { where.push(scope.where.replace(/^AND /, "")); params.push(...scope.params); }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -46,5 +75,6 @@ export async function loadComplaintRows(session, searchParams) {
     if (d) { c.assembly_name = d.name; c.assembly_source = "worker"; }
     else c.assembly_source = null;
   }
-  return { rows, scope };
+  const seen = new Set();
+  return { rows: rows.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true))), scope };
 }

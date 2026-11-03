@@ -37,6 +37,12 @@ export async function ensureComplaintColumns() {
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complaints' AND COLUMN_NAME = 'assembly_id'`
     );
     if (Number(asm[0]?.n || 0) === 0) await query("ALTER TABLE complaints ADD COLUMN assembly_id INT NULL");
+    // Free-text address of the complainant, searchable from the Complaint List.
+    const addr = await query(
+      `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complaints' AND COLUMN_NAME = 'citizen_address'`
+    );
+    if (Number(addr[0]?.n || 0) === 0) await query("ALTER TABLE complaints ADD COLUMN citizen_address TEXT NULL");
     ensuredDesignation = true;
   } catch (e) {
     console.error("[complaints] ensureComplaintColumns:", e?.message || e);
@@ -104,9 +110,9 @@ export async function POST(req) {
     let designationId = d.designation_id || null;
     if (d.designation_from_contact) designationId = d.contact_id ? await contactDesignationId(loc.contact_id) : null;
     const res = await query(
-      `INSERT INTO complaints (citizen_name, citizen_phone, type, description, designation_id, district_id, assembly_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
-      [d.citizen_name, d.citizen_phone || null, d.type || "other", d.description || null, designationId, d.district_id || loc.district_id || null, loc.assembly_id]
+      `INSERT INTO complaints (citizen_name, citizen_phone, citizen_address, type, description, designation_id, district_id, assembly_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
+      [d.citizen_name, d.citizen_phone || null, String(d.citizen_address || "").trim().slice(0, 1000) || null, d.type || "other", d.description || null, designationId, d.district_id || loc.district_id || null, loc.assembly_id]
     );
     return NextResponse.json({ id: res.insertId, assembly_id: loc.assembly_id }, { status: 201 });
   } catch (err) {

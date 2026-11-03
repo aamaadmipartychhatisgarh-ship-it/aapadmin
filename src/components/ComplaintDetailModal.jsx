@@ -81,6 +81,7 @@ export default function ComplaintDetailModal({ id, onClose }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
               <Field label="Complainant">{c.citizen_name}</Field>
               <Field label="Phone">{c.citizen_phone}</Field>
+              <Field label="Address">{c.citizen_address}</Field>
               <Field label="Designation">{c.designation_name}</Field>
               <Field label="Category / Type">{c.type ? String(c.type).replace(/^./, (m) => m.toUpperCase()) : ""}</Field>
               <Field label="Assembly">{c.assembly_name}</Field>

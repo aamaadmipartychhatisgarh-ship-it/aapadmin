@@ -120,7 +120,7 @@ function Body({ previewingCaller, viewAsCaller }) {
       <CollapsibleSection title="Search & Filters">
       <div className="flex items-center gap-3 flex-wrap">
         <Search size={18} className="text-gray-400 ml-2" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search citizen name or phone" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, phone number or address" className="flex-1 min-w-[180px] outline-none text-sm py-2" />
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="h-9 px-3 rounded-lg border border-gray-200 text-sm bg-white">
           <option value="">All types</option>
           {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
@@ -164,6 +164,7 @@ function Body({ previewingCaller, viewAsCaller }) {
                       <td className="px-4 py-3">
                         <button type="button" onClick={() => setDetailId(cm.id)} title="View full complaint" className="font-medium text-[#164FA3] hover:underline text-left">{cm.citizen_name}</button>
                         <div className="text-xs text-gray-400">{cm.citizen_phone || ""}</div>
+                        {cm.citizen_address && <div className="text-xs text-gray-400 max-w-[16rem] truncate" title={cm.citizen_address}>{cm.citizen_address}</div>}
                       </td>
                       <td className="px-4 py-3 text-gray-600">{cm.designation_name || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600">{cm.district_name || "—"}</td>
@@ -194,7 +195,7 @@ function SumCard({ label, value, accent, danger }) {
 }
 
 function AddModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ citizen_name: "", citizen_phone: "", type: "water", designation_id: "", description: "", district_id: "" });
+  const [form, setForm] = useState({ citizen_name: "", citizen_phone: "", citizen_address: "", type: "water", designation_id: "", description: "", district_id: "" });
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -220,6 +221,7 @@ function AddModal({ onClose, onSaved }) {
         {error && <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-2 text-sm">{error}</div>}
         <input className={inp} placeholder="Citizen name *" value={form.citizen_name} onChange={(e) => setForm({ ...form, citizen_name: e.target.value })} />
         <input className={inp} placeholder="Phone" value={form.citizen_phone} onChange={(e) => setForm({ ...form, citizen_phone: e.target.value })} />
+        <input className={inp} placeholder="Address" value={form.citizen_address} onChange={(e) => setForm({ ...form, citizen_address: e.target.value })} data-testid="complaint-address" />
         {/* Assembly is fetched from the Worker record behind this mobile number. */}
         <ComplaintWorkerAssembly phone={form.citizen_phone} onResolved={({ contactId }) => setWorkerId(contactId)} />
         {/* Designation — a separate field, stored independently from the name

@@ -51,16 +51,27 @@ export async function GET(_req, { params }) {
   }
 }
 
+// Seeing a complaint (list/search) never grants the right to act on it: every change re-checks, on the server and by the
+// complaint's own id, that it lies inside this user's geographic scope - the same scope the list and GET apply.
+async function inScope(session, id) {
+  const cid = Number(id);
+  if (!Number.isInteger(cid) || cid <= 0) return false;
+  const scope = scopeFilterSync(session.user, "c", { cols: ["district_id", "assembly_id"] });
+  const [r] = await query(`SELECT c.id FROM complaints c WHERE c.id = ? ${scope.where || ""} LIMIT 1`, [cid, ...scope.params]);
+  return !!r;
+}
+
 export async function PUT(req, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     await ensureComplaintColumns();
     const { id } = await params;
+    if (!(await inScope(session, id))) return NextResponse.json({ message: "Complaint not found." }, { status: 404 });
     const d = await req.json();
     // Editable fields — includes the citizen/person details the edit modal sends
     // (previously omitted, so editing name/phone/district silently didn't save).
-    const fields = ["citizen_name", "citizen_phone", "district_id", "status", "assigned_team_id", "resolution_notes", "type", "description", "designation_id"];
+    const fields = ["citizen_name", "citizen_phone", "citizen_address", "district_id", "status", "assigned_team_id", "resolution_notes", "type", "description", "designation_id"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
     // The Assembly follows the Worker behind the complaint's mobile number. It is
@@ -96,6 +107,7 @@ export async function DELETE(_req, { params }) {
     const session = await getServerSession(authOptions);
     if (!session || !isOversight(session)) return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     const { id } = await params;
+    if (!(await inScope(session, id))) return NextResponse.json({ message: "Complaint not found." }, { status: 404 });
     const [existing] = await query("SELECT id FROM complaints WHERE id = ?", [id]);
     if (!existing) return NextResponse.json({ message: "Complaint not found." }, { status: 404 });
     await query("DELETE FROM complaints WHERE id = ?", [id]);
