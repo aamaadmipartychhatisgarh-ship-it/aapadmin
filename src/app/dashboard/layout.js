@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
-import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText, Info } from "lucide-react";
+import { LayoutDashboard, Bell, Search, LogOut, PhoneCall, Database, Settings, Phone, Calendar, User, Download, PhoneOutgoing, MapPin, MessageSquare, AlertCircle, TrendingUp, FileText, Headphones, UserCog, UserCheck, ClipboardList, Gauge, Trophy, GraduationCap, Share2, Newspaper, Menu, X, CalendarClock, Shield, ShieldCheck, Flag, Users, Check, BarChart3, Lock, Loader2, Star, Vote, ScrollText, Info, IndianRupee } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -123,6 +123,7 @@ const PAGE_ICONS = {
   LayoutDashboard, Headphones, Database, UserCheck, AlertCircle, TrendingUp, MapPin,
   MessageSquare, ClipboardList, Gauge, Newspaper, Share2, FileText, BarChart3,
   Trophy, CalendarClock, Flag, UserCog, GraduationCap, Star, Users, Vote, ShieldCheck,
+  IndianRupee,
 };
 
 // Sidebar "Social Media" section: Social Command + Media as its children (only
@@ -571,6 +572,14 @@ export default function DashboardLayout({ children }) {
   // items: whichever of the two this user's nav has (by role or Page Access)
   // are moved into one "Social Media" section, placed where the first of them
   // was. Routes, pages and permissions are unchanged (navigation only).
+  // Amount & Expenses: in the sidebar iff the Admin's MA switch is ON and this user may open it. The effective
+  // page set (/api/my-pages) already drops the key while MA is off, so one rule covers every role.
+  navItems = navItems.filter((i) => i.href !== "/dashboard/admin/amount-expenses");
+  if (!previewing && Array.isArray(allowedPageKeys) && allowedPageKeys.includes("amount_expenses")) {
+    const at = navItems.findIndex((i) => i.href === "/dashboard/admin/contacts");
+    const item = { name: "Amount & Expenses", href: "/dashboard/admin/amount-expenses", icon: IndianRupee };
+    navItems = at >= 0 ? [...navItems.slice(0, at + 1), item, ...navItems.slice(at + 1)] : [...navItems, item];
+  }
   navItems = groupSocialMedia(navItems);
   // Audit Logs lives under Administration (never a standalone main item).
   navItems = nestAuditUnderAdministration(navItems);
@@ -619,7 +628,7 @@ export default function DashboardLayout({ children }) {
   // paths (profile, admin hub) resolve to a null key and are always allowed.
   const currentPageKey = pageKeyForPath(pathname);
   const accessBlocked =
-    !previewing && pageRestricted && Array.isArray(allowedPageKeys) &&
+    !previewing && (pageRestricted || currentPageKey === "amount_expenses") && Array.isArray(allowedPageKeys) &&
     !!currentPageKey && !allowedPageKeys.includes(currentPageKey);
   const firstAllowedPage = (allowedPageKeys || [])
     .map((k) => PAGES.find((p) => p.key === k)).find(Boolean);
