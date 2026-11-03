@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, Download, X } from "lucide-react";
 
 const TYPE_LABEL = { department: "Department Project", mla_fund: "MLA Fund Project" };
 const newKey = () => (globalThis.crypto?.randomUUID?.() || `k${Date.now()}${Math.random().toString(36).slice(2)}`).slice(0, 64);
@@ -15,12 +15,15 @@ export default function ProjectsPage() {
   const [state, setState] = useState("loading");
   const [create, setCreate] = useState({ project_type: "department", name: "" });
   const [err, setErr] = useState("");
+  const [search, setSearch] = useState("");
+  const [exporting, setExporting] = useState(false);
 
+  const qs = new URLSearchParams({ ...(typeFilter ? { type: typeFilter } : {}), ...(search.trim() ? { q: search.trim() } : {}) }).toString();
   const loadList = useCallback(async () => {
-    const r = await fetch(`/api/projects${typeFilter ? `?type=${typeFilter}` : ""}`, { cache: "no-store" });
+    const r = await fetch(`/api/projects?${qs}`, { cache: "no-store" });
     if (r.status === 401 || r.status === 403) { setState("denied"); return; }
     if (r.ok) { setList((await r.json()).projects); setState("ok"); }
-  }, [typeFilter]);
+  }, [qs]);
   useEffect(() => { fetch("/api/projects/masters", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then(setMasters); }, []);
   useEffect(() => { loadList(); }, [loadList]);
 
@@ -52,6 +55,11 @@ export default function ProjectsPage() {
               <button key={k} onClick={() => setTypeFilter(k)} className={`px-3 py-1 rounded-lg text-xs font-semibold border ${typeFilter === k ? "bg-[#164FA3] text-white border-[#164FA3]" : "bg-white text-gray-600 border-gray-200"}`}>{l}</button>
             ))}
           </div>
+          <div className="flex gap-2">
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search projects…" className={inp + " !mt-0"} data-testid="project-search" />
+            <button onClick={() => setExporting(true)} className="inline-flex items-center gap-1 h-9 px-3 rounded-lg border border-gray-200 bg-white text-sm font-semibold whitespace-nowrap" data-testid="export-open"><Download size={14} />Excel</button>
+          </div>
+          {exporting && <ExportDialog qs={qs} onClose={() => setExporting(false)} />}
           <ul className="space-y-1.5" data-testid="project-list">
             {list.length === 0 && <li className="text-sm text-gray-400">No projects yet.</li>}
             {list.map((p) => (
@@ -140,6 +148,45 @@ function ProjectDetail({ id, masters, onChanged }) {
             </li>
           ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// Column selection before the Excel export: one checkbox per exportable column, Select All / Deselect All, and no
+// empty export. The export uses the list's current type + search filters and returns every matching project.
+function ExportDialog({ qs, onClose }) {
+  const [cols, setCols] = useState(null);
+  const [sel, setSel] = useState(new Set());
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { fetch("/api/projects/export", { cache: "no-store" }).then((r) => r.json()).then((d) => { setCols(d.columns); setSel(new Set(d.columns.map((c) => c.key))); }); }, []);
+  const toggle = (k) => { setMsg(""); setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; }); };
+  async function go() {
+    if (sel.size === 0) { setMsg("Select at least one column to export."); return; }
+    setBusy(true); setMsg("");
+    try {
+      const keys = cols.filter((c) => sel.has(c.key)).map((c) => c.key).join(",");
+      const r = await fetch(`/api/projects/export?${qs}${qs ? "&" : ""}columns=${encodeURIComponent(keys)}`);
+      if (!r.ok) { setMsg((await r.json().catch(() => ({}))).message || "Export failed."); return; }
+      const url = URL.createObjectURL(await r.blob()); const a = document.createElement("a"); a.href = url; a.download = "projects.xlsx"; a.click(); URL.revokeObjectURL(url); onClose();
+    } finally { setBusy(false); }
+  }
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" data-testid="export-dialog">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-4 space-y-3">
+        <div className="flex items-center justify-between"><div className="font-bold">Export to Excel — choose columns</div><button onClick={onClose}><X size={16} /></button></div>
+        {!cols ? <Loader2 className="animate-spin text-[#164FA3]" /> : <>
+          <div className="flex gap-2 text-xs">
+            <button type="button" onClick={() => { setMsg(""); setSel(new Set(cols.map((c) => c.key))); }} className="px-2 py-1 border rounded" data-testid="select-all">Select All</button>
+            <button type="button" onClick={() => setSel(new Set())} className="px-2 py-1 border rounded" data-testid="deselect-all">Deselect All</button>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 text-sm">
+            {cols.map((c) => <label key={c.key} className="flex items-center gap-2"><input type="checkbox" checked={sel.has(c.key)} onChange={() => toggle(c.key)} data-testid={`col-${c.key}`} />{c.label}</label>)}
+          </div>
+          {msg && <div className="text-xs text-red-600" data-testid="export-msg">{msg}</div>}
+          <button onClick={go} disabled={busy} className="h-9 px-3 rounded-lg bg-[#164FA3] text-white text-sm font-semibold disabled:opacity-60" data-testid="export-go">Export</button>
+        </>}
       </div>
     </div>
   );

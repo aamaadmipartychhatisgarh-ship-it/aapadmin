@@ -74,3 +74,30 @@ export const PROJECT_SELECT = `
     LEFT JOIN pj_statuses st ON st.id = p.status_id
     LEFT JOIN pj_stages sg ON sg.id = p.stage_id
     LEFT JOIN pj_followups lf ON lf.id = (SELECT f2.id FROM pj_followups f2 WHERE f2.project_id = p.id ORDER BY f2.created_at DESC, f2.id DESC LIMIT 1)`;
+
+// Exportable Project List columns, in the Project List's own order. Every one is a real field of the list
+// rows (PROJECT_SELECT); nothing here is invented, and nothing restricted (created_by, internal ids of
+// masters) is offered.
+export const PROJECT_EXPORT_COLUMNS = [
+  { key: "id", label: "Project ID", get: (r) => r.id },
+  { key: "name", label: "Project Name", get: (r) => r.name },
+  { key: "project_type", label: "Project Type", get: (r) => TYPE_LABEL[r.project_type] || r.project_type },
+  { key: "description", label: "Description", get: (r) => r.description },
+  { key: "status_name", label: "Status", get: (r) => r.status_name },
+  { key: "stage_name", label: "Current Stage", get: (r) => r.stage_name },
+  { key: "latest_remark", label: "Latest Remark", get: (r) => r.latest_remark },
+  { key: "latest_remark_at", label: "Latest Remark Date", get: (r) => r.latest_remark_at },
+  { key: "next_followup_date", label: "Next Follow-up Date", get: (r) => r.next_followup_date },
+  { key: "next_followup_remark", label: "Next Follow-up Remark", get: (r) => r.next_followup_remark },
+  { key: "followup_count", label: "Follow-ups", get: (r) => r.followup_count },
+];
+
+// The Project List's filters, ONE place: used by the list and the export so both see the same projects.
+export function projectListWhere(searchParams) {
+  const clauses = [], params = [];
+  const type = searchParams.get("type");
+  if (PROJECT_TYPES.includes(type)) { clauses.push("p.project_type = ?"); params.push(type); }
+  const q = (searchParams.get("q") || "").trim();
+  if (q) { clauses.push("(p.name LIKE ? OR p.description LIKE ?)"); params.push(`%${q}%`, `%${q}%`); }
+  return { where: clauses.length ? "WHERE " + clauses.join(" AND ") : "", params };
+}

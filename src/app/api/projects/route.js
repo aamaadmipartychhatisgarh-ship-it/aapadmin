@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { query } from "@/lib/db";
-import { ensureProjectsSchema, projectsGate, PROJECT_TYPES, PROJECT_SELECT } from "@/lib/projectsModule";
+import { ensureProjectsSchema, projectsGate, PROJECT_TYPES, PROJECT_SELECT, projectListWhere } from "@/lib/projectsModule";
 import { logAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +13,8 @@ export async function GET(req) {
     const denied = await projectsGate(session);
     if (denied) return denied;
     await ensureProjectsSchema();
-    const type = new URL(req.url).searchParams.get("type");
-    const where = PROJECT_TYPES.includes(type) ? "WHERE p.project_type = ?" : "";
-    const rows = await query(`${PROJECT_SELECT} ${where} ORDER BY p.id DESC LIMIT 1000`, where ? [type] : []);
+    const f = projectListWhere(new URL(req.url).searchParams);
+    const rows = await query(`${PROJECT_SELECT} ${f.where} ORDER BY p.id DESC LIMIT 1000`, f.params);
     return NextResponse.json({ projects: rows }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) { console.error("projects GET:", e); return NextResponse.json({ message: "Internal server error" }, { status: 500 }); }
 }
