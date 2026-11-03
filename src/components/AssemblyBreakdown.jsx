@@ -23,7 +23,7 @@ function ChartTooltip({ active, payload, unitLabel, color }) {
   );
 }
 
-function AssemblyBarChart({ title, icon: Icon, rows, dataKey, unitLabel, color }) {
+function AssemblyBarChart({ title, icon: Icon, rows, dataKey, unitLabel, color, note }) {
   const data = useMemo(() => rows.map((r) => ({ assembly: r.assembly, value: Number(r[dataKey]) || 0 })), [rows, dataKey]);
   const total = useMemo(() => data.reduce((s, r) => s + r.value, 0), [data]);
   return (
@@ -36,6 +36,7 @@ function AssemblyBarChart({ title, icon: Icon, rows, dataKey, unitLabel, color }
         <p className="text-xs text-gray-400">Live count per assembly, highest to lowest. All {data.length} assemblies.</p>
         <p className="text-xs font-semibold text-gray-700">Total: <span style={{ color }}>{Number(total).toLocaleString("en-IN")}</span></p>
       </div>
+      {note}
       {data.length === 0 ? (
         <div className="h-[120px] flex items-center justify-center text-gray-400 text-sm">No assembly data available.</div>
       ) : (
@@ -91,7 +92,15 @@ export default function AssemblyBreakdown() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 text-center text-sm text-gray-500">{err}</div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <AssemblyBarChart title="Worker by Assembly" icon={Layers} rows={data?.workers || []} dataKey="workers" unitLabel="Workers" color="#164FA3" />
+          <AssemblyBarChart title="Worker by Assembly" icon={Layers} rows={data?.workers || []} dataKey="workers" unitLabel="Workers" color="#164FA3"
+            note={data?.workers_overall ? (
+              <p className="text-xs text-gray-600 mb-2" data-testid="assembly-worker-reconciliation">
+                Total workers <strong className="text-gray-900">{data.workers_overall.total.toLocaleString("en-IN")}</strong> = in an assembly{" "}
+                <strong className="text-gray-900">{data.workers_overall.sum_of_assemblies.toLocaleString("en-IN")}</strong> + not mapped to an assembly{" "}
+                <strong className="text-gray-900">{data.workers_overall.unmapped.toLocaleString("en-IN")}</strong>
+                {data.workers_overall.unmapped > 0 ? ` (${data.workers_overall.no_assembly.toLocaleString("en-IN")} with no assembly, ${data.workers_overall.invalid_assembly.toLocaleString("en-IN")} with an invalid one)` : ""}.
+              </p>
+            ) : null} />
           <AssemblyBarChart title="Influencer by Assembly" icon={Star} rows={data?.influencers || []} dataKey="influencers" unitLabel="Influencers" color="#22a45d" />
         </div>
       )}

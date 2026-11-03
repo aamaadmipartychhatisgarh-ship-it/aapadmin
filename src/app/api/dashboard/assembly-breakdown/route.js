@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
-import { contactsByAssembly } from "@/lib/workerCounts";
+import { contactsByAssembly, workerAssemblyReconciliation } from "@/lib/workerCounts";
 import { ensureInfluencerSchema } from "@/lib/influencerSchema";
 
 // GET /api/dashboard/assembly-breakdown
@@ -64,7 +64,14 @@ export async function GET() {
       influencers = asmRows.map((a) => ({ id: a.id, assembly: a.name, influencers: 0 }));
     }
 
-    return NextResponse.json({ workers, influencers }, { headers: NO_STORE });
+    // Overall unique workers vs the assembly figures: total = in an assembly + not mapped (no / invalid assembly) - nothing is forced.
+    let workers_overall = null;
+    try {
+      const rec = await workerAssemblyReconciliation();
+      workers_overall = { ...rec, sum_of_assemblies: workers.reduce((a, w) => a + w.workers, 0) };
+    } catch (e) { console.error("[assembly-breakdown] reconciliation failed:", e?.code || e?.message || e); }
+
+    return NextResponse.json({ workers, influencers, workers_overall }, { headers: NO_STORE });
   } catch (err) {
     console.error("[assembly-breakdown] GET error:", err?.message || err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

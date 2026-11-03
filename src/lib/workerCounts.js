@@ -58,27 +58,48 @@ export async function workerDistrictReconciliation() {
   return { total, mapped, invalid_district: invalid, no_district: total - mapped - invalid, unmapped: total - mapped };
 }
 
-// Assembly-wise ACTUAL people/worker count from Contacts — the assembly analogue
-// of contactsByDistrict, using the SAME person-aware resolution and active-record
-// rule, so the two always reconcile. A contact's assembly comes from its linked
-// worker's assembly_id (a person's geography lives on the worker row) and falls
-// back to the contact's own assembly_id only when it has no worker link. Each
-// contact is counted once. Returns Map<assembly_id, count>. No total is
-// hardcoded; it updates live as contacts/workers change.
-export async function contactsByAssembly() {
-  const notWrong = await activeContactClause("ct");
-  const effAssembly =
-    "CASE WHEN ct.worker_id IS NOT NULL THEN w.assembly_id ELSE ct.assembly_id END";
-  const rows = await query(
-    `SELECT ${effAssembly} AS assembly_id, COUNT(*) AS n
-       FROM contacts ct
+// A contact's ASSEMBLY, resolved exactly the way the Contact List's Assembly filter resolves it (buildContactPersonFilter): a contact linked
+// to a WORKER belongs to that worker's assembly (workers.assembly_id - the person's geography lives on the worker row), any other
+// contact to its own assembly_id. The value must name a real assembly (a `locations` row of type 'assembly'): an empty value, or one that
+// points at a missing / non-assembly location, maps to NO assembly and is reported separately (workerAssemblyReconciliation) instead of
+// being counted anywhere. Nothing is derived from calls, callers, assignments, designations or wings. All joins are many-to-one (one
+// worker per contact, one location per id) and the count is over DISTINCT contact ids, so a contact is never counted twice.
+const ASSEMBLY_JOINS = `
        LEFT JOIN workers w ON w.id = ct.worker_id
-      WHERE (${effAssembly}) IS NOT NULL${notWrong}
+       LEFT JOIN locations wa ON wa.id = w.assembly_id AND wa.type = 'assembly'
+       LEFT JOIN locations ca ON ca.id = ct.assembly_id AND ca.type = 'assembly'`;
+const EFF_ASSEMBLY = "CASE WHEN ct.worker_id IS NOT NULL THEN wa.id ELSE ca.id END";
+const RAW_ASSEMBLY = "CASE WHEN ct.worker_id IS NOT NULL THEN w.assembly_id ELSE ct.assembly_id END";
+
+// Assembly-wise ACTUAL worker count from Contacts - the assembly analogue of contactsByDistrict, using the SAME active-record rule (the
+// Contact List's default view), so the two always reconcile and the figure equals the Contact List filtered to that Assembly.
+// Returns Map<assembly_id, count>. No total is hardcoded; it updates live as contacts / workers change.
+export async function contactsByAssembly() {
+  const active = await activeContactClause("ct");
+  const rows = await query(
+    `SELECT ${EFF_ASSEMBLY} AS assembly_id, COUNT(DISTINCT ct.id) AS n
+       FROM contacts ct ${ASSEMBLY_JOINS}
+      WHERE (${EFF_ASSEMBLY}) IS NOT NULL${active}
       GROUP BY assembly_id`
   );
   const m = new Map();
   for (const r of rows) m.set(r.assembly_id, Number(r.n) || 0);
   return m;
+}
+
+// Overall unique worker count vs the assembly figures: total = mapped to an assembly + not mapped. "no_assembly" = nothing recorded for
+// the contact's assembly (or a worker link whose worker row has none); "invalid_assembly" = a value that is not a real assembly.
+export async function workerAssemblyReconciliation() {
+  const active = await activeContactClause("ct");
+  const [r] = await query(
+    `SELECT COUNT(DISTINCT ct.id) AS total,
+            COUNT(DISTINCT CASE WHEN ${EFF_ASSEMBLY} IS NOT NULL THEN ct.id END) AS mapped,
+            COUNT(DISTINCT CASE WHEN ${EFF_ASSEMBLY} IS NULL AND ${RAW_ASSEMBLY} IS NOT NULL THEN ct.id END) AS invalid_assembly
+       FROM contacts ct ${ASSEMBLY_JOINS}
+      WHERE 1 = 1${active}`
+  );
+  const total = Number(r?.total) || 0, mapped = Number(r?.mapped) || 0, invalid = Number(r?.invalid_assembly) || 0;
+  return { total, mapped, invalid_assembly: invalid, no_assembly: total - mapped - invalid, unmapped: total - mapped };
 }
 
 // Raw `users.role` values that count as actual field workers/callers — the same
