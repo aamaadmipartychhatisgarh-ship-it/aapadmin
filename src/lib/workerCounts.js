@@ -1,45 +1,61 @@
 import { query } from "@/lib/db";
-import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
+import { notWrongNumberClause, notPendingClause, notNotInterestedClause } from "@/lib/contactExtras";
+import { repeatOffExclusion } from "@/lib/repeatOff";
 
-// District-wise ACTUAL people/worker count sourced from Contacts — the SINGLE
-// source of truth shared by the Strength page, Area Ranking, Organization Map
-// and the Workers-by-District tree map so they can never show different totals
-// for the same district.
-//
-// CRITICAL: a contact's district is resolved EXACTLY the way the Contacts page
-// resolves it (see buildContactPersonFilter in @/lib/contactFilter) — a person's
-// geography lives on their linked WORKER row, so we key off the worker's
-// district when the contact is linked to a worker, and fall back to the
-// contact's own district_id only when it has no worker link:
-//     effective_district = worker_id IS NOT NULL ? workers.district_id
-//                                                : contacts.district_id
-// Keying purely on contacts.district_id (the previous behaviour) under-counted
-// any contact whose linked worker sits in a district its own column doesn't
-// name — which is exactly why the Contacts page showed 1,342 for a district
-// while Strength/Map/Ranking showed 1,336. Now every module matches Contacts.
-//
-// Wrong-number-flagged rows are excluded (same active-record rule as Contacts).
-// Each contact is counted once (worker_id → workers.id is many-to-one, so the
-// LEFT JOIN never fans a contact into multiple rows — no duplicate counting).
-// No total is hardcoded and it auto-updates live as contacts change.
+// The ACTIVE-record rule shared by every district / assembly worker figure, identical to the Contacts list's default view: not a
+// Wrong Number, not Not Interested, not 10+ times Switched Off / Incoming Off, and not awaiting Supervisor approval. (The count used to
+// leave out the Not Interested and 10+ Off rules, so a district showed more "workers" than its Contacts list held.)
+async function activeContactClause(alias = "ct") {
+  return (await notWrongNumberClause(alias)) + (await notNotInterestedClause(alias)) + (await repeatOffExclusion(alias)) + (await notPendingClause(alias));
+}
+
+// A contact's District is resolved to ONE valid district (a `locations` row of type 'district'), in this order:
+//   1. the district of the linked WORKER (workers.district_id) - a person's geography lives on their worker row - when that worker row
+//      exists AND names a real district;
+//   2. the contact's own district_id, when it names a real district;
+//   3. the district ABOVE the contact's Assembly (assembly -> district in the location hierarchy), for a contact that only has an Assembly.
+// A value that is empty or points at a missing / non-district location is skipped (never counted under a wrong district), so such a
+// contact is reported separately as "unmapped" (see workerDistrictReconciliation). Every join below is many-to-one (a contact has at
+// most one worker, one district, one assembly; ids are unique), so a contact is never fanned out into several rows.
+const DISTRICT_JOINS = `
+       LEFT JOIN workers w ON w.id = ct.worker_id
+       LEFT JOIN locations wd ON wd.id = w.district_id AND wd.type = 'district'
+       LEFT JOIN locations cd ON cd.id = ct.district_id AND cd.type = 'district'
+       LEFT JOIN locations ca ON ca.id = ct.assembly_id AND ca.type = 'assembly'
+       LEFT JOIN locations ad ON ad.id = ca.parent_id AND ad.type = 'district'`;
+const EFF_DISTRICT = "COALESCE(wd.id, cd.id, ad.id)";
+
+// District-wise ACTUAL worker count sourced from Contacts - the SINGLE source of truth shared by the Strength page, Area Ranking,
+// Organization Map and the Workers-by-District tree map so they can never show different totals for the same district.
+// Each contact is counted once, in the district resolved above. No total is hardcoded; it updates live as contacts / workers change.
 // Returns Map<district_id, count>.
 export async function contactsByDistrict() {
-  const notWrong = (await notWrongNumberClause("ct")) + (await notPendingClause("ct"));
-  // The contact's effective (person-aware) district, identical to the Contacts
-  // list filter. GROUP BY this so a worker-linked contact lands in its worker's
-  // district and a link-less contact in its own.
-  const effDistrict =
-    "CASE WHEN ct.worker_id IS NOT NULL THEN w.district_id ELSE ct.district_id END";
+  const active = await activeContactClause("ct");
   const rows = await query(
-    `SELECT ${effDistrict} AS district_id, COUNT(*) AS n
-       FROM contacts ct
-       LEFT JOIN workers w ON w.id = ct.worker_id
-      WHERE (${effDistrict}) IS NOT NULL${notWrong}
+    `SELECT ${EFF_DISTRICT} AS district_id, COUNT(DISTINCT ct.id) AS n
+       FROM contacts ct ${DISTRICT_JOINS}
+      WHERE ${EFF_DISTRICT} IS NOT NULL${active}
       GROUP BY district_id`
   );
   const m = new Map();
   for (const r of rows) m.set(r.district_id, Number(r.n) || 0);
   return m;
+}
+
+// Reconciliation of the district figures with the overall unique worker count: total = mapped to a district + not mapped. A contact
+// with no district / assembly at all ("no_district"), or whose district / assembly values do not resolve to a real district
+// ("invalid_district"), is NOT counted under any district - it is shown here so the numbers add up without being forced to.
+export async function workerDistrictReconciliation() {
+  const active = await activeContactClause("ct");
+  const [r] = await query(
+    `SELECT COUNT(DISTINCT ct.id) AS total,
+            COUNT(DISTINCT CASE WHEN ${EFF_DISTRICT} IS NOT NULL THEN ct.id END) AS mapped,
+            COUNT(DISTINCT CASE WHEN ${EFF_DISTRICT} IS NULL AND (ct.district_id IS NOT NULL OR ct.assembly_id IS NOT NULL OR w.district_id IS NOT NULL) THEN ct.id END) AS invalid_district
+       FROM contacts ct ${DISTRICT_JOINS}
+      WHERE 1 = 1${active}`
+  );
+  const total = Number(r?.total) || 0, mapped = Number(r?.mapped) || 0, invalid = Number(r?.invalid_district) || 0;
+  return { total, mapped, invalid_district: invalid, no_district: total - mapped - invalid, unmapped: total - mapped };
 }
 
 // Assembly-wise ACTUAL people/worker count from Contacts — the assembly analogue
@@ -50,7 +66,7 @@ export async function contactsByDistrict() {
 // contact is counted once. Returns Map<assembly_id, count>. No total is
 // hardcoded; it updates live as contacts/workers change.
 export async function contactsByAssembly() {
-  const notWrong = (await notWrongNumberClause("ct")) + (await notPendingClause("ct"));
+  const notWrong = await activeContactClause("ct");
   const effAssembly =
     "CASE WHEN ct.worker_id IS NOT NULL THEN w.assembly_id ELSE ct.assembly_id END";
   const rows = await query(

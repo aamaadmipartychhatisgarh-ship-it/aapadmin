@@ -5,6 +5,7 @@ import { isOversight, normalizeRole, ROLES } from "@/lib/permissions";
 import { query } from "@/lib/db";
 import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 import { districtWorkerStats } from "@/lib/districtStats";
+import { workerDistrictReconciliation } from "@/lib/workerCounts";
 import { callsUnion } from "@/lib/allCalls";
 
 // District-level map data: strength score + drill-down details per district,
@@ -81,7 +82,14 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ districts });
+    // Overall unique worker count vs the district figures: total = in a district + not mapped to one (no district / invalid district).
+    // Only for roles that see every district - a territory-scoped admin never receives state-wide numbers.
+    let workers_overall = null;
+    if (!districtFilter) {
+      const rec = await workerDistrictReconciliation();
+      workers_overall = { ...rec, sum_of_districts: districts.reduce((a, d) => a + (Number(d.worker_count) || 0), 0) };
+    }
+    return NextResponse.json({ districts, workers_overall });
   } catch (err) {
     console.error("map error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

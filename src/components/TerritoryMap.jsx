@@ -37,6 +37,7 @@ function targetInfo(district) {
 
 export default function TerritoryMap() {
   const [districts, setDistricts] = useState([]);
+  const [overall, setOverall] = useState(null); // overall unique workers vs the district figures (roles that see every district)
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [hoveredId, setHoveredId] = useState(null);
@@ -45,7 +46,7 @@ export default function TerritoryMap() {
   useEffect(() => { load(); }, []);
   async function load() {
     const r = await fetch("/api/map");
-    if (r.ok) setDistricts((await r.json()).districts || []);
+    if (r.ok) { const d = await r.json(); setDistricts(d.districts || []); setOverall(d.workers_overall || null); }
     setLoading(false);
   }
   // Keep the map current without a manual refresh.
@@ -112,6 +113,15 @@ export default function TerritoryMap() {
           </div>
         </div>
       </div>
+
+      {overall && (
+        <p className="-mt-2 mb-4 text-xs text-gray-600" data-testid="map-worker-reconciliation">
+          Total workers <strong className="text-gray-900">{overall.total.toLocaleString("en-IN")}</strong> = in a district{" "}
+          <strong className="text-gray-900">{overall.sum_of_districts.toLocaleString("en-IN")}</strong> + not mapped to a district{" "}
+          <strong className="text-gray-900">{overall.unmapped.toLocaleString("en-IN")}</strong>
+          {overall.unmapped > 0 ? ` (${overall.no_district.toLocaleString("en-IN")} with no district/assembly, ${overall.invalid_district.toLocaleString("en-IN")} with an invalid one)` : ""}.
+        </p>
+      )}
 
       {loading ? (
         <div className="flex h-48 items-center justify-center"><Loader2 className="animate-spin text-[#164FA3]" /></div>
