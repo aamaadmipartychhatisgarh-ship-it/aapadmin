@@ -31,7 +31,7 @@ const ACCENT = "#164FA3";
 const STRINGS = {
   hi: {
     org: "आम आदमी पार्टी · छत्तीसगढ़",
-    fallbackTitle: "Worker एवं मतदाता पंजीयन",
+    fallbackTitle: "AAP",
     constituency: "विधानसभा क्षेत्र", selectConstituency: "अपना क्षेत्र चुनें…",
     savedTitle: "पंजीयन सफल!",
     savedBody: "अगला व्यक्ति जोड़ने के लिए नीचे फॉर्म भरें.",
@@ -104,7 +104,7 @@ const STRINGS = {
   },
   en: {
     org: "Aam Aadmi Party · Chhattisgarh",
-    fallbackTitle: "Worker & Voter Registration",
+    fallbackTitle: "AAP",
     constituency: "Constituency", selectConstituency: "Select your constituency…",
     savedTitle: "Registration saved!",
     savedBody: "Fill the form below to add the next person.",

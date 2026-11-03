@@ -1,4 +1,6 @@
 import PublicRegistrationForm from "@/components/registration/PublicRegistrationForm";
+import RegistrationPwa from "@/components/registration/RegistrationPwa";
+import { registrationAppMetadata } from "@/lib/registrationAppMeta";
 
 // THE public link: /join — one fixed URL to print, forward and pin, for the
 // whole state. It always opens the currently active registration drive, and a
@@ -6,12 +8,8 @@ import PublicRegistrationForm from "@/components/registration/PublicRegistration
 // to be issued per person and the URL never changes between drives.
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "Worker एवं मतदाता पंजीयन — आम आदमी पार्टी छत्तीसगढ़",
-  description: "Aam Aadmi Party Chhattisgarh — Worker & Voter Registration",
-  robots: { index: false, follow: false },
-};
+export const metadata = registrationAppMetadata;
 
 export default function JoinPage() {
-  return <PublicRegistrationForm />;
+  return <><RegistrationPwa /><PublicRegistrationForm /></>;
 }

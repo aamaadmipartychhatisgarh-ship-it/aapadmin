@@ -1,4 +1,6 @@
 import PublicRegistrationForm from "@/components/registration/PublicRegistrationForm";
+import RegistrationPwa from "@/components/registration/RegistrationPwa";
+import { registrationAppMetadata } from "@/lib/registrationAppMeta";
 
 // The public, shareable registration link: /r/<token>. One token per karyakarta,
 // so whoever submits here is automatically credited to that worker. No login —
@@ -6,13 +8,9 @@ import PublicRegistrationForm from "@/components/registration/PublicRegistration
 // to nothing except this form (see /api/public/registration/[token]).
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "Worker एवं मतदाता पंजीयन — आम आदमी पार्टी छत्तीसगढ़",
-  description: "Aam Aadmi Party Chhattisgarh — Worker & Voter Registration",
-  robots: { index: false, follow: false },
-};
+export const metadata = registrationAppMetadata;
 
 export default async function PublicRegistrationPage({ params }) {
   const { token } = await params;
-  return <PublicRegistrationForm token={token} />;
+  return <><RegistrationPwa /><PublicRegistrationForm token={token} /></>;
 }

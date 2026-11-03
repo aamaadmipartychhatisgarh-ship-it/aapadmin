@@ -4,7 +4,8 @@
 // (e.g. a 504) into a hard-stuck screen. Navigations and /api/ always go
 // straight to the network, uncached.
 
-const CACHE = "aap-admin-v3";
+// v4: a new service-worker file so installed copies update and drop everything cached under the earlier branding.
+const CACHE = "aap-v4";
 
 self.addEventListener("install", () => {
   // Activate immediately on first install / update.
