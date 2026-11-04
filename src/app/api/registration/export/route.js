@@ -62,7 +62,20 @@ export async function GET(req) {
       const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("worker_limit") || "200", 10) || 200));
       // The same Lok Sabha / Assembly filter as the screen (one resolution, applied in the query).
       const workerIds = await workerIdsForLocation({ campaignId: f.campaignId, lokSabhaId: f.lokSabhaId, assemblyId: f.assemblyId, workerScope });
-      const rows = await getWorkerRanking({ ...f, limit, workerScope, workerIds });
+      const groupParam = ["lok_sabha", "assembly"].includes(searchParams.get("group")) ? searchParams.get("group") : null;
+      let rows;
+      if (groupParam && searchParams.get("format") === "pdf") {
+        // Lok Sabha-wise / Assembly-wise PDF: the Worker and Voter counts must cover EVERY worker matching the filters,
+        // not just the dashboard's Top-N, so the whole filtered set is read (500 per page, one row per unique worker id).
+        rows = []; const seen = new Set();
+        for (let off = 0; off < 50000; off += 500) {
+          const page = await getWorkerRanking({ ...f, limit: 500, offset: off, workerScope, workerIds });
+          for (const r of page) if (!seen.has(r.id)) { seen.add(r.id); rows.push(r); }
+          if (page.length < 500) break;
+        }
+      } else {
+        rows = await getWorkerRanking({ ...f, limit, workerScope, workerIds });
+      }
       if (searchParams.get("format") === "pdf") {
         const criteria = describeFilters(searchParams, session).filter((c) => !/^(Type|Source|Status):/.test(c));
         if (f.lokSabhaId || f.assemblyId) {
@@ -71,7 +84,7 @@ export async function GET(req) {
           if (f.lokSabhaId) criteria.push(`Lok Sabha: ${nm(f.lokSabhaId)}`);
           if (f.assemblyId) criteria.push(`Assembly: ${nm(f.assemblyId)}`);
         }
-        criteria.push(`Top ${limit}`);
+        criteria.push(groupParam ? `All ${rows.length} matching workers` : `Top ${limit}`);
         // ?group=lok_sabha | assembly: the Lok Sabha-wise / Assembly-wise PDF - the same filtered rows, preceded by a count summary.
         const group = ["lok_sabha", "assembly"].includes(searchParams.get("group")) ? searchParams.get("group") : null;
         const buf = await buildWorkerPerformancePdf(rows, { criteria, group });

@@ -75,7 +75,7 @@ function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols
     criteria?.length ? React.createElement(View, { style: styles.criteria }, criteria.map((c, i) => T(styles.chip, cleanPdfText(c), { key: i }))) : null,
     // Overall totals - a separate summary section.
     React.createElement(View, { style: styles.statRow, wrap: false },
-      [["Overall Total Workers", summary.totals.new_workers], ["Overall Total Voters", summary.totals.voters], ["Total Registrations", summary.totals.total], [summary.groupLabel === "Assembly" ? "Assemblies" : `${summary.groupLabel}s`, summary.groups.length]].map(([l, v], i) =>
+      [["Overall Total Worker Count", summary.totals.new_workers], ["Overall Total Voter Count", summary.totals.voters], ["Total Registrations", summary.totals.total], [summary.groupLabel === "Assembly" ? "Assemblies" : `${summary.groupLabel}s`, summary.groups.length]].map(([l, v], i) =>
         React.createElement(View, { key: i, style: styles.stat }, T(styles.statLabel, l), T(styles.statValue, Number(v).toLocaleString("en-IN"))))),
     React.createElement(View, { style: styles.headerRow, fixed: true }, summary.cols.map((c) => T([styles.hcell, { flex: c.flex }, al(c)].filter(Boolean), c.label, { key: c.key }))),
     summary.groups.length === 0
@@ -153,8 +153,8 @@ export async function buildWorkerPerformancePdf(rows, { criteria = [], group = n
         { key: "n", label: "#", flex: 0.5, align: "center", get: (g, i) => String(i + 1), total: () => "" },
         { key: "label", label: groupLabel, flex: 3, bold: true, get: (g) => dash(g.label), total: () => "Overall Total" },
         { key: "karyakartas", label: "Karyakartas", flex: 1.1, align: "center", get: (g) => num(g.karyakartas), total: (t) => num(t.karyakartas) },
-        { key: "workers", label: "Workers", flex: 1, align: "center", get: (g) => num(g.new_workers), total: (t) => num(t.new_workers) },
-        { key: "voters", label: "Voters", flex: 1, align: "center", get: (g) => num(g.voters), total: (t) => num(t.voters) },
+        { key: "workers", label: "Worker Count", flex: 1.1, align: "center", get: (g) => num(g.new_workers), total: (t) => num(t.new_workers) },
+        { key: "voters", label: "Voter Count", flex: 1.1, align: "center", get: (g) => num(g.voters), total: (t) => num(t.voters) },
         { key: "total", label: "Total", flex: 1, align: "center", bold: true, get: (g) => num(g.total), total: (t) => num(t.total) },
       ],
     };
