@@ -99,6 +99,7 @@ export default function AssemblyBreakdown() {
                 <strong className="text-gray-900">{data.workers_overall.sum_of_assemblies.toLocaleString("en-IN")}</strong> + not mapped to an assembly{" "}
                 <strong className="text-gray-900">{data.workers_overall.unmapped.toLocaleString("en-IN")}</strong>
                 {data.workers_overall.unmapped > 0 ? ` (${data.workers_overall.no_assembly.toLocaleString("en-IN")} with no assembly, ${data.workers_overall.invalid_assembly.toLocaleString("en-IN")} with an invalid one)` : ""}.
+              {data.workers_overall.duplicates_excluded > 0 ? ` Counted once per person: ${data.workers_overall.duplicates_excluded.toLocaleString("en-IN")} repeat contact record${data.workers_overall.duplicates_excluded === 1 ? "" : "s"} of the same number not counted.` : ""}
               </p>
             ) : null} />
           <AssemblyBarChart title="Influencer by Assembly" icon={Star} rows={data?.influencers || []} dataKey="influencers" unitLabel="Influencers" color="#22a45d"

@@ -120,6 +120,7 @@ export default function TerritoryMap() {
           <strong className="text-gray-900">{overall.sum_of_districts.toLocaleString("en-IN")}</strong> + not mapped to a district{" "}
           <strong className="text-gray-900">{overall.unmapped.toLocaleString("en-IN")}</strong>
           {overall.unmapped > 0 ? ` (${overall.no_district.toLocaleString("en-IN")} with no district/assembly, ${overall.invalid_district.toLocaleString("en-IN")} with an invalid one)` : ""}.
+          {overall.duplicates_excluded > 0 ? ` Counted once per person: ${overall.duplicates_excluded.toLocaleString("en-IN")} repeat contact record${overall.duplicates_excluded === 1 ? "" : "s"} of the same number not counted.` : ""}
         </p>
       )}
 

@@ -9,6 +9,24 @@ async function activeContactClause(alias = "ct") {
   return (await notWrongNumberClause(alias)) + (await notNotInterestedClause(alias)) + (await repeatOffExclusion(alias)) + (await notPendingClause(alias));
 }
 
+// ONE PERSON, ONE COUNT. A phone number saved twice in different formats ("09333333333" and "+91 93333 33333") is two contact rows
+// for one person. Contacts are therefore counted per PERSON: the rows of an active person are collapsed to the lowest contact id, by the
+// number's last 10 digits (rows with no number are each their own person). Because exactly one row per person is kept BEFORE it is placed
+// in a district / assembly, the district (or assembly) figures can never double count, and sum + unmapped = the overall unique total.
+const PHONE_KEY = (a) => `RIGHT(REGEXP_REPLACE(IFNULL(${a}.phone_number,''), '[^0-9]', ''), 10)`;
+async function uniquePersonJoin(alias = "ct") {
+  const act = await activeContactClause("c2");
+  return `JOIN (SELECT MIN(c2.id) AS keep_id FROM contacts c2 WHERE 1 = 1${act}
+                  GROUP BY IF(${PHONE_KEY("c2")} = '', CONCAT('id', c2.id), ${PHONE_KEY("c2")})) up ON up.keep_id = ${alias}.id`;
+}
+// Active contact rows that are repeats of another row of the same person (not counted anywhere).
+export async function duplicateContactRows() {
+  const act = await activeContactClause("ct");
+  const uq = await uniquePersonJoin("ct");
+  const [r] = await query(`SELECT (SELECT COUNT(*) FROM contacts ct WHERE 1 = 1${act}) - (SELECT COUNT(*) FROM contacts ct ${uq} WHERE 1 = 1${act}) AS d`);
+  return Math.max(0, Number(r?.d) || 0);
+}
+
 // A contact's District is resolved to ONE valid district (a `locations` row of type 'district'), in this order:
 //   1. the district of the linked WORKER (workers.district_id) - a person's geography lives on their worker row - when that worker row
 //      exists AND names a real district;
@@ -31,9 +49,10 @@ const EFF_DISTRICT = "COALESCE(wd.id, cd.id, ad.id)";
 // Returns Map<district_id, count>.
 export async function contactsByDistrict() {
   const active = await activeContactClause("ct");
+  const uq = await uniquePersonJoin("ct");
   const rows = await query(
     `SELECT ${EFF_DISTRICT} AS district_id, COUNT(DISTINCT ct.id) AS n
-       FROM contacts ct ${DISTRICT_JOINS}
+       FROM contacts ct ${uq} ${DISTRICT_JOINS}
       WHERE ${EFF_DISTRICT} IS NOT NULL${active}
       GROUP BY district_id`
   );
@@ -47,15 +66,17 @@ export async function contactsByDistrict() {
 // ("invalid_district"), is NOT counted under any district - it is shown here so the numbers add up without being forced to.
 export async function workerDistrictReconciliation() {
   const active = await activeContactClause("ct");
+  const uq = await uniquePersonJoin("ct");
+  const duplicates = await duplicateContactRows();
   const [r] = await query(
     `SELECT COUNT(DISTINCT ct.id) AS total,
             COUNT(DISTINCT CASE WHEN ${EFF_DISTRICT} IS NOT NULL THEN ct.id END) AS mapped,
             COUNT(DISTINCT CASE WHEN ${EFF_DISTRICT} IS NULL AND (ct.district_id IS NOT NULL OR ct.assembly_id IS NOT NULL OR w.district_id IS NOT NULL) THEN ct.id END) AS invalid_district
-       FROM contacts ct ${DISTRICT_JOINS}
+       FROM contacts ct ${uq} ${DISTRICT_JOINS}
       WHERE 1 = 1${active}`
   );
   const total = Number(r?.total) || 0, mapped = Number(r?.mapped) || 0, invalid = Number(r?.invalid_district) || 0;
-  return { total, mapped, invalid_district: invalid, no_district: total - mapped - invalid, unmapped: total - mapped };
+  return { total, mapped, invalid_district: invalid, no_district: total - mapped - invalid, unmapped: total - mapped, duplicates_excluded: duplicates };
 }
 
 // A contact's ASSEMBLY, resolved exactly the way the Contact List's Assembly filter resolves it (buildContactPersonFilter): a contact linked
@@ -76,9 +97,10 @@ const RAW_ASSEMBLY = "CASE WHEN ct.worker_id IS NOT NULL THEN w.assembly_id ELSE
 // Returns Map<assembly_id, count>. No total is hardcoded; it updates live as contacts / workers change.
 export async function contactsByAssembly() {
   const active = await activeContactClause("ct");
+  const uq = await uniquePersonJoin("ct");
   const rows = await query(
     `SELECT ${EFF_ASSEMBLY} AS assembly_id, COUNT(DISTINCT ct.id) AS n
-       FROM contacts ct ${ASSEMBLY_JOINS}
+       FROM contacts ct ${uq} ${ASSEMBLY_JOINS}
       WHERE (${EFF_ASSEMBLY}) IS NOT NULL${active}
       GROUP BY assembly_id`
   );
@@ -91,15 +113,17 @@ export async function contactsByAssembly() {
 // the contact's assembly (or a worker link whose worker row has none); "invalid_assembly" = a value that is not a real assembly.
 export async function workerAssemblyReconciliation() {
   const active = await activeContactClause("ct");
+  const uq = await uniquePersonJoin("ct");
+  const duplicates = await duplicateContactRows();
   const [r] = await query(
     `SELECT COUNT(DISTINCT ct.id) AS total,
             COUNT(DISTINCT CASE WHEN ${EFF_ASSEMBLY} IS NOT NULL THEN ct.id END) AS mapped,
             COUNT(DISTINCT CASE WHEN ${EFF_ASSEMBLY} IS NULL AND ${RAW_ASSEMBLY} IS NOT NULL THEN ct.id END) AS invalid_assembly
-       FROM contacts ct ${ASSEMBLY_JOINS}
+       FROM contacts ct ${uq} ${ASSEMBLY_JOINS}
       WHERE 1 = 1${active}`
   );
   const total = Number(r?.total) || 0, mapped = Number(r?.mapped) || 0, invalid = Number(r?.invalid_assembly) || 0;
-  return { total, mapped, invalid_assembly: invalid, no_assembly: total - mapped - invalid, unmapped: total - mapped };
+  return { total, mapped, invalid_assembly: invalid, no_assembly: total - mapped - invalid, unmapped: total - mapped, duplicates_excluded: duplicates };
 }
 
 // Raw `users.role` values that count as actual field workers/callers — the same
