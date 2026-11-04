@@ -3,7 +3,9 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
-import { query } from "@/lib/db";
+import { query, getPool } from "@/lib/db";
+import { createHash } from "crypto";
+import { phoneKey, last10Sql } from "@/lib/phone";
 import { resolveComplaintLocation, contactDesignationId } from "@/lib/complaintWorker";
 import { loadComplaintRows } from "@/lib/complaintsList";
 
@@ -88,6 +90,15 @@ export async function GET(req) {
   }
 }
 
+// DUPLICATE RULE: a complaint is refused only when Phone number (last 10 digits, so +91 / 0 / spaces / dashes do not
+// matter) + Department + Subject ALL match a complaint registered within the previous 7 days. In this data model the
+// Department is the complaint's Type and the Subject is its Description (trimmed, spaces collapsed, case-insensitive).
+// Nothing else blocks a registration; with no phone number or no description there is nothing to compare, so it is allowed.
+const DUPLICATE_COMPLAINT_MESSAGE = "Complaint already registered within the last 1 week.";
+const DUPLICATE_WINDOW_DAYS = 7;
+const normSubject = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+const SUBJECT_SQL = "TRIM(REGEXP_REPLACE(IFNULL(description,''), '[[:space:]]+', ' '))";
+
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -109,11 +120,41 @@ export async function POST(req) {
     // ignored (no contact / number not owned by it → no designation).
     let designationId = d.designation_id || null;
     if (d.designation_from_contact) designationId = d.contact_id ? await contactDesignationId(loc.contact_id) : null;
-    const res = await query(
-      `INSERT INTO complaints (citizen_name, citizen_phone, citizen_address, type, description, designation_id, district_id, assembly_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
-      [d.citizen_name, d.citizen_phone || null, String(d.citizen_address || "").trim().slice(0, 1000) || null, d.type || "other", d.description || null, designationId, d.district_id || loc.district_id || null, loc.assembly_id]
-    );
+    const type = d.type || "other";
+    const pKey = phoneKey(d.citizen_phone);
+    const subject = normSubject(d.description);
+    const params = [d.citizen_name, d.citizen_phone || null, String(d.citizen_address || "").trim().slice(0, 1000) || null, type, d.description || null, designationId, d.district_id || loc.district_id || null, loc.assembly_id];
+    const insertSql = `INSERT INTO complaints (citizen_name, citizen_phone, citizen_address, type, description, designation_id, district_id, assembly_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`;
+
+    // Check + insert happen under a per-combination database lock, so two simultaneous submissions of the same
+    // combination are serialised: the second one sees the first and is refused. Other combinations never wait.
+    let res;
+    if (pKey && subject) {
+      const lockName = "cmpl:" + createHash("md5").update(`${pKey}|${type}|${subject.toLowerCase()}`).digest("hex");
+      const conn = await getPool().getConnection();
+      let locked = false;
+      try {
+        const [[lk]] = await conn.query("SELECT GET_LOCK(?, 10) AS ok", [lockName]);
+        locked = Number(lk.ok) === 1;
+        if (!locked) return NextResponse.json({ message: "Please try again in a moment." }, { status: 503 });
+        // created_at and NOW() are both the database's own clock/time zone, so the 7-day window is consistent.
+        const [dup] = await conn.query(
+          `SELECT id FROM complaints
+            WHERE ${last10Sql("citizen_phone")} = ? AND type = ? AND ${SUBJECT_SQL} = ?
+              AND created_at >= NOW() - INTERVAL ${DUPLICATE_WINDOW_DAYS} DAY
+            LIMIT 1`,
+          [pKey, type, subject]
+        );
+        if (dup.length) return NextResponse.json({ message: DUPLICATE_COMPLAINT_MESSAGE }, { status: 409 });
+        [res] = await conn.query(insertSql, params);
+      } finally {
+        if (locked) await conn.query("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => {});
+        conn.release();
+      }
+    } else {
+      res = await query(insertSql, params);
+    }
     return NextResponse.json({ id: res.insertId, assembly_id: loc.assembly_id }, { status: 201 });
   } catch (err) {
     console.error("complaints POST error:", err);
