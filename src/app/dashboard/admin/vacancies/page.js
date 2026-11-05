@@ -266,6 +266,9 @@ export default function VacanciesPage() {
           <select className={selCls} aria-label="Wing" value={wing} onChange={(e) => { setWing(e.target.value); setDesignationId(""); }}>
             {(data?.filters?.wings || [{ key: "", label: "All Wings" }]).map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
           </select>
+          {/* The page lists the State level only, so there is no Level choice and no Lok Sabha / District / Assembly / Block area to pick
+              (a State post has no area). The selectors return automatically if the server ever offers more than one level. */}
+          {(data?.filters?.levels || []).length > 1 && <>
           <select className={selCls} aria-label="Level" value={level} onChange={(e) => { setLevel(e.target.value); setDesignationId(""); }}>
             <option value="">All levels</option>
             {(data?.filters?.levels || []).map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
@@ -286,6 +289,7 @@ export default function VacanciesPage() {
             <option value="">All Blocks</option>
             {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
+          </>}
           <select className={selCls} aria-label="Designation" value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
             <option value="">All Designations{data?.filters?.designations ? ` (${data.filters.designations.length})` : ""}</option>
             {/* Grouped by organisational Level; within a Level the order is the Designation Master's Rank. */}

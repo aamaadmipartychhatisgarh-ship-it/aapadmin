@@ -9,8 +9,13 @@ import { wingPositionDesignationIds, buildWingVacancyDataset } from "@/lib/wingV
 import { listWings } from "@/lib/wingDesignations";
 
 const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
-// Levels scanned for vacancies (State vacancies are the State Prabhari's).
-const VACANCY_LEVELS = ["state", ...TEAM_LEVELS];
+// The Designation Vacancy page covers the STATE level only (every Wing's State-level designations on one page). The level of a
+// designation is its own Master Data level (designations.level), never its name, so a District / Assembly / Block designation that
+// shares a name with a State one is never listed, and members holding lower-level posts never count toward State vacancies.
+const VACANCY_LEVELS = ["state"];
+// Every organisational level the Master Data can carry (State, Lok Sabha, District, Assembly, Block): used only to tell a
+// designation that simply belongs to another level from one with no usable level at all.
+const ORG_LEVELS = ["state", ...TEAM_LEVELS];
 const MAX_ROWS = 5000;
 
 const asId = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 0 ? n : null; };
@@ -353,15 +358,15 @@ export async function buildVacancyDataset(session, filters = {}) {
       ORDER BY name`,
     validLevels
   );
-  // Enabled Master Data designations whose Level is not an organisational level scanned here (no level,
-  // or Zone): they have no State / Lok Sabha / District / Assembly / Block position to be filled or
-  // vacant, so they are reported rather than silently missing.
+  // Enabled Master Data designations with no usable organisational Level (none, or Zone): they have no position to be filled or
+  // vacant, so they are reported rather than silently missing. Designations of the District / Assembly / Block levels are simply
+  // outside this State-level page and are not reported here.
   const notListed = await query(
     `SELECT id, name, level FROM designations
-      WHERE (level IS NULL OR TRIM(level) = '' OR level NOT IN (${VACANCY_LEVELS.map(() => "?").join(",")}))
+      WHERE (level IS NULL OR TRIM(level) = '' OR level NOT IN (${ORG_LEVELS.map(() => "?").join(",")}))
         ${hasEnabled ? "AND (enabled = 1 OR enabled IS NULL)" : ""}
       ORDER BY name`,
-    VACANCY_LEVELS
+    ORG_LEVELS
   );
   const scopedUnmapped = unmappedHolders.filter((u) => !f.designationId || u.designation_id === f.designationId);
 

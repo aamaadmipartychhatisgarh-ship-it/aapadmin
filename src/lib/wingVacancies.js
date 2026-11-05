@@ -40,7 +40,8 @@ import { loadLocationIndex, ancestryOf } from "@/lib/vacancyResponsibility";
 //     Prabhari, General Secretary → upper General Secretary). State has none.
 // Any failed query propagates (the API returns an error, no vacancies shown).
 
-export const WING_VACANCY_LEVELS = ["state", "lok_sabha", "district", "assembly"];
+// State level only (the Designation Vacancy page lists State-level posts of every Wing; lower levels are not part of it).
+export const WING_VACANCY_LEVELS = ["state"];
 const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly" };
 export const WING_ROLES = [
   { key: "president", label: "President" },
