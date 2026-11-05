@@ -63,12 +63,16 @@ export async function GET(req) {
       // The same Lok Sabha / Assembly filter as the screen (one resolution, applied in the query).
       const workerIds = await workerIdsForLocation({ campaignId: f.campaignId, lokSabhaId: f.lokSabhaId, assemblyId: f.assemblyId, workerScope });
       const groupParam = ["lok_sabha", "assembly"].includes(searchParams.get("group")) ? searchParams.get("group") : null;
+      // The Workers & Links roster exports EVERY worker matching its filters (?all=1), and so do the Lok Sabha-wise / Assembly-wise
+      // PDFs (their counts must cover everyone). Only the dashboard's own Top-N views keep a limit (worker_limit, max 200).
+      const everyone = searchParams.get("all") === "1" || (groupParam && searchParams.get("format") === "pdf");
       let rows;
-      if (groupParam && searchParams.get("format") === "pdf") {
-        // Lok Sabha-wise / Assembly-wise PDF: the Worker and Voter counts must cover EVERY worker matching the filters,
-        // not just the dashboard's Top-N, so the whole filtered set is read (500 per page, one row per unique worker id).
+      if (everyone) {
+        // Read in batches of 500 in the list's own order (total, voters, name, then the unique id as the final tie-break, so the order is
+        // total and stable); a worker is kept once by id even if the data shifts between batches. No fixed ceiling: it runs until a batch
+        // comes back short, so the export keeps working as the number of workers grows.
         rows = []; const seen = new Set();
-        for (let off = 0; off < 50000; off += 500) {
+        for (let off = 0; ; off += 500) {
           const page = await getWorkerRanking({ ...f, limit: 500, offset: off, workerScope, workerIds });
           for (const r of page) if (!seen.has(r.id)) { seen.add(r.id); rows.push(r); }
           if (page.length < 500) break;
@@ -84,7 +88,7 @@ export async function GET(req) {
           if (f.lokSabhaId) criteria.push(`Lok Sabha: ${nm(f.lokSabhaId)}`);
           if (f.assemblyId) criteria.push(`Assembly: ${nm(f.assemblyId)}`);
         }
-        criteria.push(groupParam ? `All ${rows.length} matching workers` : `Top ${limit}`);
+        criteria.push(everyone ? `All ${rows.length} matching workers` : `Top ${limit}`);
         // ?group=lok_sabha | assembly: the Lok Sabha-wise / Assembly-wise PDF - the same filtered rows, preceded by a count summary.
         const group = ["lok_sabha", "assembly"].includes(searchParams.get("group")) ? searchParams.get("group") : null;
         const buf = await buildWorkerPerformancePdf(rows, { criteria, group });

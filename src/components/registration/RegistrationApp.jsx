@@ -692,8 +692,13 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
         </div>
         <span className="text-sm text-gray-500">{total} worker{total === 1 ? "" : "s"}</span>
         <div className="ml-auto flex items-center gap-2">
-          <a href={`/api/registration/export?${filterQs({ report: "workers" })}`} className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
+          {/* Both exports carry the list's own filters (drive, period, ward AND the search box) and include EVERY matching worker, not just
+              the page on screen. */}
+          <a href={`/api/registration/export?${filterQs({ report: "workers", all: 1, search: debounced })}`} data-testid="roster-export" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
             <Download size={16} />Export
+          </a>
+          <a href={`/api/registration/export?${filterQs({ report: "workers", all: 1, search: debounced, format: "pdf" })}`} data-testid="roster-export-pdf" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
+            <FileText size={16} />PDF
           </a>
           <button onClick={() => setAdding(true)} className={`${btnCls} text-white`} style={{ background: BRAND }}>
             <Plus size={16} />Generate links
