@@ -316,7 +316,7 @@ export default function RegistrationApp() {
       </div>
 
       {/* THE common link. One fixed URL for the whole state — it opens the login
-          screen, and each karyakarta signs in with the username + password created
+          screen, and each user signs in with the username + password created
           for them in Workers & Links → Generate Links. The switch turns it on/off. */}
       <div className={`${cardCls} p-4 mb-4 border-l-4`} style={{ borderLeftColor: liveDrive ? BRAND : "#d1d5db" }}>
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -326,7 +326,7 @@ export default function RegistrationApp() {
             </h2>
             <p className="text-xs text-gray-500 mt-0.5 max-w-2xl">
               {liveDrive
-                ? <>One link for the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. It opens a login screen: every karyakarta signs in with their <span className="font-semibold text-gray-700">username and password</span> (created for them in <span className="font-semibold text-gray-700">Workers &amp; Links → Generate Links</span>), and their registrations are credited to them. No per-person link is issued.</>
+                ? <>One link for the live drive — <span className="font-semibold text-gray-700">{liveDrive.name}</span>. It opens a login screen: every user signs in with their <span className="font-semibold text-gray-700">username and password</span> (created for them in <span className="font-semibold text-gray-700">Workers &amp; Links → Generate Links</span>), and their registrations are credited to them. No per-person link is issued.</>
                 : <>The link is switched off, so anyone who opens it sees “Registration is not open right now”. Use the switch to make it live.</>}
             </p>
             {campaigns.filter((c) => c.status === "active").length > 1 && (
@@ -705,7 +705,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
           how many people registered through it — the answer to "how is this
           karyakarta doing", with no cross-referencing. */}
       <p className="text-xs text-gray-500">
-        Generate a link for each karyakarta and send it to them to share. Everyone who registers through their link is credited to them, and
+        Generate a link for each user and send it to them to share. Everyone who registers through their link is credited to them, and
         the counts below are that link&apos;s own totals.
       </p>
 
@@ -732,7 +732,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 bg-gray-50">
-                {["#", "Karyakarta", "Mobile", "Ward / Area", "Voters", "New workers", "Total", "Login username", "Status", ""].map((h) => (
+                {["#", "User", "Mobile", "Ward / Area", "Voters", "New workers", "Total", "Login username", "Status", ""].map((h) => (
                   <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -741,7 +741,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
               {loading ? (
                 <tr><td colSpan={10} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500">No karyakarta links yet. Generate one to start crediting registrations.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500">No user links yet. Generate one to start crediting registrations.</td></tr>
               ) : rows.map((w) => (
                 <tr key={w.id} className="border-t border-gray-100 hover:bg-gray-50/60">
                   <td className="px-3 py-2.5"><RankBadge rank={w.rank} /></td>
@@ -831,7 +831,7 @@ function EditWorkerDialog({ worker, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="font-bold text-lg text-gray-900">Edit Karyakarta</h3>
+          <h3 className="font-bold text-lg text-gray-900">Edit User</h3>
           <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={18} /></button>
         </div>
         <div className="p-5 space-y-3">
@@ -973,7 +973,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
           <div>
             <h3 className="text-sm font-bold text-gray-900">Login credentials created</h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Give these to each karyakarta — the <span className="font-semibold">password is shown only once</span> and cannot be retrieved later. They sign in at the common registration link.
+              Give these to each user — the <span className="font-semibold">password is shown only once</span> and cannot be retrieved later. They sign in at the common registration link.
             </p>
           </div>
           <button onClick={onDone} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={16} /></button>
@@ -1017,7 +1017,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
         <div>
           <h3 className="text-sm font-bold text-gray-900">Generate login credentials</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Each karyakarta gets a username (their name) and a password. Give it to them; they sign in at the common registration link, and everything they register is counted as theirs.
+            Each user gets a username (their name) and a password. Give it to them; they sign in at the common registration link, and everything they register is counted as theirs.
           </p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500"><X size={16} /></button>
@@ -1197,7 +1197,7 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false })
         </select>
         <select className={inputCls} value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }}>
           <option value="">All sources</option>
-          <option value="worker">Through a karyakarta link</option>
+          <option value="worker">Through a user link</option>
           <option value="direct">Direct via /join</option>
         </select>
         <select className={inputCls} value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
@@ -1455,7 +1455,7 @@ function EditPersonDialog({ person, onClose, onSaved, onError }) {
             </div>
           </div>
           {f.person_type === "worker" && (
-            <div><label className={lbl}>Karyakarta Rating (1–10)</label>
+            <div><label className={lbl}>User Rating (1–10)</label>
               <input type="number" min="1" max="10" className={inp} value={f.worker_rating} onChange={(e) => set("worker_rating", e.target.value)} /></div>
           )}
           <div className="grid grid-cols-2 gap-3">

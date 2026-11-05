@@ -183,8 +183,8 @@ function RegistrationSections() {
         <div className="w-12 h-12 rounded-xl bg-[#FCB712]/10 text-[#FCB712] flex items-center justify-center shrink-0"><UserCheck size={22} /></div>
         <div className="min-w-0 flex-1">
           <div className="font-bold text-gray-900">Worker Registration</div>
-          <div className="text-sm text-gray-500">Register karyakartas and their login links</div>
-          <div className="text-xs text-gray-500 mt-1"><span className="font-semibold text-gray-900">{n(sum?.active_workers)}</span> active of <span className="font-semibold text-gray-900">{n(sum?.total_workers)}</span> karyakartas</div>
+          <div className="text-sm text-gray-500">Register users and their login links</div>
+          <div className="text-xs text-gray-500 mt-1"><span className="font-semibold text-gray-900">{n(sum?.active_workers)}</span> active of <span className="font-semibold text-gray-900">{n(sum?.total_workers)}</span> users</div>
         </div>
         <ArrowRight size={18} className="text-gray-300 group-hover:text-[#164FA3]" />
       </Link>

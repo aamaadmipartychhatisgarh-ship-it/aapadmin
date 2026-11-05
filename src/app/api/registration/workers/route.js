@@ -151,7 +151,7 @@ export async function POST(req) {
       if (outcome.busy) { skipped.push({ name, mobile, reason: "another request for this number is in progress — try again" }); continue; }
       const res = outcome.value;
       if (res.already) { skipped.push({ name, mobile, reason: ALREADY_A_WORKER, already_worker: true }); continue; }
-      if (res.nameClash) { skipped.push({ name, mobile, reason: "a different karyakarta with this name already exists" }); continue; }
+      if (res.nameClash) { skipped.push({ name, mobile, reason: "a different user with this name already exists" }); continue; }
       const [row] = await query(`SELECT id, campaign_id, name, mobile, worker_code, username, status, contact_id FROM reg_workers WHERE id = ?`, [res.workerId]);
       created.push({ ...row, credentials: { username: cred.username, password: cred.password }, updated: res.updated });
     }

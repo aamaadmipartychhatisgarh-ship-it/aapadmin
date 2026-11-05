@@ -153,7 +153,7 @@ export async function handleRegOtpRequest(token, body) {
       const w = await resolveCampaignWorker(entry.campaign_id, entered);
       if (!w) {
         console.warn(`${tag} precheck: ${maskPhone(entered)} is not a karyakarta of drive ${entry.campaign_id}`);
-        return json({ message: "This mobile number is not registered as a karyakarta for this drive. Please use the number given to your in-charge." }, 403);
+        return json({ message: "This mobile number is not registered as a user for this drive. Please use the number given to your in-charge." }, 403);
       }
       sendTo = entered;
     }
@@ -208,7 +208,7 @@ export async function handleRegOtpVerify(token, body) {
       const entered = phoneKey(body?.mobile);
       const w = entered ? await resolveCampaignWorker(entry.campaign_id, entered) : null;
       if (!w) {
-        return json({ message: "This mobile number is not registered as a karyakarta for this drive." }, 403);
+        return json({ message: "This mobile number is not registered as a user for this drive." }, 403);
       }
       verifyMobile = entered;
       worker = w;

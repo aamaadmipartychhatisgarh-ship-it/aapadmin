@@ -84,7 +84,7 @@ function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols
           summary.cols.map((c) => T([styles.cell, { flex: c.flex }, al(c), c.bold ? styles.bold : null].filter(Boolean), fit(c, c.get(g, i)), { key: c.key })))),
     // Grand-total row: the sum of the groups above (it equals the sum of the worker table that follows).
     summary.groups.length ? React.createElement(View, { style: styles.totalRow, wrap: false }, summary.cols.map((c) => T([styles.cell, { flex: c.flex }, al(c), styles.bold].filter(Boolean), c.total(summary.totals, summary.groups), { key: c.key }))) : null,
-    T(styles.note, `Workers and Voters are the registrations added by the karyakartas mapped to each ${summary.groupLabel}, i.e. the same figures as the Workers and Voters columns of the worker table that follows. Karyakartas = number of workers listed.`),
+    T(styles.note, `Workers and Voters are the registrations added by the users mapped to each ${summary.groupLabel}, i.e. the same figures as the Workers and Voters columns of the worker table that follows. Users = number of workers listed.`),
     footer())] : [];
   return React.createElement(Document, { title },
     ...summaryPages,
@@ -152,7 +152,7 @@ export async function buildWorkerPerformancePdf(rows, { criteria = [], group = n
       cols: [
         { key: "n", label: "#", flex: 0.5, align: "center", get: (g, i) => String(i + 1), total: () => "" },
         { key: "label", label: groupLabel, flex: 3, bold: true, get: (g) => dash(g.label), total: () => "Overall Total" },
-        { key: "karyakartas", label: "Karyakartas", flex: 1.1, align: "center", get: (g) => num(g.karyakartas), total: (t) => num(t.karyakartas) },
+        { key: "karyakartas", label: "Users", flex: 1.1, align: "center", get: (g) => num(g.karyakartas), total: (t) => num(t.karyakartas) },
         { key: "workers", label: "Worker Count", flex: 1.1, align: "center", get: (g) => num(g.new_workers), total: (t) => num(t.new_workers) },
         { key: "voters", label: "Voter Count", flex: 1.1, align: "center", get: (g) => num(g.voters), total: (t) => num(t.voters) },
         { key: "total", label: "Total", flex: 1, align: "center", bold: true, get: (g) => num(g.total), total: (t) => num(t.total) },

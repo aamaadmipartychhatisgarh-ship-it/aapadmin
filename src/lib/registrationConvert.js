@@ -120,7 +120,7 @@ export async function convertRegistrationToContact({ registrationId, userId }) {
     // Details the Contact has no dedicated column for are kept in remarks.
     const remarks = [
       `Converted from Registration #${p.id}`,
-      p.worker_rating != null ? `Karyakarta Rating ${p.worker_rating}/10` : null,
+      p.worker_rating != null ? `User Rating ${p.worker_rating}/10` : null,
       p.worker_role ? `Worker role: ${p.worker_role}` : null,
       p.ward_name || p.ward_number ? `Ward: ${p.ward_name || p.ward_number}` : null,
       p.area_booth ? `Area / Booth: ${p.area_booth}` : null,

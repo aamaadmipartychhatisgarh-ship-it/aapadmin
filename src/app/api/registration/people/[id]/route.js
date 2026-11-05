@@ -56,7 +56,7 @@ export async function PATCH(req, { params }) {
       const rn = parseInt(d.worker_rating, 10);
       if (d.worker_rating === null || d.worker_rating === "") { sets.push("worker_rating = ?"); vals.push(null); }
       else if (Number.isInteger(rn) && rn >= 1 && rn <= 10) { sets.push("worker_rating = ?"); vals.push(rn); }
-      else return NextResponse.json({ message: "Karyakarta Rating must be a whole number from 1 to 10." }, { status: 400, headers: NO_STORE });
+      else return NextResponse.json({ message: "User Rating must be a whole number from 1 to 10." }, { status: 400, headers: NO_STORE });
     }
     if (d.address !== undefined) { sets.push("address = ?"); vals.push(String(d.address || "").trim().slice(0, 2000) || null); }
     if (d.ward_number !== undefined) { sets.push("ward_number = ?"); vals.push(clip(d.ward_number, 60)); }

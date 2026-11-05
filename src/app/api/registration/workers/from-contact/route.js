@@ -122,7 +122,7 @@ export async function POST(req) {
       [campaignId, name]
     );
     if (clash) {
-      return NextResponse.json({ message: `A different karyakarta named "${name}" already has a link. Rename one of them first.` }, { status: 409, headers: NO_STORE });
+      return NextResponse.json({ message: `A different user named "${name}" already has a link. Rename one of them first.` }, { status: 409, headers: NO_STORE });
     }
 
     const passwordHash = await bcrypt.hash(cred.password, 10);

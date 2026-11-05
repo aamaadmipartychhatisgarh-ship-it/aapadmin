@@ -142,7 +142,7 @@ export async function GET(req) {
       }
       csv = toCsv(
         ["Registration Date & Time", "Type", "Name", "Mobile", "Address", "Constituency", "Ward", "Area/Booth",
-         "Wants to be Worker", "Karyakarta Rating", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"],
+         "Wants to be Worker", "User Rating", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"],
         all.map((p) => [
           fmtDateTime(p.registered_at),
           p.person_type === "worker" ? "Wants to be Worker" : "Voter",
@@ -179,11 +179,11 @@ function describeFilters(sp, session) {
   const type = sp.get("person_type");
   if (type === "worker") out.push("Type: Workers"); else if (type === "voter") out.push("Type: Voters");
   const source = sp.get("source");
-  if (source === "worker") out.push("Source: karyakarta link"); else if (source === "direct") out.push("Source: direct via /join");
+  if (source === "worker") out.push("Source: user link"); else if (source === "direct") out.push("Source: direct via /join");
   const status = sp.get("status") || "active";
   out.push(`Status: ${status === "active" ? "Counted" : status === "duplicate" ? "Duplicates" : "Rejected"}`);
   if ((sp.get("search") || "").trim()) out.push(`Search: “${sp.get("search").trim()}”`);
-  if (sp.get("worker_id")) out.push(`Karyakarta id: ${sp.get("worker_id")}`);
+  if (sp.get("worker_id")) out.push(`User id: ${sp.get("worker_id")}`);
   if (isCaller(session)) out.push("Limited to your assigned area");
   return out;
 }
