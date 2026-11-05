@@ -4,7 +4,7 @@ import { PHONE_PICKED_OPTIONS, NOT_ACTIVE_REASONS, UNFILTERED_FOLLOWUP_STATUSES,
 import { UNFILTERED_WRONG_REASONS, unfilteredWrongReasonLabel } from "@/lib/unfilteredWrongReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight, Pencil, X } from "lucide-react";
+import { Play, Square, ListChecks, Users, Loader2, CheckCircle2, History, ChevronRight, Pencil, X, Search } from "lucide-react";
 import CallActionIcons from "@/components/CallActionIcons";
 import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
@@ -30,6 +30,10 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [form, setForm] = useState({ status_id: "", remarks: "", sentiment: "", pp: "", wrong_number_reason: "", follow_up_date: "", follow_up_time: "" });
   const [submitting, setSubmitting] = useState(false);
+  // Phone Number Search: the caller's own records matching a (partial) number, across Follow-ups / Completed / Pending at once.
+  const [phoneQ, setPhoneQ] = useState("");
+  const [sr, setSr] = useState(null);          // { digits, followups, completed, pending } | null
+  const [srErr, setSrErr] = useState("");
   const [fuFilter, setFuFilter] = useState(""); // Follow-ups tab: show only this exact date
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -163,6 +167,23 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
     }
   }, [view, onCounts, fuFilter]);
   useEffect(() => { load(); }, [load]);
+  // Search: re-runs when the typed number changes (debounced) and whenever the lists were re-read (a status / number / assignment
+  // change), so results never go stale. Fewer than 3 digits does not search; clearing restores the normal tabs untouched.
+  const searchDigits = (() => { const t = phoneQ.trim(); let d = t.replace(/\D/g, ""); if (/^\+\s*91/.test(t)) d = d.slice(2); if (d.length > 10) d = d.slice(-10); return d.length >= 3 ? d : ""; })();
+  useEffect(() => {
+    if (!searchDigits) { setSr(null); setSrErr(""); return undefined; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/unfiltered-calls?phone=${encodeURIComponent(phoneQ.trim())}`, { cache: "no-store" });
+        const d = await r.json().catch(() => ({}));
+        if (!alive) return;
+        if (!r.ok) { setSr(null); setSrErr(d.message || "Search failed."); return; }
+        setSr(d.search); setSrErr("");
+      } catch { if (alive) { setSr(null); setSrErr("Search failed."); } }
+    }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [phoneQ, searchDigits, data]);
   // Changes made elsewhere (an admin assigns, reassigns or removes calls) show up without a manual reload: re-read when the tab
   // becomes visible again and every minute, but never while a call is open (the open call and its form are left alone).
   useEffect(() => {
@@ -328,6 +349,38 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const counts = data?.counts || { assigned: 0, completed: 0, pending: 0, active: 0 };
   const calls = data?.calls || [];
   const firstPending = view === "pending" ? calls[0] : null;
+  const renderRow = (c, v) => (
+                <li key={c.id}>
+                  <button
+                    onClick={() => (v === "pending" || v === "followups" ? start(c) : v === "completed" ? openCompleted(c) : null)}
+                    disabled={!!active}
+                    data-testid="uw-row"
+                    title={v === "completed" ? "Open to edit this completed call" : undefined}
+                    className={`w-full text-left flex items-center gap-3 p-2.5 rounded-xl border ${active?.id === c.id ? "border-[#164FA3] bg-blue-50" : "border-gray-100 hover:bg-gray-50"} disabled:cursor-default`}
+                  >
+                    <Avatar name={c.person_name || c.phone_key} size={34} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-sm text-gray-900 truncate">{c.person_name || "Unnamed"}</div>
+                      <div className="text-xs text-gray-500 font-mono" data-testid="uw-row-phone">{c.phone_key}</div>
+                    </div>
+                    {v === "followups"
+                      ? <span className="text-[11px] font-semibold text-[#164FA3]" data-testid="uw-followup-when">Follow up {String(c.follow_up_date).slice(0, 10)}{c.follow_up_time ? ` · ${String(c.follow_up_time).slice(0, 5)}` : ""}</span>
+                      : v === "pending"
+                      ? (Number(c.attempts) > 0 && <span className="text-[10px] font-bold bg-[#FCB712] text-[#164FA3] px-2 py-0.5 rounded-full">RETRY ×{c.attempts}</span>)
+                      : <span className="text-[11px] text-emerald-700 font-semibold">{c.call_status_name}{c.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason}` : ""}{c.call_status_name === "Phone Picked" && c.call_sentiment ? ` · ${phonePickedLabel(c.call_sentiment)}` : ""}</span>}
+                  </button>
+                  {v === "completed" && c.call_status_name === "Phone Picked" && (
+                    <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-1">
+                      <span className="text-[11px] text-gray-500">Phone Picked:</span>
+                      <select value={["active", "opponent", "not_interested"].includes(c.call_sentiment) ? c.call_sentiment : ""} onChange={(e) => changePhonePicked(c.id, e.target.value)} data-testid="uw-picked-edit" aria-label="Change Phone Picked option"
+                        className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white">
+                        {!["active", "opponent", "not_interested"].includes(c.call_sentiment) && <option value="">{c.call_sentiment ? phonePickedLabel(c.call_sentiment) : "Select…"}</option>}
+                        {PHONE_PICKED_OPTIONS.filter((o) => o.value !== "wrong_number").map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </li>
+  );
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300" data-testid="unfiltered-workspace">
@@ -366,6 +419,25 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2"><Users size={16} /> Assigned to You</h3>
           </div>
+          {/* Phone Number Search: above Follow-ups / Completed / Pending. Partial numbers work; spaces, hyphens and +91 are ignored. */}
+          <div className="relative mb-3">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={phoneQ} onChange={(e) => setPhoneQ(e.target.value)} inputMode="tel" placeholder="Search by phone number…" aria-label="Phone Number Search" data-testid="uw-phone-search"
+              className="w-full h-9 pl-8 pr-8 rounded-lg border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-[#164FA3]" />
+            {phoneQ && <button type="button" onClick={() => setPhoneQ("")} aria-label="Clear search" data-testid="uw-phone-clear" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"><X size={14} /></button>}
+          </div>
+          {phoneQ.trim() && !searchDigits && <div className="text-[11px] text-gray-500 mb-2" data-testid="uw-phone-hint">Enter at least 3 digits to search.</div>}
+          {srErr && <div className="text-[11px] text-red-600 mb-2">{srErr}</div>}
+          {searchDigits && sr ? (
+            <div className="space-y-3" data-testid="uw-search-results">
+              {[["followups", "Follow-ups"], ["completed", "Completed Calls"], ["pending", "Pending Calls"]].map(([k, label]) => (
+                <div key={k} data-testid={`uw-sr-${k}`}>
+                  <div className="text-xs font-bold text-gray-700 mb-1">{label} ({sr[k].length})</div>
+                  {sr[k].length === 0 ? <div className="text-[11px] text-gray-400 pl-1">No match</div> : <ul className="space-y-1.5">{sr[k].map((c) => renderRow(c, k))}</ul>}
+                </div>
+              ))}
+            </div>
+          ) : (<>
           <div className="flex gap-1 mb-3">
             {[["pending", `Pending (${counts.pending})`], ["followups", `Follow-ups (${counts.followups || 0})`], ["completed", `Completed (${counts.completed})`]].map(([k, label]) => (
               <button key={k} onClick={() => setView(k)} data-testid={`uw-tab-${k}`}
@@ -388,40 +460,10 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
             <div className="text-gray-400 text-sm py-2">{view === "pending" ? "No pending Unfiltered Calls." : view === "followups" ? (fuFilter ? "No follow-ups for this date." : "No scheduled follow-ups.") : "No completed Unfiltered Calls yet."}</div>
           ) : (
             <ul className="space-y-1.5 max-h-[460px] overflow-y-auto">
-              {calls.map((c) => (
-                <li key={c.id}>
-                  <button
-                    onClick={() => (view === "pending" || view === "followups" ? start(c) : view === "completed" ? openCompleted(c) : null)}
-                    disabled={!!active}
-                    data-testid="uw-row"
-                    title={view === "completed" ? "Open to edit this completed call" : undefined}
-                    className={`w-full text-left flex items-center gap-3 p-2.5 rounded-xl border ${active?.id === c.id ? "border-[#164FA3] bg-blue-50" : "border-gray-100 hover:bg-gray-50"} disabled:cursor-default`}
-                  >
-                    <Avatar name={c.person_name || c.phone_key} size={34} />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-sm text-gray-900 truncate">{c.person_name || "Unnamed"}</div>
-                      <div className="text-xs text-gray-500 font-mono" data-testid="uw-row-phone">{c.phone_key}</div>
-                    </div>
-                    {view === "followups"
-                      ? <span className="text-[11px] font-semibold text-[#164FA3]" data-testid="uw-followup-when">Follow up {String(c.follow_up_date).slice(0, 10)}{c.follow_up_time ? ` · ${String(c.follow_up_time).slice(0, 5)}` : ""}</span>
-                      : view === "pending"
-                      ? (Number(c.attempts) > 0 && <span className="text-[10px] font-bold bg-[#FCB712] text-[#164FA3] px-2 py-0.5 rounded-full">RETRY ×{c.attempts}</span>)
-                      : <span className="text-[11px] text-emerald-700 font-semibold">{c.call_status_name}{c.wrong_number_reason ? ` · ${unfilteredWrongReasonLabel(c.wrong_number_reason) || c.wrong_number_reason}` : ""}{c.call_status_name === "Phone Picked" && c.call_sentiment ? ` · ${phonePickedLabel(c.call_sentiment)}` : ""}</span>}
-                  </button>
-                  {view === "completed" && c.call_status_name === "Phone Picked" && (
-                    <div className="flex items-center gap-2 px-2.5 pb-1.5 pt-1">
-                      <span className="text-[11px] text-gray-500">Phone Picked:</span>
-                      <select value={["active", "opponent", "not_interested"].includes(c.call_sentiment) ? c.call_sentiment : ""} onChange={(e) => changePhonePicked(c.id, e.target.value)} data-testid="uw-picked-edit" aria-label="Change Phone Picked option"
-                        className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white">
-                        {!["active", "opponent", "not_interested"].includes(c.call_sentiment) && <option value="">{c.call_sentiment ? phonePickedLabel(c.call_sentiment) : "Select…"}</option>}
-                        {PHONE_PICKED_OPTIONS.filter((o) => o.value !== "wrong_number").map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                    </div>
-                  )}
-                </li>
-              ))}
+              {calls.map((c) => renderRow(c, view))}
             </ul>
           )}
+          </>)}
         </div>
       </div>
 

@@ -376,12 +376,34 @@ export async function distributeUnfiltered({ byUserId, limit = null, callerId = 
 // Caller side: the caller's own assigned Unfiltered Calls.
 // view: pending (incomplete AND due - a Busy follow-up in the future is hidden until its date/time) | followups
 // (incomplete AND scheduled for later, optionally one exact `date`) | completed | all.
-export async function myUnfilteredCalls(userId, { view = "pending", onlyId = null, date = null } = {}) {
+// Phone Number Search normalisation: the digits of what was typed ("98765 43210", "+91-98765-43210", "098765", "43210"). A country code
+// (+91 / a leading 91 / 0 in front of a full number) is dropped; a PARTIAL number is searched as typed. Returns null when there are
+// fewer than 3 digits (too short to search).
+export function normalizePhoneSearch(raw) {
+  const txt = String(raw ?? "").trim();
+  let d = txt.replace(/\D/g, "");
+  if (/^\+\s*91/.test(txt)) d = d.slice(2);
+  if (d.length > 10) d = d.slice(-10);
+  return d.length >= 3 ? d : null;
+}
+
+// ALL of the caller's assigned records matching a phone number, split by their EXISTING status (a record is in exactly one of the
+// three groups: completed / scheduled follow-up / pending-due), each group read with the same query and ordering as its own tab - so a
+// search never changes a record or its status, and a record is never listed twice (one row per unique unfiltered_contacts.id).
+export async function searchMyUnfilteredCalls(userId, phone) {
+  const d = normalizePhoneSearch(phone);
+  if (!d) return null;
+  const [pending, followups, completed] = await Promise.all(["pending", "followups", "completed"].map((v) => myUnfilteredCalls(userId, { view: v, phoneDigits: d })));
+  return { digits: d, pending: pending.calls, followups: followups.calls, completed: completed.calls, counts: pending.counts };
+}
+
+export async function myUnfilteredCalls(userId, { view = "pending", onlyId = null, date = null, phoneDigits = null } = {}) {
   await ensureUnfilteredCallLogSchema();
   let cond = view === "completed" ? "u.completed_at IS NOT NULL" : view === "all" ? "1=1"
     : view === "followups" ? `u.completed_at IS NULL AND ${laterClause("u", true)}${/^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) ? ` AND u.follow_up_date = '${date}'` : ""}`
     : `u.completed_at IS NULL AND ${dueClause("u", true)}`;
   if (onlyId) cond = `u.id = ${Number(onlyId) || 0}`;
+  const phoneCond = phoneDigits && /^\d{3,10}$/.test(String(phoneDigits)) ? " AND u.phone_key LIKE ?" : "";
   const rows = await query(
     `SELECT u.id, u.person_name, u.phone_number, u.phone_key, u.address, u.designation, u.call_status_id,
             COALESCE(ld.name, u.district_name) AS district, COALESCE(la.name, u.assembly_name) AS assembly,
@@ -395,10 +417,10 @@ export async function myUnfilteredCalls(userId, { view = "pending", onlyId = nul
        LEFT JOIN locations lz ON lz.id = u.zone_id
        LEFT JOIN locations lls ON lls.id = u.lok_sabha_id
        LEFT JOIN locations lw ON lw.id = u.ward_id
-      WHERE u.assigned_to_user_id = ? AND ${cond}
+      WHERE u.assigned_to_user_id = ? AND ${cond}${phoneCond}
       ORDER BY ${view === "completed" ? "u.completed_at DESC" : view === "followups" ? "u.follow_up_date ASC, u.follow_up_time IS NULL ASC, u.follow_up_time ASC, u.id ASC" : "u.assigned_at ASC, u.id ASC"}
       LIMIT 500`,
-    [userId]
+    phoneCond ? [userId, `%${phoneDigits}%`] : [userId]
   );
   const [c] = await query(
     `SELECT COUNT(*) AS assigned, SUM(u.completed_at IS NOT NULL) AS completed,

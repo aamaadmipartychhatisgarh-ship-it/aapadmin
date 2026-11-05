@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { isCaller } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { resolveActingUserId } from "@/lib/actAs";
-import { myUnfilteredCalls } from "@/lib/unfilteredContacts";
+import { myUnfilteredCalls, searchMyUnfilteredCalls } from "@/lib/unfilteredContacts";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -21,6 +21,12 @@ export async function GET(req) {
     }
     const { userId } = await resolveActingUserId(session);
     const sp = new URL(req.url).searchParams;
+    // ?phone=<digits, partial ok>: the caller's own records matching that number, in all three statuses at once.
+    if (sp.has("phone")) {
+      const r = await searchMyUnfilteredCalls(userId, sp.get("phone"));
+      if (!r) return NextResponse.json({ message: "Enter at least 3 digits of the phone number." }, { status: 400, headers: NO_STORE });
+      return NextResponse.json({ search: r }, { headers: NO_STORE });
+    }
     const v = sp.get("view");
     const view = v === "completed" ? "completed" : v === "followups" ? "followups" : "pending";
     return NextResponse.json(await myUnfilteredCalls(userId, { view, date: sp.get("date") }), { headers: NO_STORE });
