@@ -18,6 +18,19 @@ export async function ensureSocialPageSchema() {
     if (Number(rows[0]?.n || 0) === 0) {
       await query(`ALTER TABLE social_pages ADD COLUMN photo_url VARCHAR(512) NULL`);
     }
+    // Dated follower-count snapshots (history of social_pages.followers): see lib/socialFollowers.
+    await query(
+      `CREATE TABLE IF NOT EXISTS social_page_follower_snapshots (
+         id BIGINT AUTO_INCREMENT PRIMARY KEY,
+         page_id INT NOT NULL,
+         snapshot_date DATE NOT NULL,
+         followers INT NOT NULL,
+         source VARCHAR(16) NOT NULL DEFAULT 'update',
+         recorded_by INT NULL,
+         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         UNIQUE KEY uq_page_day (page_id, snapshot_date)
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+    );
     ensured = true;
   } catch (e) {
     console.error("[social] ensureSocialPageSchema:", e?.message || e);

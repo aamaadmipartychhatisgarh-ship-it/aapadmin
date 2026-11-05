@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { canAccessSocial } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
+import { recordFollowerSnapshot } from "@/lib/socialFollowers";
 import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
 
 export async function PUT(req, { params }) {
@@ -35,6 +36,7 @@ export async function PUT(req, { params }) {
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
     vals.push(id);
     await query(`UPDATE social_pages SET ${sets.join(", ")} WHERE id = ?`, vals);
+    if ("followers" in d) await recordFollowerSnapshot(id, Number(d.followers) || 0, "update", session?.user?.id ?? null).catch((e) => console.error("follower snapshot:", e?.message));
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("social-page PUT error:", err);

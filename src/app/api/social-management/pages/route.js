@@ -5,6 +5,7 @@ import { canAccessSocial } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureSocialPageSchema } from "@/lib/socialPageSchema";
+import { recordFollowerSnapshot } from "@/lib/socialFollowers";
 
 // The Social Media Master supports exactly these three networks (BUG 1). Kept in
 // sync with the PLATFORM map in the social-management UI and the
@@ -50,6 +51,7 @@ export async function POST(req) {
       [d.lok_sabha_id || null, lokSabhaName, platform, handle, d.url || null,
        Number(d.followers) || 0, d.managed_by_user_id || null, photoUrl]
     );
+    await recordFollowerSnapshot(res.insertId, Number(d.followers) || 0, "create", session?.user?.id ?? null).catch((e) => console.error("follower snapshot:", e?.message));
     return NextResponse.json({ id: res.insertId }, { status: 201 });
   } catch (err) {
     console.error("social-pages POST error:", err);

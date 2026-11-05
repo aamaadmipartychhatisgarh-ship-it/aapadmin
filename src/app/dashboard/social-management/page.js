@@ -12,6 +12,7 @@ import {
   Bird, CheckCircle2, Calendar,
 } from "lucide-react";
 import SocialDashboardTab from "@/components/social/SocialDashboardTab";
+import FollowersGrowth from "@/components/social/FollowersGrowth";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar from "@/components/Avatar";
 import FollowersMondayReminder from "@/components/social/FollowersMondayReminder";
@@ -424,6 +425,8 @@ function PagesTab({ data, onReload }) {
         </div>
         <button onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 bg-[#164FA3] hover:bg-blue-800 text-white px-3.5 py-2 rounded-lg text-sm font-semibold"><Plus size={15} /> Add Page</button>
       </div>
+
+      <FollowersGrowth />
 
       {groups.map(({ key, meta, items }) => {
         const Icon = meta.icon;
