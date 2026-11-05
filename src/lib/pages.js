@@ -57,8 +57,6 @@ export const PAGES = [
   // page, its sidebar entry, its Dashboard card and every API behave as if it did not exist.
   { key: "amount_expenses", label: "Amount & Expenses", href: "/dashboard/admin/amount-expenses", prefixes: ["/dashboard/admin/amount-expenses"], icon: "TrendingUp",
     roles: [...ADMIN] },
-  { key: "projects", label: "Projects", href: "/dashboard/admin/projects", prefixes: ["/dashboard/admin/projects"], icon: "ClipboardList",
-    roles: [...ADMIN] },
   { key: "vacancies", label: "Designation Vacancies", href: "/dashboard/admin/vacancies", prefixes: ["/dashboard/admin/vacancies"], icon: "UserCog",
     roles: [...OVERSIGHT] },
   { key: "wrong_numbers", label: "Status Management", href: "/dashboard/admin/wrong-numbers", prefixes: ["/dashboard/admin/wrong-numbers"], icon: "AlertCircle",

@@ -580,12 +580,6 @@ export default function DashboardLayout({ children }) {
     const item = { name: "Amount & Expenses", href: "/dashboard/admin/amount-expenses", icon: IndianRupee };
     navItems = at >= 0 ? [...navItems.slice(0, at + 1), item, ...navItems.slice(at + 1)] : [...navItems, item];
   }
-  // Projects (Department / MLA Fund follow-ups): shown to users whose effective pages include "projects".
-  if (!previewing && Array.isArray(allowedPageKeys) && allowedPageKeys.includes("projects") && !navItems.some((i) => i.href === "/dashboard/admin/projects")) {
-    const at = navItems.findIndex((i) => i.href === "/dashboard/admin/contacts");
-    const item = { name: "Projects", href: "/dashboard/admin/projects", icon: ClipboardList };
-    navItems = at >= 0 ? [...navItems.slice(0, at + 1), item, ...navItems.slice(at + 1)] : [...navItems, item];
-  }
   navItems = groupSocialMedia(navItems);
   // Audit Logs lives under Administration (never a standalone main item).
   navItems = nestAuditUnderAdministration(navItems);

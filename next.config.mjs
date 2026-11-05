@@ -19,6 +19,10 @@ const nextConfig = {
   // build-time assets are still served directly and post-deploy uploads fall
   // through to /api/media (which streams the file), fixing the 404s. Every stored
   // `/uploads/...` URL keeps working — no DB change needed.
+  // The Projects module was removed: old bookmarks to its page land on the dashboard. (Its API addresses simply no longer exist.)
+  async redirects() {
+    return [{ source: "/dashboard/admin/projects", destination: "/dashboard/admin", permanent: false }];
+  },
   async rewrites() {
     return {
       afterFiles: [
