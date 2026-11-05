@@ -2,8 +2,8 @@
 // other requests, so it cannot trap the app on a stale/broken page. The one thing it does for page loads is retry the web server's own
 // transient 403 page (see handleNavigation below); every other navigation response goes straight through, uncached.
 
-// v5: a new service-worker file so installed copies update (adds the transient-403 retry; v4 was the AAP rename).
-const CACHE = "aap-v5";
+// v6: a new service-worker file so installed copies update (adds the 403 retry + in-app launcher fallback).
+const CACHE = "aap-v6";
 
 self.addEventListener("install", () => {
   // Activate immediately on first install / update.
@@ -44,6 +44,15 @@ async function handleNavigation(req) {
     try { res = await fetch(req); } catch (e) { break; }
   }
   if (await isServer403(res)) {
+    // Still refused: for an app page, load the in-app launcher instead (it opens the same page from inside the app, with no new
+    // page request for it); anything else, or a launcher that is refused too, gets the retry page.
+    try {
+      const u = new URL(req.url);
+      if (u.pathname === "/dashboard" || u.pathname.startsWith("/dashboard/")) {
+        const alt = await fetch(new Request(u.origin + "/launch?to=" + encodeURIComponent(u.pathname + u.search), { credentials: "same-origin" }));
+        if (alt.ok) return alt;
+      }
+    } catch (e) { /* fall through */ }
     return new Response(RETRY_PAGE, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
   }
   return res;

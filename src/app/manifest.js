@@ -8,7 +8,10 @@ export default function manifest() {
     short_name: "AAP Admin",
     description:
       "Aam Aadmi Party Chhattisgarh — Organization Management Dashboard",
-    start_url: "/dashboard",
+    // The app opens on /launch, which moves into the dashboard INSIDE the app. (Opening /dashboard directly as a fresh page load
+    // is what the hosting server was refusing with its own 403.) `id` stays /dashboard so installed copies keep their identity.
+    id: "/dashboard",
+    start_url: "/launch",
     scope: "/",
     display: "standalone",
     orientation: "portrait-primary",
