@@ -536,17 +536,34 @@ export default function UnfilteredContactsPage() {
             Active = Phone Picked → Active, counted on the day the call was completed. Follow-up = pending records, counted on their scheduled follow-up date.
           </p>
         </div>
+        {/* One row per user, one column per configured status (the same list as the Status filter) + Follow-up + Total. Every column is shown
+            for every user (0 where there is none); on a narrow screen the table scrolls sideways and the User column stays in view. */}
         {counts?.by_user?.length > 0 && (
-          <table className="mt-3 text-sm w-full max-w-md" data-testid="count-by-user">
-            <thead><tr className="text-left text-xs text-gray-500"><th className="py-1 pr-4">User</th><th className="py-1 pr-4">Active</th><th className="py-1">Follow-up</th></tr></thead>
-            <tbody>
-              {counts.by_user.map((r) => (
-                <tr key={r.user_id} className="border-t border-gray-100">
-                  <td className="py-1 pr-4">{r.username}</td><td className="py-1 pr-4 font-semibold">{r.active}</td><td className="py-1 font-semibold">{r.followup}</td>
+          <div className="mt-3 overflow-x-auto border border-gray-100 rounded-lg" data-testid="count-by-user-wrap">
+            <table className="text-sm min-w-max w-full" data-testid="count-by-user">
+              <thead className="bg-gray-50">
+                <tr className="text-left text-xs text-gray-500">
+                  <th className="py-2 px-3 sticky left-0 bg-gray-50 z-10 border-r border-gray-100">User</th>
+                  {(counts.statuses || []).map((st) => <th key={st.value} className="py-2 px-3 text-center whitespace-nowrap" data-testid={`th-${st.value}`}>{st.label}</th>)}
+                  <th className="py-2 px-3 text-center whitespace-nowrap" data-testid="th-followup">Follow-up</th>
+                  <th className="py-2 px-3 text-center whitespace-nowrap" data-testid="th-total">Total</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {counts.by_user.map((r) => (
+                  <tr key={r.user_id} className="border-t border-gray-100" data-testid="count-user-row">
+                    <td className="py-1.5 px-3 font-medium sticky left-0 bg-white z-10 border-r border-gray-100 whitespace-nowrap">{r.username}</td>
+                    {(counts.statuses || []).map((st) => <td key={st.value} className="py-1.5 px-3 text-center font-semibold tabular-nums" data-testid={`c-${st.value}`}>{r.by_status?.[st.value] ?? 0}</td>)}
+                    <td className="py-1.5 px-3 text-center font-semibold tabular-nums" data-testid="c-followup">{r.followup}</td>
+                    <td className="py-1.5 px-3 text-center font-bold tabular-nums" data-testid="c-total">{r.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="px-3 py-2 text-[11px] text-gray-500 border-t border-gray-100">
+              Each count equals the list filtered to that status and user. “Not Active” includes Wrong Number, Opponent and Not Interested; Follow-up is a scheduling flag on pending records, so a record can be in a status and in Follow-up. Total = the user&apos;s assigned unfiltered contacts{dateF ? " that fall on the selected date" : ""}.
+            </p>
+          </div>
         )}
       </div>
 

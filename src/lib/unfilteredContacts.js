@@ -7,7 +7,7 @@ import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 import { photoForGeneralEdit } from "@/lib/contactPhotoUrl";
 import { addressForGeneralEdit } from "@/lib/contactAddress";
 import { UNFILTERED_WRONG_REASON_VALUES } from "@/lib/unfilteredWrongReasons";
-import { PHONE_PICKED_VALUES, UNFILTERED_FOLLOWUP_STATUSES, UNFILTERED_HIDDEN_STATUSES, UNFILTERED_FINAL_STATUSES } from "@/lib/unfilteredPhonePicked";
+import { PHONE_PICKED_VALUES, UNFILTERED_STATUS_FILTERS, UNFILTERED_FOLLOWUP_STATUSES, UNFILTERED_HIDDEN_STATUSES, UNFILTERED_FINAL_STATUSES } from "@/lib/unfilteredPhonePicked";
 import { dueClause, laterClause } from "@/lib/followup";
 import { resolveOrCreateWard } from "@/lib/contactLocation";
 import { releaseOutOfZoneAssignment } from "@/lib/contactZone";
@@ -1171,24 +1171,44 @@ export async function unfilteredActiveFollowupCounts({ userId, day }) {
     query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u WHERE ${A.sql}`, A.params),
     query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u WHERE ${F.sql}`, F.params),
   ]);
-  // Per user (honours the date; a chosen user narrows it to that user).
+  // Per user: EVERY configured Unfiltered status (UNFILTERED_STATUS_FILTERS - the same list and the same conditions the list's Status filter
+  // uses, so a number here equals the list filtered to that status and user), plus Follow-up and the user's total. Every user with assigned
+  // records appears with every column (0 where there is none). One row of unfiltered_contacts = one record, grouped by the assignee id.
+  //   Active / Follow-up keep their definitions above. With a date chosen, any other status counts on the day it was recorded (the day of
+  //   the record's latest call log, else its completion day); without a date nothing is date-limited.
+  await ensureUnfilteredCallLogSchema();
+  const statusDay = `COALESCE((SELECT DATE(MAX(l.created_at)) FROM unfiltered_call_logs l WHERE l.unfiltered_contact_id = u.id), DATE(u.completed_at))`;
+  const cols = [], colParams = [];
+  for (const st of UNFILTERED_STATUS_FILTERS) {
+    const cond = unfilteredStatusCondition(st.value, "u");
+    const dayCond = st.value === "active" ? "DATE(u.completed_at) = ?" : `${statusDay} = ?`;
+    cols.push(`COALESCE(SUM(${cond}${day ? ` AND ${dayCond}` : ""}), 0) AS s_${st.value}`);
+    if (day) colParams.push(day);
+  }
+  const totalExpr = day
+    ? `COALESCE(SUM((${UNFILTERED_ACTIVE_SQL("u")} AND DATE(u.completed_at) = ?) OR (${UNFILTERED_FOLLOWUP_SQL("u")} AND u.follow_up_date = ?) OR ${statusDay} = ?), 0)`
+    : "COUNT(*)";
   const byUser = await query(
     `SELECT u.assigned_to_user_id AS user_id, us.username,
-            SUM(${UNFILTERED_ACTIVE_SQL("u")} ${day ? "AND DATE(u.completed_at) = ?" : ""}) AS active,
-            SUM(${UNFILTERED_FOLLOWUP_SQL("u")} ${day ? "AND u.follow_up_date = ?" : ""}) AS followup
+            ${cols.join(",\n            ")},
+            COALESCE(SUM(${UNFILTERED_FOLLOWUP_SQL("u")} ${day ? "AND u.follow_up_date = ?" : ""}), 0) AS followup,
+            ${totalExpr} AS total
        FROM unfiltered_contacts u LEFT JOIN users us ON us.id = u.assigned_to_user_id
       WHERE u.assigned_to_user_id IS NOT NULL ${userId != null ? "AND u.assigned_to_user_id = ?" : ""}
       GROUP BY u.assigned_to_user_id, us.username
-     HAVING active > 0 OR followup > 0
-      ORDER BY us.username`,
-    [...(day ? [day, day] : []), ...(userId != null ? [userId] : [])]
+      ORDER BY us.username, u.assigned_to_user_id`,
+    [...colParams, ...(day ? [day] : []), ...(day ? [day, day, day] : []), ...(userId != null ? [userId] : [])]
   );
   const users = await query(
     `SELECT DISTINCT u.assigned_to_user_id AS id, us.username FROM unfiltered_contacts u JOIN users us ON us.id = u.assigned_to_user_id ORDER BY us.username`
   );
   return {
     active: Number(a.n), followup: Number(fu.n),
-    by_user: byUser.map((r) => ({ user_id: r.user_id, username: r.username, active: Number(r.active), followup: Number(r.followup) })),
+    statuses: UNFILTERED_STATUS_FILTERS.map(({ value, label }) => ({ value, label })),
+    by_user: byUser.map((r) => ({
+      user_id: r.user_id, username: r.username, active: Number(r.s_active), followup: Number(r.followup), total: Number(r.total),
+      by_status: Object.fromEntries(UNFILTERED_STATUS_FILTERS.map((st) => [st.value, Number(r[`s_${st.value}`]) || 0])),
+    })),
     users,
   };
 }
