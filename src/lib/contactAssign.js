@@ -163,3 +163,60 @@ export async function selfAssignContacts(session, zoneId, contactIds, designatio
     conn.release();
   }
 }
+
+// A CALLER removes contacts from THEIR OWN assignment (Zone Contacts -> Remove Assignment, single or bulk). It only ever clears the
+// assignment relationship on contacts.assigned_to_user_id = the logged-in caller:
+//   - each requested contact is row-locked and re-checked INSIDE its own transaction, and the UPDATE is conditional on
+//     assigned_to_user_id still being this caller, so another caller's (or a reassigned) contact is never touched, and a repeated /
+//     concurrent request removes it at most once;
+//   - only assigned_to_user_id / assigned_at / assigned_by_user_id and this caller's own lock are cleared. The contact's details, Zone /
+//     Assembly mapping, calls, remarks and follow-ups are not touched, and nothing is deleted;
+//   - the active assignment record is closed (history kept) and the removal is audit-logged;
+//   - every contact gets its own outcome, so a partial failure is reported exactly (removed / skipped with a reason / failed).
+export async function removeOwnAssignments(session, contactIds) {
+  const me = Number(session.user.id);
+  const ids = [...new Set((Array.isArray(contactIds) ? contactIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return { status: 400, message: "Select at least one contact." };
+  if (ids.length > 500) return { status: 400, message: "Select at most 500 contacts at a time." };
+  await ensureContactAssignmentsSchema();
+  const stampAt = await contactsHaveAssignedAt();
+  const stampBy = await contactsHaveAssignedBy();
+  const removed = [], skipped = [], failed = [];
+  for (const id of ids) {
+    const conn = await getPool().getConnection();
+    try {
+      await conn.beginTransaction();
+      const [[row]] = await conn.query("SELECT id, assigned_to_user_id FROM contacts WHERE id = ? FOR UPDATE", [id]);
+      if (!row) { await conn.rollback(); skipped.push({ id, reason: "not_found" }); continue; }
+      if (row.assigned_to_user_id == null) { await conn.rollback(); skipped.push({ id, reason: "not_assigned" }); continue; }
+      if (Number(row.assigned_to_user_id) !== me) { await conn.rollback(); skipped.push({ id, reason: "not_yours" }); continue; }
+      const [res] = await conn.query(
+        `UPDATE contacts SET assigned_to_user_id = NULL${stampAt ? ", assigned_at = NULL" : ""}${stampBy ? ", assigned_by_user_id = NULL" : ""},
+                locked_by_user_id = IF(locked_by_user_id = ?, NULL, locked_by_user_id), locked_at = IF(locked_by_user_id = ?, NULL, locked_at)
+          WHERE id = ? AND assigned_to_user_id = ?`,
+        [me, me, id, me]
+      );
+      if (res.affectedRows !== 1) { await conn.rollback(); skipped.push({ id, reason: "not_yours" }); continue; }
+      await endAssignments(conn, [id], "removed_by_caller");
+      await conn.commit();
+      removed.push(id);
+    } catch (e) {
+      await conn.rollback().catch(() => {});
+      console.error("remove assignment failed for", id, e?.message || e);
+      failed.push({ id, reason: "error" });
+    } finally { conn.release(); }
+  }
+  if (removed.length) {
+    logAudit(session, { action: "contact.assignment_removed_by_caller", entityType: "contacts", entityId: null, details: { removed: removed.length, ids: removed.slice(0, 200), caller_id: me } }).catch(() => {});
+    emitLiveEvent(LIVE_EVENTS.CONTACT_ASSIGNED, { count: removed.length });
+  }
+  const cnt = (r) => skipped.filter((x) => x.reason === r).length;
+  const parts = [[cnt("not_yours"), "not assigned to you"], [cnt("not_assigned"), "not assigned to anyone"], [cnt("not_found"), "not found"], [failed.length, "failed (nothing changed for them - try again)"]]
+    .filter(([n]) => n > 0).map(([n, t]) => `${n} ${t}`);
+  return {
+    status: 200, removed: removed.length, removed_ids: removed, skipped, failed,
+    message: removed.length
+      ? `Removed ${removed.length} assignment${removed.length === 1 ? "" : "s"}${parts.length ? `; not removed: ${parts.join(", ")}.` : "."}`
+      : `No assignment was removed${parts.length ? `: ${parts.join(", ")}` : ""}.`,
+  };
+}

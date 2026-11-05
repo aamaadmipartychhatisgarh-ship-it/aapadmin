@@ -59,6 +59,9 @@ export default function ZoneContactsPage() {
   const [picked, setPicked] = useState(() => new Set());
   const [assigning, setAssigning] = useState(false);
   const [notice, setNotice] = useState(null);
+  // Remove Assignment: contacts assigned to THIS caller that are ticked for removal (separate from the pool selection above).
+  const [pickedMine, setPickedMine] = useState(() => new Set());
+  const [removing, setRemoving] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -66,7 +69,7 @@ export default function ZoneContactsPage() {
   }, [status, ready, allowed, router]);
 
   useEffect(() => { const t = setTimeout(() => setSearch(searchInput.trim()), 400); return () => clearTimeout(t); }, [searchInput]);
-  useEffect(() => { setPicked(new Set()); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF]);
+  useEffect(() => { setPicked(new Set()); setPickedMine(new Set()); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF]);
   useEffect(() => { setPage(1); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, pageSize, sortKey, sortDir]);
 
   const qs = useMemo(() => {
@@ -147,6 +150,24 @@ export default function ZoneContactsPage() {
     } catch { setNotice({ err: true, text: "Could not assign the contacts — network error." }); }
     finally { setAssigning(false); }
   }
+  const isMine = (c) => c.assigned_to_user_id != null && String(c.assigned_to_user_id) === String(session?.user?.id);
+  const mineRows = rows.filter(isMine);
+  const togglePickMine = (id) => setPickedMine((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // Single or bulk: always the same endpoint, always after a confirmation that states how many contacts are affected.
+  async function removeAssignments(ids) {
+    if (removing || !ids.length) return;
+    if (!confirm(`Remove the assignment of ${ids.length} contact${ids.length === 1 ? "" : "s"}?\n\nThey go back to the Zone pool. The contacts and their call history are not deleted or changed.`)) return;
+    setRemoving(true); setNotice(null);
+    try {
+      const r = await fetch("/api/zone-contacts/remove-assignment", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contact_ids: ids }) });
+      const d = await r.json().catch(() => ({}));
+      const partial = r.ok && ((d.skipped || []).length > 0 || (d.failed || []).length > 0);
+      setNotice({ err: !r.ok || !d.removed || partial, text: d.message || (r.ok ? "Done." : "Could not remove the assignments.") });
+      setPickedMine((s) => { const n = new Set(s); for (const id of d.removed_ids || []) n.delete(id); return n; });
+      await load();
+    } catch { setNotice({ err: true, text: "Could not remove the assignments — network error." }); }
+    finally { setRemoving(false); }
+  }
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const anyFilter = !!(search || lokSabhaId || districtId || assemblyId || designationId || statusF);
   const clear = () => { setSearchInput(""); setSearch(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setDesignationId(""); setStatusF(""); };
@@ -217,6 +238,12 @@ export default function ZoneContactsPage() {
           </button>
           <span className="text-xs text-gray-500">Tick unassigned, pending contacts of your Zone (filter by Designation first if you like) and assign them to yourself.</span>
           {picked.size > 0 && <button type="button" onClick={() => setPicked(new Set())} className="text-xs text-gray-500 hover:underline" data-testid="zc-pick-clear">Clear selection</button>}
+          <span className="hidden sm:inline text-gray-300">|</span>
+          <button type="button" onClick={() => removeAssignments([...pickedMine])} disabled={!pickedMine.size || removing} data-testid="zc-remove-bulk"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed">
+            {removing ? <Loader2 size={15} className="animate-spin" /> : null} Remove Assignment{pickedMine.size ? ` (${pickedMine.size})` : ""}
+          </button>
+          {mineRows.length > 0 && <button type="button" onClick={() => setPickedMine(pickedMine.size === mineRows.length ? new Set() : new Set(mineRows.map((c) => c.id)))} className="text-xs text-gray-500 hover:underline" data-testid="zc-mine-all">{pickedMine.size === mineRows.length ? "Clear my selection" : `Select my ${mineRows.length} assigned on this page`}</button>}
         </div>
       )}
 
@@ -244,7 +271,8 @@ export default function ZoneContactsPage() {
               ) : rows.map((c) => (
                 <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" data-testid="zc-row" data-id={c.id} onClick={() => setViewing(c)}>
                   <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                    {eligible(c) ? <input type="checkbox" checked={picked.has(c.id)} onChange={() => togglePick(c.id)} aria-label={`Select ${c.person_name}`} data-testid="zc-pick-row" /> : null}
+                    {eligible(c) ? <input type="checkbox" checked={picked.has(c.id)} onChange={() => togglePick(c.id)} aria-label={`Select ${c.person_name}`} data-testid="zc-pick-row" />
+                      : isMine(c) ? <input type="checkbox" checked={pickedMine.has(c.id)} onChange={() => togglePickMine(c.id)} aria-label={`Select ${c.person_name} to remove from your assignment`} data-testid="zc-pick-mine" /> : null}
                   </td>
                   <td className="px-3 py-2.5">
                     <span className="inline-flex items-center gap-2">
@@ -264,7 +292,9 @@ export default function ZoneContactsPage() {
                   <td className="px-3 py-2.5" data-testid="zc-assign-status">
                     {c.is_completed ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Completed</span>
                       : !c.assigned_to_user_id ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Available in Pool</span>
-                      : String(c.assigned_to_user_id) === String(session?.user?.id) ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-[#164FA3]">Assigned to you</span>
+                      : String(c.assigned_to_user_id) === String(session?.user?.id) ? <span className="inline-flex items-center gap-2"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-[#164FA3]">Assigned to you</span>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); removeAssignments([c.id]); }} disabled={removing} data-testid="zc-remove-one"
+                            className="text-[11px] font-semibold px-2 py-0.5 rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-40">Remove Assignment</button></span>
                       : <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700" title="Only a Supervisor / Admin can reassign">Assigned · {c.assigned_to_username || "another user"}</span>}
                   </td>
                   <td className="px-3 py-2.5">
