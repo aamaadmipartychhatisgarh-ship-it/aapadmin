@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  BarChart3, Check, ChevronLeft, ChevronRight, Copy, Download, FileText, Link2, Loader2,
+  BarChart3, Check, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileText, Link2, Loader2,
   MessageCircle, Pencil, Plus, RefreshCw, Search, Settings2, Shield, Trash2, Trophy,
   UserPlus, Users, Vote, X, UserCheck,
 } from "lucide-react";
@@ -726,6 +726,14 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
           onConfirm={confirmRemove}
         />
       )}
+
+      {/* Go to Page: opens the registration page (/join) that every link here leads into - the same address as "Open login" above. */}
+      <div className="flex">
+        <a href="/join" target="_blank" rel="noopener noreferrer" data-testid="go-to-page"
+           className={`${btnCls} border border-gray-300 text-gray-700 bg-white w-full sm:w-auto justify-center`}>
+          <ExternalLink size={16} />Go to Page
+        </a>
+      </div>
 
       <div className={`${cardCls} overflow-hidden`}>
         <div className="overflow-x-auto">
