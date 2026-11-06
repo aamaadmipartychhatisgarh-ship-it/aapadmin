@@ -21,7 +21,11 @@ const nextConfig = {
   // `/uploads/...` URL keeps working — no DB change needed.
   // The Projects module was removed: old bookmarks to its page land on the dashboard. (Its API addresses simply no longer exist.)
   async redirects() {
-    return [{ source: "/dashboard/admin/projects", destination: "/dashboard/admin", permanent: false }];
+    return [
+      { source: "/dashboard/admin/projects", destination: "/dashboard/admin", permanent: false },
+      // Amount & Expenses was removed: old bookmarks land on the dashboard. (Its API addresses simply no longer exist.)
+      { source: "/dashboard/admin/amount-expenses", destination: "/dashboard/admin", permanent: false },
+    ];
   },
   async rewrites() {
     return {

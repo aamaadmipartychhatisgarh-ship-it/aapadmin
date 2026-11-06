@@ -9,9 +9,6 @@ import SummaryDashboard from "@/components/SummaryDashboard";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
 import AssemblyBreakdown from "@/components/AssemblyBreakdown";
 import RfaReviewList from "@/components/RfaReviewList";
-import MaSwitch from "@/components/MaSwitch";
-import MaSummaryCard from "@/components/MaSummaryCard";
-import { useMa } from "@/components/useMa";
 
 // State/Zone/District/Assembly Overview — now a single tabbed page: the daily
 // calling KPIs (Overview), the full chart suite (Analytics, merged in from the
@@ -43,7 +40,6 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [scope, setScope] = useState(null);
   const [tab, setTab] = useState("overview");
-  const ma = useMa();
   const [strength, setStrength] = useState(null);
   const [reportsSummary, setReportsSummary] = useState(null);
   // Actual total contacts, read from the SAME endpoint the Contacts Dashboard
@@ -139,18 +135,12 @@ export default function AdminDashboard() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          {ma.canManage && <MaSwitch enabled={ma.enabled} onChanged={ma.setEnabled} />}
-          {reportLinks.length > 0 && <ReportJumpDropdown links={reportLinks} router={router} />}
-        </div>
+        {reportLinks.length > 0 && <ReportJumpDropdown links={reportLinks} router={router} />}
       </div>
 
       {/* RfA Review List — contacts a Supervisor-2 submitted for Review for Announce
           (Super Admin only; the /api/rfa routes enforce it). */}
       {canonical === ROLES.SUPER_ADMIN && <RfaReviewList compact />}
-
-      {/* Amount & Expenses summary - only while the Admin's MA switch is ON. */}
-      <MaSummaryCard enabled={ma.enabled === true} />
 
       {/* Organizational strength — always visible above the tabs, since this
           (not calling volume) is the primary thing the org tracks. */}

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { getEffectivePageKeys, isPageRestricted } from "@/lib/pageAccess";
-import { isMaEnabled, MA_PAGE_KEY } from "@/lib/maAccess";
 
 // Session-dependent + must never be cached — always compute the CURRENT user's
 // pages fresh from the DB. Without force-dynamic a prerendered/edge-cached
@@ -22,8 +21,6 @@ export async function GET() {
     // retries) — NOT a deceptive empty/role-baseline set that would flash the
     // "no page allotted" screen for a user who actually has pages.
     const keys = await getEffectivePageKeys(session.user.id, session.user.role, { strict: true });
-    // Amount & Expenses exists for users only while the Admin's MA switch is ON.
-    if (!(await isMaEnabled())) keys.delete(MA_PAGE_KEY);
     const restricted = await isPageRestricted(session, { strict: true });
     // Permission-trace log (per ticket): the EXACT page set this API returns for
     // this user. If the sidebar/route shows more than this, the divergence is on
