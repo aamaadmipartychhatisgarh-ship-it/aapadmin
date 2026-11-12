@@ -54,11 +54,6 @@ const SUPERVISOR_NAV = [
       { name: "Status Management", href: "/dashboard/admin/wrong-numbers", icon: AlertCircle },
     ],
   },
-  // Pending Approval — caller-submitted contacts the Supervisor reviews (approve /
-  // reject). A top-level row (not buried in the collapsed Contacts group) so it is
-  // visible the moment a Supervisor logs in. Same route and "pending_contacts"
-  // Page-Access key as before; Admin menus are unchanged.
-  { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
   // Influencers — its own route and "influencers" page-access key (baseline for
   // Supervisors); shown inside Contacts by nestInfluencersUnderContacts().
   { name: "Influencers", href: "/dashboard/admin/influencers", icon: Star },
@@ -268,7 +263,7 @@ export default function DashboardLayout({ children }) {
 
   // H1 — the generic landing route (/dashboard) resolves to the "dashboard" page
   // key, which is NOT in an auto-provisioned portal/worker account's granted set
-  // (portal_home, portal_announcements, pending_contacts). Without this, such a
+  // (portal_home, portal_announcements). Without this, such a
   // user would be greeted by the red Access-Denied screen on first login. Redirect
   // them straight to their first allowed page instead. Scoped to EXACTLY
   // "/dashboard" so deep links to other unassigned pages still show Access Denied,
@@ -349,7 +344,6 @@ export default function DashboardLayout({ children }) {
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
         { name: "Unfiltered Contact", href: "/dashboard/admin/unfiltered-contacts", icon: Users },
         // Caller-submitted contacts awaiting review (same page Supervisors use).
-        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
         // Contacts a Supervisor-2 submitted for Review for Announce (Super Admin only).
         { name: "RfA Review", href: "/dashboard/admin/rfa", icon: ClipboardList },
       ] },
@@ -392,7 +386,6 @@ export default function DashboardLayout({ children }) {
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
         { name: "Unfiltered Contact", href: "/dashboard/admin/unfiltered-contacts", icon: Users },
         // Caller-submitted contacts awaiting review (same page Supervisors use).
-        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       ...DESIGNATION_ITEMS,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -418,7 +411,6 @@ export default function DashboardLayout({ children }) {
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
         { name: "Unfiltered Contact", href: "/dashboard/admin/unfiltered-contacts", icon: Users },
         // Caller-submitted contacts awaiting review (same page Supervisors use).
-        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       ...DESIGNATION_ITEMS,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -441,7 +433,6 @@ export default function DashboardLayout({ children }) {
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
         { name: "Unfiltered Contact", href: "/dashboard/admin/unfiltered-contacts", icon: Users },
         // Caller-submitted contacts awaiting review (same page Supervisors use).
-        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       ...DESIGNATION_ITEMS,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },
@@ -464,7 +455,6 @@ export default function DashboardLayout({ children }) {
         { name: "Active Workers", href: "/dashboard/admin/active-workers", icon: Users },
         { name: "Unfiltered Contact", href: "/dashboard/admin/unfiltered-contacts", icon: Users },
         // Caller-submitted contacts awaiting review (same page Supervisors use).
-        { name: "Pending Approval", href: "/dashboard/supervisor/pending-contacts", icon: Check },
       ] },
       ...DESIGNATION_ITEMS,
       { name: "Number Corrections", href: "/dashboard/admin/number-corrections", icon: Flag },

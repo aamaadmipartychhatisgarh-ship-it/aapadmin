@@ -120,7 +120,7 @@ export async function notWrongNumberClause(alias = "c") {
 // optional columns carry this: `approval_status` ('pending' | 'rejected' | NULL =
 // live/approved) and `created_by_user_id` (the caller who added it). A pending OR
 // rejected contact must stay OUT of every live list / queue / assignment, exactly
-// like the Wrong Number flag — surfacing only in the Pending Approval queue.
+// like the Wrong Number flag — kept out of every live list.
 let _approvalCol; // undefined = unknown; cached true once seen. false/undefined re-detect.
 export async function hasApprovalStatusColumn() {
   // Only a TRUE result is cached permanently. A false/undefined result is re-checked

@@ -66,19 +66,6 @@ export const PLUGIN_CATALOG = [
     pending: [],
   },
   {
-    key: "pending_contacts", name: "Pending Contact Approval", icon: "Check",
-    purpose: "Supervisor gate for caller-added people.",
-    benchmark: "CRM lead-approval queue", verdict: "meet",
-    scores: { aap: [88, 94, 95, 93], best: [90, 62, 50, 90] },
-    features: [
-      f("Caller submissions held out of live lists"),
-      f("Queue scoped to the supervisor's territory"),
-      f("Approve → goes live; Reject → removed and phone freed"),
-      f("Server-side authorisation (no client-only gate)"),
-    ],
-    pending: [],
-  },
-  {
     key: "portal_home", name: "Member Portal", icon: "LayoutDashboard",
     purpose: "Self-serve portal for designation holders.",
     benchmark: "NationBuilder profiles", verdict: "meet",

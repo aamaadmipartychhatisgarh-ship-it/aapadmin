@@ -19,14 +19,6 @@ const nextConfig = {
   // build-time assets are still served directly and post-deploy uploads fall
   // through to /api/media (which streams the file), fixing the 404s. Every stored
   // `/uploads/...` URL keeps working — no DB change needed.
-  // The Projects module was removed: old bookmarks to its page land on the dashboard. (Its API addresses simply no longer exist.)
-  async redirects() {
-    return [
-      { source: "/dashboard/admin/projects", destination: "/dashboard/admin", permanent: false },
-      // Amount & Expenses was removed: old bookmarks land on the dashboard. (Its API addresses simply no longer exist.)
-      { source: "/dashboard/admin/amount-expenses", destination: "/dashboard/admin", permanent: false },
-    ];
-  },
   async rewrites() {
     return {
       afterFiles: [
@@ -50,6 +42,10 @@ const nextConfig = {
       // The standalone Map page was merged into the dashboard (SummaryDashboard);
       // send the old URL to the dashboard, which role-routes to the right page.
       { source: "/dashboard/map", destination: "/dashboard", permanent: true },
+      // Removed modules: old bookmarks land on the dashboard (their API addresses no longer exist).
+      { source: "/dashboard/admin/projects", destination: "/dashboard/admin", permanent: false },
+      { source: "/dashboard/admin/amount-expenses", destination: "/dashboard/admin", permanent: false },
+      { source: "/dashboard/supervisor/pending-contacts", destination: "/dashboard", permanent: false },
       // The Daily Assignment module (assignment-rules) was removed; its old URLs
       // go to the dashboard (role-routed). The assignment_rules table and the
       // workspace's use of it (Call Assignment) are intentionally kept.

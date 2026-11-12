@@ -127,7 +127,7 @@ export async function GET(req) {
       // out of the main list (they live on the dedicated "10+ Times …" pages).
       where += await repeatOffExclusion("c");
       // Caller-created contacts awaiting (or refused in) Supervisor approval are not
-      // live yet — they live only in the Pending Approval queue.
+      // live yet — they stay out of every live list.
       where += await notPendingClause("c");
     }
     // Zone / Lok Sabha / District / Assembly / Designation — filter by the PERSON

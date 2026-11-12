@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isCaller, isOversight, isSupervisorRole } from "@/lib/permissions";
+import { isCaller, isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
-import { pendingContactScope } from "@/lib/pendingContactScope";
 import { query } from "@/lib/db";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
@@ -26,8 +25,8 @@ async function contactCols() {
 }
 
 // POST /api/contacts/pending — a CALLER (or oversight) submits a new contact that
-// does NOT go live: it is stored with approval_status = 'pending' and surfaces only
-// in the Supervisor "Pending Approval" queue until approved. Same fields as the
+// does NOT go live: it is stored with approval_status = 'pending' and is kept out of
+// every live list (approval_status = pending). Same fields as the
 // normal Add Contact form; duplicate-phone is still rejected up front.
 export async function POST(req) {
   try {
@@ -109,40 +108,21 @@ export async function POST(req) {
   }
 }
 
-// GET /api/contacts/pending — two uses:
-//   • ?mine=1 — the signed-in user's OWN submissions (any status: pending /
-//     approved / rejected, with the reviewer's decision), so a caller can follow
-//     what happened to what they added. Any signed-in user, own rows only.
-//   • otherwise — the Supervisor/oversight review queue (?status=pending|rejected),
-//     scoped to the viewer's territory.
+// GET /api/contacts/pending?mine=1 — the signed-in user's OWN submissions (any status: pending / approved / rejected, with the
+// reviewer's decision), so a caller can follow what happened to what they added. Own rows only. (The Supervisor review queue that this
+// endpoint also served was removed together with the Pending Approval page; without ?mine=1 the endpoint no longer exists.)
 export async function GET(req) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
     const url = new URL(req.url);
-    const mine = url.searchParams.get("mine") === "1";
-    if (!mine && !(await pageAllowed(session, "pending_contacts", isOversight(session) || isSupervisorRole(session)))) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401, headers: NO_STORE });
-    }
+    if (url.searchParams.get("mine") !== "1") return NextResponse.json({ message: "Not found" }, { status: 404, headers: NO_STORE });
     if (!(await ensureContactApprovalColumns())) {
       return NextResponse.json({ contacts: [] }, { headers: NO_STORE });
     }
 
-    let where;
-    const params = [];
-    if (mine) {
-      where = " WHERE c.created_by_user_id = ? AND c.approval_status IN ('pending','approved','rejected')";
-      params.push(session.user.id);
-    } else {
-      const statusF = ["pending", "rejected"].includes(url.searchParams.get("status")) ? url.searchParams.get("status") : "pending";
-      where = " WHERE c.approval_status = ?";
-      params.push(statusF);
-      // Territory scope — a Supervisor/sub-admin/portal member sees only pending
-      // contacts in their own area; super/state admins see all (shared helper, so the
-      // list and the approve/reject mutation enforce exactly the same boundary).
-      const scope = pendingContactScope(session, "c");
-      if (scope.where) { where += " " + scope.where; params.push(...scope.params); }
-    }
+    const where = " WHERE c.created_by_user_id = ? AND c.approval_status IN ('pending','approved','rejected')";
+    const params = [session.user.id];
 
     const rows = await query(
       `SELECT c.id, c.person_name, c.phone_number, c.address, c.photo_url, c.approval_status,
