@@ -126,13 +126,20 @@ export const DESIGNATION_NAMES_SQL =
 //   2. else a Wing the contact is tagged with (contact_wings) that this designation belongs to (designation_wings);
 //   3. else the designation's own Wing in the Designation master;
 //   4. else the Main wing (Wing master, is_main = 1).
+// Tables created at different times (imported vs created by the app) can carry different collations
+// (utf8mb4_general_ci / utf8mb4_unicode_ci / utf8mb4_0900_ai_ci); comparing or COALESCE-ing their text
+// columns directly then fails with "Illegal mix of collations". Every Wing value is brought to ONE explicit
+// collation (available on MySQL and MariaDB) before it is compared or combined.
+export const WING_COLLATE = (x) => `(CONVERT(${x} USING utf8mb4) COLLATE utf8mb4_unicode_ci)`;
+
 export function effectiveWingSql(cd = "cd", d = "d") {
-  return `COALESCE(NULLIF(TRIM(${cd}.wing), ''),
-    (SELECT ewcw.wing FROM contact_wings ewcw JOIN designation_wings ewdw ON ewdw.wing = ewcw.wing AND ewdw.designation_id = ${cd}.designation_id
+  const W = WING_COLLATE;
+  return `COALESCE(${W(`NULLIF(TRIM(${cd}.wing), '')`)},
+    (SELECT ${W("ewcw.wing")} FROM contact_wings ewcw JOIN designation_wings ewdw ON ${W("ewdw.wing")} = ${W("ewcw.wing")} AND ewdw.designation_id = ${cd}.designation_id
       WHERE ewcw.contact_id = ${cd}.contact_id ORDER BY ewcw.id LIMIT 1),
-    NULLIF(TRIM(${d}.wing), ''),
-    (SELECT ewm.name FROM wings ewm WHERE ewm.is_main = 1 ORDER BY ewm.id LIMIT 1),
-    'Main Organisation')`;
+    ${W(`NULLIF(TRIM(${d}.wing), '')`)},
+    (SELECT ${W("ewm.name")} FROM wings ewm WHERE ewm.is_main = 1 ORDER BY ewm.id LIMIT 1),
+    ${W("'Main Organisation'")})`;
 }
 
 // Every Designation–Wing pair a contact holds, one entry per contact_designations row (so a contact is ONE list
@@ -144,7 +151,7 @@ const PAIR_US = "'\u001f'";
 const PAIR_RS = "'\u001e'";
 export const DESIGNATION_WING_PAIRS_SQL =
   `(SELECT GROUP_CONCAT(CONCAT(dp.id, ${PAIR_US}, dp.name, ${PAIR_US}, ${effectiveWingSql("cdp", "dp")}, ${PAIR_US},
-              IF(${effectiveWingSql("cdp", "dp")} IN (SELECT pm.name FROM wings pm WHERE pm.is_main = 1) OR LOWER(${effectiveWingSql("cdp", "dp")}) IN ('main', 'main organisation', 'main organisations', 'main organization', 'main organizations'), 1, 0))
+              IF(${effectiveWingSql("cdp", "dp")} IN (SELECT ${WING_COLLATE("pm.name")} FROM wings pm WHERE pm.is_main = 1) OR LOWER(${effectiveWingSql("cdp", "dp")}) IN ('main', 'main organisation', 'main organisations', 'main organization', 'main organizations'), 1, 0))
             ORDER BY (dp.sort_order IS NULL), dp.sort_order, dp.name SEPARATOR ${PAIR_RS})
       FROM contact_designations cdp JOIN designations dp ON dp.id = cdp.designation_id
      WHERE cdp.contact_id = c.id)`;
@@ -167,6 +174,28 @@ export function parseDesignationWingList(raw) {
     out.push({ designation_id: Number(id) || null, designation: d, wing: w, wing_label: wingShortLabel(w, isMain), is_main: isMain });
   }
   return out;
+}
+
+// Attach `designation_wing_list` to already-loaded contact rows in ONE separate query, so the Designation–Wing
+// display can never take the Contact List (or an export) down with it: if this lookup fails for any reason the
+// rows are still returned, each falling back to its plain designation names. `key` = the row's contact id field.
+export async function attachDesignationWingLists(rows, key = "id") {
+  for (const r of rows) r.designation_wing_list = [];
+  const ids = [...new Set(rows.map((r) => Number(r[key])).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return rows;
+  try {
+    const byId = new Map();
+    for (let i = 0; i < ids.length; i += 1000) {
+      const chunk = ids.slice(i, i + 1000);
+      // eslint-disable-next-line no-await-in-loop
+      const res = await query(`SELECT c.id, ${DESIGNATION_WING_PAIRS_SQL} AS p FROM contacts c WHERE c.id IN (${chunk.map(() => "?").join(",")})`, chunk);
+      for (const x of res) byId.set(Number(x.id), x.p);
+    }
+    for (const r of rows) r.designation_wing_list = parseDesignationWingList(byId.get(Number(r[key])));
+  } catch (e) {
+    console.error("[contacts] designation-wing pairs unavailable:", e?.message || e);
+  }
+  return rows;
 }
 
 // Export cell: Main first, then the Wings — "Main – Vidhansabha Prabhari; Mahila – Lok Sabha Adhyaksh".

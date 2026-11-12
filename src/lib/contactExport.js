@@ -5,7 +5,7 @@ import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@
 import React from "react";
 import { query } from "@/lib/db";
 import { photosToDataUris } from "@/lib/photoDataUri";
-import { DESIGNATION_NAMES_SQL, DESIGNATION_WING_PAIRS_SQL, ensureContactDesignationsSchema, effectiveWingSql, parseDesignationWingList, designationWingText } from "@/lib/contactDesignations";
+import { DESIGNATION_NAMES_SQL, ensureContactDesignationsSchema, attachDesignationWingLists, designationWingText } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { wingShortLabel } from "@/lib/wingLabel";
 import { qualificationLabel as qualOnly } from "@/lib/qualificationOptions";
@@ -36,16 +36,9 @@ export async function fetchContactExportRows(where, params, orderBy) {
   // The Wing columns read contact_designations.wing / contact_wings / designation_wings - make sure they exist.
   await ensureContactDesignationsSchema();
   await ensureContactWingsSchema();
-  return query(
+  const rows = await query(
     `SELECT c.*,
             lw.name AS block_name,
-            -- Wing of EACH designation, in the same order as the Designation column (its paired Wing, else the
-            -- Wing the contact already holds that the designation belongs to, else Main Organisation).
-            (SELECT GROUP_CONCAT(${effectiveWingSql("cdw", "ddw")}
-                    ORDER BY (ddw.sort_order IS NULL), ddw.sort_order, ddw.name SEPARATOR ', ')
-               FROM contact_designations cdw JOIN designations ddw ON ddw.id = cdw.designation_id WHERE cdw.contact_id = c.id) AS aligned_wings,
-            -- Every Designation–Wing pair, for the "Designation with Wing" column.
-            ${DESIGNATION_WING_PAIRS_SQL} AS designation_wing_pairs,
             (SELECT GROUP_CONCAT(cw2.wing ORDER BY cw2.id SEPARATOR ', ') FROM contact_wings cw2 WHERE cw2.contact_id = c.id) AS all_wings,
             w.photo_url AS worker_photo_url,
             u.username AS assigned_caller_name,
@@ -74,6 +67,8 @@ export async function fetchContactExportRows(where, params, orderBy) {
        ORDER BY ${order}`,
     params
   );
+  // Designation–Wing pairs in a SEPARATE query (an export never fails because of them).
+  return attachDesignationWingLists(rows);
 }
 
 // "DD-MM-YYYY HH:mm" in the application timezone. `dateOnly` drops the time for
@@ -94,18 +89,17 @@ function fmt(v, dateOnly = false) {
 // Designation order is the contact's list order; the aligned Wing list matches it 1:1. Wing tags the contact
 // holds that belong to no designation row are appended (so every saved Wing is exported).
 function wingCell(c) {
-  const aligned = String(c.aligned_wings || "").split(", ").filter(Boolean);
-  const have = new Set(aligned.map((w) => w.toLowerCase()));
-  const extra = String(c.all_wings || "").split(", ").filter((w) => w && !have.has(w.toLowerCase()));
-  // Display names ("Main", "Mahila", …) — the stored Wing names are unchanged.
+  // Wing of each designation (from the Designation–Wing pairs), then saved Wing tags with no designation.
+  const aligned = (c.designation_wing_list || []).map((p) => p.wing_label || wingShortLabel(p.wing, p.is_main));
+  const extra = String(c.all_wings || "").split(", ").filter(Boolean).map((w) => wingShortLabel(w));
   // Each Wing once (the "Designation with Wing" column carries the per-designation mapping).
-  return [...new Set([...aligned, ...extra].map((w) => wingShortLabel(w)))].join(", ");
+  return [...new Set([...aligned, ...extra])].join(", ");
 }
 
 // The contact's Designation–Wing pairs joined by "; " (falls back to the plain designation for a contact that holds
 // no designation rows of its own, e.g. a legacy worker-position designation).
 function designationWingCell(c) {
-  const text = designationWingText(parseDesignationWingList(c.designation_wing_pairs));
+  const text = designationWingText(c.designation_wing_list);
   return text || c.designation_name || "";
 }
 
