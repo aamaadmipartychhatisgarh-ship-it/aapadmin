@@ -22,6 +22,9 @@ export async function GET(req) {
     const q = String(searchParams.get("q") || "").trim();
     const pageSize = Math.min(200, Math.max(1, Number(searchParams.get("pageSize")) || 50));
     const page = Math.max(1, Number(searchParams.get("page")) || 1);
+    // ?all=1 (User-wise Print): EVERY record matching the very same filters, not one page - capped so a runaway request cannot exhaust memory.
+    const PRINT_MAX = 20000;
+    const allMode = searchParams.get("all") === "1";
 
     const where = [];
     const params = [];
@@ -57,7 +60,7 @@ export async function GET(req) {
          LEFT JOIN unfiltered_import_batches b ON b.id = u.import_batch_id
          ${whereSql}
         ORDER BY u.id DESC
-        LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+        ${allMode ? `LIMIT ${PRINT_MAX}` : `LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`}`,
       params
     );
     const [{ n: assignedN }] = await query(`SELECT COUNT(*) AS n FROM unfiltered_contacts u ${whereSql ? `${whereSql} AND` : "WHERE"} u.assigned_to_user_id IS NOT NULL`, params);
@@ -67,7 +70,7 @@ export async function GET(req) {
          FROM unfiltered_import_batches b LEFT JOIN users us ON us.id = b.imported_by
         ORDER BY b.id DESC LIMIT 10`
     );
-    return NextResponse.json({ contacts: rows, total: Number(n), all_total: Number(all), assigned_total: Number(assignedN), page, pageSize, batches }, { headers: NO_STORE });
+    return NextResponse.json({ contacts: rows, truncated: allMode && Number(n) > rows.length, total: Number(n), all_total: Number(all), assigned_total: Number(assignedN), page, pageSize, batches }, { headers: NO_STORE });
   } catch (err) {
     console.error("unfiltered-contacts GET error:", err);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

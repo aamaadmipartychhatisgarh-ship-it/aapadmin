@@ -5,7 +5,7 @@ import { UNFILTERED_STATUS_FILTERS, phonePickedLabel } from "@/lib/unfilteredPho
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Loader2, Upload, Search, X, ChevronLeft, ChevronRight, ListFilter, Headphones, Shuffle, RefreshCw } from "lucide-react";
+import { Loader2, Upload, Search, X, ChevronLeft, ChevronRight, ListFilter, Headphones, Shuffle, RefreshCw, Printer } from "lucide-react";
 import * as XLSX from "xlsx";
 import PageHeader from "@/components/PageHeader";
 import { ImportModal } from "@/components/contacts/ContactsModule";
@@ -347,6 +347,68 @@ export default function UnfilteredContactsPage() {
     }
   }
 
+  // USER-WISE PRINT: every record matching the CURRENT filters (user, date, status, search) - read from the server across all pages with the
+  // same query as the list (?all=1) - laid out for A4 in a print window that opens the browser's print dialog.
+  const [printing, setPrinting] = useState(false);
+  async function printList() {
+    if (printing) return;
+    const w = window.open("", "_blank");          // opened inside the click so pop-up blockers allow it
+    if (!w) { setNotice({ err: true, text: "Your browser blocked the print window. Allow pop-ups for this site and try again." }); return; }
+    w.document.write("<p style='font-family:sans-serif'>Preparing the print view…</p>");
+    setPrinting(true);
+    try {
+      const p = new URLSearchParams({ all: "1" });
+      if (search) p.set("q", search);
+      if (statusF) p.set("status", statusF);
+      if (userF) p.set("user", userF);
+      if (dateF) p.set("date", dateF);
+      const r = await fetch(`/api/unfiltered-contacts?${p}`, { cache: "no-store" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { w.close(); setNotice({ err: true, text: d.message || "Could not prepare the print view." }); return; }
+      const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      const userName = userF ? ((counts?.users || []).find((u) => String(u.id) === String(userF))?.username || `User #${userF}`) : "All users";
+      const statusLabel = statusF ? (UNFILTERED_STATUS_FILTERS.find((o) => o.value === statusF)?.label || statusF) : "All statuses";
+      const filters = [`User: ${userName}`, `Date: ${dateF ? dateF.split("-").reverse().join("/") : "All dates"}`, `Status: ${statusLabel}`, `Search: ${search ? search : "—"}`];
+      const stat = (r) => `${r.call_status_name ? (r.call_status_name === "Phone Picked" && r.call_sentiment ? phonePickedLabel(r.call_sentiment) : r.call_status_name) : "—"}${r.follow_up_date ? ` (Follow-up ${String(r.follow_up_date).slice(0, 10)})` : ""}`;
+      const rowsHtml = (d.contacts || []).map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.person_name || "—")}</td><td class="m">${esc(r.phone_key)}</td><td>${esc(r.district || "—")}</td><td>${esc(r.assembly || "—")}</td><td>${esc(r.designation || "—")}</td><td>${esc(r.address || "—")}</td><td>${esc(stat(r))}</td><td>${esc(fmtDate(r.created_at))}</td><td>${esc(r.assigned_to || "Unassigned")}</td></tr>`).join("");
+      w.document.open();
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Unfiltered Contacts - ${esc(userName)}</title>
+<style>
+@page { size: A4 landscape; margin: 10mm; }
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { font-family: Arial, "Noto Sans", sans-serif; font-size: 10px; color: #111; margin: 0; }
+h1 { font-size: 16px; margin: 0 0 2px; color: #164FA3; }
+.sub { font-size: 10.5px; color: #333; margin: 0 0 2px; }
+.meta { font-size: 9.5px; color: #555; margin: 0 0 8px; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; break-inside: avoid; }
+th { background: #e8eef8; color: #0b2e66; text-align: left; font-size: 9.5px; padding: 4px 5px; border-top: 1.5px solid #164FA3; border-bottom: 1.5px solid #164FA3; }
+td { border-bottom: 1px solid #d9dee7; padding: 3px 5px; vertical-align: top; word-wrap: break-word; overflow-wrap: anywhere; }
+tbody tr:nth-child(even) td { background: #f5f7fb; }
+td.m { font-family: "Courier New", monospace; white-space: nowrap; }
+col.n { width: 4%; } col.nm { width: 13%; } col.ph { width: 9%; } col.d { width: 10%; } col.a { width: 10%; } col.ds { width: 10%; } col.ad { width: 18%; } col.st { width: 12%; } col.im { width: 7%; } col.as { width: 7%; }
+.warn { color: #b45309; font-weight: bold; margin-bottom: 6px; }
+@media print { .noprint { display: none; } }
+.noprint { margin: 0 0 8px; } .noprint button { padding: 6px 14px; font-size: 12px; }
+</style></head><body>
+<div class="noprint"><button onclick="window.print()">Print</button></div>
+<h1>Unfiltered Contacts — ${esc(userName)}</h1>
+<p class="sub">${filters.map(esc).join(" &nbsp;·&nbsp; ")}</p>
+<p class="meta">${(d.contacts || []).length} contact${(d.contacts || []).length === 1 ? "" : "s"} · printed ${esc(new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" }))}</p>
+${d.truncated ? `<p class="warn">Only the first ${(d.contacts || []).length} of ${d.total} matching contacts are shown - narrow the filters to print the rest.</p>` : ""}
+<table><colgroup><col class="n"><col class="nm"><col class="ph"><col class="d"><col class="a"><col class="ds"><col class="ad"><col class="st"><col class="im"><col class="as"></colgroup>
+<thead><tr><th>#</th><th>Name</th><th>Phone Number</th><th>District</th><th>Assembly</th><th>Designation</th><th>Address</th><th>Status</th><th>Imported</th><th>Assigned to</th></tr></thead>
+<tbody>${rowsHtml || '<tr><td colspan="10" style="text-align:center;padding:12px">No contacts match these filters.</td></tr>'}</tbody></table>
+<script>window.onload = function () { setTimeout(function () { window.focus(); window.print(); }, 300); };</script>
+</body></html>`);
+      w.document.close();
+    } catch {
+      try { w.close(); } catch {}
+      setNotice({ err: true, text: "Could not prepare the print view — network error." });
+    } finally { setPrinting(false); }
+  }
+
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
     else if (ready && !allowed) router.push("/dashboard");
@@ -515,6 +577,10 @@ export default function UnfilteredContactsPage() {
         <input type="date" value={dateF} onChange={(e) => setDateF(e.target.value)} aria-label="Date" data-testid="unfiltered-date-filter"
           className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white" />
         {(userF || dateF) && <button type="button" onClick={() => { setUserF(""); setDateF(""); }} data-testid="unfiltered-clear-filters" className="text-xs text-gray-500 hover:underline">Clear user/date</button>}
+        <button type="button" onClick={printList} disabled={printing} data-testid="unfiltered-print" title="Print every contact matching the filters above (all pages)"
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50">
+          {printing ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Print{userF ? " user list" : ""}
+        </button>
         <div className="text-sm text-gray-500" data-testid="unfiltered-total">
           {search || statusF || userF || dateF ? <>{total} match{total === 1 ? "" : "es"} · </> : null}<span className="font-semibold text-gray-900">{data?.all_total ?? 0}</span> unfiltered contact{data?.all_total === 1 ? "" : "s"}
         </div>
