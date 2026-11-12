@@ -65,7 +65,7 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
                   reload().then((list) => { const d = list?.find((x) => String(x.id) === String(r.designation_id)); if (d && !inWing(d, w)) apply(list); });   // refresh the options from Master Data
                 }}>
                 {wings.length === 0 && <option value="">Main</option>}
-                {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{wingShortLabel(w.name)}</option>)}
+                {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{wingShortLabel(w.name, Number(w.is_main) === 1)}</option>)}
               </select>
             </div>
             <div>

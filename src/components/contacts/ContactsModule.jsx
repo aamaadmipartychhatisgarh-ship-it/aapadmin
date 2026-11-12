@@ -89,6 +89,53 @@ const MODES = {
   },
 };
 
+// Designation + Wing for one Contact List row, grouped: Main designations, then "Wing – Designation" for each other Wing.
+function DesignationWingList({ contact: c }) {
+  const pairs = Array.isArray(c.designation_wing_list) ? c.designation_wing_list : [];
+  const main = pairs.filter((p) => p.is_main);
+  const other = pairs.filter((p) => !p.is_main);
+  // Saved Wing tags with no designation under them (never repeats a Wing already shown with a designation).
+  const used = new Set(pairs.map((p) => (p.is_main ? "\u0001main" : String(p.wing).toLowerCase())));
+  const tags = [];
+  for (const w of String(c.wings || "").split(",").map((x) => x.trim()).filter(Boolean)) {
+    const label = wingShortLabel(w);
+    const key = label === "Main" ? "\u0001main" : w.toLowerCase();
+    if (used.has(key)) continue;
+    used.add(key);
+    tags.push({ wing: w, label });
+  }
+  if (!pairs.length && !tags.length) return c.designation_name || "—";
+  const head = "text-[11px] font-semibold text-gray-500";
+  return (
+    <div className="flex flex-col gap-1 min-w-[180px]">
+      {!pairs.length && c.designation_name ? <span>{c.designation_name}</span> : null}
+      {main.length > 0 && (
+        <div data-testid="dw-main">
+          <div className={head}>Main:</div>
+          {main.map((p) => (
+            <div key={`m${p.designation_id}`} data-testid="designation-wing-pair" className="whitespace-nowrap">• {p.designation}</div>
+          ))}
+        </div>
+      )}
+      {(other.length > 0 || tags.length > 0) && (
+        <div data-testid="dw-wings">
+          <div className={head}>Wings:</div>
+          {other.map((p) => (
+            <div key={`w${p.designation_id}|${p.wing}`} data-testid="designation-wing-pair" className="whitespace-nowrap">
+              • <span className="text-[#164FA3] font-medium">{p.wing_label || wingShortLabel(p.wing)}</span> – {p.designation}
+            </div>
+          ))}
+          {tags.map((t) => (
+            <div key={`t${t.wing}`} data-testid="designation-wing-tag" className="whitespace-nowrap">
+              • <span className="text-[#164FA3] font-medium">{t.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ContactsModule({ session, mode }) {
   const cfg = MODES[mode];
   const [scopeLoading, setScopeLoading] = useState(cfg.territoryScoped);
@@ -250,7 +297,7 @@ export default function ContactsModule({ session, mode }) {
     // Super Admin Contacts page uses (reuses the identical /api/locations loader).
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
-    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) })))).catch(() => {});
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name, Number(w.is_main) === 1) })))).catch(() => {});
     fetch(cfg.teamsUrl).then((r) => r.json()).then((d) => setTeams(d.teams || [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1174,8 +1221,7 @@ export default function ContactsModule({ session, mode }) {
                     cell below follow this exact sequence. */}
                 {sortTh("Name", "name")}
                 {sortTh("Phone Number", "phone")}
-                {sortTh("Designation", "designation")}
-                <th className="px-4 py-3 font-semibold text-gray-600">Wings</th>
+                {sortTh("Designation & Wing", "designation")}
                 {sortTh("Zone", "zone")}
                 {sortTh("Lok Sabha", "lok_sabha")}
                 {sortTh("District", "district")}
@@ -1253,27 +1299,11 @@ export default function ContactsModule({ session, mode }) {
                       />
                     </div>
                   </td>
-                  {/* Every Designation–Wing pair the contact holds, one per line (one row per contact). */}
+                  {/* Every Designation together with the Wing it is held under (one row per contact):
+                      "Main:" lists the Main-wing designations, "Wings:" lists "Wing – Designation" for every other Wing,
+                      plus any saved Wing tag that carries no designation. Wing names are display labels (no "Wing"). */}
                   <td className="px-4 py-3 text-gray-600" data-testid="designation-wing-cell">
-                    {Array.isArray(c.designation_wing_list) && c.designation_wing_list.length ? (
-                      <div className="flex flex-col gap-0.5 min-w-[160px]">
-                        {c.designation_wing_list.map((p, i) => (
-                          <span key={`${p.designation}|${p.wing}|${i}`} data-testid="designation-wing-pair" className="whitespace-nowrap">
-                            {p.designation}{p.wing ? <span className="text-gray-400"> — <span className="text-[#164FA3] font-medium">{p.wing}</span></span> : null}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (c.designation_name || "—")}
-                  </td>
-                  {/* Wings — the contact's saved wing tags, shown as short-label chips. */}
-                  <td className="px-4 py-3 text-gray-600">
-                    {c.wings ? (
-                      <div className="flex flex-wrap gap-1 min-w-[90px]">
-                        {String(c.wings).split(",").map((w) => w.trim()).filter(Boolean).map((w) => (
-                          <span key={w} className="inline-block bg-[#164FA3]/10 text-[#164FA3] rounded-full px-2 py-0.5 text-[11px] font-semibold">{wingShortLabel(w)}</span>
-                        ))}
-                      </div>
-                    ) : "—"}
+                    <DesignationWingList contact={c} />
                   </td>
                   <td className="px-4 py-3 text-gray-600">{c.zone_name || "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.lok_sabha_name || "—"}</td>
@@ -1727,7 +1757,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
   // value shows; changing an upper level refetches and clears the lower ones.
   useEffect(() => {
     fetch("/api/designations").then((r) => r.json()).then((d) => setDesignations(d.designations || []));
-    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => { setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name) }))); setWingMaster(d.wings || []); }).catch(() => setWingMaster([]));
+    fetch("/api/wings").then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => { setWingOptions((d.wings || []).map((w) => ({ value: w.name, label: wingShortLabel(w.name, Number(w.is_main) === 1) }))); setWingMaster(d.wings || []); }).catch(() => setWingMaster([]));
     if (!canEditGeo) return;
     fetch("/api/locations?type=zone").then((r) => r.json()).then((d) => setZones(d.locations || []));
     // eslint-disable-next-line react-hooks/exhaustive-deps

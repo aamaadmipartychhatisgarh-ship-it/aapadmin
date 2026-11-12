@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { ensureDesignationWingsSchema, wingsMapFor } from "@/lib/designationWings";
 import { ensureWingSchema } from "@/lib/wingDesignations";
+import { wingShortLabel } from "@/lib/wingLabel";
 
 // PROMPT 5 — a contact can hold MANY designations. The relationship lives in
 // contact_designations(contact_id, designation_id) with UNIQUE(contact_id,
@@ -135,37 +136,44 @@ export function effectiveWingSql(cd = "cd", d = "d") {
 }
 
 // Every Designation–Wing pair a contact holds, one entry per contact_designations row (so a contact is ONE list
-// row however many it holds), in Designation Master order: "Designation<US>Wing<RS>Designation<US>Wing…".
-// Parsed by parseDesignationWingList into [{ designation, wing }].
+// row however many it holds), in Designation Master order:
+//   "designationId<US>Designation<US>Wing<US>isMain<RS>…"
+// isMain = the pair's Wing is the Wing master's main wing (is_main = 1). Parsed by parseDesignationWingList.
 // Control-character delimiters (never typed into a name), as SQL string literals — SEPARATOR takes a literal only.
 const PAIR_US = "'\u001f'";
 const PAIR_RS = "'\u001e'";
 export const DESIGNATION_WING_PAIRS_SQL =
-  `(SELECT GROUP_CONCAT(CONCAT(dp.name, ${PAIR_US}, ${effectiveWingSql("cdp", "dp")})
+  `(SELECT GROUP_CONCAT(CONCAT(dp.id, ${PAIR_US}, dp.name, ${PAIR_US}, ${effectiveWingSql("cdp", "dp")}, ${PAIR_US},
+              IF(${effectiveWingSql("cdp", "dp")} IN (SELECT pm.name FROM wings pm WHERE pm.is_main = 1) OR LOWER(${effectiveWingSql("cdp", "dp")}) IN ('main', 'main organisation', 'main organisations', 'main organization', 'main organizations'), 1, 0))
             ORDER BY (dp.sort_order IS NULL), dp.sort_order, dp.name SEPARATOR ${PAIR_RS})
       FROM contact_designations cdp JOIN designations dp ON dp.id = cdp.designation_id
      WHERE cdp.contact_id = c.id)`;
 
+// -> [{ designation_id, designation, wing, wing_label, is_main }] — wing is the STORED Wing name, wing_label its
+// display form ("Main", "Mahila", "Trade" — wingShortLabel). One entry per distinct (designation id, Wing).
 export function parseDesignationWingList(raw) {
   if (raw == null || raw === "") return [];
   const out = [];
   const seen = new Set();
   for (const part of String(raw).split(String.fromCharCode(30))) {
-    const [designation, wing] = part.split(String.fromCharCode(31));
+    const [id, designation, wing, main] = part.split(String.fromCharCode(31));
     const d = String(designation || "").trim();
     if (!d) continue;
     const w = String(wing || "").trim();
-    const key = `${d.toLowerCase()}\u0000${w.toLowerCase()}`;
+    const isMain = main === "1" || !w;
+    const key = `${id}\u0000${isMain ? "\u0001main" : w.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ designation: d, wing: w });
+    out.push({ designation_id: Number(id) || null, designation: d, wing: w, wing_label: wingShortLabel(w, isMain), is_main: isMain });
   }
   return out;
 }
 
-// "Vidhansabha Prabhari — Main Organisation; Lok Sabha Adhyaksh — Mahila Wing" (the export cell).
+// Export cell: Main first, then the Wings — "Main – Vidhansabha Prabhari; Mahila – Lok Sabha Adhyaksh".
 export function designationWingText(list, sep = "; ") {
-  return (list || []).map((p) => (p.wing ? `${p.designation} — ${p.wing}` : p.designation)).join(sep);
+  const l = list || [];
+  return [...l.filter((p) => p.is_main), ...l.filter((p) => !p.is_main)]
+    .map((p) => `${p.wing_label || wingShortLabel(p.wing, p.is_main)} – ${p.designation}`).join(sep);
 }
 
 // A bare `designation_id` (the Caller workspace's single dropdown) must behave

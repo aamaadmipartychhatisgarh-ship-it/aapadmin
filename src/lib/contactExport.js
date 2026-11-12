@@ -7,6 +7,7 @@ import { query } from "@/lib/db";
 import { photosToDataUris } from "@/lib/photoDataUri";
 import { DESIGNATION_NAMES_SQL, DESIGNATION_WING_PAIRS_SQL, ensureContactDesignationsSchema, effectiveWingSql, parseDesignationWingList, designationWingText } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
+import { wingShortLabel } from "@/lib/wingLabel";
 import { qualificationLabel as qualOnly } from "@/lib/qualificationOptions";
 import { CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
 import { PdfHeader, loadPdfHeaderPhoto, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
@@ -96,7 +97,9 @@ function wingCell(c) {
   const aligned = String(c.aligned_wings || "").split(", ").filter(Boolean);
   const have = new Set(aligned.map((w) => w.toLowerCase()));
   const extra = String(c.all_wings || "").split(", ").filter((w) => w && !have.has(w.toLowerCase()));
-  return [...aligned, ...extra].join(", ");
+  // Display names ("Main", "Mahila", …) — the stored Wing names are unchanged.
+  // Each Wing once (the "Designation with Wing" column carries the per-designation mapping).
+  return [...new Set([...aligned, ...extra].map((w) => wingShortLabel(w)))].join(", ");
 }
 
 // The contact's Designation–Wing pairs joined by "; " (falls back to the plain designation for a contact that holds
