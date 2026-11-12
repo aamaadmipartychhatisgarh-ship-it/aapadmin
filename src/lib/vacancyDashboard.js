@@ -42,6 +42,8 @@ function fromWingPosition(p) {
     status: p.status,
     review_people: p.review_people || [],
     person_names: (p.holders || []).map((h) => h.name).join(", "),
+    // The post's holder(s) with their Contact id (the Tree Map shows each one with their photo).
+    holders: (p.holders || []).map((h) => ({ contact_id: h.contact_id, name: h.name, mobile: h.mobile || null })),
     hierarchy_incomplete: false,
     lok_sabha_id: p.lok_sabha_id ?? null, lok_sabha_name: p.lok_sabha_name ?? null,
     district_id: p.district_id ?? null, district_name: p.district_name ?? null,
@@ -325,8 +327,10 @@ export async function buildVacancyDataset(session, filters = {}) {
       || ((rankOf.get(a.r.designation_id) ?? 1e9) - (rankOf.get(b.r.designation_id) ?? 1e9))
       || (a.i - b.i))
     .map((x) => x.r);
-  const capped = tableRows.length > MAX_ROWS;
-  tableRows = tableRows.slice(0, MAX_ROWS);
+  // The Tree Map needs every post (it renders lazily per branch); the list keeps its display cap.
+  const maxRows = Number.isInteger(filters.maxRows) && filters.maxRows > MAX_ROWS ? filters.maxRows : MAX_ROWS;
+  const capped = tableRows.length > maxRows;
+  tableRows = tableRows.slice(0, maxRows);
 
   // 7) Hierarchy drill-down: per (level × location) totals, for the current scope.
   const hierMap = new Map();

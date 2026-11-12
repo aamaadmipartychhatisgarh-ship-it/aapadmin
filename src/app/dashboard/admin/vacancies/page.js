@@ -10,6 +10,7 @@ import {
 import { normalizeRole, ROLES } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
 import WingVacancies from "./WingVacancies";
+import VacancyTreeMap from "./VacancyTreeMap";
 import VacancyTable, { fromMainRow, CategorySwitch } from "./VacancyTable";
 
 const BRAND = "#164FA3";
@@ -57,17 +58,17 @@ export default function VacanciesPage() {
   const { has, loading: pagesLoading } = usePageAccess();
   const canAccess = isSuper || has("vacancies");
 
-  // "main" = Main Organisation designations (below); "wings" = Wing vacancies.
-  // Kept in the URL (?tab=wings) so a refresh / shared link reopens the same view.
-  const [tab, setTab] = useState("main");
+  // "tree" (default) = the hierarchy Tree Map; "main" = Main Organisation designations list; "wings" = Wing vacancies.
+  // Kept in the URL (?tab=main / ?tab=wings) so a refresh / shared link reopens the same view.
+  const [tab, setTab] = useState("tree");
   useEffect(() => {
-    try { if (new URLSearchParams(window.location.search).get("tab") === "wings") setTab("wings"); } catch {}
+    try { const t = new URLSearchParams(window.location.search).get("tab"); if (t === "wings" || t === "main") setTab(t); } catch {}
   }, []);
   const switchTab = (t) => {
     setTab(t);
     try {
       const u = new URL(window.location.href);
-      if (t === "wings") u.searchParams.set("tab", "wings"); else u.searchParams.delete("tab");
+      if (t === "wings" || t === "main") u.searchParams.set("tab", t); else u.searchParams.delete("tab");
       window.history.replaceState(null, "", u.toString());
     } catch {}
   };
@@ -235,14 +236,14 @@ export default function VacanciesPage() {
 
       {/* View: Main Organisation designations | Wing designations */}
       <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 mb-4" role="tablist">
-        {[["main", "Main Organisation"], ["wings", "Wings"]].map(([k, label]) => (
+        {[["tree", "Tree Map"], ["main", "Main Organisation"], ["wings", "Wings"]].map(([k, label]) => (
           <button key={k} role="tab" aria-selected={tab === k} data-testid={`tab-${k}`} onClick={() => switchTab(k)}
             className={`h-8 px-4 rounded-md text-sm font-semibold ${tab === k ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
             style={tab === k ? { background: BRAND } : undefined}>{label}</button>
         ))}
       </div>
 
-      {tab === "wings" ? <WingVacancies /> : (<>
+      {tab === "tree" ? <VacancyTreeMap /> : tab === "wings" ? <WingVacancies /> : (<>
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 mb-4">
         <StatCard label="Total Positions" value={c.total} tone="brand" />
