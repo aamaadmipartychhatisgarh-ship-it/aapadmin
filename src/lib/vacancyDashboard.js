@@ -127,7 +127,15 @@ export async function buildVacancyDataset(session, filters = {}) {
     for (const r of data.rows) {
       // Wing President / Prabhari / General Secretary posts come from the Wing engine below (one
       // entry per Wing x level x location), so they are skipped here and never listed twice.
-      if (wingPositions.has(r.designation_id)) { if (isMain) wingPositionsSkipped++; continue; }
+      // EXCEPT a designation that is ALSO mapped to the Main Wing: the Wing engine only produces its other-Wing posts, so its Main Wing
+      // post must come from here - otherwise it vanished from the Main Wing view (and from All Wings). It is kept as the Main Wing's post
+      // only (its Wing list narrowed to the Main Wing), so a named-Wing view still takes that Wing's post from the engine, never twice.
+      let rowWings = r.designation_wings || [];
+      if (wingPositions.has(r.designation_id)) {
+        const mainOnes = rowWings.filter((w) => mainNames.has(normW(w)));
+        if (!mainOnes.length) { if (isMain) wingPositionsSkipped++; continue; }
+        rowWings = mainOnes;
+      }
       const anc = ancestryOf(index, level, r.location_id);
       // A real location whose parent chain is broken in the master (e.g. an
       // assembly with no district) — still a position, flagged for the data check.
@@ -139,8 +147,8 @@ export async function buildVacancyDataset(session, filters = {}) {
         location_name: r.location_name,
         designation_id: r.designation_id,
         designation_name: r.designation_name,
-        designation_wing: r.designation_wing || null,
-        designation_wings: r.designation_wings || [],
+        designation_wing: rowWings === (r.designation_wings || []) ? (r.designation_wing || null) : (rowWings[0] || null),
+        designation_wings: rowWings,
         filled: r.filled,
         status: r.status || (r.filled ? "filled" : "vacant"),
         review_people: r.review_people || [],
