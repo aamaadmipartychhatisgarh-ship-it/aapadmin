@@ -3,7 +3,8 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isCaller, isOversight } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
-import { query } from "@/lib/db";
+import { query, getPool } from "@/lib/db";
+import { phoneKey, last10Sql } from "@/lib/phone";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
 import { ensureVehicleColumn, normalizeVehicle } from "@/lib/contactVehicle";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
@@ -24,10 +25,11 @@ async function contactCols() {
   return new Set(rows.map((r) => r.c));
 }
 
-// POST /api/contacts/pending — a CALLER (or oversight) submits a new contact that
-// does NOT go live: it is stored with approval_status = 'pending' and is kept out of
-// every live list (approval_status = pending). Same fields as the
-// normal Add Contact form; duplicate-phone is still rejected up front.
+// POST /api/contacts/pending — a CALLER (or oversight) adds a new contact from My Workspace. It goes STRAIGHT into the Contact List
+// (approval_status = 'approved', no review step), recorded against the caller who added it. Same fields as the normal Add Contact form.
+// Only this create action is open to callers; editing, deleting and assigning contacts keep their own permission checks. Duplicates are
+// refused: the same number in any format (last 10 digits) is one person, and the check + insert run under a per-number database lock,
+// so a double-click or two simultaneous submissions can never create two records. (The route name is kept for the existing callers.)
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -45,7 +47,6 @@ export async function POST(req) {
     if (rowsRes.error) return NextResponse.json({ message: rowsRes.error }, { status: 400 });
     const designationIds = parseDesignationIds(data.designation_ids ?? (designation_id ? [designation_id] : []));
     const primaryDesignation = designationIds[0] || null;
-    if (await phoneAlreadyRegistered(phone_number)) return duplicatePhoneResponse();
 
     const qual = normalizeQualification(data);
     if (qual.error) return NextResponse.json({ message: qual.error }, { status: 400, headers: NO_STORE });
@@ -61,8 +62,7 @@ export async function POST(req) {
       phone_number: phone_number.trim(),
       address: address || null,
       designation_id: primaryDesignation,
-      // Geography falls back to the caller's OWN territory (session scope) when not
-      // supplied, so the pending contact lands in the right Supervisor's queue.
+      // Geography falls back to the caller's OWN territory (session scope) when not supplied.
       zone_id: zone_id || session.user.scope_zone_id || null,
       lok_sabha_id: lok_sabha_id || session.user.scope_lok_sabha_id || null,
       district_id: district_id || session.user.home_district_id || null,
@@ -72,37 +72,55 @@ export async function POST(req) {
       photo_url: photo_url || null,
       ...(qual.present ? { qualification: qual.qualification, education_level: qual.education_level } : {}),
       ...(veh.present ? { vehicle: veh.vehicle } : {}),
-      // Pending until a Supervisor approves; recorded against the caller who added it.
-      approval_status: "pending",
+      // Live at once (no Supervisor approval); recorded against the caller who added it.
+      approval_status: "approved",
       created_by_user_id: session.user.id || null,
       is_completed: 0,
     };
-    const cols = [];
-    const vals = [];
-    for (const [k, v] of Object.entries(desired)) if (existing.has(k)) { cols.push(k); vals.push(v); }
-    // A previously REJECTED submission for this number is revived in place (same
-    // row, fresh data, back to pending) — never a second row for one number.
-    const rejectedId = await findRejectedContactByPhone(desired.phone_number);
-    let id;
-    if (rejectedId) {
-      const resetCols = ["reviewed_by_user_id", "reviewed_at", "rejection_reason", "assigned_to_user_id", "locked_by_user_id", "locked_at"].filter((c) => existing.has(c));
-      await query(
-        `UPDATE contacts SET ${[...cols.map((c) => `${c} = ?`), ...resetCols.map((c) => `${c} = NULL`)].join(", ")} WHERE id = ?`,
-        [...vals, rejectedId]
-      );
-      id = rejectedId;
-    } else {
-      const res = await query(
-        `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
-        vals
-      );
-      id = res.insertId;
+    const key = phoneKey(phone_number);
+    const lockConn = await getPool().getConnection();
+    const lockName = `contact-add:${key || phone_number.trim()}`.slice(0, 64);
+    let id, revivedRejected = false;
+    try {
+      const [[lk]] = await lockConn.query("SELECT GET_LOCK(?, 10) AS ok", [lockName]);
+      if (Number(lk.ok) !== 1) return NextResponse.json({ message: "Please try again in a moment." }, { status: 503, headers: NO_STORE });
+      // Duplicate check INSIDE the lock: the exact number, or the same 10-digit number written another way.
+      if (await phoneAlreadyRegistered(phone_number)) return duplicatePhoneResponse();
+      if (key) {
+        const notRejected = existing.has("approval_status") ? " AND (approval_status IS NULL OR approval_status <> 'rejected')" : "";
+        const same = await query(`SELECT id FROM contacts WHERE ${last10Sql("phone_number")} = ?${notRejected} LIMIT 1`, [key]);
+        if (same.length) return duplicatePhoneResponse();
+      }
+      const cols = [];
+      const vals = [];
+      for (const [k, v] of Object.entries(desired)) if (existing.has(k)) { cols.push(k); vals.push(v); }
+      // A previously REJECTED submission for this number is revived in place (same
+      // row, fresh data, now live) — never a second row for one number.
+      const rejectedId = await findRejectedContactByPhone(desired.phone_number);
+      if (rejectedId) {
+        const resetCols = ["reviewed_by_user_id", "reviewed_at", "rejection_reason", "assigned_to_user_id", "locked_by_user_id", "locked_at"].filter((c) => existing.has(c));
+        await query(
+          `UPDATE contacts SET ${[...cols.map((c) => `${c} = ?`), ...resetCols.map((c) => `${c} = NULL`)].join(", ")} WHERE id = ?`,
+          [...vals, rejectedId]
+        );
+        id = rejectedId;
+      } else {
+        const res = await query(
+          `INSERT INTO contacts (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
+          vals
+        );
+        id = res.insertId;
+      }
+      revivedRejected = !!rejectedId;
+    } finally {
+      await lockConn.query("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => {});
+      lockConn.release();
     }
     await syncContactDesignations(id, designationIds);
     await syncContactWings(id, data.wings);
     await applyRowWings(id, rowsRes.rows);
-    logAudit(session, { action: "contact.pending.create", entityType: "contact", entityId: id, details: { person_name: desired.person_name, phone_number: desired.phone_number, revived_rejected: !!rejectedId } });
-    return NextResponse.json({ id, status: "pending", revived: !!rejectedId }, { status: 201, headers: NO_STORE });
+    logAudit(session, { action: "contact.caller_create", entityType: "contact", entityId: id, details: { person_name: desired.person_name, phone_number: desired.phone_number, revived_rejected: revivedRejected } });
+    return NextResponse.json({ id, status: "approved", revived: revivedRejected }, { status: 201, headers: NO_STORE });
   } catch (err) {
     return contactWriteError(err, "contacts pending POST");
   }

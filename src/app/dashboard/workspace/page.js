@@ -125,7 +125,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // Quick section filter for the assigned list: "all" | "fresh" | "followup".
   // Ordering itself stays server-side; this only chooses which section(s) show.
   const [queueTab, setQueueTab] = useState("all");
-  const [showAddContact, setShowAddContact] = useState(false); // caller "Add Contact" modal (pending approval)
+  const [showAddContact, setShowAddContact] = useState(false); // caller "Add Contact" modal (added straight to the Contact List)
   const [submissionsKey, setSubmissionsKey] = useState(0); // bump to refresh "My submitted contacts"
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
@@ -1003,8 +1003,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
             <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
               <Users size={16} /> Assigned to You
             </h3>
-            {/* Callers can submit a new contact — it is held for Supervisor approval
-                before it goes live (never added straight to the list). */}
+            {/* Callers can add a new contact — it goes straight into the Contact List. */}
             <button onClick={() => setShowAddContact(true)}
               className="inline-flex items-center gap-1.5 bg-[#164FA3] text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-blue-800">
               <Plus size={14} /> Add Contact
@@ -1653,12 +1652,12 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       {showAddContact && (
         // The SAME Add Contact form the admin Contacts page uses (identical fields,
         // validation and payload) — only the destination differs: the submission is
-        // held as "pending" for Supervisor approval and is never live until approved.
+        // added straight to the Contact List (no approval step).
         <AddContactModal
           addUrl="/api/contacts/pending"
-          notice="This contact will be sent to your Supervisor for approval. It becomes a live contact only after they approve it."
+          notice="This contact is added straight to the Contact List."
           onClose={() => setShowAddContact(false)}
-          onSaved={() => { setShowAddContact(false); setMessage("Contact submitted for Supervisor approval."); setSubmissionsKey((k) => k + 1); }}
+          onSaved={() => { setShowAddContact(false); setMessage("Contact added to the Contact List."); setSubmissionsKey((k) => k + 1); }}
         />
       )}
     </div>
@@ -2098,7 +2097,7 @@ function MySubmittedContacts({ refreshKey }) {
     approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
     rejected: "bg-red-50 text-red-700 border-red-200",
   };
-  const label = { pending: "Pending approval", approved: "Approved", rejected: "Rejected" };
+  const label = { pending: "Pending approval", approved: "In Contact List", rejected: "Rejected" };
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between">
