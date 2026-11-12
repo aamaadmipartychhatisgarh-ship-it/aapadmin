@@ -8,11 +8,12 @@ import { query } from "@/lib/db";
 import { wingPositionDesignationIds, buildWingVacancyDataset } from "@/lib/wingVacancies";
 import { listWings } from "@/lib/wingDesignations";
 
-const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
-// The Designation Vacancy page covers the STATE level only (every Wing's State-level designations on one page). The level of a
-// designation is its own Master Data level (designations.level), never its name, so a District / Assembly / Block designation that
-// shares a name with a State one is never listed, and members holding lower-level posts never count toward State vacancies.
-const VACANCY_LEVELS = ["state"];
+const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly (Vidhan Sabha)", block: "Block" };
+// The Designation Vacancy page covers four organisational levels: State, Lok Sabha, District and Assembly (Vidhan Sabha). Every
+// designation is placed by its own Master Data level (designations.level), never by its name, and every position is one
+// (level x organisational unit x designation): a member counts only against the designation they hold AT THAT LEVEL, in the unit they
+// belong to, so a holder at one level never fills (or empties) a post at another. Block-level designations are not part of this page.
+const VACANCY_LEVELS = ["state", "lok_sabha", "district", "assembly"];
 // Every organisational level the Master Data can carry (State, Lok Sabha, District, Assembly, Block): used only to tell a
 // designation that simply belongs to another level from one with no usable level at all.
 const ORG_LEVELS = ["state", ...TEAM_LEVELS];

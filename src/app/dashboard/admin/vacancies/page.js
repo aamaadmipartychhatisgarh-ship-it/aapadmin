@@ -266,8 +266,7 @@ export default function VacanciesPage() {
           <select className={selCls} aria-label="Wing" value={wing} onChange={(e) => { setWing(e.target.value); setDesignationId(""); }}>
             {(data?.filters?.wings || [{ key: "__main__", label: "Main Wing" }, { key: "", label: "All Wings" }]).map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
           </select>
-          {/* The page lists the State level only, so there is no Level choice and no Lok Sabha / District / Assembly / Block area to pick
-              (a State post has no area). The selectors return automatically if the server ever offers more than one level. */}
+          {/* Level (State / Lok Sabha / District / Assembly) and the area filters. Block is not a level on this page, so it has no filter. */}
           {(data?.filters?.levels || []).length > 1 && <>
           <select className={selCls} aria-label="Level" value={level} onChange={(e) => { setLevel(e.target.value); setDesignationId(""); }}>
             <option value="">All levels</option>
@@ -284,10 +283,6 @@ export default function VacanciesPage() {
           <select className={selCls} value={assemblyId} onChange={(e) => { setAssemblyId(e.target.value); setBlockId(""); }}>
             <option value="">All Assemblies</option>
             {assemblies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-          <select className={selCls} value={blockId} onChange={(e) => setBlockId(e.target.value)}>
-            <option value="">All Blocks</option>
-            {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
           </>}
           <select className={selCls} aria-label="Designation" value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
