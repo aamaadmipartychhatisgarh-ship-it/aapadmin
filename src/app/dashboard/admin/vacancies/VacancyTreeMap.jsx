@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, ChevronDown, Loader2, RefreshCw, MessageCircle, UserX, AlertTriangle } from "lucide-react";
+import { ChevronRight, ChevronDown, Loader2, RefreshCw, MessageCircle, UserX, AlertTriangle, ArrowRight, Users } from "lucide-react";
 import Avatar from "@/components/Avatar";
 import { wingShortLabel } from "@/lib/wingLabel";
 
@@ -30,45 +30,63 @@ function Counts({ c, compact }) {
   );
 }
 
-function FilledCard({ p }) {
+// Post number (Designation order within its unit): green for a filled post, red for a vacant one.
+function Num({ n, filled }) {
   return (
-    <div className="rounded-xl border border-green-200 bg-white p-3 flex flex-col gap-2 min-w-0" data-testid="post-filled" data-designation={p.designation_name}>
-      <div className="text-[11px] font-semibold text-green-700 uppercase tracking-wide">Filled</div>
-      {p.holders.map((h) => (
-        <div key={h.contact_id} className="flex items-center gap-2.5 min-w-0" data-testid="post-holder">
-          <Avatar name={h.name} src={h.photo_url} size={44} className="shrink-0 bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-xs" />
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-gray-900 truncate" title={h.name} data-testid="holder-name">{h.name}</div>
-            <div className="text-xs text-gray-700 truncate" title={p.designation_name}>{p.designation_name}</div>
-            <div className="text-[11px] text-gray-500 truncate">{p.level === "state" ? p.level_label : `${p.level_label} · ${p.location_name}`}{p.wing ? ` · ${wingShortLabel(p.wing)}` : ""}</div>
-          </div>
+    <span data-testid="post-number"
+      className={`shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full text-[12px] font-bold text-white ${filled ? "bg-green-600" : "bg-red-600"}`}>{n}</span>
+  );
+}
+const whereOf = (p) => `${p.level === "state" ? p.level_label : `${p.level_label} · ${p.location_name}`}${p.wing ? ` · ${wingShortLabel(p.wing)}` : ""}`;
+
+function FilledCard({ p, n }) {
+  return (
+    <div className="h-full rounded-xl border-2 border-green-300 bg-green-50/40 p-3 flex flex-col gap-2 min-w-0 shadow-sm" data-testid="post-filled" data-designation={p.designation_name}>
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="shrink-0 text-[10px] font-bold text-white bg-green-600 rounded px-1.5 py-0.5 tracking-wide">FILLED</span>
+        <span className="text-[11px] text-green-800 truncate" title={whereOf(p)}>{whereOf(p)}</span>
+      </div>
+      <div className="flex items-start gap-2 min-w-0">
+        <Num n={n} filled />
+        <div className="flex flex-col gap-2 min-w-0 flex-1">
+          {p.holders.map((h) => (
+            <div key={h.contact_id} className="flex items-center gap-2.5 min-w-0" data-testid="post-holder">
+              <Avatar name={h.name} src={h.photo_url} size={40} className="shrink-0 bg-white border border-gray-200" textClassName="text-[#164FA3] text-xs" />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-gray-900 truncate" title={h.name} data-testid="holder-name">{h.name}</div>
+                <div className="text-xs text-gray-600 truncate" title={p.designation_name}>{p.designation_name}</div>
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
     </div>
   );
 }
 
-function VacantCard({ p }) {
+function VacantCard({ p, n }) {
+  const ab = p.assigned_by;
   return (
-    <div className="rounded-xl border-2 border-red-400 bg-red-50 p-3 flex flex-col gap-2 min-w-0" data-testid="post-vacant" data-designation={p.designation_name}>
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] font-bold text-white bg-red-600 rounded px-1.5 py-0.5 tracking-wide">VACANT</span>
-        <span className="text-[11px] text-red-700 truncate">{p.level === "state" ? p.level_label : `${p.level_label} · ${p.location_name}`}{p.wing ? ` · ${wingShortLabel(p.wing)}` : ""}</span>
+    <div className="h-full rounded-xl border-2 border-red-400 bg-red-50 p-3 flex flex-col gap-2 min-w-0 shadow-sm" data-testid="post-vacant" data-designation={p.designation_name}>
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="shrink-0 text-[10px] font-bold text-white bg-red-600 rounded px-1.5 py-0.5 tracking-wide">VACANT</span>
+        <span className="text-[11px] text-red-700 truncate" title={whereOf(p)}>{whereOf(p)}</span>
       </div>
       {/* The vacant POST (designation) — prominent, never mixed up with the proposed person below. */}
-      <div className="text-sm font-bold text-red-700 break-words" data-testid="vacant-designation">{p.designation_name}</div>
+      <div className="flex items-start gap-2 min-w-0">
+        <Num n={n} />
+        <div className="text-[15px] leading-snug font-bold text-red-700 break-words" data-testid="vacant-designation">{p.designation_name}</div>
+      </div>
       {p.needs_review && (
         <div className="flex items-start gap-1 text-[11px] text-amber-700" data-testid="vacant-review">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
           <span>Needs data check{p.review_people.length ? `: ${p.review_people.join(", ")} may hold it (location not set)` : ""}</span>
         </div>
       )}
-      <div className="border-t border-red-200 pt-2">
-        <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Proposed person</div>
-        {p.proposed.length === 0 ? (
-          <div className="inline-flex items-center gap-1 text-xs text-gray-500 italic" data-testid="proposed-none"><UserX size={13} /> Person Not Assigned</div>
-        ) : p.proposed.map((x) => (
-          <div key={x.assignment_id} className="flex items-center gap-2 min-w-0 mb-1 last:mb-0" data-testid="proposed-person">
+      <div className="mt-auto border-t border-red-200 pt-2 flex flex-col gap-1.5">
+        <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Proposed person</div>
+        {p.proposed.map((x) => (
+          <div key={x.assignment_id} className="flex items-center gap-2 min-w-0" data-testid="proposed-person">
             <Avatar name={x.name} src={x.photo_url} size={28} className="shrink-0 bg-white border border-gray-200" textClassName="text-gray-600 text-[10px]" />
             <div className="min-w-0">
               {x.whatsapp_url ? (
@@ -84,7 +102,63 @@ function VacantCard({ p }) {
             </div>
           </div>
         ))}
+        {/* Who is responsible for filling the post (the vacancy-responsibility rule) — not a proposed person. */}
+        {ab ? (
+          <div data-testid="assigned-by"
+            title={ab.people.length ? `Currently: ${ab.people.map((q) => `${q.name} (${q.role})`).join(", ")}` : `${ab.label}: not assigned${ab.areas.length ? ` in ${ab.areas.join(", ")}` : ""}`}
+            className="inline-flex items-start gap-1.5 self-start max-w-full text-[11px] font-semibold text-amber-900 bg-amber-100 border border-amber-300 rounded-md px-2 py-1">
+            <Users size={12} className="mt-[1px] shrink-0" />
+            <span className="break-words">Assigned By: {ab.label}</span>
+          </div>
+        ) : p.proposed.length === 0 ? (
+          <div className="inline-flex items-center gap-1 text-xs text-gray-500 italic" data-testid="proposed-none"><UserX size={13} /> Person Not Assigned</div>
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+// The posts of one unit as a numbered flow (1 -> 2 -> 3 ...) in Designation order. Rows are measured from the
+// container width so each row reads left to right with arrows between its cards, and every row starts aligned.
+const CARD_MIN = 230;
+const ARROW_W = 22;
+function PostFlow({ posts }) {
+  const ref = useRef(null);
+  const [cols, setCols] = useState(1);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const measure = () => setCols(Math.max(1, Math.min(4, Math.floor((el.clientWidth + ARROW_W) / (CARD_MIN + ARROW_W)))));
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const rows = [];
+  for (let i = 0; i < posts.length; i += cols) rows.push(posts.slice(i, i + cols));
+  return (
+    <div ref={ref} className="flex flex-col gap-3 px-2 sm:px-3 py-2" data-testid="node-posts">
+      {rows.map((row, ri) => (
+        <div key={ri} className="flex items-stretch">
+          {Array.from({ length: cols }).map((_, ci) => {
+            const p = row[ci];
+            const n = ri * cols + ci + 1;
+            return (
+              <div key={p ? p.key : `pad${ci}`} className="flex items-stretch flex-1 min-w-0" style={{ flexBasis: 0 }}>
+                {ci > 0 && (
+                  <div className="shrink-0 flex items-center justify-center text-gray-400" style={{ width: ARROW_W }} aria-hidden="true">
+                    {p ? <ArrowRight size={16} strokeWidth={2.5} data-testid="flow-arrow" /> : null}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  {p ? (p.status === "filled" ? <FilledCard p={p} n={n} /> : <VacantCard p={p} n={n} />) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -105,9 +179,7 @@ const TreeNode = memo(function TreeNode({ node, expanded, toggle, depth }) {
       {open && (
         <div className="pb-2">
           {node.posts.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2.5 px-2 sm:px-3 py-2" data-testid="node-posts">
-              {node.posts.map((p) => (p.status === "filled" ? <FilledCard key={p.key} p={p} /> : <VacantCard key={p.key} p={p} />))}
-            </div>
+            <PostFlow posts={node.posts} />
           )}
           {node.children.map((c) => <TreeNode key={c.id} node={c} expanded={expanded} toggle={toggle} depth={depth + 1} />)}
         </div>
@@ -184,6 +256,8 @@ export default function VacancyTreeMap() {
         <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded border border-green-300 bg-white inline-block" /> Filled post</span>
         <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded border-2 border-red-400 bg-red-50 inline-block" /> Vacant post</span>
         <span className="inline-flex items-center gap-1"><MessageCircle size={12} className="text-[#128C4B]" /> Click a proposed person to WhatsApp them</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-flex items-center gap-1 px-1.5 rounded bg-amber-100 border border-amber-300 text-amber-900"><Users size={11} /> Assigned By</span> role responsible for filling the post</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-flex w-4 h-4 rounded-full bg-red-600 text-white text-[9px] font-bold items-center justify-center">1</span> Designation order</span>
       </div>
       <div className="p-1 sm:p-2 overflow-x-hidden">
         {err ? <div className="p-6 text-sm text-red-600">{err}</div>

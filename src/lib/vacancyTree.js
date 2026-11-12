@@ -124,6 +124,32 @@ function proposalsForPost(byDesignation, post) {
   return out;
 }
 
+// "District President" + "District Prabhari" -> "District President / Prabhari" (shared leading words said once).
+export function shortRoles(labels) {
+  const ls = [...new Set((labels || []).map((l) => String(l || "").trim()).filter(Boolean))];
+  if (ls.length <= 1) return ls[0] || "";
+  const words = ls.map((l) => l.split(/\s+/));
+  let k = 0;
+  while (words.every((w) => w.length > k + 1 && w[k].toLowerCase() === words[0][k].toLowerCase())) k++;
+  return [ls[0], ...words.slice(1).map((w) => w.slice(k).join(" "))].join(" / ");
+}
+
+function assignedBy(slots, designationName) {
+  // A post is never shown as assigned by itself (e.g. the State Prabhari post under the State Prabhari rule).
+  const self = String(designationName || "").trim().toLowerCase();
+  const ss = (slots || []).filter((x) => x && x.label && String(x.label).trim().toLowerCase() !== self);
+  if (!ss.length) return null;
+  const people = [];
+  const seen = new Set();
+  for (const x of ss) for (const p of x.people || []) {
+    const k = p.contact_id || p.name;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    people.push({ name: p.name, role: p.designation || x.label });
+  }
+  return { label: shortRoles(ss.map((x) => x.label)), areas: [...new Set(ss.map((x) => x.area).filter(Boolean))], people };
+}
+
 export async function buildVacancyTree(session, { wing } = {}) {
   const data = await buildVacancyDataset(session, { wing, status: "combined", maxRows: MAX_TREE_POSTS });
   const levels = (data.filters?.levels || []).map((l) => l.key);
@@ -196,6 +222,9 @@ export async function buildVacancyTree(session, { wing } = {}) {
       review_people: (r.review_people || []).map((p) => p.person_name || p.name).filter(Boolean),
       holders: filled ? holders : [],
       proposed: filled ? [] : proposalsForPost(proposals, { ...r, location_name: r.level === "state" ? "State" : r.location_name }),
+      // Who is responsible for filling this vacant post (the existing vacancy-responsibility rule) — shown as
+      // "Assigned By: District President / Prabhari", with the people who currently hold those roles.
+      assigned_by: filled ? null : assignedBy(r.responsible_slots, r.designation_name),
     });
   }
 
