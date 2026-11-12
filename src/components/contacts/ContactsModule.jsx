@@ -1253,7 +1253,18 @@ export default function ContactsModule({ session, mode }) {
                       />
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{c.designation_name || "—"}</td>
+                  {/* Every Designation–Wing pair the contact holds, one per line (one row per contact). */}
+                  <td className="px-4 py-3 text-gray-600" data-testid="designation-wing-cell">
+                    {Array.isArray(c.designation_wing_list) && c.designation_wing_list.length ? (
+                      <div className="flex flex-col gap-0.5 min-w-[160px]">
+                        {c.designation_wing_list.map((p, i) => (
+                          <span key={`${p.designation}|${p.wing}|${i}`} data-testid="designation-wing-pair" className="whitespace-nowrap">
+                            {p.designation}{p.wing ? <span className="text-gray-400"> — <span className="text-[#164FA3] font-medium">{p.wing}</span></span> : null}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (c.designation_name || "—")}
+                  </td>
                   {/* Wings — the contact's saved wing tags, shown as short-label chips. */}
                   <td className="px-4 py-3 text-gray-600">
                     {c.wings ? (

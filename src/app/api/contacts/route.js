@@ -14,7 +14,7 @@ import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureC
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
-import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL } from "@/lib/contactDesignations";
+import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL, DESIGNATION_WING_PAIRS_SQL, parseDesignationWingList } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema, syncContactWings, WINGS_SQL } from "@/lib/contactWings";
 import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
 import { ensureQualificationColumns, normalizeQualification } from "@/lib/contactQualification";
@@ -306,6 +306,8 @@ export async function GET(req) {
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
               ${DESIGNATION_PAIRS_SQL} AS designation_pairs,
+              -- Every Designation–Wing pair (one list row per contact, however many it holds).
+              ${DESIGNATION_WING_PAIRS_SQL} AS designation_wing_pairs,
               -- The contact's Wings (saved tags, Master-Data names) as a CSV, for
               -- the list display and to preload the edit form's Wings dropdown.
               ${WINGS_SQL} AS wings,
@@ -340,6 +342,8 @@ export async function GET(req) {
     // Full pagination metadata so the client can page through the COMPLETE set
     // (every record is reachable across pages — nothing is silently dropped by a
     // cap). no-store so all authorized users always get the same fresh list.
+    // Parsed server-side: [{ designation, wing }] per contact, in Designation Master order.
+    for (const row of contacts) { row.designation_wing_list = parseDesignationWingList(row.designation_wing_pairs); delete row.designation_wing_pairs; }
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     // A caller's list carries the Zone it is confined to (read fresh), so the page
     // can show it and offer only that Zone's Lok Sabha / District / Assembly options.

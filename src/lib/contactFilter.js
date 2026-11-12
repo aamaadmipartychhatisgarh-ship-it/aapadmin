@@ -11,6 +11,8 @@
 // if it appears anywhere in the multi-value position text). Requires the query to
 // LEFT JOIN workers w ON w.id = c.worker_id (see `needsWorkerJoin`).
 
+import { effectiveWingSql } from "@/lib/contactDesignations";
+
 // Hierarchical geo predicate on a table alias (same logic as the Workers page).
 function geoParts(alias, { zone_id, lok_sabha_id, district_id, assembly_ids }) {
   const a = alias ? `${alias}.` : "";
@@ -67,46 +69,43 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
   const geo = { zone_id, lok_sabha_id, district_id, assembly_ids };
   const wingList = Array.isArray(wings) ? wings.filter(Boolean) : [];
 
-  // A contact matches the designation/wing filter if ANY of its OWN designations
-  // (the multi-value contact_designations join, PROMPT 5) is a selected designation
-  // OR belongs to a selected wing, OR the contact carries the selected wing as a
-  // SAVED tag (contact_wings). This covers legacy single-designation contacts
-  // (backfilled into the join), new multi-designation ones, and contacts tagged
-  // with a wing directly — on either the worker or the own branch. A wing with no
-  // matching designations/tags correctly matches nothing (never "all").
-  const desExists = (designation_ids?.length || wingList.length)
+  // Designation / Wing search, matched against the contact's OWN assignment rows (contact_designations), each of
+  // which is one Designation held under one Wing (effectiveWingSql — the same rule the list and exports display):
+  //   • Designation only → a row holds one of the selected designations (any Wing).
+  //   • Wing only        → a row is held under one of the selected Wings. A contact with NO designation rows
+  //                        still matches by its saved Wing tag (contact_wings).
+  //   • Both             → ONE row matches both: the selected designation held under the selected Wing — never
+  //                        "designation in one row, wing in another".
+  // EXISTS keeps one result per contact however many rows match (no duplicate rows from a JOIN).
+  const hasDes = designation_ids?.length > 0;
+  const hasWing = wingList.length > 0;
+  const desExists = (hasDes || hasWing)
     ? (() => {
-        const clauses = [];
+        const conds = [];
         const params = [];
-        // Designation-based match (explicit ids and/or wing-of-designation).
-        const subs = [];
-        const subParams = [];
-        if (designation_ids?.length) {
-          subs.push(`cd.designation_id IN (${designation_ids.map(() => "?").join(",")})`);
-          subParams.push(...designation_ids);
+        if (hasDes) {
+          conds.push(`cd.designation_id IN (${designation_ids.map(() => "?").join(",")})`);
+          params.push(...designation_ids);
         }
-        if (wingList.length) {
-          // A designation matches a wing by its own (first) wing OR any wing stored
-          // against it in designation_wings (one entry can carry many wings).
-          const wph = wingList.map(() => "?").join(",");
-          // Main is an ordinary Wing: a designation that belongs to no other Wing is a Main designation, so the Main filter
-          // also finds contacts holding one (whatever wrote the pair), exactly like any other Wing's designations.
-          subs.push(`(dw.wing IN (${wph}) OR EXISTS (SELECT 1 FROM designation_wings dwx WHERE dwx.designation_id = dw.id AND dwx.wing IN (${wph}))
-            OR ((dw.wing IS NULL OR TRIM(dw.wing) = '') AND NOT EXISTS (SELECT 1 FROM designation_wings dwy WHERE dwy.designation_id = dw.id AND dwy.wing NOT IN (SELECT mw.name FROM wings mw WHERE mw.is_main = 1))
-                AND EXISTS (SELECT 1 FROM wings mx WHERE mx.is_main = 1 AND mx.name IN (${wph}))))`);
-          subParams.push(...wingList, ...wingList, ...wingList);
-        }
-        const join = wingList.length ? "JOIN designations dw ON dw.id = cd.designation_id" : "";
-        clauses.push(`EXISTS (SELECT 1 FROM contact_designations cd ${join} WHERE cd.contact_id = c.id AND (${subs.join(" OR ")}))`);
-        params.push(...subParams);
-        // Saved wing-tag match (contact_wings), so a contact tagged with the wing
-        // is found even if none of its designations belong to that wing.
-        if (wingList.length) {
-          clauses.push(`EXISTS (SELECT 1 FROM contact_wings cwf WHERE cwf.contact_id = c.id AND cwf.wing IN (${wingList.map(() => "?").join(",")}))`);
+        if (hasWing) {
+          conds.push(`${effectiveWingSql("cd", "dw")} IN (${wingList.map(() => "?").join(",")})`);
           params.push(...wingList);
         }
-        return { clause: `(${clauses.join(" OR ")})`, params };
+        const join = hasWing ? "JOIN designations dw ON dw.id = cd.designation_id" : "";
+        const clauses = [`EXISTS (SELECT 1 FROM contact_designations cd ${join} WHERE cd.contact_id = c.id AND ${conds.join(" AND ")})`];
+        if (hasWing && !hasDes) {
+          clauses.push(`(NOT EXISTS (SELECT 1 FROM contact_designations cdn WHERE cdn.contact_id = c.id)
+            AND EXISTS (SELECT 1 FROM contact_wings cwf WHERE cwf.contact_id = c.id AND cwf.wing IN (${wingList.map(() => "?").join(",")})))`);
+          params.push(...wingList);
+        }
+        return { clause: clauses.length > 1 ? `(${clauses.join(" OR ")})` : clauses[0], params };
       })()
+    : null;
+  // Legacy fallbacks (worker position text / contacts.designation_id) carry no Wing, so they apply only to contacts
+  // with no designation rows of their own, and — with a Wing selected — only when that Wing is the Main wing
+  // (an unpaired legacy designation is a Main Organisation one).
+  const legacyWingOk = hasWing
+    ? { sql: `EXISTS (SELECT 1 FROM wings lmw WHERE lmw.is_main = 1 AND lmw.name IN (${wingList.map(() => "?").join(",")}))`, params: [...wingList] }
     : null;
 
   // Worker-side (person truth).
@@ -126,8 +125,8 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
     const parts = [desExists.clause];
     workerParams.push(...desExists.params);
     if (wDes) {
-      parts.push(`(NOT EXISTS (SELECT 1 FROM contact_designations cdx WHERE cdx.contact_id = c.id) AND ${wDes.clause})`);
-      workerParams.push(...wDes.params);
+      parts.push(`(NOT EXISTS (SELECT 1 FROM contact_designations cdx WHERE cdx.contact_id = c.id) AND ${wDes.clause}${legacyWingOk ? ` AND ${legacyWingOk.sql}` : ""})`);
+      workerParams.push(...wDes.params, ...(legacyWingOk ? legacyWingOk.params : []));
     }
     workerConds.push(`(${parts.join(" OR ")})`);
   }
@@ -139,9 +138,9 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
   const ownParams = [...cGeo.params];
   if (desExists) {
     const parts = [];
-    if (designation_ids?.length) {
-      parts.push(`c.designation_id IN (${designation_ids.map(() => "?").join(",")})`);
-      ownParams.push(...designation_ids);
+    if (hasDes) {
+      parts.push(`(NOT EXISTS (SELECT 1 FROM contact_designations cdo WHERE cdo.contact_id = c.id) AND c.designation_id IN (${designation_ids.map(() => "?").join(",")})${legacyWingOk ? ` AND ${legacyWingOk.sql}` : ""})`);
+      ownParams.push(...designation_ids, ...(legacyWingOk ? legacyWingOk.params : []));
     }
     parts.push(desExists.clause);
     ownParams.push(...desExists.params);

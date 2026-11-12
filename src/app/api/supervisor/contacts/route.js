@@ -17,7 +17,7 @@ import { ensureRfaSchema, RFA_STATUS_SQL, rfaStatusFilterClause } from "@/lib/rf
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
-import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL } from "@/lib/contactDesignations";
+import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds, DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL, DESIGNATION_WING_PAIRS_SQL, parseDesignationWingList } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema, syncContactWings, WINGS_SQL } from "@/lib/contactWings";
 import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
 import { buildContactOrderBy, CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
@@ -194,6 +194,8 @@ export async function GET(req) {
               COALESCE(${DESIGNATION_NAMES_SQL}, NULLIF(TRIM(w.position), ''), dsg.name) AS designation_name,
               ${DESIGNATION_IDS_SQL} AS designation_ids,
               ${DESIGNATION_PAIRS_SQL} AS designation_pairs,
+              -- Every Designation–Wing pair (one list row per contact, however many it holds).
+              ${DESIGNATION_WING_PAIRS_SQL} AS designation_wing_pairs,
               ${WINGS_SQL} AS wings,
               ${RFA_STATUS_SQL} AS rfa_status,
               -- Resolve the photo EXACTLY like the has_photo count condition
@@ -221,6 +223,8 @@ export async function GET(req) {
         LIMIT ${pageSize} OFFSET ${offset}`,
       params
     );
+    // Parsed server-side: [{ designation, wing }] per contact, in Designation Master order.
+    for (const row of contacts) { row.designation_wing_list = parseDesignationWingList(row.designation_wing_pairs); delete row.designation_wing_pairs; }
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     return NextResponse.json(
       { contacts, total, page, page_size: pageSize,

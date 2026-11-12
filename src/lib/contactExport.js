@@ -5,7 +5,7 @@ import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@
 import React from "react";
 import { query } from "@/lib/db";
 import { photosToDataUris } from "@/lib/photoDataUri";
-import { DESIGNATION_NAMES_SQL, ensureContactDesignationsSchema } from "@/lib/contactDesignations";
+import { DESIGNATION_NAMES_SQL, DESIGNATION_WING_PAIRS_SQL, ensureContactDesignationsSchema, effectiveWingSql, parseDesignationWingList, designationWingText } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { qualificationLabel as qualOnly } from "@/lib/qualificationOptions";
 import { CONTACT_DEFAULT_ORDER_BY } from "@/lib/contactSort";
@@ -40,11 +40,11 @@ export async function fetchContactExportRows(where, params, orderBy) {
             lw.name AS block_name,
             -- Wing of EACH designation, in the same order as the Designation column (its paired Wing, else the
             -- Wing the contact already holds that the designation belongs to, else Main Organisation).
-            (SELECT GROUP_CONCAT(COALESCE(NULLIF(cdw.wing, ''),
-                      (SELECT cw.wing FROM contact_wings cw JOIN designation_wings dw ON dw.wing = cw.wing AND dw.designation_id = cdw.designation_id
-                        WHERE cw.contact_id = cdw.contact_id ORDER BY cw.id LIMIT 1), 'Main Organisation')
+            (SELECT GROUP_CONCAT(${effectiveWingSql("cdw", "ddw")}
                     ORDER BY (ddw.sort_order IS NULL), ddw.sort_order, ddw.name SEPARATOR ', ')
                FROM contact_designations cdw JOIN designations ddw ON ddw.id = cdw.designation_id WHERE cdw.contact_id = c.id) AS aligned_wings,
+            -- Every Designation–Wing pair, for the "Designation with Wing" column.
+            ${DESIGNATION_WING_PAIRS_SQL} AS designation_wing_pairs,
             (SELECT GROUP_CONCAT(cw2.wing ORDER BY cw2.id SEPARATOR ', ') FROM contact_wings cw2 WHERE cw2.contact_id = c.id) AS all_wings,
             w.photo_url AS worker_photo_url,
             u.username AS assigned_caller_name,
@@ -99,6 +99,13 @@ function wingCell(c) {
   return [...aligned, ...extra].join(", ");
 }
 
+// The contact's Designation–Wing pairs joined by "; " (falls back to the plain designation for a contact that holds
+// no designation rows of its own, e.g. a legacy worker-position designation).
+function designationWingCell(c) {
+  const text = designationWingText(parseDesignationWingList(c.designation_wing_pairs));
+  return text || c.designation_name || "";
+}
+
 function statusLabel(c) {
   if (c.is_completed) return "Done";
   if (c.assigned_to_user_id) return "Assigned";
@@ -117,6 +124,8 @@ const COLUMNS = [
   { key: "designation", header: "Designation", width: 20, get: (c) => c.designation_name || "" },
   // Wing of each designation, same order; standalone Wing tags (no designation) follow.
   { key: "wing", header: "Wing", width: 22, get: (c) => wingCell(c) },
+  // Every Designation–Wing pair the contact holds: "Vidhansabha Prabhari — Main Organisation; Lok Sabha Adhyaksh — Mahila Wing".
+  { key: "designation_wing", header: "Designation with Wing", width: 40, get: (c) => designationWingCell(c) },
   { key: "zone", header: "Zone", width: 15, get: (c) => c.zone_name || "" },
   { key: "lok_sabha", header: "Lok Sabha", width: 16, get: (c) => c.lok_sabha_name || "" },
   { key: "assembly", header: "Assembly", width: 18, get: (c) => c.assembly_name || "" },
@@ -207,7 +216,7 @@ export function buildContactsCsv(rows, cols) {
 const PDF_COLUMNS = [
   { header: "Name", flex: 2, get: (c) => c.person_name || "" },
   { header: "Mobile", flex: 1.5, get: (c) => c.phone_number || "" },
-  { header: "Designation", flex: 1.7, get: (c) => c.designation_name || "" },
+  { header: "Designation with Wing", flex: 2.6, get: (c) => designationWingCell(c) },
   { header: "Zone", flex: 1.2, get: (c) => c.zone_name || "" },
   { header: "Lok Sabha", flex: 1.4, get: (c) => c.lok_sabha_name || "" },
   { header: "District", flex: 1.4, get: (c) => c.district_name || "" },

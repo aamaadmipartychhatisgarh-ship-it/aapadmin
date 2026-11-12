@@ -9,6 +9,7 @@ export const CONTACT_EXPORT_COLUMNS = [
   { key: "alt_phone", label: "Alternate Mobile" },
   { key: "designation", label: "Designation" },
   { key: "wing", label: "Wing" },
+  { key: "designation_wing", label: "Designation with Wing" },
   { key: "zone", label: "Zone" },
   { key: "lok_sabha", label: "Lok Sabha" },
   { key: "assembly", label: "Assembly" },

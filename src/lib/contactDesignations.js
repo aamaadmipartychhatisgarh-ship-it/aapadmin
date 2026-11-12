@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { ensureDesignationWingsSchema, wingsMapFor } from "@/lib/designationWings";
+import { ensureWingSchema } from "@/lib/wingDesignations";
 
 // PROMPT 5 — a contact can hold MANY designations. The relationship lives in
 // contact_designations(contact_id, designation_id) with UNIQUE(contact_id,
@@ -13,6 +14,8 @@ export async function ensureContactDesignationsSchema() {
   try {
     // designation_wings is read by the wing filter that joins contact_designations.
     await ensureDesignationWingsSchema();
+    // The Wing master (wings.is_main) is read by the Designation–Wing pair SQL below.
+    await ensureWingSchema().catch(() => {});
     await query(
       `CREATE TABLE IF NOT EXISTS contact_designations (
          id INT AUTO_INCREMENT PRIMARY KEY,
@@ -115,6 +118,55 @@ export const DESIGNATION_NAMES_SQL =
   `(SELECT GROUP_CONCAT(dd.name ORDER BY (dd.sort_order IS NULL), dd.sort_order, dd.name SEPARATOR ', ')
       FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
      WHERE cd.contact_id = c.id)`;
+
+// The Wing ONE designation row (alias `cd`, its designation joined as `d`) is held under — the single
+// rule the Contact List, the Wing / Designation search and the exports all share:
+//   1. the Wing stored on the row itself (contact_designations.wing);
+//   2. else a Wing the contact is tagged with (contact_wings) that this designation belongs to (designation_wings);
+//   3. else the designation's own Wing in the Designation master;
+//   4. else the Main wing (Wing master, is_main = 1).
+export function effectiveWingSql(cd = "cd", d = "d") {
+  return `COALESCE(NULLIF(TRIM(${cd}.wing), ''),
+    (SELECT ewcw.wing FROM contact_wings ewcw JOIN designation_wings ewdw ON ewdw.wing = ewcw.wing AND ewdw.designation_id = ${cd}.designation_id
+      WHERE ewcw.contact_id = ${cd}.contact_id ORDER BY ewcw.id LIMIT 1),
+    NULLIF(TRIM(${d}.wing), ''),
+    (SELECT ewm.name FROM wings ewm WHERE ewm.is_main = 1 ORDER BY ewm.id LIMIT 1),
+    'Main Organisation')`;
+}
+
+// Every Designation–Wing pair a contact holds, one entry per contact_designations row (so a contact is ONE list
+// row however many it holds), in Designation Master order: "Designation<US>Wing<RS>Designation<US>Wing…".
+// Parsed by parseDesignationWingList into [{ designation, wing }].
+// Control-character delimiters (never typed into a name), as SQL string literals — SEPARATOR takes a literal only.
+const PAIR_US = "'\u001f'";
+const PAIR_RS = "'\u001e'";
+export const DESIGNATION_WING_PAIRS_SQL =
+  `(SELECT GROUP_CONCAT(CONCAT(dp.name, ${PAIR_US}, ${effectiveWingSql("cdp", "dp")})
+            ORDER BY (dp.sort_order IS NULL), dp.sort_order, dp.name SEPARATOR ${PAIR_RS})
+      FROM contact_designations cdp JOIN designations dp ON dp.id = cdp.designation_id
+     WHERE cdp.contact_id = c.id)`;
+
+export function parseDesignationWingList(raw) {
+  if (raw == null || raw === "") return [];
+  const out = [];
+  const seen = new Set();
+  for (const part of String(raw).split(String.fromCharCode(30))) {
+    const [designation, wing] = part.split(String.fromCharCode(31));
+    const d = String(designation || "").trim();
+    if (!d) continue;
+    const w = String(wing || "").trim();
+    const key = `${d.toLowerCase()}\u0000${w.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ designation: d, wing: w });
+  }
+  return out;
+}
+
+// "Vidhansabha Prabhari — Main Organisation; Lok Sabha Adhyaksh — Mahila Wing" (the export cell).
+export function designationWingText(list, sep = "; ") {
+  return (list || []).map((p) => (p.wing ? `${p.designation} — ${p.wing}` : p.designation)).join(sep);
+}
 
 // A bare `designation_id` (the Caller workspace's single dropdown) must behave
 // like the Supervisor/Admin multi-select: it updates the join table, which the
