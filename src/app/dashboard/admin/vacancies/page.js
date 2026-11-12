@@ -13,9 +13,9 @@ import WingVacancies from "./WingVacancies";
 import VacancyTable, { fromMainRow, CategorySwitch } from "./VacancyTable";
 
 const BRAND = "#164FA3";
-// Default filters: every Wing (all Master Data designations), all levels. "__main__" must match
-// MAIN_WING_FILTER in lib/vacancyDashboard.
-const MAIN_WING = "";
+// Default Wing: the MAIN Wing (the Wing master's is_main Wing - "__main__" must match MAIN_WING_FILTER in lib/vacancyDashboard).
+// The page opens on it, returns to it on refresh and on Clear; any other Wing, or "All Wings", only when chosen explicitly.
+const MAIN_WING = "__main__";
 const DEFAULT_LEVEL = ""; // all levels - the combined list spans every level
 
 function fmtDateTime(v) {
@@ -79,7 +79,7 @@ export default function VacanciesPage() {
   const [toast, setToast] = useState(null);
 
   // Filters
-  // Default view: All Wings, all levels, Filled + Vacant (the page opens on it, and
+  // Default view: Main Wing, all levels, Filled + Vacant (the page opens on it, and
   // returns to it on refresh / Clear) — straight from Master Data.
   const [wing, setWing] = useState(MAIN_WING);
   const [level, setLevel] = useState(DEFAULT_LEVEL);
@@ -264,7 +264,7 @@ export default function VacanciesPage() {
               chosen Wing, Level and area (from the server), and a parent change
               clears a Designation that no longer applies. */}
           <select className={selCls} aria-label="Wing" value={wing} onChange={(e) => { setWing(e.target.value); setDesignationId(""); }}>
-            {(data?.filters?.wings || [{ key: "", label: "All Wings" }]).map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+            {(data?.filters?.wings || [{ key: "__main__", label: "Main Wing" }, { key: "", label: "All Wings" }]).map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
           </select>
           {/* The page lists the State level only, so there is no Level choice and no Lok Sabha / District / Assembly / Block area to pick
               (a State post has no area). The selectors return automatically if the server ever offers more than one level. */}

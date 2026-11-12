@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
-import { buildVacancyDataset } from "@/lib/vacancyDashboard";
+import { buildVacancyDataset, MAIN_WING_FILTER } from "@/lib/vacancyDashboard";
 
 // GET /api/vacancies — the Designation Vacancy dashboard dataset (summary cards,
 // vacancy table, hierarchy drill-down, filter option lists). Everything is
@@ -30,7 +30,8 @@ export async function GET(req) {
       assemblyId: searchParams.get("assembly_id"),
       blockId: searchParams.get("block_id"),
       designationId: searchParams.get("designation_id"),
-      wing: searchParams.get("wing"),
+      // No wing parameter = the default view = the Main Wing (same default as the page). "wing=" (empty) explicitly asks for All Wings.
+      wing: searchParams.has("wing") ? searchParams.get("wing") : MAIN_WING_FILTER,
       wings: searchParams.get("wings"),
       status: searchParams.get("status"),
       reminderStatus: searchParams.get("reminder_status"),
