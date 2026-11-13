@@ -456,12 +456,3 @@ export async function buildVacancyDataset(session, filters = {}) {
     },
   };
 }
-
-// Resolve one responsible person's CURRENT pending vacancies (used by the reminder
-// endpoint to build the grouped message and validate the mobile). Recomputed live,
-// so anything already filled is naturally excluded.
-export async function pendingVacanciesForResponsible(session, contactId) {
-  const data = await buildVacancyDataset(session, { responsibleId: contactId });
-  const rows = data.vacancies.filter((r) => r.status === "vacant" && (r.responsibles || []).some((rp) => rp.contact_id === contactId));
-  return rows.map((r) => ({ designation_name: r.designation_name, location_name: r.location_name, level_label: r.level_label }));
-}
