@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { contactPhotoMap } from "@/lib/contactPhotos";
 import { buildVacancyDataset } from "@/lib/vacancyDashboard";
 import { normalizeIndianMobile } from "@/lib/phoneLinks";
 import { TOTAL_LEVELS, levelConfig } from "@/lib/designationApprovals";
@@ -46,27 +47,6 @@ export function proposalMessage({ name, designation, level, location }) {
 export function whatsappLink(mobile, text) {
   const m = normalizeIndianMobile(mobile);
   return m ? `https://wa.me/91${m}?text=${encodeURIComponent(text)}` : null;
-}
-
-// Current photo of each holder: the Contact's own photo, else its linked Worker's photo (as the Contact List does).
-async function photosFor(contactIds) {
-  const out = new Map();
-  const ids = [...new Set(contactIds.filter((n) => Number.isInteger(n) && n > 0))];
-  if (!ids.length) return out;
-  const hasWorkerPhoto = (await columnExists("workers", "photo_url")) && (await columnExists("contacts", "worker_id"));
-  for (let i = 0; i < ids.length; i += 1000) {
-    const chunk = ids.slice(i, i + 1000);
-    // eslint-disable-next-line no-await-in-loop
-    const rows = await query(
-      hasWorkerPhoto
-        ? `SELECT c.id, COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url
-             FROM contacts c LEFT JOIN workers w ON w.id = c.worker_id WHERE c.id IN (${chunk.map(() => "?").join(",")})`
-        : `SELECT c.id, NULLIF(TRIM(c.photo_url), '') AS photo_url FROM contacts c WHERE c.id IN (${chunk.map(() => "?").join(",")})`,
-      chunk
-    );
-    for (const r of rows) out.set(r.id, r.photo_url || null);
-  }
-  return out;
 }
 
 // In-progress approval requests for the given designations, bucketed by "designationId" (state) or
@@ -147,7 +127,14 @@ function assignedBy(slots, designationName) {
     seen.add(k);
     people.push({ name: p.name, role: p.designation || x.label });
   }
-  return { label: shortRoles(ss.map((x) => x.label)), areas: [...new Set(ss.map((x) => x.area).filter(Boolean))], people };
+  // One line per responsible role (rule order), each with the person(s) who hold it IN THIS post's area — matched
+  // by the rule's contact ids, with their current photo — or none when nobody holds it there.
+  const slotsOut = ss.map((x) => ({
+    label: x.label,
+    area: x.area || null,
+    people: (x.people || []).map((p) => ({ contact_id: p.contact_id || null, name: p.name, photo_url: p.photo_url || null })),
+  }));
+  return { label: shortRoles(ss.map((x) => x.label)), areas: [...new Set(ss.map((x) => x.area).filter(Boolean))], people, slots: slotsOut };
 }
 
 export async function buildVacancyTree(session, { wing } = {}) {
@@ -161,7 +148,7 @@ export async function buildVacancyTree(session, { wing } = {}) {
   const TYPE_KEY = { lok_sabha: "lok_sabha", district: "district", assembly: "assembly", block: "block" };
   for (const [lvl, key] of Object.entries(TYPE_KEY)) (data.filters?.locations?.[key] || []).forEach((l, i) => orderOf.set(`${lvl}:${l.id}`, i));
 
-  const photo = await photosFor(posts.flatMap((p) => (p.holders || []).map((h) => Number(h.contact_id))));
+  const photo = await contactPhotoMap(posts.flatMap((p) => (p.holders || []).map((h) => Number(h.contact_id))));
   const proposals = await loadProposals(posts.filter((p) => p.status !== "filled").map((p) => Number(p.designation_id)));
 
   const nodes = new Map();

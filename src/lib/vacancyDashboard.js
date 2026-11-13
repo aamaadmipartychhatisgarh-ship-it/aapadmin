@@ -7,6 +7,7 @@ import { getReminderStates } from "@/lib/vacancyReminders";
 import { query } from "@/lib/db";
 import { wingPositionDesignationIds, buildWingVacancyDataset } from "@/lib/wingVacancies";
 import { listWings } from "@/lib/wingDesignations";
+import { contactPhotoMap } from "@/lib/contactPhotos";
 
 const LEVEL_LABEL = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly (Vidhan Sabha)", block: "Block" };
 // The Designation Vacancy page covers four organisational levels: State, Lok Sabha, District and Assembly (Vidhan Sabha). Every
@@ -257,6 +258,20 @@ export async function buildVacancyDataset(session, filters = {}) {
       })),
       responsible_note: res.missing.length ? `Not assigned: ${res.missing.join(", ")}` : null,
     });
+  }
+
+  // 3b) Profile photo of every responsible person (visual identification only), by their contact id.
+  {
+    const ids = [];
+    for (const row of displayRows) {
+      for (const rp of row.responsibles) ids.push(rp.contact_id);
+      for (const sl of row.responsible_slots || []) for (const h of sl.people || []) ids.push(h.contact_id);
+    }
+    const photos = await contactPhotoMap(ids);
+    for (const row of displayRows) {
+      for (const rp of row.responsibles) rp.photo_url = photos.get(Number(rp.contact_id)) || null;
+      for (const sl of row.responsible_slots || []) for (const h of sl.people || []) h.photo_url = photos.get(Number(h.contact_id)) || null;
+    }
   }
 
   // 4) Attach reminder state per responsible (missing → pending default).

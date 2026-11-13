@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { contactPhotoMap } from "@/lib/contactPhotos";
 import { fetchIncompleteDesignation } from "@/lib/incompleteDesignations";
 import { ensureWingSchema, listWings } from "@/lib/wingDesignations";
 import { wingsMapFor } from "@/lib/designationWings";
@@ -386,6 +387,11 @@ export async function buildWingVacancyDataset(session, filters = {}) {
   );
 
   const nc = notConfigured.filter((n) => (!f.wing || norm(n.wing) === norm(f.wing)) && (!f.role || n.role === f.role));
+  // Profile photo of each responsible person (visual identification only), by their contact id.
+  {
+    const photos = await contactPhotoMap(rows.flatMap((p) => (p.responsible?.people || []).map((h) => h.contact_id)));
+    for (const p of rows) for (const h of p.responsible?.people || []) h.photo_url = photos.get(Number(h.contact_id)) || null;
+  }
   return {
     counts: {
       total: scoped.length,

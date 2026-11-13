@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment } from "react";
-import { Loader2, CheckCircle2, MapPin, Phone, Lock } from "lucide-react";
+import { Loader2, CheckCircle2, MapPin, Phone, Lock, UserX } from "lucide-react";
+import Avatar from "@/components/Avatar";
 import { wingShortLabel } from "@/lib/wingLabel";
 
 // ONE layout for Designation Vacancies (Main Organisation) and Wing Vacancies.
@@ -24,7 +25,7 @@ export function fromMainRow(r) {
     const byId = new Map((r.responsibles || []).map((rp) => [rp.contact_id, rp]));
     for (const sl of r.responsible_slots || []) {
       if (sl.people.length) {
-        for (const h of sl.people) lines.push({ kind: "person", contact_id: h.contact_id, name: h.name, designation: h.designation, area: sl.area, mobile: byId.get(h.contact_id)?.mobile || null, reminder: byId.get(h.contact_id) || null });
+        for (const h of sl.people) lines.push({ kind: "person", contact_id: h.contact_id, name: h.name, designation: h.designation, photo_url: h.photo_url || null, area: sl.area, mobile: byId.get(h.contact_id)?.mobile || null, reminder: byId.get(h.contact_id) || null });
       } else {
         lines.push({ kind: "missing", designation: sl.label, area: sl.area, note: sl.note || "Not assigned" });
       }
@@ -56,7 +57,7 @@ export function fromWingRow(r) {
   const resp = r.responsible;
   if (r.status === "vacant" && resp) {
     if (resp.status === "assigned") {
-      for (const h of resp.people) lines.push({ kind: "person", contact_id: h.contact_id, name: h.name, designation: h.designation, area: resp.area, mobile: h.mobile || null });
+      for (const h of resp.people) lines.push({ kind: "person", contact_id: h.contact_id, name: h.name, designation: h.designation, photo_url: h.photo_url || null, area: resp.area, mobile: h.mobile || null });
     } else if (resp.status === "top_level") {
       lines.push({ kind: "note", note: resp.note });
     } else {
@@ -101,6 +102,16 @@ export function StatusChip({ status }) {
 const ROW_ACCENT = { vacant: "border-l-amber-400", review: "border-l-red-400", filled: "border-l-green-400" };
 const dash = <span className="text-gray-300">—</span>;
 const areaSuffix = (a) => (a && a !== "State" ? ` (${a})` : "");
+
+// Small round photo of the responsible person, right before their designation (visual identification only): the
+// person's own current photo by contact id, the standard initials placeholder when they have none, and an empty
+// outline when nobody holds the responsible role.
+function RespPhoto({ l }) {
+  if (l.kind === "person") {
+    return <Avatar name={l.name} src={l.photo_url} size={24} className="shrink-0 bg-[#164FA3]/10 border border-gray-200" textClassName="text-[#164FA3] text-[9px]" title={l.name} />;
+  }
+  return <span className="shrink-0 w-6 h-6 rounded-full border border-dashed border-red-300 inline-flex items-center justify-center text-red-300" data-testid="resp-photo-empty"><UserX size={12} /></span>;
+}
 
 // Filled rows are DISPLAY-ONLY on this page: no reminder / edit / delete actions.
 function ReadOnlyBadge() {
@@ -171,7 +182,12 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
             {field === "name" && (l.kind === "person" ? <span className="font-semibold text-gray-900">{l.name}</span>
               : l.kind === "note" ? <span className="text-gray-500 text-xs">{l.note}</span>
               : <span className="font-semibold text-red-600 text-xs whitespace-nowrap">{l.note}</span>)}
-            {field === "designation" && (l.kind === "note" ? dash : <span className={`text-xs ${l.kind === "person" ? "text-gray-700" : "text-red-500"}`}>{l.designation}{areaSuffix(l.area)}</span>)}
+            {field === "designation" && (l.kind === "note" ? dash : (
+              <>
+                <RespPhoto l={l} />
+                <span className={`text-xs ${l.kind === "person" ? "text-gray-700" : "text-red-500"}`} data-testid="resp-designation">{l.designation}{areaSuffix(l.area)}</span>
+              </>
+            ))}
             {field === "contact" && (l.kind === "person" ? (
               <>
                 {l.mobile ? <a href={`tel:${l.mobile}`} className="inline-flex items-center gap-1 font-mono text-xs text-[#164FA3] hover:underline"><Phone size={11} />{l.mobile}</a> : <span className="text-xs text-gray-400">No mobile</span>}
@@ -283,15 +299,15 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
                       <div key={i} className="text-xs">
                         {l.kind === "person" ? (
                           <>
-                            <span className="font-semibold text-gray-900">{l.name}</span>
-                            <span className="text-gray-500"> · {l.designation}{areaSuffix(l.area)}</span>
+                            <span className="inline-flex items-center gap-1.5 align-middle"><RespPhoto l={l} /><span className="text-gray-700">{l.designation}{areaSuffix(l.area)}</span></span>
+                            <span className="text-gray-500"> · </span><span className="font-semibold text-gray-900">{l.name}</span>
                             <div className="flex items-center gap-2 mt-0.5">
                               {l.mobile ? <a href={`tel:${l.mobile}`} className="font-mono text-[#164FA3]">{l.mobile}</a> : <span className="text-gray-400">No mobile</span>}
                               {renderContactExtra ? renderContactExtra(l, r) : null}
                             </div>
                           </>
                         ) : l.kind === "note" ? <span className="text-gray-500">{l.note}</span>
-                          : <span className="text-red-600"><span className="font-semibold">{l.note}</span> · {l.designation}{areaSuffix(l.area)}</span>}
+                          : <span className="text-red-600 inline-flex items-center gap-1.5"><RespPhoto l={l} /><span><span className="font-semibold">{l.note}</span> · {l.designation}{areaSuffix(l.area)}</span></span>}
                       </div>
                     ))}
                   </div>

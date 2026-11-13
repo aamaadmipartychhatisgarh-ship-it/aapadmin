@@ -104,11 +104,20 @@ function VacantCard({ p, n }) {
         ))}
         {/* Who is responsible for filling the post (the vacancy-responsibility rule) — not a proposed person. */}
         {ab ? (
-          <div data-testid="assigned-by"
-            title={ab.people.length ? `Currently: ${ab.people.map((q) => `${q.name} (${q.role})`).join(", ")}` : `${ab.label}: not assigned${ab.areas.length ? ` in ${ab.areas.join(", ")}` : ""}`}
-            className="inline-flex items-start gap-1.5 self-start max-w-full text-[11px] font-semibold text-amber-900 bg-amber-100 border border-amber-300 rounded-md px-2 py-1">
-            <Users size={12} className="mt-[1px] shrink-0" />
-            <span className="break-words">Assigned By: {ab.label}</span>
+          <div data-testid="assigned-by" className="self-stretch max-w-full rounded-md bg-amber-50 border border-amber-300 px-2 py-1.5">
+            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 mb-1"><Users size={11} /> Assigned By</div>
+            {/* One line per responsible role: [photo] Role · the person who holds it in this post's area. */}
+            {(ab.slots || []).flatMap((sl, si) => (sl.people.length ? sl.people.map((h) => ({ key: `${si}:${h.contact_id || h.name}`, sl, h })) : [{ key: `${si}:none`, sl, h: null }])).map(({ key, sl, h }) => (
+              <div key={key} className="flex items-center gap-1.5 min-w-0 py-0.5" data-testid="assigned-by-line" data-role={sl.label} data-contact={h?.contact_id || ""}>
+                {h ? (
+                  <Avatar name={h.name} src={h.photo_url} size={22} className="shrink-0 bg-white border border-amber-300" textClassName="text-amber-800 text-[9px]" />
+                ) : (
+                  <span className="shrink-0 w-[22px] h-[22px] rounded-full border border-dashed border-amber-400 bg-white inline-flex items-center justify-center text-amber-400" data-testid="assigned-by-empty"><UserX size={11} /></span>
+                )}
+                <span className="text-[11px] font-semibold text-amber-900 whitespace-nowrap" data-testid="assigned-by-role">{sl.label}</span>
+                <span className={`text-[11px] truncate ${h ? "text-gray-700" : "text-gray-400 italic"}`} title={h ? h.name : `Not assigned${sl.area ? ` in ${sl.area}` : ""}`}>· {h ? h.name : "Not assigned"}</span>
+              </div>
+            ))}
           </div>
         ) : p.proposed.length === 0 ? (
           <div className="inline-flex items-center gap-1 text-xs text-gray-500 italic" data-testid="proposed-none"><UserX size={13} /> Person Not Assigned</div>
