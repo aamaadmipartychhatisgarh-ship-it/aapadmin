@@ -26,6 +26,8 @@ import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 //   Block (Prabhari)            →  Assembly Prabhari                            parent Assembly
 //   Block (President)           →  Assembly President                           parent Assembly
 //   Block Team                  →  Assembly Prabhari + Assembly President       parent Assembly
+//   Lok Sabha Upadhyaksh        →  Lok Sabha Prabhari + Lok Sabha President     the post's Lok Sabha  (any level)
+//   District Upadhyaksh         →  Lok Sabha Prabhari + Lok Sabha President     the post's Lok Sabha  (any level)
 //
 // President and Prabhari lines are never mixed. Every responsible person is read
 // from Contacts (their real name + the designation they actually hold). A required
@@ -74,10 +76,34 @@ const RULES = {
 
 const roleLabel = ([lvl, kind]) => `${LEVEL_LABEL[lvl]} ${KIND_LABEL[kind]}`;
 
+// Named exceptions to the level rules above — ONLY these designations, wherever the Designation Master places
+// them: Lok Sabha Upadhyaksh and District Upadhyaksh are appointed by the Lok Sabha Prabhari + Lok Sabha
+// President of the post's own Lok Sabha (the vacancy unit's Lok Sabha ancestor), not by the Assembly / District
+// leadership their level would otherwise give. Matched on the full designation name (English / Hindi spellings);
+// every other designation keeps its level rule.
+const UPADHYAKSH = "(upadhyaksh|upadhyaksha|upadyaksh|upadyaksha|उपाध्यक्ष)";
+const LOK_SABHA_APPOINTED = [
+  new RegExp(`^(lok ?sabha|लोकसभा|लोक सभा) ${UPADHYAKSH}$`),
+  new RegExp(`^(district|zila|jila|जिला|ज़िला) ${UPADHYAKSH}$`),
+];
+function normName(name) {
+  return String(name || "").toLowerCase().replace(/[\/,.\-()]+/g, " ").replace(/\s+/g, " ").trim();
+}
+export function lokSabhaAppointed(designationName) {
+  const n = normName(designationName);
+  return LOK_SABHA_APPOINTED.some((re) => re.test(n));
+}
+
 // The rule for one vacancy: { role, required: [[level, kind]...], label }.
 export function responsibilityRule(level, designationName) {
   const levelRules = RULES[level];
   if (!levelRules) return { role: null, required: [], label: "—" };
+  // Lok Sabha Upadhyaksh / District Upadhyaksh -> Lok Sabha Prabhari + Lok Sabha President (see above). A State-level
+  // post has no Lok Sabha above it, so the exception applies from the Lok Sabha level down.
+  if (level !== "state" && lokSabhaAppointed(designationName)) {
+    const required = BOTH("lok_sabha");
+    return { role: "team", required, label: required.map(roleLabel).join(" + ") };
+  }
   let role = designationRole(designationName);
   // A Working President is only a leadership role at State; elsewhere it is a team post.
   if (role === "working_president") role = level === "state" ? "president" : "team";
