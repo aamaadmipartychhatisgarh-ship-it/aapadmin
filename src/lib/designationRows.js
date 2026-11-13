@@ -8,15 +8,38 @@
 const clean = (w) => String(w ?? "").trim();
 const lc = (w) => clean(w).toLowerCase();
 
+// The Wing a designation row is held under when NO Wing is saved on the row — the same rule the Contact List, its
+// Wing filter / search and the exports apply (lib/contactDesignations effectiveWingSql), so the edit form always
+// opens showing exactly what the list shows:
+//   1. a Wing the contact is tagged with that this designation is mapped to (first in tag order);
+//   2. else the Designation master's mapping when unambiguous: exactly one Wing -> it; none -> the Main Wing;
+//   3. else "" (mapped to several Wings, none chosen for this contact) -> "Wing not set": the user must choose.
+// masterWings: the designation's Wings from the master (designation_wings, else designations.wing).
+export function resolveBlankWing({ masterWings = [], tags = [], mainNames = [] }) {
+  const main = new Set(mainNames.map(lc));
+  const mainName = clean(mainNames[0]);
+  const dw = masterWings.map(clean).filter(Boolean);
+  const tag = tags.map(clean).find((t) => t && dw.some((w) => lc(w) === lc(t)));
+  if (tag) return main.has(lc(tag)) ? mainName : (dw.find((w) => lc(w) === lc(tag)) || tag);
+  const uniq = [...new Set(dw.map(lc))];
+  if (uniq.length === 1) return main.has(uniq[0]) ? mainName : dw[0];
+  if (uniq.length === 0) return mainName;
+  return "";
+}
+
+// "Main Organisation", "Main Organisations", "Main" … — a saved spelling of the Main Wing.
+export const MAIN_ALIAS = /^main(\s+organi[sz]ations?)?$/i;
+
 // pairs: [{ designation_id, wing }] as stored (wing may be null for rows saved before pairing).
 // wings: the contact's saved wing names. designationWings: { [designationId]: [wing names] } from the
 // master. mainNames: names of the main organisation wing(s). Main is an ORDINARY Wing: a row on it carries the Main
 // wing's own name (never a blank placeholder), and a saved Main tag comes back as a row like any other Wing.
-// Unpaired legacy rows take the first of the designation's master wings the contact already has, else - for a designation
-// that belongs to no other Wing - Main; Wings not used by any row come back as standalone Wing rows, so nothing saved is lost.
+// A row with no saved Wing is resolved by resolveBlankWing (and stays "" when that is ambiguous); Wings not used by any
+// row come back as standalone Wing rows, so nothing saved is lost.
 export function deriveRows({ pairs = [], wings = [], designationWings = {}, mainNames = [] }) {
   const main = new Set(mainNames.map(lc));
   const mainName = clean(mainNames[0]);
+  const isMain = (w) => main.has(lc(w)) || (mainName && MAIN_ALIAS.test(clean(w)));
   const have = wings.map(clean).filter(Boolean);
   const used = new Set();
   const rows = [];
@@ -24,23 +47,16 @@ export function deriveRows({ pairs = [], wings = [], designationWings = {}, main
     const id = Number(p.designation_id);
     if (!Number.isInteger(id) || id <= 0) continue;
     let wing = clean(p.wing);
-    if (!wing) {
-      const cand = (designationWings[id] || designationWings[String(id)] || []).map(clean)
-        .find((w) => w && !main.has(lc(w)) && have.some((h) => lc(h) === lc(w)));
-      wing = cand || "";
-      if (!wing && mainName) {
-        const dw = (designationWings[id] || designationWings[String(id)] || []).map(clean).filter(Boolean);
-        if (dw.length === 0 || dw.some((w) => main.has(lc(w)))) wing = mainName;   // a legacy blank pair on a general designation = Main
-      }
-    }
-    if (wing && main.has(lc(wing))) wing = mainName;                              // one canonical spelling for Main
+    if (!wing) wing = resolveBlankWing({ masterWings: designationWings[id] || designationWings[String(id)] || [], tags: have, mainNames });
+    if (wing && isMain(wing)) wing = mainName;                                    // one canonical spelling for Main
     if (wing) used.add(lc(wing));
     rows.push({ designation_id: id, wing });
   }
   for (const w of have) {
-    if (used.has(lc(w))) continue;
-    used.add(lc(w));
-    rows.push({ designation_id: null, wing: main.has(lc(w)) ? mainName : w });
+    const ww = isMain(w) ? mainName : w;
+    if (used.has(lc(ww))) continue;
+    used.add(lc(ww));
+    rows.push({ designation_id: null, wing: ww });
   }
   return rows;
 }

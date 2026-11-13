@@ -126,7 +126,8 @@ export const DESIGNATION_NAMES_SQL =
 // (never from the designation's name):
 //   1. the Wing saved on the assignment row itself (contact_designations.wing);
 //   2. else a Wing the contact is tagged with (contact_wings) that this designation is mapped to (designation_wings);
-//   3. else the Designation master's own mapping when it is unambiguous: mapped to exactly ONE Wing -> that Wing;
+//   3. else the Designation master's own mapping (designation_wings, else designations.wing — as the forms read it)
+//      when it is unambiguous: mapped to exactly ONE Wing -> that Wing;
 //      mapped to NO Wing -> the Main Wing (the rule the app applies when it saves such a designation);
 //   4. else (mapped to several Wings, none saved for this contact) -> NULL: shown as "Wing not set", never guessed.
 // Tables created at different times (imported vs created by the app) can carry different collations
@@ -137,11 +138,11 @@ export const WING_COLLATE = (x) => `(CONVERT(${x} USING utf8mb4) COLLATE utf8mb4
 
 export function effectiveWingSql(cd = "cd", d = "d") {
   const W = WING_COLLATE;
-  // The designation's master Wings: designation_wings rows plus designations.wing (when not already listed).
-  const masterCount = `((SELECT COUNT(DISTINCT ${W("ewx.wing")}) FROM designation_wings ewx
-                          WHERE ewx.designation_id = ${cd}.designation_id AND TRIM(ewx.wing) <> '')
-                        + IF(TRIM(IFNULL(${d}.wing, '')) <> '' AND NOT EXISTS (SELECT 1 FROM designation_wings ewy
-                          WHERE ewy.designation_id = ${cd}.designation_id AND ${W("ewy.wing")} = ${W(`TRIM(${d}.wing)`)}), 1, 0))`;
+  // The designation's master Wings exactly as the forms read them (lib/designationWings wingsMapFor): its
+  // designation_wings rows, or — only when it has none — designations.wing.
+  const dwCount = `(SELECT COUNT(DISTINCT ${W("ewx.wing")}) FROM designation_wings ewx
+                      WHERE ewx.designation_id = ${cd}.designation_id AND TRIM(ewx.wing) <> '')`;
+  const masterCount = `IF(${dwCount} > 0, ${dwCount}, IF(TRIM(IFNULL(${d}.wing, '')) <> '', 1, 0))`;
   const masterOne = `COALESCE((SELECT ${W("ewz.wing")} FROM designation_wings ewz
                        WHERE ewz.designation_id = ${cd}.designation_id AND TRIM(ewz.wing) <> '' ORDER BY ewz.wing LIMIT 1),
                      ${W(`NULLIF(TRIM(${d}.wing), '')`)})`;

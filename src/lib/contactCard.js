@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL } from "@/lib/contactDesignations";
+import { DESIGNATION_IDS_SQL, DESIGNATION_NAMES_SQL, DESIGNATION_PAIRS_SQL, attachDesignationWingLists } from "@/lib/contactDesignations";
 import { WINGS_SQL, ensureContactWingsSchema } from "@/lib/contactWings";
 
 // Resolve ONE contact into the exact shape the Contacts list renders — every
@@ -41,6 +41,9 @@ export async function resolveContactCard(id) {
       WHERE c.id = ? LIMIT 1`,
     [id]
   );
+  // The Designation–Wing pairs the Contact List renders, so a saved card replaces the list row with the FRESH
+  // pairs (never a stale or missing Wing). Loaded separately: a failure there never fails the save response.
+  if (rows[0]) await attachDesignationWingLists(rows);
   return rows[0] || null;
 }
 

@@ -23,7 +23,12 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
   const mainName = wingMaster.find((w) => w.is_main)?.name || "";
   // The Main Wing's name comes from Master Data (Administration -> Master Data -> Wing) - never a hardcoded list. While the
   // master is still loading (or unavailable) the blank option still reads "Main" so a selection is always possible.
-  const effWing = (r) => String(r.wing || mainName || "");   // a new row starts on Main (a blank legacy value is Main)
+  // A NEW row (no designation yet) starts on Main. A row that already has a designation but no Wing is "Wing not set"
+  // (its Wing is ambiguous in the master and was never chosen) — shown as such, never disguised as Main, so choosing
+  // any Wing (Main included) is a real change that gets saved.
+  const unset = (r) => !!r.designation_id && !String(r.wing || "").trim();
+  const effWing = (r) => (unset(r) ? "" : String(r.wing || mainName || ""));
+  const known = (w) => wings.some((x) => String(x.name).trim().toLowerCase() === String(w || "").trim().toLowerCase());
   const wingsOf = (d) => (d.wings && d.wings.length ? d.wings : d.wing ? [d.wing] : []).map((w) => String(w).trim().toLowerCase());
   // Is this designation mapped to the Wing? A named Wing: the designation lists it. The Main Wing (blank): the designation
   // has no Wing at all, or lists the Main Wing (also when it is shared with other Wings). One that belongs ONLY to other
@@ -64,7 +69,11 @@ export default function DesignationWingRows({ rows, onChange, designations: desi
                   apply(designations);
                   reload().then((list) => { const d = list?.find((x) => String(x.id) === String(r.designation_id)); if (d && !inWing(d, w)) apply(list); });   // refresh the options from Master Data
                 }}>
-                {wings.length === 0 && <option value="">Main</option>}
+                {unset(r) && <option value="" disabled>Wing not set — choose a Wing</option>}
+                {!unset(r) && wings.length === 0 && <option value="">Main</option>}
+                {/* A saved Wing that is not (or no longer) in Master Data: shown as it is stored, so the select never
+                    pretends another Wing is selected; choosing a Master-Data Wing replaces it. */}
+                {r.wing && wings.length > 0 && !known(r.wing) && <option value={r.wing}>{wingShortLabel(r.wing)} (not in Master Data)</option>}
                 {wings.map((w) => <option key={w.name} value={w.name} disabled={wingTaken(idx).has(w.name) && !r.designation_id}>{wingShortLabel(w.name, Number(w.is_main) === 1)}</option>)}
               </select>
             </div>

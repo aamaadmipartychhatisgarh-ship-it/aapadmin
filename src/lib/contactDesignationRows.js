@@ -3,7 +3,7 @@ import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { wingsMapFor } from "@/lib/designationWings";
 import { listWings } from "@/lib/wingDesignations";
-import { deriveRows, normalizeRows, sameRows } from "@/lib/designationRows";
+import { deriveRows, normalizeRows, sameRows, resolveBlankWing, MAIN_ALIAS } from "@/lib/designationRows";
 
 const lc = (w) => String(w ?? "").trim().toLowerCase();
 
@@ -48,12 +48,10 @@ export async function validateRows(rows, existing = []) {
     const isExisting = existing.some((e) => e.designation_id === r.designation_id && lc(e.wing) === lc(r.wing));
     let wing = r.wing;
     const mainName = ctx.mainNames[0] || "";
-    // Main is an ordinary Wing carrying its own name; a blank Wing on a designation that belongs to no other Wing means Main.
-    if (wing && mainLc.has(lc(wing))) wing = mainName;
-    else if (!wing && r.designation_id && mainName) {
-      const dwAll = (ctx.wmap.get(r.designation_id) || []).filter(Boolean);
-      if (dwAll.length === 0 || dwAll.some((w) => mainLc.has(lc(w)))) wing = mainName;
-    }
+    // Main is an ordinary Wing carrying its own name (any saved spelling of it is read as Main). A blank Wing is resolved
+    // by the SAME rule the Contact List and the forms use (resolveBlankWing): it stays blank only when ambiguous.
+    if (wing && (mainLc.has(lc(wing)) || (mainName && MAIN_ALIAS.test(String(wing).trim())))) wing = mainName;
+    else if (!wing && r.designation_id) wing = resolveBlankWing({ masterWings: ctx.wmap.get(r.designation_id) || [], mainNames: ctx.mainNames });
     const isMainWing = !!wing && mainLc.has(lc(wing));
     if (wing && !isMainWing && !isExisting) {
       const canon = wingByLc.get(lc(wing));
@@ -66,13 +64,17 @@ export async function validateRows(rows, existing = []) {
       if (seenD.has(r.designation_id)) return { error: `"${d.name}" is selected more than once. Each designation can be added once per contact.` };
       seenD.add(r.designation_id);
       if (!isExisting) {
-        if (d.enabled != null && Number(d.enabled) === 0) return { error: `"${d.name}" is disabled in Master Data.` };
+        // A designation the contact ALREADY holds may have its Wing changed even if it was switched off in Master Data
+        // since; only newly added designations must be enabled.
+        const holds = existing.some((e) => e.designation_id === r.designation_id);
+        if (!holds && d.enabled != null && Number(d.enabled) === 0) return { error: `"${d.name}" is disabled in Master Data.` };
         const dw = (ctx.wmap.get(r.designation_id) || []).filter(Boolean);
         const dwNonMain = dw.filter((w) => !mainLc.has(lc(w)));
         if (isMainWing) {
           if (dw.length && !dw.some((w) => mainLc.has(lc(w)))) return { error: `"${d.name}" belongs to ${dwNonMain.join(", ")}; choose that Wing for it.` };
         } else if (wing && !dw.some((w) => lc(w) === lc(wing))) return { error: `"${d.name}" does not belong to the ${wing}.` };
-        if (!wing && dwNonMain.length && dwNonMain.length === dw.length) return { error: `"${d.name}" belongs to ${dwNonMain.join(", ")}; choose that Wing for it.` };
+        // A changed row must say which Wing it is held under when the master gives it several.
+        if (!wing) return { error: `Choose the Wing for "${d.name}" — it belongs to ${dw.join(", ")}.` };
       }
     } else {
       if (!wing) continue;
@@ -95,13 +97,10 @@ export async function prepareDesignationRows(data, { contactId = null, canClear 
     const blank = rows.filter((r) => r.designation_id && !r.wing);
     if (!blank.length) return rows;
     const ctx = await masterContext([...new Set(blank.map((r) => r.designation_id))]);
-    const mainName = ctx.mainNames[0] || "";
-    const mainLc0 = new Set(ctx.mainNames.map(lc));
-    return rows.map((r) => {
-      if (!(r.designation_id && !r.wing && mainName)) return r;
-      const dw = (ctx.wmap.get(r.designation_id) || []).filter(Boolean);
-      return dw.length === 0 || dw.some((w) => mainLc0.has(lc(w))) ? { ...r, wing: mainName } : r;
-    });
+    // Same rule as the list / forms (resolveBlankWing); a blank stays blank only when the master leaves it ambiguous.
+    return rows.map((r) => (r.designation_id && !r.wing
+      ? { ...r, wing: resolveBlankWing({ masterWings: ctx.wmap.get(r.designation_id) || [], mainNames: ctx.mainNames }) }
+      : r));
   };
   const sent = await canonMain(normalizeRows(data.designation_rows));
   const strip = () => { delete data.designation_rows; delete data.designation_rows_prev; delete data.designation_ids; delete data.designation_ids_prev; delete data.designation_id; delete data.wings; };
