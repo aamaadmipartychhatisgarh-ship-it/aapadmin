@@ -1,7 +1,8 @@
 import { query } from "@/lib/db";
 import { scopeFilterSync } from "@/lib/permissions";
 import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
-import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
+import { ensureContactDesignationsSchema, effectiveWingSql } from "@/lib/contactDesignations";
+import { listWings } from "@/lib/wingDesignations";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 import { wingsMapFor } from "@/lib/designationWings";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
@@ -98,6 +99,10 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     ? opts.wings.map((w) => String(w || "").trim()).filter(Boolean)
     : [];
   const wingSet = wingFilter.length ? new Set(wingFilter) : null;
+  // With a Wing filter, every holder row carries the Wing its ASSIGNMENT is held under (the same rule the Contact
+  // List uses: the Wing saved on the assignment, else the contact's matching Wing tag, else the master's unambiguous
+  // mapping; NULL = not set). Without a filter nothing extra is read.
+  const effWingCol = wingSet ? `, ${effectiveWingSql("cd", "d")} AS eff_wing` : "";
   // Collapse designations that render to the SAME name at this level into a single
   // vacancy column (case/whitespace-insensitive) so a location never shows the same
   // designation twice (e.g. a stray duplicate row in the master). The representative
@@ -157,7 +162,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     peopleRows = await query(
       `SELECT 0 AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name, c.phone_number,
               COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
-              lac.name AS assembly_name
+              lac.name AS assembly_name${effWingCol}
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
          JOIN designations d ON d.id = cd.designation_id AND d.level = 'state'
@@ -174,7 +179,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
       `SELECT ${levelIdExpr} AS loc_id, cd.designation_id, c.id AS contact_id, c.person_name, c.phone_number,
               COALESCE(NULLIF(TRIM(c.photo_url), ''), NULLIF(TRIM(w.photo_url), '')) AS photo_url,
               lac.name AS assembly_name,
-              c.lok_sabha_id AS raw_lok_sabha_id, c.district_id AS raw_district_id, c.assembly_id AS raw_assembly_id
+              c.lok_sabha_id AS raw_lok_sabha_id, c.district_id AS raw_district_id, c.assembly_id AS raw_assembly_id${effWingCol}
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
          JOIN designations d ON d.id = cd.designation_id AND d.level = ?
@@ -191,39 +196,34 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   }
 
   // ---- Wing mapping ---------------------------------------------------------------
-  // Which Wing a person is listed under comes from THEIR saved Contact record
-  // (contact_wings — what the Contacts edit form's Wings field saves). Read live, so
-  // changing a contact's Wing there moves the same record (same contact id, no copy)
-  // to the new Wing section here and removes it from the old one.
-  // A contact with NO saved Wing keeps the existing workflow: it is listed under the
-  // Wing(s) of the designation it holds. With no Wing filter nothing changes.
+  // STRICT Wing-wise separation, by the real relationships — never by a person's other Wings or by name:
+  //   • a designation column is listed under a Wing only when the Designation master maps the designation to that
+  //     Wing (a designation mapped to NO Wing is a Main one — the same rule as Designation Vacancies);
+  //   • a holder is counted under a Wing only when THEIR ASSIGNMENT of that designation is held under that Wing
+  //     (eff_wing above). A person holding a Main post and a Youth post is therefore counted for each post under its
+  //     own Wing only — their Youth State President never appears under Main.
+  //   • an assignment whose Wing is not set (several possible Wings, none chosen) is not counted under any Wing; it
+  //     marks the post "Needs review" instead of filling it or leaving it falsely vacant.
+  // With no Wing filter nothing changes.
   let designations = baseDesignations;
-  let personMatchesWing = () => true;
+  let holderWing = () => "match";                     // "match" | "other" | "unset"
   if (wingSet) {
     await ensureContactWingsSchema();
-    const cwMap = new Map(); // contact id -> saved wing names
-    const cids = [...new Set(peopleRows.map((r) => r.contact_id))];
-    for (let i = 0; i < cids.length; i += 1000) {
-      const chunk = cids.slice(i, i + 1000);
-      // eslint-disable-next-line no-await-in-loop
-      // No .catch: a failed lookup must surface as an error, never silently drop
-      // holders (which would turn filled positions into false vacancies).
-      const rows = await query(`SELECT contact_id, wing FROM contact_wings WHERE contact_id IN (${chunk.map(() => "?").join(",")})`, chunk);
-      for (const w of rows) { if (!cwMap.has(w.contact_id)) cwMap.set(w.contact_id, []); cwMap.get(w.contact_id).push(w.wing); }
-    }
-    const effectiveWings = (r) => {
-      const saved = cwMap.get(r.contact_id);
-      return saved && saved.length ? saved : (wingsOfDesignationId.get(r.designation_id) || []);
+    const master = await listWings();
+    const mainLc = new Set(master.filter((w) => Number(w.is_main) === 1).map((w) => normName(w.name)));
+    const MAIN_ALIAS = /^main(\s+organi[sz]ations?)?$/i;
+    const isMain = (w) => mainLc.has(normName(w)) || MAIN_ALIAS.test(String(w || "").trim());
+    const wanted = new Set([...wingSet].map(normName));
+    const wantMain = [...wingSet].some(isMain);
+    const wingWanted = (w) => (isMain(w) ? wantMain : wanted.has(normName(w)));
+    const designationInWing = (d) => {
+      const ws = (d.wings || []).map((w) => String(w || "").trim()).filter(Boolean);
+      return ws.length === 0 ? wantMain : ws.some(wingWanted);
     };
-    personMatchesWing = (r) => effectiveWings(r).some((w) => wingSet.has(w));
-    // A designation column is shown under a Wing when the designation belongs to it OR
-    // someone saved under that Wing holds it (so a worker saved under Wing X is visible
-    // even when their designation is a general one).
-    const shown = new Set();
-    for (const d of baseDesignations) if ((d.wings || []).some((w) => wingSet.has(w))) shown.add(normName(d.name));
-    for (const r of peopleRows) if (personMatchesWing(r)) shown.add(idToNorm.get(r.designation_id) || normName(r.designation_name));
-    designations = baseDesignations.filter((d) => shown.has(normName(d.name)));
+    designations = baseDesignations.filter(designationInWing);
+    holderWing = (r) => (r.eff_wing == null || String(r.eff_wing).trim() === "" ? "unset" : wingWanted(r.eff_wing) ? "match" : "other");
   }
+  const personMatchesWing = (r) => holderWing(r) === "match";
   const allowedNorms = new Set(designations.map((d) => normName(d.name)));
 
   // Bucket assigned people by EXACT (location id : designation id). A holder whose
@@ -236,7 +236,19 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   for (const r of peopleRows) {
     const nm = idToNorm.get(r.designation_id) || normName(r.designation_name);
     if (!allowedNorms.has(nm)) continue;
-    if (!personMatchesWing(r)) continue;
+    const hw = holderWing(r);
+    if (hw === "other") continue;                      // held under another Wing: not part of this Wing at all
+    if (hw === "unset" && !(validLocIds && (r.loc_id == null || !validLocIds.has(Number(r.loc_id))))) {
+      // Wing not set on this assignment: the post it may fill is flagged for review (never counted as filled).
+      unmapped.push({
+        contact_id: r.contact_id, person_name: r.person_name, norm: nm,
+        designation_id: r.designation_id,
+        designation_name: (repByNorm.get(nm) || {}).name || null,
+        reason: "Wing not set for this designation on the contact — set it in Contacts",
+        raw: {}, exactLoc: Number(r.loc_id ?? 0),
+      });
+      continue;
+    }
     if (validLocIds && (r.loc_id == null || !validLocIds.has(Number(r.loc_id)))) {
       unmapped.push({
         contact_id: r.contact_id, person_name: r.person_name, norm: nm,
@@ -261,7 +273,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   // with a valid District can only be in that District's assemblies); with none,
   // any location of this level is possible.
   let couldBeAt = () => false;
-  if (unmapped.length) {
+  if (unmapped.some((u) => u.exactLoc == null)) {
     const all = await query("SELECT id, type, parent_id FROM locations");
     const byId = new Map(all.map((x) => [x.id, x]));
     const isType = (id, t) => id != null && byId.get(Number(id))?.type === t;
@@ -279,6 +291,11 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
       return false;
     };
     couldBeAt = (u, locId) => u.anchor == null || under(locId, u.anchor);
+  }
+  {
+    // A holder whose only gap is the Wing (location valid) can be at exactly their own location.
+    const base = couldBeAt;
+    couldBeAt = (u, locId) => (u.exactLoc != null ? u.exactLoc === Number(locId) : base(u, locId));
   }
 
   // Build one row per (location × level-designation). FILLED iff ≥1 person is
@@ -394,7 +411,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     counts,
     // Holders of this level's designations whose location mapping is missing or
     // invalid — reported, never counted as filling (or freeing) a position.
-    unmapped_holders: unmapped.map(({ norm, raw, anchor, ...u }) => u),
+    unmapped_holders: unmapped.map(({ norm, raw, anchor, exactLoc, ...u }) => u),
     capped: peopleRows.length >= MAX_PEOPLE,
   };
 }
