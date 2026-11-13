@@ -101,12 +101,10 @@ export function buildContactPersonFilter({ zone_id, lok_sabha_id, district_id, a
         return { clause: clauses.length > 1 ? `(${clauses.join(" OR ")})` : clauses[0], params };
       })()
     : null;
-  // Legacy fallbacks (worker position text / contacts.designation_id) carry no Wing, so they apply only to contacts
-  // with no designation rows of their own, and — with a Wing selected — only when that Wing is the Main wing
-  // (an unpaired legacy designation is a Main Organisation one).
-  const legacyWingOk = hasWing
-    ? { sql: `EXISTS (SELECT 1 FROM wings lmw WHERE lmw.is_main = 1 AND lmw.name IN (${wingList.map(() => "?").join(",")}))`, params: [...wingList] }
-    : null;
+  // Legacy fallbacks (worker position text / contacts.designation_id) carry NO saved Wing, so they apply only to
+  // contacts with no designation rows of their own, and never when a Wing is selected: a Wing (Main included) is
+  // only ever matched from a saved relationship, never assumed.
+  const legacyWingOk = hasWing ? { sql: "1 = 0", params: [] } : null;
 
   // Worker-side (person truth).
   const wGeo = geoParts("w", geo);

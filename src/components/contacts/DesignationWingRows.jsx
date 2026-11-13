@@ -5,7 +5,7 @@ import { Plus, X } from "lucide-react";
 import { wingShortLabel } from "@/lib/wingLabel";
 
 // The Designation + Wing field of the Add / Edit Contact forms: ONE row = ONE Designation paired
-// with ITS Wing ("Main Organisation" or a Master-Data Wing). "Add Designation" inserts another
+// with ITS Wing (any Master-Data Wing - Main is one of them, like SC, ST, Youth ...). "Add Designation" inserts another
 // row directly below; every row is independent, and each is saved as its own combination.
 // rows: [{ designation_id: "" | number, wing: "" }]   wing "" = Main Organisation.
 // designations: the Designation master (each with .wings / .wing); wingMaster: /api/wings entries.

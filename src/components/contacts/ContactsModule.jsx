@@ -89,49 +89,36 @@ const MODES = {
   },
 };
 
-// Designation + Wing for one Contact List row, grouped: Main designations, then "Wing – Designation" for each other Wing.
+// Designation + Wing for one Contact List row: one "Designation – Wing" line per saved assignment, in Designation
+// order, every Wing treated alike (Main, SC, ST, Youth, Mahila …) — "Vidhansabha Prabhari – Main". A designation with
+// no saved Wing reads "– Wing not set"; a saved Wing tag with no designation reads "No designation – Youth".
 function DesignationWingList({ contact: c }) {
   const pairs = Array.isArray(c.designation_wing_list) ? c.designation_wing_list : [];
-  const main = pairs.filter((p) => p.is_main);
-  const other = pairs.filter((p) => !p.is_main);
-  // Saved Wing tags with no designation under them (never repeats a Wing already shown with a designation).
-  const used = new Set(pairs.map((p) => (p.is_main ? "\u0001main" : String(p.wing).toLowerCase())));
-  const tags = [];
+  const lines = pairs.map((p) => ({ key: `p${p.designation_id}|${p.wing}`, designation: p.designation, wing: p.wing ? (p.wing_label || wingShortLabel(p.wing, p.is_main)) : "" }));
+  // Saved Wing tags not already shown with a designation (never repeats a Wing).
+  const used = new Set(pairs.filter((p) => p.wing).map((p) => (p.is_main ? "\u0001main" : String(p.wing).toLowerCase())));
   for (const w of String(c.wings || "").split(",").map((x) => x.trim()).filter(Boolean)) {
     const label = wingShortLabel(w);
     const key = label === "Main" ? "\u0001main" : w.toLowerCase();
     if (used.has(key)) continue;
     used.add(key);
-    tags.push({ wing: w, label });
+    lines.push({ key: `t${w}`, designation: null, wing: label });
   }
-  if (!pairs.length && !tags.length) return c.designation_name || "—";
-  const head = "text-[11px] font-semibold text-gray-500";
+  // A contact with no assignment rows of its own (legacy worker-position designation): no Wing is saved for it.
+  if (!pairs.length && c.designation_name) {
+    String(c.designation_name).split(",").map((x) => x.trim()).filter(Boolean).forEach((d, i) => lines.unshift({ key: `l${i}`, designation: d, wing: "" }));
+  }
+  if (!lines.length) return "—";
   return (
-    <div className="flex flex-col gap-1 min-w-[180px]">
-      {!pairs.length && c.designation_name ? <span>{c.designation_name}</span> : null}
-      {main.length > 0 && (
-        <div data-testid="dw-main">
-          <div className={head}>Main:</div>
-          {main.map((p) => (
-            <div key={`m${p.designation_id}`} data-testid="designation-wing-pair" className="whitespace-nowrap">• {p.designation}</div>
-          ))}
+    <div className="flex flex-col gap-0.5 min-w-[200px]">
+      {lines.map((l) => (
+        <div key={l.key} data-testid={l.designation ? "designation-wing-pair" : "designation-wing-tag"} className="whitespace-nowrap">
+          {l.designation ? <span className="text-gray-800">{l.designation}</span> : <span className="text-gray-400 italic">No designation</span>}
+          <span className="text-gray-400"> – </span>
+          {l.wing ? <span className="text-[#164FA3] font-medium" data-testid="dw-wing-label">{l.wing}</span>
+            : <span className="text-amber-700 italic" data-testid="dw-wing-missing">Wing not set</span>}
         </div>
-      )}
-      {(other.length > 0 || tags.length > 0) && (
-        <div data-testid="dw-wings">
-          <div className={head}>Wings:</div>
-          {other.map((p) => (
-            <div key={`w${p.designation_id}|${p.wing}`} data-testid="designation-wing-pair" className="whitespace-nowrap">
-              • <span className="text-[#164FA3] font-medium">{p.wing_label || wingShortLabel(p.wing)}</span> – {p.designation}
-            </div>
-          ))}
-          {tags.map((t) => (
-            <div key={`t${t.wing}`} data-testid="designation-wing-tag" className="whitespace-nowrap">
-              • <span className="text-[#164FA3] font-medium">{t.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      ))}
     </div>
   );
 }
@@ -1876,7 +1863,7 @@ function EditContactModal({ contact, contactUrl, canEditGeo, position, total, ha
         <textarea rows={2} className={`${inp} resize-none`} placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
         <QualificationField qualification={form.qualification} educationLevel={form.education_level} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
         <VehicleField value={form.vehicle} onChange={(v) => setForm((f) => ({ ...f, vehicle: v }))} />
-        {/* Designation + Wing — one combined row per combination (Main Organisation or a Master-Data Wing). */}
+        {/* Designation + Wing — one combined row per combination (any Master-Data Wing, Main included). */}
         {dwRows ? (
           <DesignationWingRows rows={dwRows} onChange={setDwRows} designations={designations} wingMaster={wingMaster || []} />
         ) : <div className="text-xs text-gray-400">Loading designations…</div>}

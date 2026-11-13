@@ -120,12 +120,15 @@ export const DESIGNATION_NAMES_SQL =
       FROM contact_designations cd JOIN designations dd ON dd.id = cd.designation_id
      WHERE cd.contact_id = c.id)`;
 
-// The Wing ONE designation row (alias `cd`, its designation joined as `d`) is held under — the single
-// rule the Contact List, the Wing / Designation search and the exports all share:
-//   1. the Wing stored on the row itself (contact_designations.wing);
-//   2. else a Wing the contact is tagged with (contact_wings) that this designation belongs to (designation_wings);
-//   3. else the designation's own Wing in the Designation master;
-//   4. else the Main wing (Wing master, is_main = 1).
+// The Wing ONE designation row (alias `cd`, its designation joined as `d`) is held under — the single rule the
+// Contact List, the Wing / Designation filter + search and the exports share. Main is an ordinary Wing here (the
+// Wing master's is_main row), resolved exactly like SC, ST, Youth, Mahila … and only from SAVED relationships
+// (never from the designation's name):
+//   1. the Wing saved on the assignment row itself (contact_designations.wing);
+//   2. else a Wing the contact is tagged with (contact_wings) that this designation is mapped to (designation_wings);
+//   3. else the Designation master's own mapping when it is unambiguous: mapped to exactly ONE Wing -> that Wing;
+//      mapped to NO Wing -> the Main Wing (the rule the app applies when it saves such a designation);
+//   4. else (mapped to several Wings, none saved for this contact) -> NULL: shown as "Wing not set", never guessed.
 // Tables created at different times (imported vs created by the app) can carry different collations
 // (utf8mb4_general_ci / utf8mb4_unicode_ci / utf8mb4_0900_ai_ci); comparing or COALESCE-ing their text
 // columns directly then fails with "Illegal mix of collations". Every Wing value is brought to ONE explicit
@@ -134,12 +137,31 @@ export const WING_COLLATE = (x) => `(CONVERT(${x} USING utf8mb4) COLLATE utf8mb4
 
 export function effectiveWingSql(cd = "cd", d = "d") {
   const W = WING_COLLATE;
+  // The designation's master Wings: designation_wings rows plus designations.wing (when not already listed).
+  const masterCount = `((SELECT COUNT(DISTINCT ${W("ewx.wing")}) FROM designation_wings ewx
+                          WHERE ewx.designation_id = ${cd}.designation_id AND TRIM(ewx.wing) <> '')
+                        + IF(TRIM(IFNULL(${d}.wing, '')) <> '' AND NOT EXISTS (SELECT 1 FROM designation_wings ewy
+                          WHERE ewy.designation_id = ${cd}.designation_id AND ${W("ewy.wing")} = ${W(`TRIM(${d}.wing)`)}), 1, 0))`;
+  const masterOne = `COALESCE((SELECT ${W("ewz.wing")} FROM designation_wings ewz
+                       WHERE ewz.designation_id = ${cd}.designation_id AND TRIM(ewz.wing) <> '' ORDER BY ewz.wing LIMIT 1),
+                     ${W(`NULLIF(TRIM(${d}.wing), '')`)})`;
+  const mainWing = `COALESCE((SELECT ${W("ewm.name")} FROM wings ewm WHERE ewm.is_main = 1 ORDER BY ewm.id LIMIT 1), ${W("'Main Organisation'")})`;
   return `COALESCE(${W(`NULLIF(TRIM(${cd}.wing), '')`)},
     (SELECT ${W("ewcw.wing")} FROM contact_wings ewcw JOIN designation_wings ewdw ON ${W("ewdw.wing")} = ${W("ewcw.wing")} AND ewdw.designation_id = ${cd}.designation_id
       WHERE ewcw.contact_id = ${cd}.contact_id ORDER BY ewcw.id LIMIT 1),
-    ${W(`NULLIF(TRIM(${d}.wing), '')`)},
-    (SELECT ${W("ewm.name")} FROM wings ewm WHERE ewm.is_main = 1 ORDER BY ewm.id LIMIT 1),
-    ${W("'Main Organisation'")})`;
+    CASE ${masterCount} WHEN 1 THEN ${masterOne} WHEN 0 THEN ${mainWing} ELSE NULL END)`;
+}
+
+// Free-text search on the Contact List also finds a contact by a Designation it holds or a Wing it holds it under
+// (e.g. "Main", "Youth", "Vidhansabha Prabhari"), or a saved Wing tag. Returns an " OR …" fragment + params.
+export function designationWingSearchOr(search, alias = "c") {
+  const like = `%${search}%`;
+  return {
+    sql: ` OR EXISTS (SELECT 1 FROM contact_designations cds JOIN designations dds ON dds.id = cds.designation_id
+                      WHERE cds.contact_id = ${alias}.id AND (dds.name LIKE ? OR ${effectiveWingSql("cds", "dds")} LIKE ?))
+           OR EXISTS (SELECT 1 FROM contact_wings cws WHERE cws.contact_id = ${alias}.id AND cws.wing LIKE ?)`,
+    params: [like, like, like],
+  };
 }
 
 // Every Designation–Wing pair a contact holds, one entry per contact_designations row (so a contact is ONE list
@@ -150,8 +172,8 @@ export function effectiveWingSql(cd = "cd", d = "d") {
 const PAIR_US = "'\u001f'";
 const PAIR_RS = "'\u001e'";
 export const DESIGNATION_WING_PAIRS_SQL =
-  `(SELECT GROUP_CONCAT(CONCAT(dp.id, ${PAIR_US}, dp.name, ${PAIR_US}, ${effectiveWingSql("cdp", "dp")}, ${PAIR_US},
-              IF(${effectiveWingSql("cdp", "dp")} IN (SELECT ${WING_COLLATE("pm.name")} FROM wings pm WHERE pm.is_main = 1) OR LOWER(${effectiveWingSql("cdp", "dp")}) IN ('main', 'main organisation', 'main organisations', 'main organization', 'main organizations'), 1, 0))
+  `(SELECT GROUP_CONCAT(CONCAT(dp.id, ${PAIR_US}, dp.name, ${PAIR_US}, IFNULL(${effectiveWingSql("cdp", "dp")}, ''), ${PAIR_US},
+              IF(IFNULL(${effectiveWingSql("cdp", "dp")}, '') IN (SELECT ${WING_COLLATE("pm.name")} FROM wings pm WHERE pm.is_main = 1) OR LOWER(IFNULL(${effectiveWingSql("cdp", "dp")}, '')) IN ('main', 'main organisation', 'main organisations', 'main organization', 'main organizations'), 1, 0))
             ORDER BY (dp.sort_order IS NULL), dp.sort_order, dp.name SEPARATOR ${PAIR_RS})
       FROM contact_designations cdp JOIN designations dp ON dp.id = cdp.designation_id
      WHERE cdp.contact_id = c.id)`;
@@ -167,11 +189,12 @@ export function parseDesignationWingList(raw) {
     const d = String(designation || "").trim();
     if (!d) continue;
     const w = String(wing || "").trim();
-    const isMain = main === "1" || !w;
+    // Main is identified by the Wing master (is_main), like any Wing by its name; "" = no Wing saved / resolvable.
+    const isMain = !!w && main === "1";
     const key = `${id}\u0000${isMain ? "\u0001main" : w.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ designation_id: Number(id) || null, designation: d, wing: w, wing_label: wingShortLabel(w, isMain), is_main: isMain });
+    out.push({ designation_id: Number(id) || null, designation: d, wing: w, wing_label: w ? wingShortLabel(w, isMain) : "", is_main: isMain });
   }
   return out;
 }
@@ -198,11 +221,26 @@ export async function attachDesignationWingLists(rows, key = "id") {
   return rows;
 }
 
-// Export cell: Main first, then the Wings — "Main – Vidhansabha Prabhari; Mahila – Lok Sabha Adhyaksh".
-export function designationWingText(list, sep = "; ") {
-  const l = list || [];
-  return [...l.filter((p) => p.is_main), ...l.filter((p) => !p.is_main)]
-    .map((p) => `${p.wing_label || wingShortLabel(p.wing, p.is_main)} – ${p.designation}`).join(sep);
+// Placeholder for a designation whose Wing is not saved (and not resolvable without guessing).
+export const WING_NOT_SET = "Wing not set";
+
+// One "Designation – Wing" line per pair, in Designation order — every Wing (Main included) treated alike:
+// "Vidhansabha Prabhari – Main; Lok Sabha President – SC". Saved Wing tags that carry no designation follow as
+// "No designation – Youth" so no saved Wing is lost.
+export function designationWingLines(list, tags = []) {
+  const lines = (list || []).map((p) => `${p.designation} – ${p.wing_label || (p.wing ? wingShortLabel(p.wing, p.is_main) : WING_NOT_SET)}`);
+  const used = new Set((list || []).filter((p) => p.wing).map((p) => (p.is_main ? "\u0001main" : String(p.wing).toLowerCase())));
+  for (const t of tags || []) {
+    const label = wingShortLabel(t);
+    const k = label === "Main" ? "\u0001main" : String(t).toLowerCase();
+    if (!t || used.has(k)) continue;
+    used.add(k);
+    lines.push(`No designation – ${label}`);
+  }
+  return lines;
+}
+export function designationWingText(list, sep = "; ", tags = []) {
+  return designationWingLines(list, tags).join(sep);
 }
 
 // A bare `designation_id` (the Caller workspace's single dropdown) must behave

@@ -5,7 +5,7 @@ import { renderToBuffer, Document, Page, View, Text, Image, StyleSheet } from "@
 import React from "react";
 import { query } from "@/lib/db";
 import { photosToDataUris } from "@/lib/photoDataUri";
-import { DESIGNATION_NAMES_SQL, ensureContactDesignationsSchema, attachDesignationWingLists, designationWingText } from "@/lib/contactDesignations";
+import { DESIGNATION_NAMES_SQL, ensureContactDesignationsSchema, attachDesignationWingLists, designationWingText, WING_NOT_SET } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { wingShortLabel } from "@/lib/wingLabel";
 import { qualificationLabel as qualOnly } from "@/lib/qualificationOptions";
@@ -90,7 +90,7 @@ function fmt(v, dateOnly = false) {
 // holds that belong to no designation row are appended (so every saved Wing is exported).
 function wingCell(c) {
   // Wing of each designation (from the Designation–Wing pairs), then saved Wing tags with no designation.
-  const aligned = (c.designation_wing_list || []).map((p) => p.wing_label || wingShortLabel(p.wing, p.is_main));
+  const aligned = (c.designation_wing_list || []).filter((p) => p.wing).map((p) => p.wing_label || wingShortLabel(p.wing, p.is_main));
   const extra = String(c.all_wings || "").split(", ").filter(Boolean).map((w) => wingShortLabel(w));
   // Each Wing once (the "Designation with Wing" column carries the per-designation mapping).
   return [...new Set([...aligned, ...extra])].join(", ");
@@ -99,8 +99,11 @@ function wingCell(c) {
 // The contact's Designation–Wing pairs joined by "; " (falls back to the plain designation for a contact that holds
 // no designation rows of its own, e.g. a legacy worker-position designation).
 function designationWingCell(c) {
-  const text = designationWingText(c.designation_wing_list);
-  return text || c.designation_name || "";
+  const tags = String(c.all_wings || "").split(", ").filter(Boolean);
+  const text = designationWingText(c.designation_wing_list, "; ", tags);
+  if (text) return text;
+  // A contact with no assignment rows (legacy worker-position designation): no Wing is saved for it.
+  return String(c.designation_name || "").split(",").map((x) => x.trim()).filter(Boolean).map((x) => `${x} – ${WING_NOT_SET}`).join("; ");
 }
 
 function statusLabel(c) {

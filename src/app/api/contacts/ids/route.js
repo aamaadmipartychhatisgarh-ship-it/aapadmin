@@ -1,5 +1,6 @@
 import { parseIdList } from "@/lib/idList";
 import { NextResponse } from "next/server";
+import { designationWingSearchOr } from "@/lib/contactDesignations";
 import { rfaStatusFilterClause } from "@/lib/rfa";
 import { sourceFilterClause, sourceSearchOr } from "@/lib/contactSource";
 import { getServerSession } from "next-auth/next";
@@ -67,8 +68,10 @@ export async function GET(req) {
     { const sf = await sourceFilterClause(searchParams.get("source"), "c"); where += sf.where; params.push(...sf.params); }
     { const rf = await rfaStatusFilterClause(searchParams.get("rfa_status"), "c"); if (rf.error) return Response.json({ message: rf.error }, { status: 400 }); where += rf.where; params.push(...rf.params); }
     if (search) {
-      where += ` AND (c.person_name LIKE ? OR c.phone_number LIKE ?${await sourceSearchOr(search, "c")})`;
-      params.push(`%${search}%`, `%${search}%`);
+      // Name / phone / source, or a Designation the contact holds / the Wing it holds it under (Main, SC, Youth …).
+      const dws = designationWingSearchOr(search, "c");
+      where += ` AND (c.person_name LIKE ? OR c.phone_number LIKE ?${await sourceSearchOr(search, "c")}${dws.sql})`;
+      params.push(`%${search}%`, `%${search}%`, ...dws.params);
     }
     // Added-date filter (contacts.created_at; single date or range, IST calendar days).
     const addedDate = await addedDateClause(searchParams, "c");
