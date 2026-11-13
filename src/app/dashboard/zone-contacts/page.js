@@ -55,7 +55,7 @@ export default function ZoneContactsPage() {
   const [assemblies, setAssemblies] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [viewing, setViewing] = useState(null);
-  // Self-assign: eligible = unassigned (pool) and not done. Selection spans the current filter/page.
+  // Self-assign: eligible = unassigned (pool), whatever its calling status (Completed included). Selection spans the current filter/page.
   const [picked, setPicked] = useState(() => new Set());
   const [assigning, setAssigning] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -132,7 +132,9 @@ export default function ZoneContactsPage() {
   }, [districtId]);
   const districtOptions = lokSabhaId ? districts.filter((d) => String(d.parent_id) === String(lokSabhaId)) : districts;
 
-  const eligible = (c) => !c.assigned_to_user_id && !c.is_completed;
+  // An assignment is managed independently of the contact's calling status: a Completed contact can be taken from the pool
+  // and removed from your assignment like any other (its Completed status and history are never changed).
+  const eligible = (c) => !c.assigned_to_user_id;
   const eligibleRows = rows.filter(eligible);
   const pageAllPicked = eligibleRows.length > 0 && eligibleRows.every((c) => picked.has(c.id));
   const togglePick = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -236,7 +238,7 @@ export default function ZoneContactsPage() {
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-[#164FA3] text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed">
             {assigning ? <Loader2 size={15} className="animate-spin" /> : <UserCheck size={15} />} Assign to me{picked.size ? ` (${picked.size})` : ""}
           </button>
-          <span className="text-xs text-gray-500">Tick unassigned, pending contacts of your Zone (filter by Designation first if you like) and assign them to yourself.</span>
+          <span className="text-xs text-gray-500">Tick unassigned contacts of your Zone (filter by Designation first if you like) and assign them to yourself.</span>
           {picked.size > 0 && <button type="button" onClick={() => setPicked(new Set())} className="text-xs text-gray-500 hover:underline" data-testid="zc-pick-clear">Clear selection</button>}
           <span className="hidden sm:inline text-gray-300">|</span>
           <button type="button" onClick={() => removeAssignments([...pickedMine])} disabled={!pickedMine.size || removing} data-testid="zc-remove-bulk"
@@ -290,8 +292,8 @@ export default function ZoneContactsPage() {
                   <td className="px-3 py-2.5 text-gray-600">{c.assembly_name || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.ward_name || "—"}</td>
                   <td className="px-3 py-2.5" data-testid="zc-assign-status">
-                    {c.is_completed ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Completed</span>
-                      : !c.assigned_to_user_id ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Available in Pool</span>
+                    {/* Who holds the contact — shown for every contact, Completed included (completion is in the Calling column). */}
+                    {!c.assigned_to_user_id ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Available in Pool</span>
                       : String(c.assigned_to_user_id) === String(session?.user?.id) ? <span className="inline-flex items-center gap-2"><span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-[#164FA3]">Assigned to you</span>
                           <button type="button" onClick={(e) => { e.stopPropagation(); removeAssignments([c.id]); }} disabled={removing} data-testid="zc-remove-one"
                             className="text-[11px] font-semibold px-2 py-0.5 rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-40">Remove Assignment</button></span>

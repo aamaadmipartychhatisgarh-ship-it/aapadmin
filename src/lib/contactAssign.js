@@ -79,7 +79,7 @@ export async function assignSingleContact(session, contactId, userId) {
 // read fresh by the caller (callerZoneAccess). For every requested contact, under a row lock, it must be
 //   - inside that Zone (the Contact Page's own Zone definition - zoneMatch),
 //   - still in the pool (unassigned - another caller's contact is never taken),
-//   - not completed, and not Wrong Number / pending approval / Not Interested / 10+ Switch-Off
+//   - not Wrong Number / pending approval / Not Interested / 10+ Switch-Off (a Completed status does NOT block it)
 // (the same exclusions bulk Distribute applies). Everything that qualifies is assigned with the same
 // stamping as bulk (assigned_at, assigned_by_user_id = the caller, locks cleared); the rest is reported
 // with the reason, never changed. One assignee column = no duplicate mappings; a repeat changes nothing.
@@ -124,7 +124,8 @@ export async function selfAssignContacts(session, zoneId, contactIds, designatio
       if (!seen.has(id) || !zoneSet.has(id)) { skipped.push({ id, reason: "outside_zone" }); continue; }   // never reveal more than "not in your Zone"
       const r = all.find((x) => x.id === id);
       if (r.assigned_to_user_id != null) { skipped.push({ id, reason: String(r.assigned_to_user_id) === String(me) ? "already_yours" : "already_assigned" }); continue; }
-      if (Number(r.is_completed) === 1) { skipped.push({ id, reason: "completed" }); continue; }
+      // A Completed status never blocks an assignment (it is the contact's calling outcome, not an assignment state):
+      // the contact is assigned with its status and history untouched.
       if (!cleanSet.has(id)) { skipped.push({ id, reason: "not_eligible" }); continue; }
       if (holdSet && !holdSet.has(id)) { skipped.push({ id, reason: "designation_mismatch" }); continue; }
       ok.push(id);
@@ -138,7 +139,10 @@ export async function selfAssignContacts(session, zoneId, contactIds, designatio
         [me, ...(stampBy ? [me] : []), ...ok]
       );
       assigned = res.affectedRows || 0;
+      // Assignment history, exactly like an Admin / Supervisor assignment (closes any open record, opens this one).
+      if (assigned) await recordAssignments(conn, ok, me, me);
     }
+    const completedTaken = ok.filter((id) => Number(all.find((x) => x.id === id)?.is_completed) === 1).length;
     await conn.commit();
     if (assigned) {
       logAudit(session, { action: "contact.self_assign", entityType: "contacts", entityId: null, details: { zone_id: zoneId, designation_id: desig, previous_assignee: null, assigned_to: me, assigned, ids: ok.slice(0, 200) } }).catch(() => {});
@@ -147,13 +151,13 @@ export async function selfAssignContacts(session, zoneId, contactIds, designatio
     const cnt = (r) => skipped.filter((x) => x.reason === r).length;
     const parts = [
       [cnt("already_yours"), "already assigned to you"], [cnt("already_assigned"), "assigned to another user (not changed - ask a Supervisor to reassign)"],
-      [cnt("outside_zone"), "outside your Zone"], [cnt("completed"), "completed"], [cnt("not_eligible"), "not eligible"],
+      [cnt("outside_zone"), "outside your Zone"], [cnt("not_eligible"), "not eligible"],
       [cnt("designation_mismatch"), "not holding the selected designation"],
     ].filter(([n]) => n > 0).map(([n, t]) => `${n} ${t}`);
     return {
       status: 200, assigned, assigned_ids: ok, skipped,
       message: assigned
-        ? `Assigned ${assigned} contact${assigned === 1 ? "" : "s"} to you.${parts.length ? ` Not assigned: ${parts.join(", ")}.` : ""}`
+        ? `Assigned ${assigned} contact${assigned === 1 ? "" : "s"} to you.${completedTaken ? ` ${completedTaken} of them ${completedTaken === 1 ? "is" : "are"} already Completed: ${completedTaken === 1 ? "it stays" : "they stay"} Completed (history kept) and ${completedTaken === 1 ? "is" : "are"} listed here under "Assigned to you", not in your calling queue.` : ""}${parts.length ? ` Not assigned: ${parts.join(", ")}.` : ""}`
         : `None of the selected contacts could be assigned${parts.length ? `: ${parts.join(", ")}` : ""}.`,
     };
   } catch (e) {
