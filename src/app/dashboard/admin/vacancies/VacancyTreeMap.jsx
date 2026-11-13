@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, ChevronDown, Loader2, RefreshCw, MessageCircle, UserX, AlertTriangle, ArrowRight, Users } from "lucide-react";
 import Avatar from "@/components/Avatar";
+import ReminderName from "@/components/vacancies/ReminderName";
 import { wingShortLabel } from "@/lib/wingLabel";
 
 // Designation Vacancies — TREE MAP. State -> Lok Sabha -> District -> Assembly (every level the server sends), built
@@ -115,7 +116,13 @@ function VacantCard({ p, n }) {
                   <span className="shrink-0 w-[22px] h-[22px] rounded-full border border-dashed border-amber-400 bg-white inline-flex items-center justify-center text-amber-400" data-testid="assigned-by-empty"><UserX size={11} /></span>
                 )}
                 <span className="text-[11px] font-semibold text-amber-900 whitespace-nowrap" data-testid="assigned-by-role">{sl.label}</span>
-                <span className={`text-[11px] truncate ${h ? "text-gray-700" : "text-gray-400 italic"}`} title={h ? h.name : `Not assigned${sl.area ? ` in ${sl.area}` : ""}`}>· {h ? h.name : "Not assigned"}</span>
+                {h ? (
+                  <span className="text-[11px] min-w-0 inline-flex items-center gap-0.5"><span className="text-gray-400">·</span>
+                    <ReminderName contactId={h.contact_id} name={h.name} lokSabhaId={p.lok_sabha_id} className="text-[11px]" />
+                  </span>
+                ) : (
+                  <span className="text-[11px] truncate text-gray-400 italic" title={`Not assigned${sl.area ? ` in ${sl.area}` : ""}`}>· Not assigned</span>
+                )}
               </div>
             ))}
           </div>

@@ -204,6 +204,7 @@ export async function buildVacancyTree(session, { wing } = {}) {
       level_label: r.level_label,
       location_id: r.location_id,
       location_name: r.level === "state" ? "State" : r.location_name,
+      lok_sabha_id: r.level === "state" ? null : (r.lok_sabha_id ?? null),
       status: filled ? "filled" : "vacant",
       needs_review: r.status === "review",
       review_people: (r.review_people || []).map((p) => p.person_name || p.name).filter(Boolean),

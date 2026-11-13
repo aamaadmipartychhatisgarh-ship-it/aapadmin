@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import { Loader2, CheckCircle2, MapPin, Phone, Lock, UserX } from "lucide-react";
 import Avatar from "@/components/Avatar";
+import ReminderName from "@/components/vacancies/ReminderName";
 import { wingShortLabel } from "@/lib/wingLabel";
 
 // ONE layout for Designation Vacancies (Main Organisation) and Wing Vacancies.
@@ -37,6 +38,7 @@ export function fromMainRow(r) {
   return {
     key: `main:${r.level}:${r.location_id}:${r.designation_id}`,
     level: r.level, level_label: r.level_label, location_id: r.location_id, location_name: r.location_name,
+    lok_sabha_id: r.level === "state" ? null : (r.lok_sabha_id ?? null),
     lok_sabha_name: r.lok_sabha_name, district_name: r.district_name, assembly_name: r.assembly_name, block_name: r.block_name,
     hierarchy_incomplete: !!r.hierarchy_incomplete,
     wing: (r.designation_wings || []).length ? r.designation_wings.map(wingShortLabel).join(", ") : null,
@@ -67,6 +69,7 @@ export function fromWingRow(r) {
   return {
     key: `wing:${r.wing}:${r.level}:${r.location_id}:${r.role}`,
     level: r.level, level_label: r.level_label, location_id: r.location_id, location_name: r.location_name,
+    lok_sabha_id: r.level === "state" ? null : (r.lok_sabha_id ?? null),
     lok_sabha_name: r.lok_sabha_name, district_name: r.district_name, assembly_name: r.assembly_name, block_name: null,
     hierarchy_incomplete: false,
     wing: r.wing ? wingShortLabel(r.wing) : null, wing_full: r.wing,
@@ -179,7 +182,7 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
           // One row per responsible line, never wrapped, so a person's name, designation
           // and contact stay aligned across the three columns.
           <div key={i} className="h-8 flex items-center gap-2 whitespace-nowrap" data-testid={l.kind === "person" ? "resp-line" : "resp-missing"}>
-            {field === "name" && (l.kind === "person" ? <span className="font-semibold text-gray-900">{l.name}</span>
+            {field === "name" && (l.kind === "person" ? <ReminderName contactId={l.contact_id} name={l.name} lokSabhaId={row.lok_sabha_id} className="text-sm" />
               : l.kind === "note" ? <span className="text-gray-500 text-xs">{l.note}</span>
               : <span className="font-semibold text-red-600 text-xs whitespace-nowrap">{l.note}</span>)}
             {field === "designation" && (l.kind === "note" ? dash : (
@@ -300,7 +303,7 @@ export default function VacancyTable({ rows, loading, err, showWing = true, rend
                         {l.kind === "person" ? (
                           <>
                             <span className="inline-flex items-center gap-1.5 align-middle"><RespPhoto l={l} /><span className="text-gray-700">{l.designation}{areaSuffix(l.area)}</span></span>
-                            <span className="text-gray-500"> · </span><span className="font-semibold text-gray-900">{l.name}</span>
+                            <span className="text-gray-500"> · </span><ReminderName contactId={l.contact_id} name={l.name} lokSabhaId={r.lok_sabha_id} className="text-xs align-middle" />
                             <div className="flex items-center gap-2 mt-0.5">
                               {l.mobile ? <a href={`tel:${l.mobile}`} className="font-mono text-[#164FA3]">{l.mobile}</a> : <span className="text-gray-400">No mobile</span>}
                               {renderContactExtra ? renderContactExtra(l, r) : null}
