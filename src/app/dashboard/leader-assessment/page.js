@@ -6,7 +6,7 @@ import ProfilePhoto from "@/components/ProfilePhoto";
 import Avatar, { initialsOf } from "@/components/Avatar";
 import PartySelect, { usePartyMaster, PartyLogo, PartyBadge, partyLogoFor } from "@/components/PartySelect";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
-import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
+import ColumnPicker, { exportColumnsParam, hasNoColumns, NO_COLUMNS_MESSAGE } from "@/components/ColumnPicker";
 import { MLA_EXPORT_COLUMNS, CANDIDATE_EXPORT_COLUMNS } from "@/lib/leaderAssessmentColumns";
 import { MLA_PROFILE_SECTIONS, EMPTY_MLA_PROFILE } from "@/lib/mlaProfileFields";
 import { ASSEMBLY_CATEGORY_LABEL } from "@/lib/assemblyCategoryOptions";
@@ -1052,6 +1052,7 @@ function MlaManager({ flash, fail, editAssemblyId, onEditConsumed }) {
   const exportingPdf = exportingFmt !== "";
   async function exportList(format) {
     if (exportingFmt || shown.length === 0) return;
+    if (hasNoColumns(exportColumns)) { fail?.(NO_COLUMNS_MESSAGE); return; }
     setExportingFmt(format);
     try {
       const rows = await rowsWithPhotoData(shown); // exact displayed photos → JPEG
@@ -1720,6 +1721,7 @@ function CandidatesTab({ flash, fail }) {
   const exportingPdf = exportingFmt !== "";
   async function exportList(format) {
     if (exportingFmt || view.length === 0) return;
+    if (hasNoColumns(exportColumns)) { fail?.(NO_COLUMNS_MESSAGE); return; }
     setExportingFmt(format);
     try {
       const rows = await rowsWithPhotoData(view); // exact displayed photos → JPEG

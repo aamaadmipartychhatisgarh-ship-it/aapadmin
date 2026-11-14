@@ -18,7 +18,7 @@ import WingMultiSelect from "@/components/WingMultiSelect";
 import DesignationWingRows from "@/components/contacts/DesignationWingRows";
 import { deriveRows, normalizeRows, parseDesignationPairs } from "@/lib/designationRows";
 import { wingShortLabel } from "@/lib/wingLabel";
-import ColumnPicker, { exportColumnsParam } from "@/components/ColumnPicker";
+import ColumnPicker, { exportColumnsParam, hasNoColumns, NO_COLUMNS_MESSAGE } from "@/components/ColumnPicker";
 import { CONTACT_EXPORT_COLUMNS } from "@/lib/contactExportColumns";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import { isCaller, isSuperAdmin, isSupervisorRole, normalizeRole, ROLES } from "@/lib/permissions";
@@ -609,6 +609,7 @@ export default function ContactsModule({ session, mode }) {
   // downloads is what's shown (and, for a supervisor, only their territory).
   const [exportingFormat, setExportingFormat] = useState(""); // which format is in flight
   async function exportData(format) {
+    if (hasNoColumns(exportColumns)) { setMessage(""); setError(NO_COLUMNS_MESSAGE); return; }
     setExporting(true); setExportingFormat(format); setError(""); setMessage("");
     // Abort so the menu can never hang if the server stalls building a big PDF.
     const controller = new AbortController();
@@ -653,6 +654,7 @@ export default function ContactsModule({ session, mode }) {
   // selected/filtered/sorted dataset), opening it in a new tab and triggering the
   // browser print dialog. Selection priority is identical to exportData.
   async function printData() {
+    if (hasNoColumns(exportColumns)) { setMessage(""); setError(NO_COLUMNS_MESSAGE); return; }
     setExporting(true); setExportingFormat("print"); setError(""); setMessage("");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 120000);
