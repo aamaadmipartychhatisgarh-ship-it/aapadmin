@@ -11,8 +11,9 @@ import { visibleWorkerColumns } from "@/lib/workerPerformanceColumns";
 // CSV export of whatever the dashboard is currently showing:
 //   ?report=registrations  every person + the worker who added them (default)
 //   ?report=workers        worker-wise performance — the same ranked list the
-//                          dashboard shows (Top worker_limit, default 200), with
-//                          Zone / Assembly from the worker's Contact; &format=pdf too
+//                          dashboard shows, but EVERY matching worker (no Top-N
+//                          cut), with Lok Sabha / Assembly from the worker's
+//                          Contact; &format=xlsx / &format=pdf too
 //   ?report=blocks         block-wise (Area/Booth) performance (Top 100)
 //   &format=pdf            (registrations only) the same filtered, scoped list as a PDF
 // The SAME filters as the on-screen view are applied, so an export always matches
@@ -57,17 +58,14 @@ export async function GET(req) {
     let csv;
     let filename;
     if (report === "workers") {
-      // Exactly the rows the dashboard's Worker-wise Performance shows: same
-      // filters, same scope, same ranking order and the same Top-N limit.
-      const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("worker_limit") || "200", 10) || 200));
+      // The dashboard's Worker-wise Performance rows with the same filters, scope and ranking order — but EVERY matching
+      // worker: a downloaded report is never cut to the on-screen Top-N (worker_limit only sizes the dashboard's own list).
       // The same Lok Sabha / Assembly filter as the screen (one resolution, applied in the query).
       const workerIds = await workerIdsForLocation({ campaignId: f.campaignId, lokSabhaId: f.lokSabhaId, assemblyId: f.assemblyId, workerScope });
-      const groupParam = ["lok_sabha", "assembly"].includes(searchParams.get("group")) ? searchParams.get("group") : null;
-      // The Workers & Links roster exports EVERY worker matching its filters (?all=1), and so do the Lok Sabha-wise / Assembly-wise
-      // PDFs (their counts must cover everyone). Only the dashboard's own Top-N views keep a limit (worker_limit, max 200).
-      const everyone = searchParams.get("all") === "1" || (groupParam && searchParams.get("format") === "pdf");
+      // Every worker export (the Workers & Links roster Export / PDF, the Worker-wise Performance Excel / PDF and the Lok Sabha-wise /
+      // Assembly-wise PDFs) contains EVERY worker matching its filters.
       let rows;
-      if (everyone) {
+      {
         // Read in batches of 500 in the list's own order (total, voters, name, then the unique id as the final tie-break, so the order is
         // total and stable); a worker is kept once by id even if the data shifts between batches. No fixed ceiling: it runs until a batch
         // comes back short, so the export keeps working as the number of workers grows.
@@ -77,8 +75,6 @@ export async function GET(req) {
           for (const r of page) if (!seen.has(r.id)) { seen.add(r.id); rows.push(r); }
           if (page.length < 500) break;
         }
-      } else {
-        rows = await getWorkerRanking({ ...f, limit, workerScope, workerIds });
       }
       if (searchParams.get("format") === "pdf") {
         const criteria = describeFilters(searchParams, session).filter((c) => !/^(Type|Source|Status):/.test(c));
@@ -88,7 +84,7 @@ export async function GET(req) {
           if (f.lokSabhaId) criteria.push(`Lok Sabha: ${nm(f.lokSabhaId)}`);
           if (f.assemblyId) criteria.push(`Assembly: ${nm(f.assemblyId)}`);
         }
-        criteria.push(everyone ? `All ${rows.length} matching workers` : `Top ${limit}`);
+        criteria.push(`All ${rows.length} matching workers`);
         // ?group=lok_sabha | assembly: the Lok Sabha-wise / Assembly-wise PDF - the same filtered rows, preceded by a count summary.
         const group = ["lok_sabha", "assembly"].includes(searchParams.get("group")) ? searchParams.get("group") : null;
         const buf = await buildWorkerPerformancePdf(rows, { criteria, group });

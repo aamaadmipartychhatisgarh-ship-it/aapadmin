@@ -442,12 +442,12 @@ function DashboardTab({ filterQs, onWard, onError }) {
         <RankTable
           title="Worker-wise Performance"
           subtitle={`Top ${Math.min(200, data.workers.length)}${data.worker_totals && data.worker_totals.workers > data.workers.length ? ` of ${data.worker_totals.workers}` : ""}`}
-          exportHref={`/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "xlsx" })}`}
+          exportHref={`/api/registration/export?${wpQs({ report: "workers", format: "xlsx" })}`}
           exportLabel="Export Excel"
-          pdfHref={`/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "pdf" })}`}
+          pdfHref={`/api/registration/export?${wpQs({ report: "workers", format: "pdf" })}`}
           extraPdfs={[
-            { label: "Lok Sabha-wise PDF", testId: "export-pdf-ls", href: `/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "pdf", group: "lok_sabha" })}` },
-            { label: "Assembly-wise PDF", testId: "export-pdf-asm", href: `/api/registration/export?${wpQs({ report: "workers", worker_limit: 200, format: "pdf", group: "assembly" })}` },
+            { label: "Lok Sabha-wise PDF", testId: "export-pdf-ls", href: `/api/registration/export?${wpQs({ report: "workers", format: "pdf", group: "lok_sabha" })}` },
+            { label: "Assembly-wise PDF", testId: "export-pdf-asm", href: `/api/registration/export?${wpQs({ report: "workers", format: "pdf", group: "assembly" })}` },
           ]}
           filters={(
             <div className="flex flex-wrap items-center gap-2" data-testid="wp-filters">
