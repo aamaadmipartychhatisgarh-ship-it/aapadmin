@@ -61,14 +61,41 @@ export async function requireRegistrationAccess({ superAdminOnly = false, manage
   return { session };
 }
 
+// A Custom Date Range as inclusive IST calendar dates 'YYYY-MM-DD'. One date alone (From or To) means that single day
+// (From = To). Each date must be a real calendar date; From after To is refused (error), never silently swapped.
+export function regDateRange(fromRaw, toRaw) {
+  const ok = (s) => {
+    if (!s) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s && s >= "2000-01-01" && s <= "2100-12-31" ? s : false;
+  };
+  let from = ok(fromRaw), to = ok(toRaw);
+  if (from === false || to === false) return { from: null, to: null, error: "Enter a valid date (DD-MM-YYYY)." };
+  if (from && !to) to = from;
+  if (to && !from) from = to;
+  if (from && to && from > to) return { from: null, to: null, error: "From Date cannot be later than To Date." };
+  return { from, to, error: null };
+}
+
 // The filter set shared by the dashboard, ranking, list and export routes, so
 // every view of the drive means the same thing by the same query string.
 export function parseRegFilters(searchParams) {
   const num = (k) => { const v = searchParams.get(k); return v && /^\d+$/.test(v) ? Number(v) : null; };
   const str = (k) => (searchParams.get(k) || "").trim() || null;
-  const { from, to } = resolveRegPeriod(searchParams.get("period") || "", str("from"), str("to"));
+  // Custom Date Range (period=custom&from&to) — the REGISTRATION submission date (reg_people.registered_at, IST).
+  const custom = searchParams.get("period") === "custom" ? regDateRange(str("from"), str("to")) : { from: null, to: null };
+  const { from, to } = searchParams.get("period") === "custom"
+    ? custom
+    : resolveRegPeriod(searchParams.get("period") || "", null, null);
+  // Workers & Links Custom Date Range (created_from&created_to) — the date the WORKER (reg_workers row = their link /
+  // login) was created. A separate pair, because on the Workers page the shared period above means "registrations counted".
+  const created = regDateRange(str("created_from"), str("created_to"));
   return {
     from, to,
+    createdFrom: created.from, createdTo: created.to,
+    // Set when a supplied date is not a real calendar date or From is after To — routes answer 400 with it.
+    dateError: custom.error || created.error || null,
     campaignId: num("campaign_id"),
     workerId: num("worker_id"),
     ward: str("ward"),

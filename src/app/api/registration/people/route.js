@@ -16,6 +16,7 @@ export async function GET(req) {
     if (error) return error;
     const { searchParams } = new URL(req.url);
     const filters = parseRegFilters(searchParams);
+    if (filters.dateError) return NextResponse.json({ message: filters.dateError }, { status: 400, headers: NO_STORE });
     const data = await getPeoplePage({
       ...filters,
       // A Worker list defaults to marks (highest first); otherwise newest first.

@@ -8,6 +8,7 @@ import {
   BarChart3, Check, ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileText, Link2, Loader2,
   MessageCircle, Pencil, Plus, RefreshCw, Search, Settings2, Shield, Trash2, Trophy,
   UserPlus, Users, Vote, X, UserCheck,
+  CalendarRange, FileSpreadsheet,
 } from "lucide-react";
 import { isTopAdmin, isCaller, isSuperAdmin, canManageRegistration, isAdmin } from "@/lib/permissions";
 import { usePageAccess } from "@/components/usePageAccess";
@@ -157,6 +158,70 @@ function LinkSwitch({ drive, drives, reload, onError }) {
       {busy ? <Loader2 className="animate-spin" size={16} /> : <span className={`w-2.5 h-2.5 rounded-full ${on ? "bg-green-500" : "bg-gray-400"}`} />}
       {on ? "Link is ON" : "Link is OFF"}
     </button>
+  );
+}
+
+// ------------------------------------------------------------ CUSTOM DATE RANGE
+// From Date / To Date / Apply / Clear. One date alone (either box) = that single day. From after To is refused here AND by the
+// API (parseRegFilters → 400), so the table, counts, Excel and PDF can only ever use a valid range. The applied range is shown
+// as a chip. Dates are IST calendar days; the server turns them into whole-day bounds (the To date includes the entire day).
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayWords = (ymd) => `${ymd.slice(8, 10)} ${MONTHS_SHORT[Number(ymd.slice(5, 7)) - 1]} ${ymd.slice(0, 4)}`;
+const rangeWords = (r) => (!r?.from ? "" : r.to && r.to !== r.from ? `${dayWords(r.from)} – ${dayWords(r.to)}` : dayWords(r.from));
+const fmtIstDate = (v) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }); };
+const istTodayClient = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+
+function DateRangeFilter({ title, field, applied, onApply, onClear, note, testId = "date-range" }) {
+  const [from, setFrom] = useState(applied?.from || "");
+  const [to, setTo] = useState(applied?.to || "");
+  const [err, setErr] = useState("");
+  const today = istTodayClient();
+  const valid = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s) && s >= "2000-01-01";
+  function apply() {
+    let f = from, t = to;
+    if (!f && !t) { setErr("Select a From Date (and a To Date for a range)."); return; }
+    if ((f && !valid(f)) || (t && !valid(t))) { setErr("Enter a valid date."); return; }
+    if (f && !t) t = f;                    // a single date = that one day
+    if (t && !f) f = t;
+    if (f > t) { setErr("From Date cannot be later than To Date."); return; }
+    setErr(""); setFrom(f); setTo(t);
+    onApply({ from: f, to: t });
+  }
+  function clear() { setFrom(""); setTo(""); setErr(""); onClear(); }
+  const dateCls = `${inputCls} w-full sm:w-[160px]`;
+  return (
+    <div className={`${cardCls} p-3`} data-testid={testId}>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="w-full sm:w-auto">
+          <div className="text-xs font-bold text-gray-800 flex items-center gap-1.5"><CalendarRange size={14} style={{ color: BRAND }} />{title}</div>
+          <div className="text-[11px] text-gray-500">By {field}. Pick one date for a single day.</div>
+        </div>
+        <label className="flex-1 min-w-[130px] sm:flex-none">
+          <span className="block text-[11px] font-semibold text-gray-600 mb-0.5">From Date</span>
+          <input type="date" className={dateCls} value={from} min="2000-01-01" max={today} data-testid={`${testId}-from`}
+                 onChange={(e) => { setFrom(e.target.value); setErr(""); }} />
+        </label>
+        <label className="flex-1 min-w-[130px] sm:flex-none">
+          <span className="block text-[11px] font-semibold text-gray-600 mb-0.5">To Date</span>
+          <input type="date" className={dateCls} value={to} min={from || "2000-01-01"} max={today} data-testid={`${testId}-to`}
+                 onChange={(e) => { setTo(e.target.value); setErr(""); }} />
+        </label>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button type="button" onClick={apply} data-testid={`${testId}-apply`} className={`${btnCls} text-white flex-1 sm:flex-none justify-center`} style={{ background: BRAND }}>Apply Filter</button>
+          <button type="button" onClick={clear} disabled={!applied && !from && !to} data-testid={`${testId}-clear`}
+                  className={`${btnCls} border border-gray-300 text-gray-700 bg-white flex-1 sm:flex-none justify-center`}><X size={15} />Clear</button>
+        </div>
+      </div>
+      {err && <p className="mt-2 text-xs text-red-600" data-testid={`${testId}-error`}>{err}</p>}
+      {applied && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-[#164FA3]/10 text-[#164FA3]" data-testid={`${testId}-applied`}>
+            <CalendarRange size={13} />{applied.to !== applied.from ? "Date range" : "Date"}: {rangeWords(applied)}
+          </span>
+          {note && <span className="text-[11px] text-gray-500">{note}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -350,7 +415,7 @@ export default function RegistrationApp() {
 
       {tab === "dashboard" && canManage && <DashboardTab filterQs={filterQs} onWard={setWard} onError={setErr} />}
       {tab === "workers" && <WorkersTab filterQs={filterQs} campaignId={campaignId} campaigns={campaigns} onError={setErr} canDelete={canDelete} />}
-      {tab === "people" && <PeopleTab filterQs={filterQs} onError={setErr} canDelete={canDelete} canConvert={canConvert} />}
+      {tab === "people" && <PeopleTab filterQs={filterQs} onError={setErr} canDelete={canDelete} canConvert={canConvert} period={period} />}
     </div>
   );
 }
@@ -615,20 +680,25 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
   const [confirmDel, setConfirmDel] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [editing, setEditing] = useState(null); // the karyakarta being edited (full form), or null
+  // Custom Date Range of THIS page: the date each worker (their link / login) was created — reg_workers.created_at. Sent to the
+  // list, the count and both exports as created_from / created_to, so all of them hold exactly the same workers.
+  const [created, setCreated] = useState(null);   // { from, to } once applied
+  const wqs = useCallback((extra = {}) => filterQs({ search: debounced, created_from: created?.from, created_to: created?.to, ...extra }), [filterQs, debounced, created]);
 
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/registration/workers?${filterQs({ page, pageSize: 25, search: debounced })}`, { cache: "no-store" });
+      const r = await fetch(`/api/registration/workers?${wqs({ page, pageSize: 25 })}`, { cache: "no-store" });
+      if (r.status === 400) { const d = await r.json().catch(() => ({})); onError(d.message || "Invalid date range."); setRows([]); setTotal(0); setPages(1); return; }
       if (!r.ok) throw new Error();
       const d = await r.json();
       setRows(d.workers || []); setPages(d.pages || 1); setTotal(d.total || 0);
     } catch {
       onError("Could not load the worker list.");
     } finally { setLoading(false); }
-  }, [filterQs, page, debounced, onError]);
+  }, [wqs, page, onError]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -690,14 +760,17 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
           <input className={`${inputCls} pl-9 w-64`} placeholder="Search worker, mobile, ID" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <span className="text-sm text-gray-500">{total} worker{total === 1 ? "" : "s"}</span>
-        <div className="ml-auto flex items-center gap-2">
-          {/* Both exports carry the list's own filters (drive, period, ward AND the search box) and include EVERY matching worker, not just
-              the page on screen. */}
-          <a href={`/api/registration/export?${filterQs({ report: "workers", all: 1, search: debounced })}`} data-testid="roster-export" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
-            <Download size={16} />Export
+        <span className="text-sm text-gray-500" data-testid="workers-total">{total} worker{total === 1 ? "" : "s"}{created ? ` created ${rangeWords(created)}` : ""}</span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* Every export carries the list's own filters (drive, period, ward, the search box AND the Custom Date Range) and includes
+              EVERY matching worker, not just the page on screen. */}
+          <a href={`/api/registration/export?${wqs({ report: "workers", all: 1, format: "xlsx" })}`} data-testid="roster-export-xlsx" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
+            <FileSpreadsheet size={16} />Excel
           </a>
-          <a href={`/api/registration/export?${filterQs({ report: "workers", all: 1, search: debounced, format: "pdf" })}`} data-testid="roster-export-pdf" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
+          <a href={`/api/registration/export?${wqs({ report: "workers", all: 1 })}`} data-testid="roster-export" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
+            <Download size={16} />CSV
+          </a>
+          <a href={`/api/registration/export?${wqs({ report: "workers", all: 1, format: "pdf" })}`} data-testid="roster-export-pdf" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
             <FileText size={16} />PDF
           </a>
           <button onClick={() => setAdding(true)} className={`${btnCls} text-white`} style={{ background: BRAND }}>
@@ -705,6 +778,10 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
           </button>
         </div>
       </div>
+
+      <DateRangeFilter title="Custom Date Range" field="the date the worker was created" testId="workers-range"
+        applied={created} onApply={(r) => { setCreated(r); setPage(1); onError(""); }} onClear={() => { setCreated(null); setPage(1); onError(""); }}
+        note="Only workers created in this period are listed, counted and exported." />
 
       {/* Each row IS one generated link, and the counts beside it are exactly
           how many people registered through it — the answer to "how is this
@@ -754,7 +831,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
               {loading ? (
                 <tr><td colSpan={10} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500">No user links yet. Generate one to start crediting registrations.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500">{created ? `No workers were created ${rangeWords(created).includes("–") ? "between" : "on"} ${rangeWords(created).replace("–", "and")}.` : "No user links yet. Generate one to start crediting registrations."}</td></tr>
               ) : rows.map((w) => (
                 <tr key={w.id} className="border-t border-gray-100 hover:bg-gray-50/60">
                   <td className="px-3 py-2.5"><RankBadge rank={w.rank} /></td>
@@ -766,6 +843,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
                       <span className="min-w-0">
                         <span className="font-semibold text-gray-900 block truncate">{w.name}</span>
                         <span className="block text-[11px] text-gray-400 font-mono">{w.worker_code}</span>
+                        {w.created_at ? <span className="block text-[11px] text-gray-400" data-testid="worker-created">Created {fmtIstDate(w.created_at)}</span> : null}
                       </span>
                     </div>
                   </td>
@@ -1086,7 +1164,7 @@ function AddWorkers({ campaignId, campaigns, onClose, onDone, onError }) {
 }
 
 // ------------------------------------------------------------- REGISTRATIONS
-function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false }) {
+function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, period = "" }) {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
@@ -1110,7 +1188,11 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false })
 
   useEffect(() => { const t = setTimeout(() => { setDebounced(search); setPage(1); }, 350); return () => clearTimeout(t); }, [search]);
 
-  const qs = useCallback((extra = {}) => filterQs({ person_type: type, status, source, search: debounced, worker_id: addedById, ...extra }), [filterQs, type, status, source, debounced, addedById]);
+  // Custom Date Range of THIS page: the registration submission date (reg_people.registered_at, IST). Applied, it is sent as
+  // period=custom&from&to to the list, the count and every export — so they all hold exactly the same records.
+  const [regRange, setRegRange] = useState(null);   // { from, to } once applied
+  const qs = useCallback((extra = {}) => filterQs({ person_type: type, status, source, search: debounced, worker_id: addedById,
+    ...(regRange ? { period: "custom", from: regRange.from, to: regRange.to } : {}), ...extra }), [filterQs, type, status, source, debounced, addedById, regRange]);
 
   useEffect(() => {
     fetch("/api/registration/workers/options", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { workers: [] })).then((d) => setAddedByOpts(d.workers || [])).catch(() => {});
@@ -1127,6 +1209,7 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false })
     setLoading(true);
     try {
       const r = await fetch(`/api/registration/people?${qs({ page, pageSize: 25 })}`, { cache: "no-store" });
+      if (r.status === 400) { const d = await r.json().catch(() => ({})); onError(d.message || "Invalid date range."); setRows([]); setTotal(0); setPages(1); return; }
       if (!r.ok) throw new Error();
       const d = await r.json();
       setRows(d.people || []); setTotal(d.total || 0); setPages(d.pages || 1);
@@ -1218,9 +1301,12 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false })
           <option value="duplicate">Duplicates</option>
           <option value="rejected">Rejected</option>
         </select>
-        <span className="text-sm text-gray-500">{total.toLocaleString("en-IN")} record{total === 1 ? "" : "s"}</span>
+        <span className="text-sm text-gray-500" data-testid="registrations-total">{total.toLocaleString("en-IN")} record{total === 1 ? "" : "s"}{regRange ? ` · ${rangeWords(regRange)}` : ""}</span>
         {okMsg ? <span className="text-sm font-semibold text-green-700 inline-flex items-center gap-1"><Check size={15} />{okMsg}</span> : null}
-        <a href={`/api/registration/export?${qs({ report: "registrations" })}`} className={`${btnCls} ml-auto border border-gray-300 text-gray-700 bg-white`}>
+        <a href={`/api/registration/export?${qs({ report: "registrations", format: "xlsx" })}`} data-testid="registrations-xlsx" className={`${btnCls} ml-auto border border-gray-300 text-gray-700 bg-white`}>
+          <FileSpreadsheet size={16} />Export Excel
+        </a>
+        <a href={`/api/registration/export?${qs({ report: "registrations" })}`} data-testid="registrations-csv" className={`${btnCls} border border-gray-300 text-gray-700 bg-white`}>
           <Download size={16} />Export CSV
         </a>
         {/* Same filters + same access scope as this list (enforced by the export API). */}
@@ -1229,6 +1315,10 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false })
           <FileText size={16} />Export PDF
         </a>
       </div>
+
+      <DateRangeFilter title="Custom Date Range" field="registration submission date" testId="registrations-range"
+        applied={regRange} onApply={(r) => { setRegRange(r); setPage(1); onError(""); }} onClear={() => { setRegRange(null); setPage(1); onError(""); }}
+        note={period ? "This range replaces the period selected above for this list and its exports." : "Only registrations submitted in this period are listed, counted and exported."} />
 
       <div className={`${cardCls} overflow-hidden`}>
         <div className="overflow-x-auto">

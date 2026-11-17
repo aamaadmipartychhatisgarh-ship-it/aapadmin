@@ -48,6 +48,7 @@ export async function GET(req) {
     if (error) return error;
     const { searchParams } = new URL(req.url);
     const f = parseRegFilters(searchParams);
+    if (f.dateError) return NextResponse.json({ message: f.dateError }, { status: 400, headers: NO_STORE });
     // Zone-wise access control: an export is scoped to the caller's territory too,
     // so a CSV can never be used to pull other zones' records.
     const scope = peopleScopeCond(session);
@@ -77,7 +78,7 @@ export async function GET(req) {
         }
       }
       if (searchParams.get("format") === "pdf") {
-        const criteria = describeFilters(searchParams, session).filter((c) => !/^(Type|Source|Status):/.test(c));
+        const criteria = describeFilters(searchParams, session, f).filter((c) => !/^(Type|Source|Status):/.test(c));
         if (f.lokSabhaId || f.assemblyId) {
           const names = await query(`SELECT id, name FROM locations WHERE id IN (?, ?)`, [f.lokSabhaId || 0, f.assemblyId || 0]);
           const nm = (id) => names.find((n) => Number(n.id) === Number(id))?.name || `#${id}`;
@@ -104,11 +105,11 @@ export async function GET(req) {
         const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
         return new NextResponse(new Uint8Array(buf), {
           status: 200,
-          headers: { ...NO_STORE, "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="AAP_Worker_Performance_${stamp}.xlsx"` },
+          headers: { ...NO_STORE, "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="AAP_Worker_Performance_${rangeStamp(f.createdFrom, f.createdTo) || stamp}.xlsx"` },
         });
       }
       csv = toCsv(cols.map((c) => c.label), rows.map((r) => cols.map((c) => c.value(r))));
-      filename = `AAP_Worker_Performance_${stamp}.csv`;
+      filename = `AAP_Worker_Performance_${rangeStamp(f.createdFrom, f.createdTo) || stamp}.csv`;
     } else if (report === "blocks" || report === "wards") {
       // Block-wise (Area / Booth) performance — §9B. `wards` kept as an alias so any
       // old link still resolves to the same Block report.
@@ -121,38 +122,47 @@ export async function GET(req) {
     } else {
       // Registrations can run to tens of thousands; page through rather than
       // holding one enormous result set open.
+      // EVERY matching record (all pages, no cap), read in pages of 500 in the list's own order; a record is kept once by id.
       const all = [];
-      let page = 1;
-      for (;;) {
+      const seenP = new Set();
+      for (let page = 1; ; page += 1) {
         const d = await getPeoplePage({ ...f, sort: searchParams.get("sort") || defaultPeopleSort(f.personType), page, pageSize: 500, scope });
-        all.push(...d.people);
-        if (page >= d.pages || all.length >= 50000) break;
-        page += 1;
+        for (const p of d.people) if (!seenP.has(p.id)) { seenP.add(p.id); all.push(p); }
+        if (page >= d.pages || !d.people.length) break;
       }
       if (searchParams.get("format") === "pdf") {
-        // A PDF is for reading/printing; very large lists stay in the CSV export.
-        const PDF_MAX = 5000;
-        const criteria = describeFilters(searchParams, session);
-        if (all.length > PDF_MAX) criteria.push(`First ${PDF_MAX.toLocaleString("en-IN")} of ${all.length.toLocaleString("en-IN")} records — use Export CSV for the full list`);
-        const buf = await buildRegistrationPdf(all.slice(0, PDF_MAX), { title: "Worker & Voter Registrations", criteria });
+        const criteria = describeFilters(searchParams, session, f);
+        criteria.push(`${all.length.toLocaleString("en-IN")} matching record${all.length === 1 ? "" : "s"}`);
+        const buf = await buildRegistrationPdf(all, { title: "Worker & Voter Registrations", criteria });
         return new NextResponse(new Uint8Array(buf), {
           status: 200,
           headers: { ...NO_STORE, "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${registrationPdfFilename()}"` },
         });
       }
-      csv = toCsv(
-        ["Registration Date & Time", "Type", "Name", "Mobile", "Address", "Constituency", "Ward", "Area/Booth",
-         "Wants to be Worker", "User Rating", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"],
-        all.map((p) => [
+      const regHead = ["Registration Date & Time", "Type", "Name", "Mobile", "Address", "Constituency", "Ward", "Area/Booth",
+         "Wants to be Worker", "User Rating", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"];
+      const regRows = all.map((p) => [
           fmtDateTime(p.registered_at),
           p.person_type === "worker" ? "Wants to be Worker" : "Voter",
           p.name, p.mobile, p.address, p.assembly_name, p.effective_ward || p.ward_number, p.area_booth,
           p.wants_worker ? "Yes" : "No", p.worker_rating != null ? String(p.worker_rating) : "",
           // No karyakarta = arrived through the general /join link.
           p.worker_name || "Direct (/join)", p.worker_mobile, p.worker_code, p.status,
-        ])
-      );
-      filename = `AAP_Registrations_${stamp}.csv`;
+        ]);
+      // Excel: the same columns, in the same order, as the CSV.
+      if (searchParams.get("format") === "xlsx") {
+        const ws = XLSX.utils.aoa_to_sheet([regHead, ...regRows.map((r) => r.map((v) => (v == null ? "" : v)))]);
+        ws["!cols"] = regHead.map((h) => ({ wch: Math.max(h.length + 2, /Name|Address|Added By/.test(h) ? 28 : 14) }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Registrations");
+        const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+        return new NextResponse(new Uint8Array(buf), {
+          status: 200,
+          headers: { ...NO_STORE, "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="AAP_Registrations_${rangeStamp(f.from, f.to) || stamp}.xlsx"` },
+        });
+      }
+      csv = toCsv(regHead, regRows);
+      filename = `AAP_Registrations_${rangeStamp(f.from, f.to) || stamp}.csv`;
     }
 
     return new NextResponse(csv, {
@@ -170,11 +180,13 @@ export async function GET(req) {
 }
 
 // The list filters in words, for the PDF header (same params the list uses).
-function describeFilters(sp, session) {
+function describeFilters(sp, session, f = {}) {
   const out = [];
   const period = sp.get("period");
-  if (period) out.push(`Period: ${period}`);
-  if (sp.get("from") || sp.get("to")) out.push(`Dates: ${sp.get("from") || "…"} – ${sp.get("to") || "…"}`);
+  // The Custom Date Range exactly as applied (one date = that single day), in words.
+  if (period === "custom" && f.from) out.push(`Registration date: ${rangeWords(f.from, f.to)}`);
+  else if (period && period !== "custom") out.push(`Period: ${PERIOD_WORDS[period] || period}`);
+  if (f.createdFrom) out.push(`Worker created: ${rangeWords(f.createdFrom, f.createdTo)}`);
   if (sp.get("ward")) out.push(`Ward: ${sp.get("ward")}`);
   const type = sp.get("person_type");
   if (type === "worker") out.push("Type: Workers"); else if (type === "voter") out.push("Type: Voters");
@@ -186,4 +198,17 @@ function describeFilters(sp, session) {
   if (sp.get("worker_id")) out.push(`User id: ${sp.get("worker_id")}`);
   if (isCaller(session)) out.push("Limited to your assigned area");
   return out;
+}
+
+const PERIOD_WORDS = { today: "Today", yesterday: "Yesterday", week: "This Week", month: "This Month" };
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayWords = (ymd) => `${ymd.slice(8, 10)} ${MONTHS[Number(ymd.slice(5, 7)) - 1]} ${ymd.slice(0, 4)}`;
+// "05 Mar 2025" for a single day, "01 Mar 2025 – 31 Mar 2025" for a range.
+function rangeWords(from, to) {
+  return !to || to === from ? dayWords(from) : `${dayWords(from)} – ${dayWords(to)}`;
+}
+// File-name part for a dated export: "2025-03-05" or "2025-03-01_to_2025-03-31"; "" when no range.
+function rangeStamp(from, to) {
+  if (!from) return "";
+  return !to || to === from ? from : `${from}_to_${to}`;
 }

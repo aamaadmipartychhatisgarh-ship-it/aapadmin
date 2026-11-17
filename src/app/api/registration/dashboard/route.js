@@ -17,6 +17,7 @@ export async function GET(req) {
     if (error) return error;
     const { searchParams } = new URL(req.url);
     const f = parseRegFilters(searchParams);
+    if (f.dateError) return NextResponse.json({ message: f.dateError }, { status: 400, headers: NO_STORE });
     // Zone-wise access control — a caller's whole dashboard is scoped to their
     // territory (counts, rankings, assembly graph, ward filter), enforced in SQL.
     const scope = peopleScopeCond(session);

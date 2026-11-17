@@ -120,10 +120,22 @@ export async function getRegSummary({ campaignId, from, to, ward, scope } = {}) 
 // Rank | Worker | Mobile | Voters Added | Workers Added | Total.
 // LEFT JOIN from the worker side so a worker with zero registrations still
 // appears (ranked last) — the roster is the denominator of the drive.
+// Worker creation date filter (Workers & Links Custom Date Range): reg_workers.created_at is a TIMESTAMP (an absolute instant), so
+// the IST calendar days are turned into exact instants — [From 00:00 IST, day after To 00:00 IST) — and compared with
+// FROM_UNIXTIME, which converts in the same session timezone as the column. A worker created at 11:59 pm IST on the To date is
+// included; nothing shifts a day because of the server's or database's timezone.
+const istDayStartEpoch = (ymd) => Math.floor(Date.parse(`${ymd}T00:00:00+05:30`) / 1000);
+function workerCreatedConds(col, createdFrom, createdTo) {
+  const cond = []; const params = [];
+  if (createdFrom) { cond.push(`${col} >= FROM_UNIXTIME(?)`); params.push(istDayStartEpoch(createdFrom)); }
+  if (createdTo) { cond.push(`${col} < FROM_UNIXTIME(?)`); params.push(istDayStartEpoch(createdTo) + 86400); }
+  return { cond, params };
+}
+
 // The people-join / worker WHERE of the Worker-wise Performance dataset, shared by the ranking rows, its totals and its count so
 // they are always computed over exactly the same workers. `workerIds` (from workerIdsForLocation) is the Lok Sabha / Assembly
 // filter: null = no location filter, [] = nothing matches.
-function workerRankingParts({ campaignId, from, to, ward, search, workerScope, workerIds }) {
+function workerRankingParts({ campaignId, from, to, ward, search, workerScope, workerIds, createdFrom, createdTo }) {
   const on = ["p.worker_id = w.id", "p.status = 'active'"];
   const params = [];
   if (from) { on.push("p.registered_at >= ?"); params.push(`${from} 00:00:00`); }
@@ -131,6 +143,7 @@ function workerRankingParts({ campaignId, from, to, ward, search, workerScope, w
   const where = ["1 = 1"];
   if (campaignId) { where.push("w.campaign_id = ?"); params.push(campaignId); }
   if (ward) { where.push("w.ward_number = ?"); params.push(ward); }
+  { const c = workerCreatedConds("w.created_at", createdFrom, createdTo); where.push(...c.cond); params.push(...c.params); }
   if (search) { where.push("(w.name LIKE ? OR w.mobile LIKE ? OR w.worker_code LIKE ?)"); const l = `%${search}%`; params.push(l, l, l); }
   // Zone-wise access control: a caller sees only workers active in their territory.
   if (workerScope && workerScope.cond) { where.push(workerScope.cond); params.push(...(workerScope.params || [])); }
@@ -154,16 +167,16 @@ export async function getWorkerPerformanceTotals(opts = {}) {
   return { workers: Number(r?.workers || 0), voters: Number(r?.voters || 0), new_workers: Number(r?.new_workers || 0), total: Number(r?.total || 0) };
 }
 
-export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10, offset = 0, search, workerScope, workerIds = null } = {}) {
+export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10, offset = 0, search, workerScope, workerIds = null, createdFrom = null, createdTo = null } = {}) {
   await ensureRegistrationSchema();
 
   // People-side conditions live in the JOIN (not WHERE) to preserve the LEFT JOIN.
-  const { on, where, params } = workerRankingParts({ campaignId, from, to, ward, search, workerScope, workerIds });
+  const { on, where, params } = workerRankingParts({ campaignId, from, to, ward, search, workerScope, workerIds, createdFrom, createdTo });
 
   const lim = Math.min(500, Math.max(1, Number(limit) || 10));
   const off = Math.max(0, Number(offset) || 0);
   const rows = await query(
-    `SELECT w.id, w.name, w.mobile, w.worker_code, w.ward_number, w.area_booth, w.status, w.token, w.contact_id,
+    `SELECT w.id, w.name, w.mobile, w.worker_code, w.ward_number, w.area_booth, w.status, w.token, w.contact_id, w.created_at,
             MAX(cc.photo_url)   AS contact_photo_url,
             MAX(cc.person_name) AS contact_name,
             COALESCE(SUM(p.person_type = 'voter'), 0) AS voters,
@@ -191,7 +204,7 @@ export async function getWorkerRanking({ campaignId, from, to, ward, limit = 10,
     assembly_id: loc.get(r.id)?.assembly_id || null,
     assembly_name: loc.get(r.id)?.assembly_name || null,
     location_contact_id: loc.get(r.id)?.contact_id || null,
-    ward_number: r.ward_number, area_booth: r.area_booth, status: r.status, token: r.token,
+    ward_number: r.ward_number, area_booth: r.area_booth, status: r.status, token: r.token, created_at: r.created_at,
     contact_id: r.contact_id || null,
     photo_url: r.contact_photo_url || null,
     contact_name: r.contact_name || null,
@@ -286,12 +299,13 @@ export async function getLocationFilterOptions() {
   return { lok_sabhas: lok.map((r) => ({ id: r.id, name: r.name })), assemblies: asm.map((r) => ({ id: r.id, name: r.name, lok_sabha_id: r.lok_sabha_id || null })) };
 }
 
-export async function countWorkers({ campaignId, ward, search, workerScope } = {}) {
+export async function countWorkers({ campaignId, ward, search, workerScope, createdFrom, createdTo } = {}) {
   await ensureRegistrationSchema();
   const where = ["1 = 1"];
   const params = [];
   if (campaignId) { where.push("campaign_id = ?"); params.push(campaignId); }
   if (ward) { where.push("ward_number = ?"); params.push(ward); }
+  { const c = workerCreatedConds("created_at", createdFrom, createdTo); where.push(...c.cond); params.push(...c.params); }
   if (search) { where.push("(name LIKE ? OR mobile LIKE ? OR worker_code LIKE ?)"); const l = `%${search}%`; params.push(l, l, l); }
   // Zone-wise access control (same rule as getWorkerRanking). Alias is reg_workers
   // itself here (no table alias), so scope on the bare row via a correlated EXISTS.

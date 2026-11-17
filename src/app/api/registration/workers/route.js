@@ -36,6 +36,7 @@ export async function GET(req) {
     if (error) return error;
     const { searchParams } = new URL(req.url);
     const f = parseRegFilters(searchParams);
+    if (f.dateError) return NextResponse.json({ message: f.dateError }, { status: 400, headers: NO_STORE });
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
     const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get("pageSize") || "25", 10) || 25));
     // Zone-wise access control: a caller sees only workers active in their territory.
