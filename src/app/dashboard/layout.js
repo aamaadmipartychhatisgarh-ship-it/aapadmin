@@ -736,7 +736,7 @@ export default function DashboardLayout({ children }) {
       </aside>
 
       {/* Main Content Area */}
-      <div className="print-col flex-1 flex flex-col h-full overflow-hidden">
+      <div className="print-col flex-1 min-w-0 flex flex-col h-full overflow-hidden">
 
         {/* Header */}
         <header className="no-print bg-white h-[72px] lg:h-[100px] flex items-center justify-between gap-2 px-3 lg:px-8 border-b border-gray-200 shrink-0 shadow-sm z-10">
@@ -968,7 +968,9 @@ export default function DashboardLayout({ children }) {
         {/* Scrollable Main Content — a page-restricted user on an unassigned
             page gets a hard Access Denied screen instead of the page (the
             unauthorized page is never rendered). */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-8 relative">
+        {/* Scrolls vertically only: a page never slides sideways on a phone / in the PWA because one element is too wide (wide
+            tables keep their own horizontal scroll inside their card). min-w-0 lets this column shrink to the screen width. */}
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 lg:p-8 relative">
           {accessBlocked
             ? (pathname === "/dashboard"
                 // Managed portal/worker landing — the redirect effect above is

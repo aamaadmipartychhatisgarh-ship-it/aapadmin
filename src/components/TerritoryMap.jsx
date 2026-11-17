@@ -66,20 +66,21 @@ export default function TerritoryMap() {
   const hovered = hoveredId ? districts.find((d) => d.id === hoveredId) : null;
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+    <div className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-gray-100 min-w-0">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-full bg-[#164FA3]/10 text-[#164FA3] flex items-center justify-center"><MapIcon size={20} /></div>
           <div>
             <span className="font-bold text-lg text-gray-900">Organization Map</span>
             <p className="text-xs text-gray-400">Districts colored by organizational strength. Hover for a quick look, click a tile to drill down.</p>
           </div>
         </div>
-        <div className="flex items-center gap-4 text-sm">
+        {/* Legend + Print / Export wrap onto further lines on a phone instead of pushing the page wider than the screen. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
           <Legend color="bg-emerald-500" label="Strong" />
           <Legend color="bg-amber-500" label="Medium" />
           <Legend color="bg-red-500" label="Weak" />
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <CommonPrintButton title="Organization Map" />
             <CommonPDFExportButton
               filename="organization-map.pdf"
