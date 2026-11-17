@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network, Printer, Link2, Copy } from "lucide-react";
+import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network, Printer, Link2, Copy, Share2 } from "lucide-react";
+import { shareGenerated, offerFile, responseToFile } from "@/components/pdfShare/fileShare";
 import PageHeader from "@/components/PageHeader";
 import DesignationMultiSelect, { parseDesignationIdList } from "@/components/contacts/DesignationMultiSelect";
 import ImportEditModal from "@/components/contacts/ImportEditModal";
@@ -650,6 +651,23 @@ export default function ContactsModule({ session, mode }) {
     }
   }
 
+  // Share PDF / Share Excel (common file sharing) — the SAME request as Export (same selection / filters / columns), offered
+  // to the common share panel without downloading: the native share sheet with the actual file, or a secure sign-in-only link.
+  function shareExport(format) {
+    if (hasNoColumns(exportColumns)) { setMessage(""); setError(NO_COLUMNS_MESSAGE); return; }
+    setError("");
+    shareGenerated(async () => {
+      const params = buildParams(1);
+      params.delete("page"); params.delete("page_size");
+      params.set("format", format);
+      if (selectedIds.size > 0) params.set("ids", [...selectedIds].join(","));
+      const colParam = exportColumnsParam(exportColumns, CONTACT_COL_KEYS);
+      if (colParam) params.set("columns", colParam.join(","));
+      const r = await fetch(`${cfg.listUrl}?${params}`, { cache: "no-store" });
+      return responseToFile(r, `Contacts_Export_${new Date().toISOString().slice(0, 10)}.${format}`);
+    }, { label: format === "pdf" ? "PDF" : "Excel" });
+  }
+
   // Print — reuses the SAME PDF the export builds (so it honors the exact
   // selected/filtered/sorted dataset), opening it in a new tab and triggering the
   // browser print dialog. Selection priority is identical to exportData.
@@ -671,6 +689,8 @@ export default function ContactsModule({ session, mode }) {
       if (!blob || blob.size === 0) { setError("Nothing to print for the current selection."); return; }
       const url = URL.createObjectURL(blob);
       const w = window.open(url, "_blank");
+      // The printed PDF is kept for sharing too (common share panel) — the user can send exactly what was printed.
+      offerFile(blob, (r.headers.get("content-disposition") || "").match(/filename="?([^"]+)"?/i)?.[1] || `Contacts_Print_${new Date().toISOString().slice(0, 10)}.pdf`, { origin: "print" });
       if (!w) { setError("Allow pop-ups for this site to print."); URL.revokeObjectURL(url); return; }
       // Trigger the print dialog once the PDF viewer has loaded.
       try { w.addEventListener("load", () => { try { w.focus(); w.print(); } catch { /* viewer blocks scripted print — user can Ctrl+P */ } }); } catch { /* ignore */ }
@@ -860,6 +880,8 @@ export default function ContactsModule({ session, mode }) {
             { key: "export-pdf", label: (exporting && exportingFormat === "pdf") ? "Exporting…" : `Export PDF${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: FileText, loading: exporting && exportingFormat === "pdf", disabled: exporting, menuOnly: true, onClick: () => exportData("pdf") },
             { key: "export-csv", label: (exporting && exportingFormat === "csv") ? "Exporting…" : "Export CSV", icon: Download, loading: exporting && exportingFormat === "csv", disabled: exporting, menuOnly: true, onClick: () => exportData("csv") },
             { key: "print", label: (exporting && exportingFormat === "print") ? "Preparing…" : `Print${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: Printer, loading: exporting && exportingFormat === "print", disabled: exporting, menuOnly: true, onClick: () => printData() },
+            { key: "share-pdf", label: `Share PDF${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: Share2, disabled: exporting, menuOnly: true, onClick: () => shareExport("pdf") },
+            { key: "share-xlsx", label: `Share Excel${selectedIds.size > 0 ? ` (${selectedIds.size} selected)` : ""}`, icon: Share2, disabled: exporting, menuOnly: true, onClick: () => shareExport("xlsx") },
             cfg.canImport && { key: "upload", label: uploading ? "Uploading…" : "Upload", icon: Upload, loading: uploading, menuOnly: true, onClick: () => fileRef.current?.click() },
             cfg.canAdd && { key: "add", label: "Add Contact", icon: Plus, variant: "primary", onClick: () => setShowAdd(true) },
           ]} />

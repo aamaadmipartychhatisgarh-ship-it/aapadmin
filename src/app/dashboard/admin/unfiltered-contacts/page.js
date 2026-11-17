@@ -5,7 +5,8 @@ import { UNFILTERED_STATUS_FILTERS, phonePickedLabel } from "@/lib/unfilteredPho
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Loader2, Upload, Search, X, ChevronLeft, ChevronRight, ListFilter, Headphones, Shuffle, RefreshCw, Printer } from "lucide-react";
+import { Loader2, Upload, Search, X, ChevronLeft, ChevronRight, ListFilter, Headphones, Shuffle, RefreshCw, Printer, Share2 } from "lucide-react";
+import { shareGenerated, responseToFile } from "@/components/pdfShare/fileShare";
 import * as XLSX from "xlsx";
 import PageHeader from "@/components/PageHeader";
 import { ImportModal } from "@/components/contacts/ContactsModule";
@@ -350,6 +351,40 @@ export default function UnfilteredContactsPage() {
   // USER-WISE PRINT: every record matching the CURRENT filters (user, date, status, search) - read from the server across all pages with the
   // same query as the list (?all=1) - laid out for A4 in a print window that opens the browser's print dialog.
   const [printing, setPrinting] = useState(false);
+  // SHARE beside Print: the browser's print dialog creates no file, so Share builds the SAME list (same filters, same columns,
+  // all pages) as a PDF through the common generator and hands it to the common share panel (native share sheet with the file,
+  // or a secure sign-in-only link).
+  function sharePrintList() {
+    shareGenerated(async () => {
+      const p = new URLSearchParams({ all: "1" });
+      if (search) p.set("q", search);
+      if (statusF) p.set("status", statusF);
+      if (userF) p.set("user", userF);
+      if (dateF) p.set("date", dateF);
+      const r = await fetch(`/api/unfiltered-contacts?${p}`, { cache: "no-store" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || "Could not prepare the list.");
+      const userName = userF ? ((counts?.users || []).find((u) => String(u.id) === String(userF))?.username || `User #${userF}`) : "All users";
+      const statusLabel = statusF ? (UNFILTERED_STATUS_FILTERS.find((o) => o.value === statusF)?.label || statusF) : "All statuses";
+      const filters = [`User: ${userName}`, `Date: ${dateF ? dateF.split("-").reverse().join("/") : "All dates"}`, `Status: ${statusLabel}`, `Search: ${search ? search : "—"}`];
+      const stat = (x) => `${x.call_status_name ? (x.call_status_name === "Phone Picked" && x.call_sentiment ? phonePickedLabel(x.call_sentiment) : x.call_status_name) : "—"}${x.follow_up_date ? ` (Follow-up ${String(x.follow_up_date).slice(0, 10)})` : ""}`;
+      const list = d.contacts || [];
+      const filename = `Unfiltered_Contacts_${userName.replace(/[^a-z0-9]+/gi, "_")}.pdf`;
+      const res = await fetch("/api/pdf/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename, orientation: "landscape", title: `Unfiltered Contacts — ${userName}`,
+          subtitle: `${filters.join(" · ")} · ${list.length} contact${list.length === 1 ? "" : "s"}${d.truncated ? ` (first ${list.length} of ${d.total})` : ""}`,
+          table: {
+            columns: [{ header: "#", flex: 0.4 }, { header: "Name", flex: 1.3 }, { header: "Phone Number", flex: 0.9 }, { header: "District", flex: 1 }, { header: "Assembly", flex: 1 },
+              { header: "Designation", flex: 1 }, { header: "Address", flex: 1.8 }, { header: "Status", flex: 1.2 }, { header: "Imported", flex: 0.7 }, { header: "Assigned to", flex: 0.8 }],
+            rows: list.map((x, i) => [String(i + 1), x.person_name || "—", x.phone_key, x.district || "—", x.assembly || "—", x.designation || "—", x.address || "—", stat(x), fmtDate(x.created_at), x.assigned_to || "Unassigned"]),
+          },
+        }),
+      });
+      return responseToFile(res, filename);
+    }, { label: "PDF" });
+  }
   async function printList() {
     if (printing) return;
     const w = window.open("", "_blank");          // opened inside the click so pop-up blockers allow it
@@ -580,6 +615,10 @@ ${d.truncated ? `<p class="warn">Only the first ${(d.contacts || []).length} of 
         <button type="button" onClick={printList} disabled={printing} data-testid="unfiltered-print" title="Print every contact matching the filters above (all pages)"
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50">
           {printing ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Print{userF ? " user list" : ""}
+        </button>
+        <button type="button" onClick={sharePrintList} data-testid="unfiltered-share" title="Share this list as a PDF (WhatsApp, Email, …)"
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg border border-gray-200 bg-white hover:bg-gray-50">
+          <Share2 size={14} /> Share
         </button>
         <div className="text-sm text-gray-500" data-testid="unfiltered-total">
           {search || statusF || userF || dateF ? <>{total} match{total === 1 ? "" : "es"} · </> : null}<span className="font-semibold text-gray-900">{data?.all_total ?? 0}</span> unfiltered contact{data?.all_total === 1 ? "" : "s"}

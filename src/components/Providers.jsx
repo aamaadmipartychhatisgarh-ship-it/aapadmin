@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { SessionProvider } from "next-auth/react";
-import PdfShareCenter from "@/components/pdfShare/PdfShareCenter";
+import FileShareCenter from "@/components/pdfShare/FileShareCenter";
 
 // After a deploy the server has a new build, so pages still open in a browser
 // reference old chunk filenames that now 404 (ChunkLoadError). Reload once to
@@ -40,8 +40,8 @@ export default function Providers({ children }) {
   return (
     <SessionProvider>
       {children}
-      {/* Common PDF sharing for every PDF export in the app (see components/pdfShare/PdfShareCenter). */}
-      <PdfShareCenter />
+      {/* Common sharing for every PDF / Excel / CSV export and PDF print in the app (see components/pdfShare/fileShare). */}
+      <FileShareCenter />
     </SessionProvider>
   );
 }

@@ -20,7 +20,9 @@ import {
   Target, ShieldAlert, Star, Vote, Search, ChevronDown, ChevronUp,
   Database, Power, Check, Printer, Flag, FileText,
   Upload, Download, FileSpreadsheet, AlertTriangle,
+  Share2,
 } from "lucide-react";
+import { shareGenerated, offerFile, printRegionPdf, responseToFile } from "@/components/pdfShare/fileShare";
 
 // 10 assessment parameters (keys match the DB columns / API). Each is scored /10
 // → a 100-point total.
@@ -3127,6 +3129,7 @@ function PollingEditor({ row, onClose, onSaved, fail }) {
 
 // ------------------------------- helpers ----------------------------------
 function Modal({ title, onClose, children, wide, size, printable }) {
+  const panelRef = useRef(null);
   const width = size === "full" ? "max-w-5xl" : wide ? "max-w-2xl" : "max-w-lg";
   // When printable, the overlay is tagged `la-print-root` so the print CSS
   // (globals.css) can hide the rest of the app and print ONLY this modal's
@@ -3134,13 +3137,21 @@ function Modal({ title, onClose, children, wide, size, printable }) {
   // clipped to the visible portion (§1.6).
   return (
     <div className={`fixed inset-0 bg-black/40 flex items-center justify-center z-[70] p-4 ${printable ? "la-print-root" : ""}`} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`la-print-panel bg-white rounded-2xl shadow-xl w-full ${width} p-6 max-h-[90vh] overflow-auto`}>
+      <div ref={panelRef} className={`la-print-panel bg-white rounded-2xl shadow-xl w-full ${width} p-6 max-h-[90vh] overflow-auto`}>
         <div className="flex items-center justify-between mb-4 gap-3">
           <h2 className="text-xl font-bold text-gray-900">{title}</h2>
           <div className="flex items-center gap-1.5 la-no-print">
             {printable && (
               <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#164FA3] border border-[#164FA3]/30 hover:bg-[#164FA3]/10 px-3 py-1.5 rounded-lg" title="Print this Full View">
                 <Printer size={15} /> Print
+              </button>
+            )}
+            {printable && (
+              // Share beside Print: the print dialog makes no file, so Share turns this printable view into a PDF (common
+              // generator) and hands it to the common share panel.
+              <button onClick={() => shareGenerated(printRegionPdf(panelRef.current, { title, orientation: "portrait" }), { label: "PDF" })}
+                data-testid="modal-share" className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 px-3 py-1.5 rounded-lg" title="Share this Full View as a PDF">
+                <Share2 size={15} /> Share
               </button>
             )}
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1"><X size={20} /></button>
@@ -3365,7 +3376,10 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
       if (selected.size) p.set("ids", [...selected].join(","));
       const r = await fetch(`/api/leader-assessment/comparison/export?${p.toString()}`, { cache: "no-store" });
       if (!r.ok) { const d = await r.json().catch(() => ({})); fail?.(d.message || "Print failed."); return; }
-      const url = URL.createObjectURL(await r.blob());
+      const printBlob = await r.blob();
+      // The printed PDF is kept for sharing too (common share panel), so the user can send exactly what was printed.
+      offerFile(printBlob, "MLA_vs_AAP_Vote_Comparison.pdf", { origin: "print" });
+      const url = URL.createObjectURL(printBlob);
       const frame = document.createElement("iframe");
       frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
       frame.src = url;
@@ -3475,6 +3489,13 @@ function VoteComparisonTab({ flash, fail, onEditMla }) {
             <button onClick={printComparison} disabled={!!exporting || loading} data-testid="comparison-print"
               className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold">
               {exporting === "print" ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Print
+            </button>
+            <button onClick={() => shareGenerated(async () => {
+                const p = geoParams(); p.set("format", "pdf"); if (selected.size) p.set("ids", [...selected].join(","));
+                return responseToFile(await fetch(`/api/leader-assessment/comparison/export?${p.toString()}`, { cache: "no-store" }), "MLA_vs_AAP_Vote_Comparison.pdf");
+              }, { label: "PDF" })} disabled={!!exporting || loading} data-testid="comparison-share" title="Share the comparison PDF (WhatsApp, Email, …)"
+              className="inline-flex items-center gap-1.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold">
+              <Share2 size={14} /> Share
             </button>
           </div>
         }

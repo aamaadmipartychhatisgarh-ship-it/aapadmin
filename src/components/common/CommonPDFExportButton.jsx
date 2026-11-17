@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Loader2, FileText } from "lucide-react";
+import { Download, Loader2, FileText, Share2 } from "lucide-react";
+import { shareGenerated } from "@/components/pdfShare/fileShare";
 
 // Reusable "Export PDF" button shared by every listed page. The page supplies a
 // `getPayload()` that returns what it is CURRENTLY showing (already filtered):
@@ -29,18 +30,15 @@ export default function CommonPDFExportButton({
   className = "",
   icon = "download",
   onError,
+  // Share (common file sharing): a "Share" button beside Export — it builds the SAME PDF and opens the share panel / native
+  // share sheet without downloading. Every Print button in the app sits beside this button, so Print always has Share too.
+  share = true,
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  async function handleExport() {
-    if (busy) return; // prevent duplicate concurrent exports
-    setBusy(true);
-    setErr("");
-    try {
-      // `fetchUrl` (optional): the server builds the PDF itself from the page's current
-      // filters (GET) — used where the content must come straight from the database
-      // (e.g. long complaint descriptions) rather than from rows posted by the browser.
+  // The PDF, exactly as Export downloads it (one code path for Export and Share).
+  async function generate() {
       const payload = fetchUrl ? {} : (await (typeof getPayload === "function" ? getPayload() : getPayload)) || {};
       const body = { filename, ...payload };
       const res = fetchUrl
@@ -55,11 +53,27 @@ export default function CommonPDFExportButton({
         try { msg = (await res.json()).message || msg; } catch { /* non-JSON */ }
         throw new Error(msg);
       }
-      const blob = await res.blob();
+      return { blob: await res.blob(), filename: body.filename || filename };
+  }
+
+  async function handleShare() {
+    if (busy) return;
+    await shareGenerated(generate, { label: "PDF" });
+  }
+
+  async function handleExport() {
+    if (busy) return; // prevent duplicate concurrent exports
+    setBusy(true);
+    setErr("");
+    try {
+      // `fetchUrl` (optional): the server builds the PDF itself from the page's current
+      // filters (GET) — used where the content must come straight from the database
+      // (e.g. long complaint descriptions) rather than from rows posted by the browser.
+      const { blob, filename: name } = await generate();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = body.filename || filename;
+      a.download = name;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -78,6 +92,7 @@ export default function CommonPDFExportButton({
   const Icon = icon === "file" ? FileText : Download;
   return (
     <span className="no-print inline-flex flex-col items-start">
+      <span className="inline-flex items-center gap-2">
       <button
         type="button"
         onClick={handleExport}
@@ -91,6 +106,14 @@ export default function CommonPDFExportButton({
         {busy ? <Loader2 size={15} className="animate-spin" /> : <Icon size={15} />}
         {busy ? "Preparing…" : label}
       </button>
+      {share && (
+        <button type="button" onClick={handleShare} disabled={busy} data-testid="common-share"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+          title="Share this page as a PDF (WhatsApp, Email, …)">
+          <Share2 size={15} /> Share
+        </button>
+      )}
+      </span>
       {err ? <span className="mt-1 text-[11px] text-red-600 max-w-[220px]">{err}</span> : null}
     </span>
   );

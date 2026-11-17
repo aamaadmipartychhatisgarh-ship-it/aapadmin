@@ -32,6 +32,10 @@ export const LightLogin = () => {
         // Workers have no Admin dashboard — send them to their own (Page Access
         // limits them to their Dashboard and Announcements).
         const s = await getSession().catch(() => null);
+        // ?next=/api/file-share/<token>: a shared file link that asked the user to sign in first — go back to it. Only that
+        // same-site path is honoured (never another site), so this cannot become an open redirect.
+        const next = new URLSearchParams(window.location.search).get("next") || "";
+        if (/^\/api\/(file|pdf)-share\/[A-Za-z0-9_-]{43}$/.test(next)) { window.location.assign(next); return; }
         router.push(s?.user?.role === "worker" ? "/dashboard/portal" : "/dashboard/admin");
         router.refresh();
       }

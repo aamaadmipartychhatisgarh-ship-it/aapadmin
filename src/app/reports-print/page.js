@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Printer, RectangleHorizontal, RectangleVertical } from "lucide-react";
+import { Loader2, Printer, RectangleHorizontal, RectangleVertical, Share2 } from "lucide-react";
+import { shareGenerated, responseToFile } from "@/components/pdfShare/fileShare";
 import { formatDate, formatDateTime } from "@/lib/dateFormat";
 
 const PAYLOAD_KEY = "reports_print_payload";
@@ -18,12 +19,19 @@ export default function ReportPrintPage() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [orientation, setOrientation] = useState("landscape");
+  const [body, setBody] = useState(null);
+  // Share beside Print: the same report as the Reports PDF (same filters, chosen orientation) via the common share panel.
+  const share = () => body && shareGenerated(async () => {
+    const r = await fetch("/api/reports/export?format=pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, orientation }) });
+    return responseToFile(r, "report.pdf");
+  }, { label: "PDF" });
 
   useEffect(() => {
     let payload;
     try { payload = JSON.parse(sessionStorage.getItem(PAYLOAD_KEY) || "null"); } catch { payload = null; }
     if (!payload) { setErr("No report loaded — open Print again from the Reports Center."); return; }
     setOrientation(payload.orientation === "portrait" ? "portrait" : "landscape");
+    setBody(payload.body || null);
     fetch("/api/reports/export?format=json", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -59,6 +67,12 @@ export default function ReportPrintPage() {
           disabled={!data}
           style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: "none", background: "#164FA3", color: "#fff", fontSize: 13, cursor: data ? "pointer" : "not-allowed", opacity: data ? 1 : 0.5, marginLeft: "auto" }}
         ><Printer size={14} /> Print</button>
+        <button
+          onClick={share}
+          disabled={!data}
+          data-testid="reports-print-share"
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: "1px solid #ccc", background: "#fff", color: "#333", fontSize: 13, cursor: data ? "pointer" : "not-allowed", opacity: data ? 1 : 0.5 }}
+        ><Share2 size={14} /> Share PDF</button>
       </div>
 
       <div style={{ padding: "20px 24px" }}>

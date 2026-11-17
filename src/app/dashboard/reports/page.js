@@ -13,6 +13,7 @@ import {
   PhoneCall, Contact, Users, ClipboardList, MessageSquareWarning, Clock,
   UserCog, Network, Bell, ScrollText, PhoneOff, Calendar as CalendarIcon, Share2,
 } from "lucide-react";
+import { shareGenerated, responseToFile } from "@/components/pdfShare/fileShare";
 
 const ICONS = {
   PhoneCall, Contact, Users, ClipboardList, MessageSquareWarning, Clock,
@@ -290,6 +291,13 @@ function ReportsCenter() {
   // Print opens a dedicated, chrome-free print view in a new tab — the
   // filter config is handed off via sessionStorage (not the URL: a
   // multi-select filter set is too big/awkward for a query string).
+  // Share beside Print: the print view goes to the browser's print dialog (no file), so Share builds the same report as the
+  // Reports PDF (same module, filters, columns) and hands it to the common share panel.
+  const sharePrint = () => shareGenerated(async () => {
+    const r = await fetch("/api/reports/export?format=pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, orientation: "landscape" }) });
+    return responseToFile(r, "report.pdf");
+  }, { label: "PDF" });
+
   const openPrint = () => {
     try { sessionStorage.setItem(PRINT_PAYLOAD_KEY, JSON.stringify({ body, orientation: "landscape" })); } catch {}
     window.open("/reports-print", "_blank");
@@ -536,6 +544,7 @@ function ReportsCenter() {
               {exporting === "today" ? <Loader2 size={15} className="animate-spin" /> : <CalendarIcon size={15} />} Today's Report
             </button>
             <button onClick={openPrint} disabled={!result} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"><Printer size={15} /> Print</button>
+            <button onClick={sharePrint} disabled={!result} data-testid="report-print-share" title="Share this report as a PDF (WhatsApp, Email, …)" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-40"><Share2 size={15} /> Share PDF</button>
             {/* Share Report — mints a secure link that reopens THIS exact report
                 (module + filters + view/group/sort) for another authorized user. */}
             <button onClick={() => setShareOpen(true)} disabled={!moduleKey} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-[#164FA3] text-[#164FA3] hover:bg-blue-50 disabled:opacity-40"><Share2 size={15} /> Share Report</button>

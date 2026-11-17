@@ -85,6 +85,7 @@ export function ensureFonts() {
 }
 // Style fragment that switches a <Text> to the Unicode font when it is available.
 const uni = () => (ensureFonts() ? { fontFamily: FONT_FAMILY } : {});
+const hasDeva = (t) => /[\u0900-\u097F]/.test(String(t || ""));
 
 // Make arbitrary user text safe for the PDF: unify line breaks, drop control chars and
 // zero-width noise, and replace pictographs (no glyph in the font) with a visible
@@ -254,11 +255,13 @@ function CommonPdfDoc({ title, subtitle, sections, table, images, records, orien
         React.createElement(
           View,
           { key: `sec${i}` },
-          s.title ? React.createElement(Text, { style: styles.sectionTitle }, s.title) : null,
+          // Hindi in a section title / text needs the bundled Devanagari font (Helvetica has no Devanagari glyphs); text without
+          // Hindi keeps the original Helvetica look.
+          s.title ? React.createElement(Text, { style: [styles.sectionTitle, hasDeva(s.title) ? { ...uni(), fontWeight: 700 } : {}] }, s.title) : null,
           s.columns
             ? React.createElement(Table, { columns: s.columns, rows: s.rows || [], keys: s.keys })
             : s.text
-            ? React.createElement(Text, { style: { fontSize: 9, marginBottom: 6 } }, s.text)
+            ? React.createElement(Text, { style: [{ fontSize: 9, marginBottom: 6 }, hasDeva(s.text) ? uni() : {}] }, s.text)
             : null
         )
       ),
