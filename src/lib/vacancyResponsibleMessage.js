@@ -14,66 +14,32 @@ import { normalizeIndianMobile } from "@/lib/phoneLinks";
 //   • each post appears once (the tree's own post key: level × unit × designation × Wing).
 // Nothing is matched by name, nothing is cached, nothing is written or sent: the result is a wa.me link with the message
 // pre-filled for the user to review, edit and send in WhatsApp.
+//
+// The message text is Hindi (fixed introduction and closing); each post is "<Designation> – <unit>" with the Designation in ENGLISH, exactly
+// as named in the Designation Master (by designation id) — never translated — and the unit name from the location master.
 
 const LEVEL_ORDER = ["state", "lok_sabha", "district", "assembly", "block"];
-const LEVEL_HI = { state: "प्रदेश", lok_sabha: "लोकसभा", district: "जिला", assembly: "विधानसभा", block: "ब्लॉक" };
+const LEVEL_EN = { state: "State", lok_sabha: "Lok Sabha", district: "District", assembly: "Assembly", block: "Block" };
+// A level already named in the designation (English or the Roman-Hindi forms used in the master).
+const HAS_LEVEL = /\b(state|pradesh|lok ?sabha|loksabha|district|zila|jila|assembly|vidhan ?sabha|vidhansabha|vidhansbha|block|mandal|ward|booth)\b/i;
+const DEVANAGARI = /[\u0900-\u097F]/;
+// The same level words in Devanagari (\b does not apply to Devanagari, so a plain alternation).
+const HAS_LEVEL_HI = /प्रदेश|लोकसभा|लोक सभा|जिला|ज़िला|विधानसभा|विधान सभा|ब्लॉक|मंडल|वार्ड|बूथ/;
 
-// Level words a designation name may already carry (removed — the post's ACTUAL level from the master is used instead).
-const LEVEL_WORDS = /\b(state|pradesh|lok ?sabha|loksabha|district|zila|jila|assembly|vidhan ?sabha|vidhansabha|vidhansbha|block)\b/gi;
-
-// English / Roman-Hindi designation words → Hindi, longest phrase first. Unknown words are kept as recorded.
-const PHRASES = [
-  ["general secretary organisation", "महासचिव (संगठन)"], ["general secretary organization", "महासचिव (संगठन)"],
-  ["general secretary media", "महासचिव (मीडिया)"],
-  ["karyakari adhyaksh", "कार्यकारी अध्यक्ष"], ["working president", "कार्यकारी अध्यक्ष"],
-  ["vice president", "उपाध्यक्ष"], ["upadhyaksha", "उपाध्यक्ष"], ["upadhyaksh", "उपाध्यक्ष"], ["upadyaksh", "उपाध्यक्ष"],
-  ["general secretary", "महासचिव"], ["joint secretary", "संयुक्त सचिव"], ["office secretary", "कार्यालय सचिव"],
-  ["organisation secretary", "संगठन सचिव"], ["organization secretary", "संगठन सचिव"],
-  ["sanghathan mantri", "संगठन मंत्री"], ["sangathan mantri", "संगठन मंत्री"], ["sanghatan mantri", "संगठन मंत्री"],
-  ["seh prabhari", "सह प्रभारी"], ["sah prabhari", "सह प्रभारी"], ["co prabhari", "सह प्रभारी"],
-  ["media prabhari", "मीडिया प्रभारी"], ["media incharge", "मीडिया प्रभारी"], ["media in charge", "मीडिया प्रभारी"],
-  ["social media", "सोशल मीडिया"], ["chief spokesperson", "मुख्य प्रवक्ता"], ["spokesperson", "प्रवक्ता"],
-  ["vice treasurer", "उप कोषाध्यक्ष"], ["treasurer", "कोषाध्यक्ष"], ["booth worker", "बूथ कार्यकर्ता"],
-  ["adhyaksha", "अध्यक्ष"], ["adhyaksh", "अध्यक्ष"], ["president", "अध्यक्ष"],
-  ["secretary", "सचिव"], ["prabhari", "प्रभारी"], ["incharge", "प्रभारी"], ["in charge", "प्रभारी"],
-  ["coordinator", "समन्वयक"], ["member", "सदस्य"], ["observer", "पर्यवेक्षक"], ["convenor", "संयोजक"], ["convener", "संयोजक"],
-  ["organisation", "संगठन"], ["organization", "संगठन"], ["media", "मीडिया"], ["mantri", "मंत्री"], ["worker", "कार्यकर्ता"],
-];
-const WING_HI = {
-  "sc wing": "एससी विंग", "st wing": "एसटी विंग", "youth wing": "युवा विंग", "mahila wing": "महिला विंग", "rti wing": "आरटीआई विंग",
-  "legal wing": "विधि विंग", "transport wing": "ट्रांसपोर्ट विंग", "rwa wing": "आरडब्ल्यूए विंग", "obc wing": "ओबीसी विंग",
-  "social media wing": "सोशल मीडिया विंग", "ex-employee wing": "पूर्व कर्मचारी विंग", "asap wing": "ASAP विंग",
-  "minority wing": "अल्पसंख्यक विंग", "labour wing": "श्रमिक विंग", "trade wing": "व्यापार विंग", "kisan wing": "किसान विंग",
-};
-const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-// "District President" (level district) → "जिला अध्यक्ष"; "State General Secretary" (state) → "प्रदेश महासचिव";
-// "Mahila Wing President" → "जिला अध्यक्ष (महिला विंग)". A name already in Devanagari is kept, with the level added if absent.
-export function hindiDesignation(name, level, wing, mainWings = new Set()) {
-  const raw = String(name || "").trim();
-  const levelHi = LEVEL_HI[level] || "";
-  const wingKey = String(wing || "").trim().toLowerCase();
-  const wingHi = wingKey && !mainWings.has(wingKey) ? (WING_HI[wingKey] || String(wing).trim()) : "";
-  let role;
-  if (/[ऀ-ॿ]/.test(raw)) {
-    role = raw;
-    if (levelHi && !raw.includes(levelHi) && !/प्रदेश|लोकसभा|लोक सभा|जिला|ज़िला|विधानसभा|विधान सभा|ब्लॉक/.test(raw)) role = `${levelHi} ${role}`;
-    return wingHi && !role.includes(wingHi.replace(/ विंग$/, "")) ? `${role} (${wingHi})` : role;
+// The designation exactly as it is named in the Designation Master (by its id) — the approved English name; never translated.
+// The organisational level and the Wing are added in brackets ONLY when the master name does not already say them, e.g.
+// "Coordinator (District)", "District Secretary (Mahila Wing)". A master name that is not in English is returned as recorded and
+// reported (english: false) — it is never machine-translated.
+export function englishDesignation(masterName, level, wing, mainWings = new Set()) {
+  const name = String(masterName || "").trim();
+  const extras = [];
+  if (LEVEL_EN[level] && !HAS_LEVEL.test(name) && !HAS_LEVEL_HI.test(name)) extras.push(LEVEL_EN[level]);
+  const w = String(wing || "").trim();
+  if (w && !mainWings.has(w.toLowerCase())) {
+    const base = w.replace(/\s*wing$/i, "").trim().toLowerCase();
+    if (!name.toLowerCase().includes(base)) extras.push(/wing$/i.test(w) ? w : `${w} Wing`);
   }
-  let rest = raw.toLowerCase().replace(/[\/,()]+/g, " ");
-  // The Wing is said once, in brackets — removed from the role words if the name repeats it.
-  if (wingKey) rest = rest.replace(new RegExp(`\\b${esc(wingKey)}\\b`, "g"), " ").replace(new RegExp(`\\b${esc(wingKey.replace(/\s*wing$/, ""))}\\b`, "g"), " ");
-  rest = rest.replace(LEVEL_WORDS, " ").replace(/[-–]+/g, " ").replace(/\s+/g, " ").trim();
-  let out = ` ${rest} `;
-  for (const [en, hi] of PHRASES) out = out.replace(new RegExp(`(?<=\\s)${esc(en)}(?=\\s)`, "g"), hi);
-  out = out.replace(/\s+/g, " ").trim();
-  // Unknown words keep their recorded spelling (capitalised as in the master).
-  if (/[a-z]/.test(out)) {
-    const words = raw.split(/\s+/);
-    out = out.split(" ").map((w) => (/[a-z]/.test(w) ? (words.find((x) => x.toLowerCase() === w) || w) : w)).join(" ");
-  }
-  role = [levelHi, out].filter(Boolean).join(" ");
-  return wingHi ? `${role} (${wingHi})` : role;
+  return { text: extras.length ? `${name} (${extras.join(", ")})` : name, english: !DEVANAGARI.test(name) };
 }
 
 export const MESSAGE_HEAD = "नमस्कार सर 🙏🏻\nनिम्नलिखित पद वर्तमान में रिक्त हैं:";
@@ -109,15 +75,21 @@ export async function buildResponsibleMessage(session, contactId) {
 
   // Top level first (State → Lok Sabha → District → Assembly → Block), then the tree order.
   found.sort((a, b) => (LEVEL_ORDER.indexOf(a.p.level) - LEVEL_ORDER.indexOf(b.p.level)) || (a.order - b.order));
+  // Each designation's approved name, read from the Designation Master by id (the tree's own label as a fallback only).
+  const ids = [...new Set(found.map(({ p }) => Number(p.designation_id)).filter((n) => Number.isInteger(n) && n > 0))];
+  const master = new Map(ids.length ? (await query(`SELECT id, name FROM designations WHERE id IN (${ids.map(() => "?").join(",")})`, ids)).map((d) => [Number(d.id), d.name]) : []);
+  const notEnglish = new Set();
   const lines = [];
   const used = new Set();
   const posts = found.map(({ p, parents }) => {
-    const title = hindiDesignation(p.designation_name, p.level, p.wing, mainWings);
+    const des = englishDesignation(master.get(Number(p.designation_id)) || p.designation_name, p.level, p.wing, mainWings);
+    if (!des.english) notEnglish.add(des.text);
+    const title = des.text;
     let line = p.level === "state" ? title : `${title} – ${p.location_name}`;
     // Two different posts that would read the same (equal unit names in different branches) get their parent unit.
     if (used.has(line)) {
       const up = [...parents].reverse().find((n) => n.level !== "state" && n.level !== p.level);
-      if (up) line = `${line} (${LEVEL_HI[up.level] || ""} ${up.name})`.replace(/\(\s+/, "(");
+      if (up) line = `${line} (${LEVEL_EN[up.level] || ""} ${up.name})`.replace(/\(\s+/, "(");
     }
     used.add(line);
     lines.push(line);
@@ -134,6 +106,8 @@ export async function buildResponsibleMessage(session, contactId) {
     name: person.person_name,
     count: posts.length,
     posts,
+    // Designations whose Designation Master name is not in English (shown as recorded, never machine-translated).
+    names_not_english: [...notEnglish],
     message,
     mobile_valid: !!mobile,
     // International format (91 + 10 digits); the whole Hindi text, line breaks and emoji UTF-8 percent-encoded.

@@ -150,6 +150,10 @@ export async function buildVacancyTree(session, { wing } = {}) {
 
   const photo = await contactPhotoMap(posts.flatMap((p) => (p.holders || []).map((h) => Number(h.contact_id))));
   const proposals = await loadProposals(posts.filter((p) => p.status !== "filled").map((p) => Number(p.designation_id)));
+  // The approved (English) name of each vacant post's designation, read from the Designation Master by id — used in the proposed
+  // person's WhatsApp message, so it never carries a translated / snapshot name.
+  const vacIds = [...new Set(posts.filter((p) => p.status !== "filled").map((p) => Number(p.designation_id)).filter((n) => Number.isInteger(n) && n > 0))];
+  const masterName = new Map(vacIds.length ? (await query(`SELECT id, name FROM designations WHERE id IN (${vacIds.map(() => "?").join(",")})`, vacIds)).map((d) => [Number(d.id), d.name]) : []);
 
   const nodes = new Map();
   const root = { id: "state", level: "state", level_label: levelLabel.state || "State", location_id: 0, name: "State Level", posts: [], children: [], parent: null };
@@ -209,7 +213,7 @@ export async function buildVacancyTree(session, { wing } = {}) {
       needs_review: r.status === "review",
       review_people: (r.review_people || []).map((p) => p.person_name || p.name).filter(Boolean),
       holders: filled ? holders : [],
-      proposed: filled ? [] : proposalsForPost(proposals, { ...r, location_name: r.level === "state" ? "State" : r.location_name }),
+      proposed: filled ? [] : proposalsForPost(proposals, { ...r, designation_name: masterName.get(Number(r.designation_id)) || r.designation_name, location_name: r.level === "state" ? "State" : r.location_name }),
       // Who is responsible for filling this vacant post (the existing vacancy-responsibility rule) — shown as
       // "Assigned By: District President / Prabhari", with the people who currently hold those roles.
       assigned_by: filled ? null : assignedBy(r.responsible_slots, r.designation_name),

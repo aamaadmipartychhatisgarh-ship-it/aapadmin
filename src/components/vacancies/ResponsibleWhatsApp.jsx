@@ -53,6 +53,8 @@ export default function ResponsibleWhatsApp({ contactId, name, className = "" })
       if (!d.wa_url) { closeWin(); notice(`${d.name || name} has no valid mobile number on record — WhatsApp cannot be opened.`); return; }
       if (win && !win.closed) { try { win.opener = null; } catch { /* ignore */ } win.location.href = d.wa_url; }
       else window.open(d.wa_url, "_blank", "noopener,noreferrer");
+      // A Designation whose master name is not in English is sent as recorded (never machine-translated) — say so.
+      if (d.names_not_english?.length) notice(`No English name in the Designation Master for: ${d.names_not_english.join(", ")} — shown as recorded. Please add the English name there.`, "info");
     } catch {
       closeWin();
       notice("Could not prepare the WhatsApp message — network error.");
