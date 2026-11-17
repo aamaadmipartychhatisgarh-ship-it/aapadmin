@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 
-// A responsible person in the Tree Map's "Assigned By" box: their name (as before) and a WhatsApp icon. Clicking either
+// A RESPONSIBLE PERSON in their own box on the Tree Map (the post they hold): their name and a WhatsApp icon. Clicking either
 // fetches — live, at that moment — every post that is vacant and assigned to this person (by Contact id, across all Wings
 // and levels) and opens WhatsApp (app on phones, WhatsApp Web on desktop) to their registered mobile with ONE consolidated
 // Hindi message pre-filled. The user reviews / edits and sends it in WhatsApp; nothing is sent or recorded here.
@@ -34,7 +34,7 @@ export function WhatsAppIcon({ size = 14, className = "" }) {
   );
 }
 
-export default function ResponsibleWhatsApp({ contactId, name, className = "" }) {
+export default function ResponsibleWhatsApp({ contactId, name, className = "", nameClassName = "text-[#128C4B] hover:underline font-semibold" }) {
   const [busy, setBusy] = useState(false);
   if (!contactId) return <span className={className}>{name}</span>;
   const open = async (e) => {
@@ -66,7 +66,7 @@ export default function ResponsibleWhatsApp({ contactId, name, className = "" })
   return (
     <span className={`inline-flex items-center gap-1 min-w-0 max-w-full ${className}`}>
       <button type="button" onClick={open} data-testid="reminder-name" data-contact={contactId} title={title}
-        className="text-[#128C4B] hover:underline font-semibold min-w-0 truncate text-left">{name}</button>
+        className={`${nameClassName} min-w-0 truncate text-left`}>{name}</button>
       <button type="button" onClick={open} disabled={busy} data-testid="responsible-whatsapp" data-contact={contactId} title={title} aria-label={title}
         className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#25D366] text-white hover:bg-[#1ebe5b] disabled:opacity-60">
         {busy ? <Loader2 size={11} className="animate-spin" /> : <WhatsAppIcon size={12} />}

@@ -220,6 +220,15 @@ export async function buildVacancyTree(session, { wing } = {}) {
     });
   }
 
+  // Responsible people: everyone named (by Contact id) in the Assigned By of at least one VACANT post of this tree. The post they
+  // HOLD carries the WhatsApp option (one consolidated message for all their vacancies) — never the vacant posts themselves.
+  const responsibleIds = new Set();
+  for (const n of nodes.values()) for (const p of n.posts) {
+    if (p.status !== "vacant" || !p.assigned_by) continue;
+    for (const sl of p.assigned_by.slots || []) for (const h of sl.people || []) if (h.contact_id) responsibleIds.add(Number(h.contact_id));
+  }
+  for (const n of nodes.values()) for (const p of n.posts) for (const h of p.holders) h.has_vacancies = responsibleIds.has(Number(h.contact_id));
+
   // Counts: own posts + every descendant's, each post counted exactly once (it lives on one node only).
   const finish = (n) => {
     n.children.sort((a, b) => ((orderOf.get(a.id) ?? 1e9) - (orderOf.get(b.id) ?? 1e9)) || String(a.name).localeCompare(String(b.name)));

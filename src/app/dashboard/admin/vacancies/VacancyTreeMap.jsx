@@ -54,7 +54,13 @@ function FilledCard({ p, n }) {
             <div key={h.contact_id} className="flex items-center gap-2.5 min-w-0" data-testid="post-holder">
               <Avatar name={h.name} src={h.photo_url} size={40} className="shrink-0 bg-white border border-gray-200" textClassName="text-[#164FA3] text-xs" />
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-gray-900 truncate" title={h.name} data-testid="holder-name">{h.name}</div>
+                {/* The Responsible Person's box: a holder who is responsible for filling vacant posts gets the WhatsApp option here
+                    (name + icon → one consolidated message for ALL their vacant posts). Everyone else's name stays plain. */}
+                {h.has_vacancies ? (
+                  <div className="text-sm min-w-0" data-testid="holder-name"><ResponsibleWhatsApp contactId={h.contact_id} name={h.name} nameClassName="text-gray-900 font-semibold hover:underline" /></div>
+                ) : (
+                  <div className="text-sm font-semibold text-gray-900 truncate" title={h.name} data-testid="holder-name">{h.name}</div>
+                )}
                 <div className="text-xs text-gray-600 truncate" title={p.designation_name}>{p.designation_name}</div>
               </div>
             </div>
@@ -109,7 +115,7 @@ function VacantCard({ p, n }) {
             <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 mb-1"><Users size={11} /> Assigned By</div>
             {/* One line per responsible role: [photo] Role · the person who holds it in this post's area. */}
             {(ab.slots || []).flatMap((sl, si) => (sl.people.length ? sl.people.map((h) => ({ key: `${si}:${h.contact_id || h.name}`, sl, h })) : [{ key: `${si}:none`, sl, h: null }])).map(({ key, sl, h }) => (
-              <div key={key} className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 py-0.5" data-testid="assigned-by-line" data-role={sl.label} data-contact={h?.contact_id || ""}>
+              <div key={key} className="flex items-center gap-1.5 min-w-0 py-0.5" data-testid="assigned-by-line" data-role={sl.label} data-contact={h?.contact_id || ""}>
                 {h ? (
                   <Avatar name={h.name} src={h.photo_url} size={22} className="shrink-0 bg-white border border-amber-300" textClassName="text-amber-800 text-[9px]" />
                 ) : (
@@ -117,9 +123,7 @@ function VacantCard({ p, n }) {
                 )}
                 <span className="text-[11px] font-semibold text-amber-900 whitespace-nowrap" data-testid="assigned-by-role">{sl.label}</span>
                 {h ? (
-                  <span className="text-[11px] min-w-0 inline-flex items-center gap-0.5"><span className="text-gray-400">·</span>
-                    <ResponsibleWhatsApp contactId={h.contact_id} name={h.name} className="text-[11px]" />
-                  </span>
+                  <span className="text-[11px] min-w-0 truncate text-gray-800 font-semibold" title={h.name} data-testid="assigned-by-name"><span className="text-gray-400 font-normal">· </span>{h.name}</span>
                 ) : (
                   <span className="text-[11px] truncate text-gray-400 italic" title={`Not assigned${sl.area ? ` in ${sl.area}` : ""}`}>· Not assigned</span>
                 )}
