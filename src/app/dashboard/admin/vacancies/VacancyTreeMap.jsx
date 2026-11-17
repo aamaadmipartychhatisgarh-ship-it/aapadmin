@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, ChevronDown, Loader2, RefreshCw, MessageCircle, UserX, AlertTriangle, ArrowRight, Users } from "lucide-react";
 import Avatar from "@/components/Avatar";
-import ReminderName from "@/components/vacancies/ReminderName";
+import ResponsibleWhatsApp from "@/components/vacancies/ResponsibleWhatsApp";
 import { wingShortLabel } from "@/lib/wingLabel";
 
 // Designation Vacancies — TREE MAP. State -> Lok Sabha -> District -> Assembly (every level the server sends), built
@@ -109,7 +109,7 @@ function VacantCard({ p, n }) {
             <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800 mb-1"><Users size={11} /> Assigned By</div>
             {/* One line per responsible role: [photo] Role · the person who holds it in this post's area. */}
             {(ab.slots || []).flatMap((sl, si) => (sl.people.length ? sl.people.map((h) => ({ key: `${si}:${h.contact_id || h.name}`, sl, h })) : [{ key: `${si}:none`, sl, h: null }])).map(({ key, sl, h }) => (
-              <div key={key} className="flex items-center gap-1.5 min-w-0 py-0.5" data-testid="assigned-by-line" data-role={sl.label} data-contact={h?.contact_id || ""}>
+              <div key={key} className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 py-0.5" data-testid="assigned-by-line" data-role={sl.label} data-contact={h?.contact_id || ""}>
                 {h ? (
                   <Avatar name={h.name} src={h.photo_url} size={22} className="shrink-0 bg-white border border-amber-300" textClassName="text-amber-800 text-[9px]" />
                 ) : (
@@ -118,7 +118,7 @@ function VacantCard({ p, n }) {
                 <span className="text-[11px] font-semibold text-amber-900 whitespace-nowrap" data-testid="assigned-by-role">{sl.label}</span>
                 {h ? (
                   <span className="text-[11px] min-w-0 inline-flex items-center gap-0.5"><span className="text-gray-400">·</span>
-                    <ReminderName contactId={h.contact_id} name={h.name} lokSabhaId={p.lok_sabha_id} className="text-[11px]" />
+                    <ResponsibleWhatsApp contactId={h.contact_id} name={h.name} className="text-[11px]" />
                   </span>
                 ) : (
                   <span className="text-[11px] truncate text-gray-400 italic" title={`Not assigned${sl.area ? ` in ${sl.area}` : ""}`}>· Not assigned</span>
