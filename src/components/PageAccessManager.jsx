@@ -380,7 +380,7 @@ export default function PageAccessManager() {
       </div>
 
       {/* View switcher */}
-      <div className="flex items-center gap-1 border-b border-gray-200">
+      <div className="flex items-center gap-1 border-b border-gray-200 overflow-x-auto max-w-full">
         {[
           { key: "all", label: "All Grants", icon: FileText },
           { key: "by_user", label: "By User", icon: UserIcon },
@@ -389,7 +389,7 @@ export default function PageAccessManager() {
           <button
             key={t.key}
             onClick={() => setView(t.key)}
-            className={`px-3.5 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors inline-flex items-center gap-1.5 ${view === t.key ? "border-[#164FA3] text-[#164FA3]" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+            className={`px-3.5 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${view === t.key ? "border-[#164FA3] text-[#164FA3]" : "border-transparent text-gray-500 hover:text-gray-700"}`}
           >
             <t.icon size={15} /> {t.label}
           </button>

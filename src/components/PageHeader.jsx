@@ -65,7 +65,8 @@ export default function PageHeader({ icon: Icon, title, description, breadcrumb,
             <span className="hidden md:inline text-sm text-gray-400 font-medium truncate min-w-0">— {description}</span>
           )}
         </div>
-        {actions && <div className="shrink-0">{actions}</div>}
+        {/* min-w-0 / max-w-full (not shrink-0): on a phone the action buttons wrap within the screen instead of widening the page. */}
+        {actions && <div className="min-w-0 max-w-full">{actions}</div>}
       </div>
       {children}
     </div>

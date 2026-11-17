@@ -122,12 +122,12 @@ export default function AdminDashboard() {
     <div className="space-y-4 animate-in fade-in duration-500">
       {/* Compact header: title + tabs + report quick-jump, one row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 border-b border-gray-200 -mb-px">
+        <div className="flex items-center gap-1 border-b border-gray-200 -mb-px overflow-x-auto max-w-full">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-3.5 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+              className={`px-3.5 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0 ${
                 tab === t.key ? "border-[#164FA3] text-[#164FA3]" : "border-transparent text-gray-500 hover:text-gray-700"
               }`}
             >
