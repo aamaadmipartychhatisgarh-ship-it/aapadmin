@@ -31,3 +31,34 @@ export async function influencerAssemblyCounts() {
   }
   return { byAssembly, total, mapped, no_assembly, invalid_assembly, unmapped: no_assembly + invalid_assembly };
 }
+
+// The INFLUENCERS behind the "Influencer by Assembly" counts, record by record — for the State Overview PDF export. Same rule as
+// influencerAssemblyCounts (one row per influencer id; an Assembly only when assembly_id names a real assembly), so per Assembly the
+// number of rows equals that Assembly's bar and with no filter the list equals the overall influencer total. Filters:
+//   assemblyId — an assembly id, "none" (no / invalid assembly), or null (all);   search — name, mobile, or Assembly name.
+export async function influencerPeopleByAssembly({ assemblyId = null, search = "" } = {}) {
+  await ensureInfluencerSchema();
+  const where = [];
+  const params = [];
+  if (assemblyId === "none") where.push("a.id IS NULL");
+  else if (assemblyId) { where.push("a.id = ?"); params.push(Number(assemblyId)); }
+  const q = String(search || "").trim();
+  if (q) {
+    const like = `%${q}%`;
+    // Mobile matching only for a number search (digits, spaces, +, -): "Worker 012" must not match mobiles containing 012.
+    const digits = /^[\d\s+\-()]+$/.test(q) ? q.replace(/\D/g, "") : "";
+    where.push(`(i.name LIKE ? OR a.name LIKE ?${digits.length >= 3 ? " OR REGEXP_REPLACE(IFNULL(i.phone,''), '[^0-9]', '') LIKE ?" : ""})`);
+    params.push(like, like);
+    if (digits.length >= 3) params.push(`%${digits}%`);
+  }
+  return query(
+    `SELECT i.id, i.name, i.phone AS mobile, i.influence_type, i.influence_position, i.potential_rating,
+            a.id AS assembly_id, a.name AS assembly_name, COALESCE(d.name, i.district_name) AS district_name
+       FROM influencers i
+       LEFT JOIN locations a ON a.id = i.assembly_id AND a.type = 'assembly'
+       LEFT JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY (a.name IS NULL), a.name, i.name, i.id`,
+    params
+  );
+}

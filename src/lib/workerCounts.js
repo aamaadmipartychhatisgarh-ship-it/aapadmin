@@ -188,3 +188,57 @@ export async function workersByDistrict() {
   }
   return counts;
 }
+
+// The WORKERS behind the "Worker by Assembly" counts, person by person — for the State Overview PDF export. Built from exactly the same
+// rules as contactsByAssembly / workerAssemblyReconciliation (active-record rule, one row per person, the same effective Assembly), so for
+// any Assembly the number of rows here equals that Assembly's bar, and with no filter the list totals the overall unique worker count
+// (mapped + not mapped). Filters:
+//   assemblyId — an assembly id (that Assembly only), "none" (only workers not mapped to an assembly), or null (everyone);
+//   search     — person name, mobile number (any format) or Assembly name.
+// Returns [{ id, name, mobile, assembly_id, assembly_name, district_name, designations }], ordered by Assembly then name.
+export async function workerPeopleByAssembly({ assemblyId = null, search = "" } = {}) {
+  const active = await activeContactClause("ct");
+  const uq = await uniquePersonJoin("ct");
+  const where = [];
+  const params = [];
+  if (assemblyId === "none") where.push(`(${EFF_ASSEMBLY}) IS NULL`);
+  else if (assemblyId) { where.push(`(${EFF_ASSEMBLY}) = ?`); params.push(Number(assemblyId)); }
+  const q = String(search || "").trim();
+  if (q) {
+    const like = `%${q}%`;
+    // Mobile matching only for a number search (digits, spaces, +, -): "Worker 012" must not match mobiles containing 012.
+    const digits = /^[\d\s+\-()]+$/.test(q) ? q.replace(/\D/g, "") : "";
+    where.push(`(ct.person_name LIKE ? OR asm.name LIKE ?${digits.length >= 3 ? ` OR ${PHONE_KEY("ct")} LIKE ?` : ""})`);
+    params.push(like, like);
+    if (digits.length >= 3) params.push(`%${digits}%`);
+  }
+  const rows = await query(
+    `SELECT DISTINCT ct.id, ct.person_name AS name, ct.phone_number AS mobile,
+            asm.id AS assembly_id, asm.name AS assembly_name,
+            COALESCE(ad2.name, cdist.name) AS district_name
+       FROM contacts ct ${uq} ${ASSEMBLY_JOINS}
+       LEFT JOIN locations asm ON asm.id = (${EFF_ASSEMBLY})
+       LEFT JOIN locations ad2 ON ad2.id = asm.parent_id AND ad2.type = 'district'
+       LEFT JOIN locations cdist ON cdist.id = ct.district_id AND cdist.type = 'district'
+      WHERE 1 = 1${active}${where.length ? ` AND ${where.join(" AND ")}` : ""}
+      ORDER BY (asm.name IS NULL), asm.name, ct.person_name, ct.id`,
+    params
+  );
+  // Each person's designation(s) — the Designation Master names of their assignments (plus a legacy single designation).
+  const des = new Map();
+  for (let i = 0; i < rows.length; i += 1000) {
+    const ids = rows.slice(i, i + 1000).map((r) => r.id);
+    if (!ids.length) break;
+    const ph = ids.map(() => "?").join(",");
+    // eslint-disable-next-line no-await-in-loop
+    const ds = await query(
+      `SELECT x.contact_id, GROUP_CONCAT(DISTINCT x.name ORDER BY x.name SEPARATOR ', ') AS names FROM (
+         SELECT cd.contact_id, d.name FROM contact_designations cd JOIN designations d ON d.id = cd.designation_id WHERE cd.contact_id IN (${ph})
+         UNION SELECT c.id, d.name FROM contacts c JOIN designations d ON d.id = c.designation_id WHERE c.id IN (${ph})
+       ) x GROUP BY x.contact_id`,
+      [...ids, ...ids]
+    ).catch(() => []);
+    for (const d of ds) des.set(d.contact_id, d.names);
+  }
+  return rows.map((r) => ({ ...r, designations: des.get(r.id) || null }));
+}
