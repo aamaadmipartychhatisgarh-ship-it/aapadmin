@@ -42,12 +42,14 @@ export function englishDesignation(masterName, level, wing, mainWings = new Set(
   return { text: extras.length ? `${name} (${extras.join(", ")})` : name, english: !DEVANAGARI.test(name) };
 }
 
-// The approved message: this exact greeting and introduction, then every assigned vacant post numbered 1..n (no emoji, no closing).
-export const MESSAGE_HEAD = "नमस्कार सर/मैडम,\nआपके जिम्मे निम्नलिखित पदों को भरने की जिम्मेदारी है:";
+// The approved message: this exact greeting and introduction, every assigned vacant post numbered 1..n (designation lines unchanged),
+// then the closing request. No emoji.
+export const MESSAGE_HEAD = "नमस्कार सर/मैडम,\n\nनिम्नलिखित पद वर्तमान में रिक्त हैं:";
+export const MESSAGE_TAIL = "अतः अनुरोध है कि इन रिक्त पदों को जल्द से जल्द भरवाने की कृपा करें। कृपया इस कार्य को प्राथमिकता देते हुए आवश्यक कार्रवाई करने का कष्ट करें।";
 export function consolidatedMessage(lines) {
   // Emoji never appear (a Designation / location name carrying one is cleaned too).
   const clean = (t) => String(t).replace(/\p{Extended_Pictographic}|\u{1F3FB}|\u{1F3FC}|\u{1F3FD}|\u{1F3FE}|\u{1F3FF}|\uFE0F/gu, "").replace(/\s+/g, " ").trim();
-  return `${MESSAGE_HEAD}\n\n${lines.map((l, i) => `${i + 1}. ${clean(l)}`).join("\n")}`;
+  return `${MESSAGE_HEAD}\n\n${lines.map((l, i) => `${i + 1}. ${clean(l)}`).join("\n")}\n\n${MESSAGE_TAIL}`;
 }
 
 // The live vacant posts this person (contact id) is responsible for + the pre-filled WhatsApp link.
