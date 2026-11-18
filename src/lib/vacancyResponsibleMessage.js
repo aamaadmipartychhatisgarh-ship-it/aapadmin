@@ -15,7 +15,7 @@ import { normalizeIndianMobile } from "@/lib/phoneLinks";
 // Nothing is matched by name, nothing is cached, nothing is written or sent: the result is a wa.me link with the message
 // pre-filled for the user to review, edit and send in WhatsApp.
 //
-// The message text is Hindi (fixed introduction and closing); each post is "<Designation> – <unit>" with the Designation in ENGLISH, exactly
+// The message text is Hindi (fixed greeting + introduction); each post is "<Designation> – <unit>" with the Designation in ENGLISH, exactly
 // as named in the Designation Master (by designation id) — never translated — and the unit name from the location master.
 
 const LEVEL_ORDER = ["state", "lok_sabha", "district", "assembly", "block"];
@@ -42,10 +42,12 @@ export function englishDesignation(masterName, level, wing, mainWings = new Set(
   return { text: extras.length ? `${name} (${extras.join(", ")})` : name, english: !DEVANAGARI.test(name) };
 }
 
-export const MESSAGE_HEAD = "नमस्कार सर 🙏🏻\nनिम्नलिखित पद वर्तमान में रिक्त हैं:";
-export const MESSAGE_TAIL = "अतः अनुरोध है कि इन रिक्त पदों को जल्द से जल्द भरवाने की कृपा करें। कृपया इस कार्य को प्राथमिकता देते हुए आवश्यक कार्रवाई करने का कष्ट करें।";
+// The approved message: this exact greeting and introduction, then every assigned vacant post numbered 1..n (no emoji, no closing).
+export const MESSAGE_HEAD = "नमस्कार सर/मैडम,\nआपके जिम्मे निम्नलिखित पदों को भरने की जिम्मेदारी है:";
 export function consolidatedMessage(lines) {
-  return `${MESSAGE_HEAD}\n\n${lines.map((l, i) => `${i + 1}. ${l}`).join("\n")}\n\n${MESSAGE_TAIL}`;
+  // Emoji never appear (a Designation / location name carrying one is cleaned too).
+  const clean = (t) => String(t).replace(/\p{Extended_Pictographic}|\u{1F3FB}|\u{1F3FC}|\u{1F3FD}|\u{1F3FE}|\u{1F3FF}|\uFE0F/gu, "").replace(/\s+/g, " ").trim();
+  return `${MESSAGE_HEAD}\n\n${lines.map((l, i) => `${i + 1}. ${clean(l)}`).join("\n")}`;
 }
 
 // The live vacant posts this person (contact id) is responsible for + the pre-filled WhatsApp link.
