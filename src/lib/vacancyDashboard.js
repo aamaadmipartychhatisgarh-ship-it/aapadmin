@@ -139,6 +139,13 @@ export async function buildVacancyDataset(session, filters = {}) {
         const mainOnes = rowWings.filter((w) => mainNames.has(normW(w)));
         if (!mainOnes.length) { if (isMain) wingPositionsSkipped++; continue; }
         rowWings = mainOnes;
+      } else if (rowWings.length) {
+        // Other Wings have a FIXED structure (lib/otherWingStructure), produced only by the Wing engine below. Any other
+        // designation tagged / mapped to an Other Wing is not an Other-Wing post: a designation of no Main Wing is left out
+        // altogether, and one shared with the Main Wing counts as a Main Wing post only — never in another Wing's list.
+        const mainOnes = rowWings.filter((w) => mainNames.has(normW(w)));
+        if (!mainOnes.length) continue;
+        rowWings = mainOnes;
       }
       const anc = ancestryOf(index, level, r.location_id);
       // A real location whose parent chain is broken in the master (e.g. an
@@ -216,25 +223,27 @@ export async function buildVacancyDataset(session, filters = {}) {
   const groupKeys = new Set();
   for (const r of vacantRows) {
     if (r.wing_responsible !== undefined) {
-      // Wing position — the Wing hierarchy's responsible person (as on the Wings tab).
-      const wr = r.wing_responsible || { status: "not_assigned", people: [] };
+      // Other-Wing post — the responsible people of lib/otherWingStructure (one slot per required post, from the Wing engine).
+      const wr = r.wing_responsible || { status: "not_assigned", slots: [], people: [] };
+      const slots = wr.slots || [];
       const responsibles = (wr.people || []).map((h) => {
         const gk = groupKeyFor(h.contact_id);
         groupKeys.add(gk);
-        return { contact_id: h.contact_id, name: h.name, role: h.designation, area: wr.area, mobile: h.mobile || null, group_key: gk };
+        const sl = slots.find((x) => (x.people || []).some((y) => y.contact_id === h.contact_id));
+        return { contact_id: h.contact_id, name: h.name, role: h.designation, area: sl?.area || null, mobile: h.mobile || null, group_key: gk };
       });
-      const missingText = { not_assigned: "Not assigned", review: "Needs review", not_configured: "Not configured in Wing master", no_parent_area: "Parent area missing" }[wr.status];
+      const missing = slots.filter((x) => x.status !== "assigned").map((x) => x.label);
       displayRows.push({
         ...r,
         responsibles,
         responsible_rule: wr.label || null,
-        responsible_missing: missingText ? [wr.label] : [],
-        responsible_slots: wr.status === "top_level" ? [] : [{
-          label: wr.label, area: wr.area || null, note: missingText || null,
-          people: (wr.people || []).map((h) => ({ contact_id: h.contact_id, name: h.name, designation: h.designation })),
-        }],
-        responsible_note: wr.status === "top_level" ? wr.note : missingText ? `${missingText}: ${wr.label}` : null,
-        responsible_top_level: wr.status === "top_level",
+        responsible_missing: missing,
+        responsible_slots: slots.map((x) => ({
+          label: x.label, area: x.area || null, note: x.status === "assigned" ? null : x.note,
+          people: (x.people || []).map((h) => ({ contact_id: h.contact_id, name: h.name, designation: h.designation })),
+        })),
+        responsible_note: missing.length ? `Not assigned: ${missing.join(", ")}` : null,
+        responsible_top_level: false,
       });
       continue;
     }
