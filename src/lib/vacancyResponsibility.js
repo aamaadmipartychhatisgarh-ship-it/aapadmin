@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { ensureContactDesignationsSchema, effectiveWingSql } from "@/lib/contactDesignations";
+import { ensureContactDesignationsSchema, effectiveWingSql, WING_COLLATE } from "@/lib/contactDesignations";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 import { ensureLocationSortOrder } from "@/lib/locationOrder";
@@ -195,7 +195,10 @@ export async function loadResponsibleHolders() {
     // eslint-disable-next-line no-await-in-loop
     const rows = await query(
       `SELECT ${level === "state" ? "0" : RESP_LOC_EXPR[level]} AS loc_id, c.id AS contact_id, c.person_name, c.phone_number, d.name AS dname,
-              ${effectiveWingSql("cd", "d")} AS eff_wing
+              ${effectiveWingSql("cd", "d")} AS eff_wing,
+              (EXISTS (SELECT 1 FROM designation_wings mdw JOIN wings mw ON mw.is_main = 1 AND ${WING_COLLATE("mw.name")} = ${WING_COLLATE("mdw.wing")}
+                        WHERE mdw.designation_id = cd.designation_id)
+               OR EXISTS (SELECT 1 FROM wings mw2 WHERE mw2.is_main = 1 AND ${WING_COLLATE("mw2.name")} = ${WING_COLLATE("NULLIF(TRIM(d.wing), '')")})) AS main_mapped
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
          JOIN designations d ON d.id = cd.designation_id AND d.level = ?
@@ -208,7 +211,10 @@ export async function loadResponsibleHolders() {
     for (const r of rows) {
       const kind = designationRole(r.dname);
       if (kind === "team" || r.loc_id == null) continue;
-      if (!isMainWing(r.eff_wing)) continue;            // held under another Wing (or Wing not determinable): not a Main Wing leader
+      // A Main Wing leader: the assignment's effective Wing is Main — or it is not determinable (a designation mapped to several
+      // Wings, none saved for this person) and the designation's own mapping includes the Main Wing: the vacancy calculation
+      // already counts such a holder as filling the Main post, so responsibility treats them the same. Held under another Wing → not.
+      if (!(isMainWing(r.eff_wing) || (r.eff_wing == null && Number(r.main_mapped) === 1))) continue;
       const key = `${level}:${kind}`;
       if (!holders.has(key)) holders.set(key, new Map());
       const byLoc = holders.get(key);
