@@ -1290,10 +1290,10 @@ export default function ContactsModule({ session, mode }) {
                         </span>
                       ) : null}
                       </div>
-                      {/* Approved caller submission — stays identifiable after approval. */}
+                      {/* A contact a Caller added (live at once — there is no approval step) stays identifiable. */}
                       {c.approval_status === "approved" && (
                         <span
-                          title={`Added by caller${c.submitted_by_name ? ` ${c.submitted_by_name}` : ""} and approved by a Supervisor`}
+                          title={`Added by caller${c.submitted_by_name ? ` ${c.submitted_by_name}` : ""}`}
                           className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200"
                         >
                           Caller-added
@@ -1952,7 +1952,7 @@ function ChevronRightIcon() { return <svg width="16" height="16" viewBox="0 0 24
 // reflects that — a fixed district for a district/assembly supervisor, or a
 // choice among the zone's districts for a zone-level supervisor.
 // Exported so the Caller workspace reuses this EXACT form (same fields, validation
-// and payload) with addUrl pointed at the pending-approval endpoint. `notice`
+// and payload) with addUrl pointed at the caller Add Contact endpoint (/api/contacts/pending — saved straight into the Contact List). `notice`
 // (optional) renders an info banner at the top of the form.
 export function AddContactModal({ addUrl, territory = null, territoryLabel = "", scopedDistricts = null, notice = "", onClose, onSaved }) {
   const districtLocked = !!(territory && territory.district); // district/assembly anchor → fixed

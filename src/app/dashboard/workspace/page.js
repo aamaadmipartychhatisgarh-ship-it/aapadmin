@@ -126,7 +126,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   // Ordering itself stays server-side; this only chooses which section(s) show.
   const [queueTab, setQueueTab] = useState("all");
   const [showAddContact, setShowAddContact] = useState(false); // caller "Add Contact" modal (added straight to the Contact List)
-  const [submissionsKey, setSubmissionsKey] = useState(0); // bump to refresh "My submitted contacts"
+  const [submissionsKey, setSubmissionsKey] = useState(0); // bump to refresh "Contacts I added"
   const didMountQueue = useRef(false);
   const [active, setActive] = useState(null); // { ...contact, started_at }
   // The id of the contact currently on screen, readable from async callbacks: a response for any OTHER contact (a slow request for the
@@ -1176,7 +1176,7 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
           )}
         </div>
 
-        {/* What happened to the contacts this caller submitted (pending / approved / rejected). */}
+        {/* The contacts this user added — each already in the Contact List, with an Edit link. */}
         <MySubmittedContacts refreshKey={submissionsKey} />
         <FollowUpCalls scheduled={queue.scheduled || []} disabled={!!active || claiming} onOpen={(id) => claim(id)} />
 
@@ -2076,8 +2076,9 @@ function Field({ label, children, className = "" }) {
   );
 }
 
-// The caller's own Add Contact submissions and their review status. Read-only;
-// pending ones are not live yet, rejected ones show the Supervisor's reason.
+// The contacts this user ADDED (Add Contact). There is no approval step: each one is in the Contact List the moment it is saved,
+// and the user can open it here to edit it (the same edit form as "Edit in Workspace"). Records from before approval was removed
+// that a reviewer had rejected, or that repeated a number already in the list, are shown as such (they are kept, not listed).
 function MySubmittedContacts({ refreshKey }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2092,36 +2093,34 @@ function MySubmittedContacts({ refreshKey }) {
     return () => { alive = false; };
   }, [refreshKey]);
   if (!loading && rows.length === 0) return null;
-  const chip = {
-    pending: "bg-amber-50 text-amber-700 border-amber-200",
-    approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    rejected: "bg-red-50 text-red-700 border-red-200",
-  };
-  const label = { pending: "Pending approval", approved: "In Contact List", rejected: "Rejected" };
+  const live = (c) => !c.approval_status || c.approval_status === "approved";
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5" data-testid="my-added-contacts">
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between">
-        <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2"><Plus size={16} /> My submitted contacts</h3>
+        <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2"><Plus size={16} /> Contacts I added</h3>
         <span className="text-xs text-gray-500">{rows.length} · {open ? "hide" : "show"}</span>
       </button>
       {open && (
         <ul className="mt-3 space-y-2 max-h-[240px] overflow-y-auto">
           {loading ? <li className="text-sm text-gray-400">Loading…</li> : rows.map((c) => (
-            <li key={c.id} className="p-3 rounded-lg border border-gray-100">
+            <li key={c.id} className="p-3 rounded-lg border border-gray-100" data-testid="my-added-row">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="font-medium text-gray-900 text-sm truncate">{c.person_name}</div>
                   <div className="text-xs text-gray-500">{c.phone_number}{c.designation_names ? ` · ${c.designation_names}` : ""}</div>
                 </div>
-                <span className={`shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${chip[c.approval_status] || ""}`}>{label[c.approval_status] || c.approval_status}</span>
+                {live(c) ? (
+                  <a href={`/dashboard/workspace?contact_id=${c.id}`} data-testid="my-added-edit"
+                    className="shrink-0 text-[11px] font-semibold px-2 py-1 rounded-md border border-[#164FA3]/30 text-[#164FA3] hover:bg-blue-50">Edit</a>
+                ) : (
+                  <span className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-md border bg-gray-50 text-gray-600 border-gray-200">Not in Contact List</span>
+                )}
               </div>
               {c.approval_status === "rejected" && (
-                <div className="text-[11px] text-red-700 mt-1">
-                  Rejected{c.reviewed_by_name ? ` by ${c.reviewed_by_name}` : ""}{c.rejection_reason ? `: ${c.rejection_reason}` : ""}. You can submit this number again with corrected details.
-                </div>
+                <div className="text-[11px] text-gray-600 mt-1">Turned down before approval was removed{c.rejection_reason ? `: ${c.rejection_reason}` : ""}. Add this number again to bring it back.</div>
               )}
-              {c.approval_status === "approved" && c.reviewed_by_name && (
-                <div className="text-[11px] text-emerald-700 mt-1">Approved by {c.reviewed_by_name} — now in the Contact List.</div>
+              {c.approval_status === "duplicate" && (
+                <div className="text-[11px] text-gray-600 mt-1">This number is already in the Contact List as another record, so this one was not added again.</div>
               )}
             </li>
           ))}

@@ -51,7 +51,7 @@ export async function assignSingleContact(session, contactId, userId) {
       const [ok] = await conn.query(`SELECT c.id FROM contacts c WHERE c.id = ? ${excl}`, [cid]);
       if (!ok.length) {
         await conn.rollback();
-        return { status: 409, message: "This contact cannot be assigned (Wrong Number, awaiting approval, Not Interested or in a 10+ Switch-Off list). Restore it first." };
+        return { status: 409, message: "This contact cannot be assigned (Wrong Number, not in the Contact List, Not Interested or in a 10+ Switch-Off list). Restore it first." };
       }
     }
     await conn.query(

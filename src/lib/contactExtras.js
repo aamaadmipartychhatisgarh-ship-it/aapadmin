@@ -116,11 +116,15 @@ export async function notWrongNumberClause(alias = "c") {
   return ` AND (${alias}.is_wrong_number = 0 OR ${alias}.is_wrong_number IS NULL)`;
 }
 
-// Caller-created contacts await Supervisor approval before they go live. Two
-// optional columns carry this: `approval_status` ('pending' | 'rejected' | NULL =
-// live/approved) and `created_by_user_id` (the caller who added it). A pending OR
-// rejected contact must stay OUT of every live list / queue / assignment, exactly
-// like the Wrong Number flag — kept out of every live list.
+// CONTACT APPROVAL IS REMOVED. A contact a Caller adds goes straight into the Contact List (approval_status = 'approved',
+// /api/contacts/pending POST) — there is no review step, no Pending Approval page and no approve / reject API any more.
+// What remains of the old columns:
+//   • created_by_user_id — who added the contact (a Caller manages the contacts they added: lib/callerContactAccess);
+//   • approval_status    — NULL / 'approved' = live. Old values from before the workflow was removed are resolved ONCE by
+//     releaseLegacyPendingContacts(): an un-reviewed 'pending' contact becomes live, unless its number already belongs to a
+//     live contact (then 'duplicate', so the same person is never listed twice). 'rejected' (a reviewer's explicit decision
+//     on an old submission) stays out of the lists — adding the same number again brings that record back (findRejectedContactByPhone).
+//   Nothing is ever deleted.
 let _approvalCol; // undefined = unknown; cached true once seen. false/undefined re-detect.
 export async function hasApprovalStatusColumn() {
   // Only a TRUE result is cached permanently. A false/undefined result is re-checked
@@ -174,7 +178,58 @@ export async function ensureContactApprovalColumns() {
 // exist before then, so nothing to hide).
 export async function notPendingClause(alias = "c") {
   if (!(await hasApprovalStatusColumn())) return "";
+  await releaseLegacyPendingContacts();
   return ` AND (${alias}.approval_status IS NULL OR ${alias}.approval_status = 'approved')`;
+}
+
+// One-time (per process, idempotent) release of contacts left 'pending' by the removed approval workflow: nobody can approve them
+// any more, so they would stay invisible for ever. Each becomes live ('approved') unless the same number (last 10 digits) is already
+// a live contact — then it is marked 'duplicate' (kept, not deleted, not listed). Only rows still 'pending' are touched.
+let _legacyReleased = null;
+export function releaseLegacyPendingContacts() {
+  if (!_legacyReleased) {
+    _legacyReleased = (async () => {
+      const pend = await query("SELECT id, phone_number FROM contacts WHERE approval_status = 'pending'");
+      if (!pend.length) return { released: 0, duplicates: 0 };
+      const key = (v) => String(v || "").replace(/\D/g, "").slice(-10);
+      const keys = [...new Set(pend.map((r) => key(r.phone_number)).filter((k) => k.length === 10))];
+      const live = new Set();
+      for (let i = 0; i < keys.length; i += 500) {
+        const chunk = keys.slice(i, i + 500);
+        // eslint-disable-next-line no-await-in-loop
+        const rows = await query(
+          `SELECT RIGHT(REGEXP_REPLACE(IFNULL(phone_number,''), '[^0-9]', ''), 10) AS k FROM contacts
+            WHERE (approval_status IS NULL OR approval_status = 'approved')
+              AND RIGHT(REGEXP_REPLACE(IFNULL(phone_number,''), '[^0-9]', ''), 10) IN (${chunk.map(() => "?").join(",")})`, chunk);
+        for (const r of rows) live.add(r.k);
+      }
+      const release = [], dup = [];
+      const seen = new Set();
+      for (const r of pend.sort((a, b) => a.id - b.id)) {
+        const k = key(r.phone_number);
+        if (k.length === 10 && (live.has(k) || seen.has(k))) dup.push(r.id);
+        else { release.push(r.id); if (k.length === 10) seen.add(k); }
+      }
+      for (const [ids, status] of [[release, "approved"], [dup, "duplicate"]]) {
+        for (let i = 0; i < ids.length; i += 500) {
+          const chunk = ids.slice(i, i + 500);
+          // eslint-disable-next-line no-await-in-loop
+          await query(`UPDATE contacts SET approval_status = ? WHERE approval_status = 'pending' AND id IN (${chunk.map(() => "?").join(",")})`, [status, ...chunk]);
+        }
+      }
+      console.log(`[contacts] approval workflow removed: released ${release.length} legacy pending contact(s) into the Contact List, ${dup.length} kept out as duplicate number(s).`);
+      return { released: release.length, duplicates: dup.length };
+    })().catch((e) => { console.error("[contacts] releaseLegacyPendingContacts:", e?.message || e); _legacyReleased = null; return null; });
+  }
+  return _legacyReleased;
+}
+
+// Does contacts.created_by_user_id exist? (Created with the old approval columns; cached once seen.)
+let _createdByCol;
+export async function hasCreatedByColumn() {
+  if (_createdByCol === true) return true;
+  try { if ((await query("SHOW COLUMNS FROM contacts LIKE 'created_by_user_id'")).length > 0) _createdByCol = true; } catch { /* re-detect */ }
+  return _createdByCol === true;
 }
 
 // "Not Interested" — a PERSISTENT contact state (mirrors the Wrong Number flag).

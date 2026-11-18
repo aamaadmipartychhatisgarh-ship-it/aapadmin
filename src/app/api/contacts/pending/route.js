@@ -11,7 +11,7 @@ import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDup
 import { ensureContactDesignationsSchema, syncContactDesignations, parseDesignationIds } from "@/lib/contactDesignations";
 import { syncContactWings } from "@/lib/contactWings";
 import { prepareDesignationRows, applyRowWings } from "@/lib/contactDesignationRows";
-import { ensureContactApprovalColumns, findRejectedContactByPhone } from "@/lib/contactExtras";
+import { ensureContactApprovalColumns, findRejectedContactByPhone, releaseLegacyPendingContacts } from "@/lib/contactExtras";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { logAudit } from "@/lib/audit";
 
@@ -126,8 +126,8 @@ export async function POST(req) {
   }
 }
 
-// GET /api/contacts/pending?mine=1 — the signed-in user's OWN submissions (any status: pending / approved / rejected, with the
-// reviewer's decision), so a caller can follow what happened to what they added. Own rows only. (The Supervisor review queue that this
+// GET /api/contacts/pending?mine=1 — the contacts the signed-in user ADDED (own rows only), for "Contacts I added" in My Workspace.
+// All are live in the Contact List, except old records a reviewer had rejected / that repeat a live number (kept, not listed). (The Supervisor review queue that this
 // endpoint also served was removed together with the Pending Approval page; without ?mine=1 the endpoint no longer exists.)
 export async function GET(req) {
   try {
@@ -139,7 +139,8 @@ export async function GET(req) {
       return NextResponse.json({ contacts: [] }, { headers: NO_STORE });
     }
 
-    const where = " WHERE c.created_by_user_id = ? AND c.approval_status IN ('pending','approved','rejected')";
+    await releaseLegacyPendingContacts();   // nothing is left waiting for an approval that no longer exists
+    const where = " WHERE c.created_by_user_id = ?";
     const params = [session.user.id];
 
     const rows = await query(

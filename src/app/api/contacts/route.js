@@ -10,7 +10,7 @@ import { addedDateClause } from "@/lib/contactDateFilter";
 import { buildContactPersonFilter } from "@/lib/contactFilter";
 import { statusWhere } from "@/lib/contactStatus";
 import { ACTIVE_STATUS_VALUES, normalizeActiveStatus } from "@/lib/activeStatus";
-import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureContactActiveStatusColumns, findRejectedContactByPhone, hasApprovalStatusColumn, ensureContactRemarksColumn } from "@/lib/contactExtras";
+import { notWrongNumberClause, notNotInterestedClause, notPendingClause, ensureContactActiveStatusColumns, findRejectedContactByPhone, hasApprovalStatusColumn, ensureContactRemarksColumn, hasCreatedByColumn } from "@/lib/contactExtras";
 import { fetchContactExportRows, buildContactsWorkbookBuffer, buildContactsCsv, buildContactsPdfBuffer, contactsExportFilename } from "@/lib/contactExport";
 import { contactWriteError } from "@/lib/contactWriteError";
 import { phoneAlreadyRegistered, duplicatePhoneResponse } from "@/lib/contactDuplicate";
@@ -214,9 +214,15 @@ export async function GET(req) {
       ) = c.phone_number`;
     }
     // Geographic scope: the role's scope, or — for a caller — their current Zone.
+    // A caller also always sees the contacts THEY added (created_by_user_id), wherever those were filed — nothing else outside the Zone.
     const scope = callerZone ? zoneContactClause(callerZone.zoneId, "c") : scopeFilterSync(session.user, "c");
-    where += " " + scope.where;
-    params.push(...scope.params);
+    if (callerZone && (await hasCreatedByColumn())) {
+      where += ` AND ((1 = 1 ${scope.where}) OR c.created_by_user_id = ?)`;
+      params.push(...scope.params, session.user.id);
+    } else {
+      where += " " + scope.where;
+      params.push(...scope.params);
+    }
 
     // Export — same filters + role scope as the on-screen list (this exact
     // `where`/`params`), just every matching row instead of one page. Both CSV
