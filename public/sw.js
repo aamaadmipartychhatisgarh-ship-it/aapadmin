@@ -6,7 +6,10 @@
 // v6: a new service-worker file so installed copies update (adds the 403 retry + in-app launcher fallback).
 // v7: page loads also survive the proxy's own gateway errors (nginx / LiteSpeed 502 / 503 / 504 while the app restarts after a
 //     deploy) and dropped connections: retried quietly, then a "restarting" page that retries by itself.
-const CACHE = "aap-v7";
+// v8: the web server's own 403 that PERSISTS (LiteSpeed answers 403 for every path while the Node app is down - e.g. for the
+//     minutes of a redeploy) no longer ends on a dead "The server is busy" card: it gets the same self-healing page, which checks
+//     the app's /api/health every few seconds and reopens the requested page by itself as soon as the app answers.
+const CACHE = "aap-v8";
 
 self.addEventListener("install", () => {
   // Activate immediately on first install / update.
@@ -35,11 +38,7 @@ async function isServer403(res) {
   if (!res || res.status !== 403 || res.type === "opaque" || res.type === "opaqueredirect") return false;
   try { return (await res.clone().text()).includes(SERVER_403_MARK); } catch (e) { return false; }
 }
-const RETRY_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AAP - Please try again</title>
-<style>body{font-family:system-ui,sans-serif;background:#f4f7fb;color:#1f2937;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
-.c{background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:28px;max-width:360px;text-align:center}h1{font-size:20px;margin:0 0 8px;color:#164FA3}p{font-size:14px;color:#4b5563;margin:0 0 18px}
-a,button{display:inline-block;background:#164FA3;color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:600;text-decoration:none;cursor:pointer}</style></head>
-<body><div class="c"><h1>The server is busy</h1><p>This page could not be opened right now. Please try again in a moment.</p><button onclick="location.reload()">Try again</button></div></body></html>`;
+
 // The proxy in front of the app (nginx / LiteSpeed) answers with ITS OWN 502 / 503 / 504 page while the app is restarting (e.g.
 // for a few minutes after every deploy) or overloaded - "504 Gateway Time-out ... nginx". Such a page (or a dropped connection)
 // is retried; if it persists, a page that retries by itself is shown instead of the raw server error. Only the proxy's own
@@ -50,13 +49,19 @@ async function isGatewayError(res) {
   if (res.status === 502 || res.status === 504) return true;               // the app never answers 502 / 504 itself
   try { return /nginx|litespeed|service unavailable|gateway|temporarily unavailable/i.test(await res.clone().text()); } catch (e) { return false; }
 }
+// Shown while the app cannot be reached (gateway error, dropped connection, or the web server's own 403 that persists). It never
+// dead-ends: it checks the app's lightweight liveness probe (/api/health - no session, no database) every 4 s and, the moment the
+// app answers, reopens the page that was asked for. A full reload is also tried every 30 s, and "Try now" does it at once.
 const RESTART_PAGE = (target) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AAP - Reconnecting</title>
 <style>body{font-family:system-ui,sans-serif;background:#f4f7fb;color:#1f2937;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
 .c{background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:28px;max-width:380px;text-align:center}h1{font-size:20px;margin:0 0 8px;color:#164FA3}p{font-size:14px;color:#4b5563;margin:0 0 18px}
-button{display:inline-block;background:#164FA3;color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer}.s{font-size:12px;color:#6b7280;margin-top:12px}</style></head>
-<body><div class="c" data-testid="sw-restart"><h1>The server is restarting</h1><p>The app will open by itself as soon as the server is back. This usually takes a minute or two after an update.</p>
-<button onclick="location.reload()">Try now</button><div class="s">Trying again in <span id="t">10</span> s…</div></div>
-<script>var n=10,e=document.getElementById("t");setInterval(function(){n--;if(n<=0){location.replace(${JSON.stringify(target)});n=10}e.textContent=n},1000);</script></body></html>`;
+button{display:inline-block;background:#164FA3;color:#fff;border:0;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer}.s{font-size:12px;color:#6b7280;margin-top:12px}
+.d{display:inline-block;width:8px;height:8px;border-radius:50%;background:#164FA3;margin-right:6px;animation:b 1s infinite alternate}@keyframes b{from{opacity:.25}to{opacity:1}}</style></head>
+<body><div class="c" data-testid="sw-restart"><h1>Reconnecting to the server…</h1><p>The server is not answering right now (it is usually restarting after an update). This page will open by itself as soon as it is back.</p>
+<button onclick="go()">Try now</button><div class="s"><span class="d"></span><span id="m">Checking…</span></div></div>
+<script>var T=${JSON.stringify(target)},n=0,m=document.getElementById("m");function go(){location.replace(T)}
+function check(){n++;fetch("/api/health?sw="+Date.now(),{cache:"no-store",credentials:"same-origin"}).then(function(r){if(r.ok){m.textContent="Server is back - opening…";go()}else{m.textContent="Still waiting… (check "+n+")"}}).catch(function(){m.textContent="Still waiting… (check "+n+")"})}
+setInterval(check,4000);setTimeout(check,1500);setInterval(go,30000);</script></body></html>`;
 
 async function handleNavigation(req) {
   let res;
@@ -87,7 +92,7 @@ async function handleNavigation(req) {
         if (alt.ok) return alt;
       }
     } catch (e) { /* fall through */ }
-    return new Response(RETRY_PAGE, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+    return new Response(RESTART_PAGE(req.url), { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
   }
   return res;
 }
