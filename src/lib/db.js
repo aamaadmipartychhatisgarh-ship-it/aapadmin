@@ -44,6 +44,17 @@ function baseConfig() {
     // server-local midnight, which serializes UTC-shifted and shows a date one day
     // off on non-UTC servers. DATETIME/TIMESTAMP columns are unaffected.
     dateStrings: ['DATE'],
+    // Registration time (reg_people.registered_at) is stored as the India (IST) wall-clock time it was saved at, in a DATETIME
+    // with no timezone. Read as a plain DATETIME, mysql2 would build a Date in the SERVER's timezone (UTC on the host), which the
+    // browser then shifted again (+5:30) — an entry saved at 2:37 pm showed as 8:07 pm. It is returned as the exact IST moment
+    // instead ("2026-11-18T14:37:00+05:30"), so every screen, export and PDF shows the time it was saved. Nothing else changes.
+    typeCast(field, next) {
+      if (field.type === 'DATETIME' && field.name === 'registered_at') {
+        const s = field.string();
+        return s ? `${s.slice(0, 19).replace(' ', 'T')}+05:30` : null;
+      }
+      return next();
+    },
     waitForConnections: true,
     connectTimeout: 10000,
     enableKeepAlive: true,      // avoid stale-socket errors that trigger retries

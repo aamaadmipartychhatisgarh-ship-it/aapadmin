@@ -39,7 +39,7 @@ function toCsv(headers, rows) {
 function fmtDateTime(v) {
   if (!v) return "";
   const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString("en-IN", { hour12: false });
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString("en-IN", { hour12: false, timeZone: "Asia/Kolkata" });
 }
 
 export async function GET(req) {

@@ -366,13 +366,37 @@ export function istToday() {
   return istFields().date;
 }
 
+// REPORTING DAY — the registration day closes at 6:00 pm IST: an entry made from 6:00 pm onwards counts for the NEXT day.
+// Day D therefore runs from D−1 18:00:00 up to (not including) D 18:00:00, IST. Every registration date figure (Today /
+// Yesterday / Week / Month presets, the Custom Date Range, counts, rankings, exports) uses this one rule; the saved
+// date + time of each entry is shown exactly as it was saved.
+export const REG_DAY_CUTOFF_HOUR = 18;
+// The reporting day of an IST wall-clock 'YYYY-MM-DD HH:MM:SS' (or ISO with +05:30).
+export function regReportingDay(ts) {
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2})/.exec(String(ts || ""));
+  if (!m) return null;
+  if (Number(m[2]) < REG_DAY_CUTOFF_HOUR) return m[1];
+  const d = new Date(`${m[1]}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+// The reporting day it is right now (after 6 pm IST that is already tomorrow's date).
+export function regBusinessToday() {
+  return regReportingDay(regNow());
+}
+// SQL bounds for reporting days from..to (inclusive): registered_at >= (from − 1 day) 18:00 AND registered_at < to 18:00.
+export function regDayBounds(from, to) {
+  const shift = (ymd, days, hh) => { const d = new Date(`${ymd}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + days); return `${d.toISOString().slice(0, 10)} ${hh}:00:00`; };
+  const hh = String(REG_DAY_CUTOFF_HOUR).padStart(2, "0");
+  return { start: from ? shift(from, -1, hh) : null, end: to ? shift(to, 0, hh) : null };
+}
+
 // Date-range presets → { from, to } as inclusive 'YYYY-MM-DD' in IST, compared
 // against the registration timestamp. Mirrors the membership module's preset
 // names so both dashboards mean the same thing by "This Week".
 export function resolveRegPeriod(preset, from, to) {
   // Work in a UTC-anchored Date built from the IST calendar date, so adding and
   // subtracting days can never be shifted by a timezone or a DST rule.
-  const today = istToday();
+  const today = regBusinessToday();   // the reporting day (after 6 pm IST it is tomorrow)
   const base = new Date(`${today}T00:00:00Z`);
   const iso = (d) => d.toISOString().slice(0, 10);
   const shift = (days) => { const x = new Date(base); x.setUTCDate(x.getUTCDate() + days); return x; };

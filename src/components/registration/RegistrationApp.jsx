@@ -169,7 +169,19 @@ const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "S
 const dayWords = (ymd) => `${ymd.slice(8, 10)} ${MONTHS_SHORT[Number(ymd.slice(5, 7)) - 1]} ${ymd.slice(0, 4)}`;
 const rangeWords = (r) => (!r?.from ? "" : r.to && r.to !== r.from ? `${dayWords(r.from)} – ${dayWords(r.to)}` : dayWords(r.from));
 const fmtIstDate = (v) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }); };
-const istTodayClient = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+// Entries saved from 6:00 pm IST count for the NEXT day — "19 Nov" for an entry at 7 pm on 18 Nov; null before 6 pm.
+const reportingDayAfterCutoff = (v) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})/.exec(String(v || ""));
+  if (!m || Number(m[4]) < 18) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1));
+  return d.toLocaleDateString("en-IN", { timeZone: "UTC", day: "2-digit", month: "short" });
+};
+// Today's REPORTING day in IST (after 6 pm it is already tomorrow) — the latest date the Custom Date Range can pick.
+const istTodayClient = () => {
+  const now = new Date();
+  const hh = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }).format(now));
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(hh >= 18 ? new Date(now.getTime() + 6 * 3600 * 1000) : now);
+};
 
 function DateRangeFilter({ title, field, applied, onApply, onClear, note, testId = "date-range" }) {
   const [from, setFrom] = useState(applied?.from || "");
@@ -1316,7 +1328,7 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, p
         </a>
       </div>
 
-      <DateRangeFilter title="Custom Date Range" field="registration submission date" testId="registrations-range"
+      <DateRangeFilter title="Custom Date Range" field="registration date (a day runs 6 pm – 6 pm: entries after 6 pm count for the next day)" testId="registrations-range"
         applied={regRange} onApply={(r) => { setRegRange(r); setPage(1); onError(""); }} onClear={() => { setRegRange(null); setPage(1); onError(""); }}
         note={period ? "This range replaces the period selected above for this list and its exports." : "Only registrations submitted in this period are listed, counted and exported."} />
 
@@ -1339,7 +1351,9 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, p
               ) : rows.map((p) => (
                 <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50/60 align-top">
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">
-                    {new Date(p.registered_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {new Date(p.registered_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {/* Entries from 6 pm IST onwards count for the next day (the reporting day). */}
+                    {reportingDayAfterCutoff(p.registered_at) ? <span className="block text-[11px] text-amber-700" data-testid="counts-for">Counts for {reportingDayAfterCutoff(p.registered_at)}</span> : null}
                   </td>
                   <td className="px-3 py-2.5">
                     <span className={`text-[11px] font-semibold px-2 py-1 rounded-md border ${

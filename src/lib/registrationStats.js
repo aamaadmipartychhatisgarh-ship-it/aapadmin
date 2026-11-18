@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { ensureRegistrationSchema, resolveRegPeriod } from "@/lib/registrationSchema";
+import { ensureRegistrationSchema, resolveRegPeriod, regDayBounds } from "@/lib/registrationSchema";
 import { UNCONTACTED_FIRST_SQL } from "@/lib/registrationContactAction";
 import { ensureConvertSchema, isConvertEligible } from "@/lib/registrationConvert";
 import { phoneKey, last10Sql } from "@/lib/phone";
@@ -37,8 +37,10 @@ function peopleFilters({ campaignId, from, to, ward, workerId, personType, statu
   // at the database — it can't be bypassed from the client.
   if (scope && scope.cond) { cond.push(scope.cond); params.push(...(scope.params || [])); }
   if (campaignId) { cond.push("p.campaign_id = ?"); params.push(campaignId); }
-  if (from) { cond.push("p.registered_at >= ?"); params.push(`${from} 00:00:00`); }
-  if (to) { cond.push("p.registered_at < DATE_ADD(?, INTERVAL 1 DAY)"); params.push(`${to} 00:00:00`); }
+  // Reporting days (6 pm IST cut-off — registrationSchema.regDayBounds): day D = D−1 18:00 … D 17:59:59.
+  { const bd = regDayBounds(from, to);
+    if (bd.start) { cond.push("p.registered_at >= ?"); params.push(bd.start); }
+    if (bd.end) { cond.push("p.registered_at < ?"); params.push(bd.end); } }
   if (ward) { cond.push(`${WARD_EXPR} = ?`); params.push(ward); }
   if (workerId) { cond.push("p.worker_id = ?"); params.push(workerId); }
   if (personType) { cond.push("p.person_type = ?"); params.push(personType); }
@@ -138,8 +140,9 @@ function workerCreatedConds(col, createdFrom, createdTo) {
 function workerRankingParts({ campaignId, from, to, ward, search, workerScope, workerIds, createdFrom, createdTo }) {
   const on = ["p.worker_id = w.id", "p.status = 'active'"];
   const params = [];
-  if (from) { on.push("p.registered_at >= ?"); params.push(`${from} 00:00:00`); }
-  if (to) { on.push("p.registered_at < DATE_ADD(?, INTERVAL 1 DAY)"); params.push(`${to} 00:00:00`); }
+  { const bd = regDayBounds(from, to);   // reporting days, 6 pm IST cut-off
+    if (bd.start) { on.push("p.registered_at >= ?"); params.push(bd.start); }
+    if (bd.end) { on.push("p.registered_at < ?"); params.push(bd.end); } }
   const where = ["1 = 1"];
   if (campaignId) { where.push("w.campaign_id = ?"); params.push(campaignId); }
   if (ward) { where.push("w.ward_number = ?"); params.push(ward); }
