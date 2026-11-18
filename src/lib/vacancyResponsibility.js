@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
-import { ensureContactDesignationsSchema } from "@/lib/contactDesignations";
+import { ensureContactDesignationsSchema, effectiveWingSql } from "@/lib/contactDesignations";
+import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 import { ensureLocationSortOrder } from "@/lib/locationOrder";
 import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
@@ -27,7 +28,14 @@ import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
 //   Block (President)           →  Assembly President                           parent Assembly
 //   Block Team                  →  Assembly Prabhari + Assembly President       parent Assembly
 //   Lok Sabha Upadhyaksh        →  Lok Sabha Prabhari + Lok Sabha President     the post's Lok Sabha  (any level)
-//   District Upadhyaksh         →  Lok Sabha Prabhari + Lok Sabha President     the post's Lok Sabha  (any level)
+//   (District Upadhyaksh is an ordinary District team post: District Prabhari + District President — Main Wing mapping v0.1.606.)
+//   Sangathan Mantri posts are team posts at their level (Lok Sabha / District / Assembly Prabhari + President of the same unit).
+//
+// MAIN WING: the responsible people are the holders of the MAIN Wing's leadership posts — an assignment counts only when its
+// effective Wing (contactDesignations.effectiveWingSql: the Wing saved on the assignment, else the contact's matching Wing tag,
+// else the master's unambiguous mapping) is the Main Wing (wings.is_main). Someone holding "District President" under the Youth
+// Wing is never made responsible for a Main Wing vacancy; an assignment whose Wing is ambiguous is not guessed (the slot shows
+// "Not assigned"). Other Wings' President / Prabhari / General Secretary posts keep the Wing engine's own hierarchy.
 //
 // President and Prabhari lines are never mixed. Every responsible person is read
 // from Contacts (their real name + the designation they actually hold). A required
@@ -84,7 +92,6 @@ const roleLabel = ([lvl, kind]) => `${LEVEL_LABEL[lvl]} ${KIND_LABEL[kind]}`;
 const UPADHYAKSH = "(upadhyaksh|upadhyaksha|upadyaksh|upadyaksha|उपाध्यक्ष)";
 const LOK_SABHA_APPOINTED = [
   new RegExp(`^(lok ?sabha|लोकसभा|लोक सभा) ${UPADHYAKSH}$`),
-  new RegExp(`^(district|zila|jila|जिला|ज़िला) ${UPADHYAKSH}$`),
 ];
 function normName(name) {
   return String(name || "").toLowerCase().replace(/[\/,.\-()]+/g, " ").replace(/\s+/g, " ").trim();
@@ -177,13 +184,18 @@ export async function loadResponsibleHolders() {
   // read holders (this runs before fetchIncompleteDesignation, which also ensures
   // them). Idempotent + cached, so it's a no-op once created.
   await ensureContactDesignationsSchema();
+  await ensureContactWingsSchema();
   await ensureDesignationLevelColumn(query);
   const live = (await notWrongNumberClause("c")) + (await notPendingClause("c"));
+  // The Main Wing's names (Wing master is_main), plus the plain "Main" / "Main Organisation" spellings.
+  const mainNames = new Set((await query("SELECT name FROM wings WHERE is_main = 1").catch(() => [])).map((w) => normName(w.name)));
+  const isMainWing = (w) => w != null && (mainNames.has(normName(w)) || /^main(\s+organi[sz]ations?)?$/i.test(String(w).trim()));
   const holders = new Map();
   for (const level of ["state", "lok_sabha", "district", "assembly"]) {
     // eslint-disable-next-line no-await-in-loop
     const rows = await query(
-      `SELECT ${level === "state" ? "0" : RESP_LOC_EXPR[level]} AS loc_id, c.id AS contact_id, c.person_name, c.phone_number, d.name AS dname
+      `SELECT ${level === "state" ? "0" : RESP_LOC_EXPR[level]} AS loc_id, c.id AS contact_id, c.person_name, c.phone_number, d.name AS dname,
+              ${effectiveWingSql("cd", "d")} AS eff_wing
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
          JOIN designations d ON d.id = cd.designation_id AND d.level = ?
@@ -196,6 +208,7 @@ export async function loadResponsibleHolders() {
     for (const r of rows) {
       const kind = designationRole(r.dname);
       if (kind === "team" || r.loc_id == null) continue;
+      if (!isMainWing(r.eff_wing)) continue;            // held under another Wing (or Wing not determinable): not a Main Wing leader
       const key = `${level}:${kind}`;
       if (!holders.has(key)) holders.set(key, new Map());
       const byLoc = holders.get(key);
