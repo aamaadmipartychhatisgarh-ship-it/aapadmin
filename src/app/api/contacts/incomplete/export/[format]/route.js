@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
-import { fetchIncompleteDesignation, normalizeLevel, LEVEL_LABEL } from "@/lib/incompleteDesignations";
+import { fetchIncompleteDesignation, normalizeLevel, resolvePageWingFilter, LEVEL_LABEL } from "@/lib/incompleteDesignations";
 import * as XLSX from "xlsx";
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import { PdfHeader, PDF_HEADER_HEIGHT } from "@/lib/pdf/commonHeader";
@@ -27,12 +27,15 @@ export async function GET(req, { params }) {
     const { searchParams } = new URL(req.url);
     const level = normalizeLevel(searchParams.get("level"));
     if (!level) return NextResponse.json({ message: "Invalid level." }, { status: 400 });
+    // Wing by Wing-master id; with no Wing given the page's default view is the Main Wing (and Level defaults to State).
+    const wf = await resolvePageWingFilter(searchParams);
+    if (wf.error) return NextResponse.json({ message: wf.error }, { status: 400 });
 
     const data = await fetchIncompleteDesignation(session, {
       level,
       designationId: parseInt(searchParams.get("designation_id"), 10),
       locationId: parseInt(searchParams.get("location_id"), 10),
-      wings: (searchParams.get("wings") || "").split(",").map((w) => w.trim()).filter(Boolean),
+      wings: wf.wings,
       status: searchParams.get("status"),
     });
 

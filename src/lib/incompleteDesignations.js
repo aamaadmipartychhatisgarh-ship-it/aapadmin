@@ -45,6 +45,32 @@ const LOC_TYPE = { zone: "zone", lok_sabha: "lok_sabha", district: "district", a
 const MAX_PEOPLE = 300000; // safety ceiling only; a truncated holder list would make filled posts look vacant, so callers fail closed above it
 const MAX_LOCS = 5000;
 
+// The Wing filter of the Incomplete Designation PAGE (list + export routes), resolved against the Wing master by unique id:
+//   ?wing_ids=3,7  → those Wings (every id must exist in the master — an unknown id is an error, never "all");
+//   ?wing_ids=all  → every Wing (no Wing filter);
+//   ?wings=<names> → legacy name list (old links), kept as before;
+//   nothing        → the DEFAULT view: the Main Wing(s) of the master (wings.is_main = 1).
+// Returns { wings: [names] (empty = all), wing_ids: [ids] | "all", defaulted, error }. fetchIncompleteDesignation itself is NOT
+// defaulted (Designation Vacancies reads it for every Wing), only these page routes are.
+export async function resolvePageWingFilter(searchParams) {
+  const raw = (searchParams.get("wing_ids") || "").trim();
+  if (raw.toLowerCase() === "all") return { wings: [], wing_ids: "all", defaulted: false };
+  if (!raw && searchParams.get("wings")) {
+    return { wings: searchParams.get("wings").split(",").map((w) => w.trim()).filter(Boolean), wing_ids: null, defaulted: false };
+  }
+  const master = await listWings();
+  if (!raw) {
+    const main = master.filter((w) => Number(w.is_main) === 1);
+    return { wings: main.map((w) => w.name), wing_ids: main.map((w) => Number(w.id)), defaulted: true };
+  }
+  const ids = [...new Set(raw.split(",").map((x) => x.trim()).filter(Boolean))];
+  if (ids.some((x) => !/^\d+$/.test(x))) return { error: "Invalid Wing." };
+  const byId = new Map(master.map((w) => [Number(w.id), w]));
+  const chosen = ids.map((x) => byId.get(Number(x)));
+  if (chosen.some((w) => !w)) return { error: "Unknown Wing." };
+  return { wings: chosen.map((w) => w.name), wing_ids: chosen.map((w) => Number(w.id)), defaulted: false };
+}
+
 export function normalizeLevel(v) {
   const level = String(v || "state").toLowerCase();
   return LEVELS.includes(level) ? level : null;
@@ -206,6 +232,8 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   //     marks the post "Needs review" instead of filling it or leaving it falsely vacant.
   // With no Wing filter nothing changes.
   let designations = baseDesignations;
+  // The Designation choices of this view: the level's designations of the selected Wing(s) (all of them without a Wing filter).
+  let wingLevelDesignations = uniqueLevelDesignations;
   let holderWing = () => "match";                     // "match" | "other" | "unset"
   if (wingSet) {
     await ensureContactWingsSchema();
@@ -221,6 +249,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
       return ws.length === 0 ? wantMain : ws.some(wingWanted);
     };
     designations = baseDesignations.filter(designationInWing);
+    wingLevelDesignations = uniqueLevelDesignations.filter(designationInWing);
     holderWing = (r) => (r.eff_wing == null || String(r.eff_wing).trim() === "" ? "unset" : wingWanted(r.eff_wing) ? "match" : "other");
   }
   const personMatchesWing = (r) => holderWing(r) === "match";
@@ -386,7 +415,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
       level_label: LEVEL_LABEL[level],
       view: "persons",
       status,
-      level_designations: uniqueLevelDesignations,
+      level_designations: wingLevelDesignations,
       all_locations: allLocations,
       persons: assignedPersons.slice(start, start + pageSize),
       persons_total: total,
@@ -405,7 +434,7 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
     level_label: LEVEL_LABEL[level],
     view: "matrix",
     status,
-    level_designations: uniqueLevelDesignations,
+    level_designations: wingLevelDesignations,
     all_locations: allLocations,
     rows,
     counts,

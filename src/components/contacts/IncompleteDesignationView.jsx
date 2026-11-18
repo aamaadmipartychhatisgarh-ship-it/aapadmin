@@ -31,8 +31,11 @@ const PERSONS_PAGE_SIZE = 50;
 export default function IncompleteDesignationView() {
   const [level, setLevel] = useState("state");
   const [designationId, setDesignationId] = useState("");
-  const [wingF, setWingF] = useState([]); // selected wing names ([] = All)
-  const [wingOptions, setWingOptions] = useState([]); // [{ id: wingName, name: shortLabel }]
+  // Wing filter by Wing-master id. null = the DEFAULT view (not touched yet): the request carries no Wing and the server applies
+  // the Main Wing — so the very first load is already State + Main, never an unfiltered list. [] = All Wings (wing_ids=all).
+  const [wingF, setWingF] = useState(null);
+  const [wingOptions, setWingOptions] = useState([]); // [{ id: wingId, name: shortLabel }]
+  const [mainWingIds, setMainWingIds] = useState([]); // the master's Main Wing id(s) — what the default shows as selected
   const [locationId, setLocationId] = useState("");
   const [status, setStatus] = useState("all"); // all | filled | blank
   // "matrix" = the location × designation table; "persons" = the flattened Total
@@ -48,7 +51,7 @@ export default function IncompleteDesignationView() {
   const qs = useCallback(() => {
     const p = new URLSearchParams({ level });
     if (designationId) p.set("designation_id", designationId);
-    if (wingF.length) p.set("wings", wingF.join(","));
+    if (wingF !== null) p.set("wing_ids", wingF.length ? wingF.join(",") : "all");
     if (locationId) p.set("location_id", locationId);
     if (status !== "all") p.set("status", status);
     return p.toString();
@@ -75,6 +78,11 @@ export default function IncompleteDesignationView() {
   }, [listQs]);
 
   useEffect(() => { load(); }, [load]);
+  // A chosen Designation that is not part of the newly selected Wing / Level is cleared (it would only show an empty table).
+  useEffect(() => {
+    if (!designationId || loading) return;
+    if (!(data.level_designations || []).some((d) => String(d.id) === String(designationId))) setDesignationId("");
+  }, [data.level_designations, designationId, loading]);
   // Changing the level clears the level-specific designation & location filters.
   // Wing is cross-level (a global grouping), so it is NOT reset here.
   useEffect(() => { setDesignationId(""); setLocationId(""); }, [level]);
@@ -87,7 +95,11 @@ export default function IncompleteDesignationView() {
     let alive = true;
     fetch("/api/wings")
       .then((r) => (r.ok ? r.json() : { wings: [] }))
-      .then((d) => { if (alive) setWingOptions((d.wings || []).map((w) => ({ id: w.name, name: wingShortLabel(w.name) }))); })
+      .then((d) => {
+        if (!alive) return;
+        setWingOptions((d.wings || []).map((w) => ({ id: String(w.id), name: wingShortLabel(w.name) })));
+        setMainWingIds((d.wings || []).filter((w) => Number(w.is_main) === 1).map((w) => String(w.id)));
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -166,7 +178,7 @@ export default function IncompleteDesignationView() {
         </div>
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Wing</label>
-          <MultiSelect options={wingOptions} value={wingF} onChange={setWingF} allLabel="All Wings" className="h-10 min-w-[160px]" />
+          <MultiSelect options={wingOptions} value={wingF ?? mainWingIds} onChange={(v) => setWingF(v)} allLabel="All Wings" className="h-10 min-w-[160px]" />
         </div>
         {!isState && (
           <div>
