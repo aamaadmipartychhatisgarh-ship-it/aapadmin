@@ -342,7 +342,10 @@ export async function handleRegLogin(body) {
     // exactly as before. The password check below is unchanged either way.
     const asMobile = phoneKey(username);
     const byMobile = /^\+?[\d\s-]+$/.test(username) && asMobile && asMobile.length === 10;
-    const [w] = byMobile
+    // Several workers may share a name (the username is not unique — a worker is identified by their mobile), so a name can
+    // match more than one account: the password decides which. If it still fits more than one, the worker is asked to sign in
+    // with their mobile number instead (always unique), so no one is ever signed in as somebody else.
+    const candidates = byMobile
       ? await query(
           `SELECT id AS worker_id, name AS worker_name, worker_code, mobile, contact_id, password_hash, status, password_set_at, created_at
              FROM reg_workers WHERE campaign_id = ? AND ${last10Sql("mobile")} = ? LIMIT 1`,
@@ -350,11 +353,17 @@ export async function handleRegLogin(body) {
         )
       : await query(
           `SELECT id AS worker_id, name AS worker_name, worker_code, mobile, contact_id, password_hash, status, password_set_at, created_at
-             FROM reg_workers WHERE campaign_id = ? AND username = ? LIMIT 1`,
+             FROM reg_workers WHERE campaign_id = ? AND username = ? ORDER BY id LIMIT 50`,
           [entry.campaign_id, username]
         );
-    const ok = !!w && w.status === "active" && !!w.password_hash && (await bcrypt.compare(password, w.password_hash));
-    if (!ok) return json({ message: "Incorrect username or password." }, 401);
+    const matches = [];
+    for (const c of candidates) {
+      // eslint-disable-next-line no-await-in-loop
+      if (c.status === "active" && c.password_hash && (await bcrypt.compare(password, c.password_hash))) matches.push(c);
+    }
+    if (matches.length > 1) return json({ message: "More than one user has this name. Please sign in with your mobile number instead." }, 409);
+    const w = matches[0];
+    if (!w) return json({ message: "Incorrect username or password." }, 401);
     // Enforce the 3-month password validity on the backend (§6): a correct but
     // expired password cannot authenticate. Checked only after the password
     // matches, so it never reveals whether an account exists.

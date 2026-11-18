@@ -11,6 +11,7 @@ import { requireRegistrationAccess, NO_STORE } from "@/lib/registrationGuard";
 import { newLinkToken, workerCodeFor, normalizeMobile } from "@/lib/registrationSchema";
 import { phoneKey, last10Sql } from "@/lib/phone";
 import { buildRegCredentials } from "@/lib/regCredentials";
+import { withNamedLock } from "@/lib/registrationMatch";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -27,8 +28,8 @@ function linkMobile(v) {
 // for an existing Contact (§Contacts↔Registration integration). The Contact is the
 // source of truth: its name + phone are reused, and the worker row keeps the stable
 // contact_id so the roster/registration always resolve back to the same Contact
-// (and its live photo). Idempotent: the same Contact never spawns a second worker /
-// User ID / link.
+// (and its live photo). Duplicates are identified by the MOBILE NUMBER ONLY: a number
+// that already has a worker is refused with a duplicate error; a shared name is fine.
 export async function POST(req) {
   try {
     // A Supervisor generates links through the same logic as an Admin, but through their own capability
@@ -85,55 +86,46 @@ export async function POST(req) {
       );
     }
 
-    // Idempotency (§11): reuse an existing worker for this Contact — matched first by
-    // the stable contact_id, else by the same mobile in this drive. Never duplicate.
-    const [existing] = await query(
-      `SELECT id, name, worker_code, username, status, contact_id
-         FROM reg_workers
-        WHERE campaign_id = ? AND (contact_id = ? OR ${last10Sql("mobile")} = ?)
-        ORDER BY (contact_id = ?) DESC, id ASC LIMIT 1`,
-      [campaignId, contactId, mobile, contactId]
-    );
-    if (existing) {
-      // Backfill the stable link if this row was matched only by mobile.
-      if (!existing.contact_id) {
-        await query(`UPDATE reg_workers SET contact_id = ? WHERE id = ?`, [contactId, existing.id]);
-      }
-      return NextResponse.json(
-        {
-          reused: true,
-          link: "/join",
-          worker: { id: existing.id, name: existing.name, mobile, worker_code: existing.worker_code, username: existing.username, status: existing.status, contact_id: contactId, photo_url: contact.photo_url || null },
-          credentials: null, // the password was issued when the account was first created
-        },
-        { headers: NO_STORE }
-      );
-    }
-
-    // Fresh account — User ID (= tidied Name) + password by the existing rules.
+    // DUPLICATE CHECK — by MOBILE NUMBER ONLY. The number is normalised first (country code, spaces, dashes, a leading 0 all
+    // reduce to the same 10 digits) and compared with every worker of the drive on the same normalised key, so formatting can
+    // never slip a second link through. A name is never a reason to refuse: several workers may share a name. An existing
+    // worker with this mobile (this Contact's own link, or anyone else's) is a duplicate: nothing is created and the existing
+    // worker is named. The check and the insert run under a per-(drive, number) lock shared with the Generate-links form, and
+    // the UNIQUE (drive, mobile) key is the final backstop.
     const cred = buildRegCredentials(contact.name, mobile);
     if (cred.error) return NextResponse.json({ message: cred.error }, { status: 400, headers: NO_STORE });
-    const name = cred.username.slice(0, 160); // tidied Name = username
-
-    // Username (= Name) is unique within the drive: a different person with the same
-    // name is rejected, so two accounts never share one login identity.
-    const [clash] = await query(
-      `SELECT id FROM reg_workers WHERE campaign_id = ? AND username = ? LIMIT 1`,
-      [campaignId, name]
-    );
-    if (clash) {
-      return NextResponse.json({ message: `A different user named "${name}" already has a link. Rename one of them first.` }, { status: 409, headers: NO_STORE });
-    }
+    const name = cred.username.slice(0, 160); // tidied Name = username (shared names allowed)
+    const duplicate = (w) => NextResponse.json({
+      message: `This mobile number (${mobile}) is already registered with ${Number(w.contact_id) === contactId ? "this contact's" : "an existing"} worker "${w.name}"${w.worker_code ? ` (User ID ${w.worker_code})` : ""}. A duplicate Worker Link was not generated.`,
+      duplicate: true,
+      existing: { id: w.id, name: w.name, worker_code: w.worker_code, username: w.username, status: w.status, contact_id: w.contact_id || null, same_contact: Number(w.contact_id) === contactId },
+    }, { status: 409, headers: NO_STORE });
+    const findByMobile = async () => (await query(
+      `SELECT id, name, worker_code, username, status, contact_id FROM reg_workers
+        WHERE campaign_id = ? AND ${last10Sql("mobile")} = ? ORDER BY id ASC LIMIT 1`,
+      [campaignId, mobile]
+    ))[0] || null;
 
     const passwordHash = await bcrypt.hash(cred.password, 10);
-    const res = await query(
-      `INSERT INTO reg_workers (campaign_id, contact_id, name, mobile, token, username, password_hash, password_set_at, created_by)
-       VALUES (?,?,?,?,?,?,?,NOW(),?)`,
-      [campaignId, contactId, name, mobile, newLinkToken(), name, passwordHash, null]
-    );
-    const workerId = res.insertId;
-    await query(`UPDATE reg_workers SET worker_code = ? WHERE id = ?`, [workerCodeFor(name, workerId), workerId]);
-    const [row] = await query(`SELECT id, name, mobile, worker_code, username, status FROM reg_workers WHERE id = ?`, [workerId]);
+    const outcome = await withNamedLock(`regw:${campaignId}:${mobile}`, async () => {
+      const existing = await findByMobile();
+      if (existing) return { duplicate: existing };
+      try {
+        const res = await query(
+          `INSERT INTO reg_workers (campaign_id, contact_id, name, mobile, token, username, password_hash, password_set_at, created_by)
+           VALUES (?,?,?,?,?,?,?,NOW(),?)`,
+          [campaignId, contactId, name, mobile, newLinkToken(), name, passwordHash, null]
+        );
+        await query(`UPDATE reg_workers SET worker_code = ? WHERE id = ?`, [workerCodeFor(name, res.insertId), res.insertId]);
+        return { workerId: res.insertId };
+      } catch (err) {
+        if (err?.code === "ER_DUP_ENTRY") return { duplicate: (await findByMobile()) || { name: "another worker" } };
+        throw err;
+      }
+    });
+    if (outcome.busy) return NextResponse.json({ message: "A link for this number is being generated right now. Please try again in a moment." }, { status: 409, headers: NO_STORE });
+    if (outcome.value.duplicate) return duplicate(outcome.value.duplicate);
+    const [row] = await query(`SELECT id, name, mobile, worker_code, username, status FROM reg_workers WHERE id = ?`, [outcome.value.workerId]);
 
     return NextResponse.json(
       {

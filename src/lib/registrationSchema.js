@@ -88,7 +88,7 @@ export async function ensureRegistrationSchema() {
          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
          UNIQUE KEY uq_reg_worker_token (token),
          UNIQUE KEY uq_reg_worker_campaign_mobile (campaign_id, mobile),
-         UNIQUE KEY uq_reg_worker_campaign_username (campaign_id, username),
+         KEY idx_reg_worker_campaign_username (campaign_id, username),
          KEY idx_reg_worker_campaign (campaign_id),
          KEY idx_reg_worker_status (status),
          KEY idx_reg_worker_mobile (mobile),
@@ -101,7 +101,11 @@ export async function ensureRegistrationSchema() {
     // as a bcrypt hash (see the workers route) — never in plain text.
     await ensureColumn("reg_workers", "username", "VARCHAR(160) NULL");
     await ensureColumn("reg_workers", "password_hash", "VARCHAR(255) NULL");
-    await ensureIndex("reg_workers", "uq_reg_worker_campaign_username", "campaign_id, username", true);
+    // Several workers may share a name: the username (= Name) is NOT unique — a worker is identified by their mobile
+    // (uq_reg_worker_campaign_mobile). An older install's UNIQUE (drive, username) key is swapped for a plain index
+    // (no row is changed). Login resolves a shared name by the password, or the worker signs in with their mobile.
+    await relaxUsernameUnique();
+    await ensureIndex("reg_workers", "idx_reg_worker_campaign_username", "campaign_id, username");
     // Password validity (§6): the login password is valid for 3 months from the
     // date it was set. `password_set_at` records that date; for existing rows it is
     // back-filled to their registration date (created_at), so current passwords
@@ -285,6 +289,15 @@ async function ensureNullable(table, column, definition) {
   }
 }
 // Add an index only if it does not already exist (same placeholder caveat).
+async function relaxUsernameUnique() {
+  try {
+    const rows = await query("SHOW INDEX FROM `reg_workers` WHERE Key_name = 'uq_reg_worker_campaign_username'");
+    if (rows.length && Number(rows[0].Non_unique) === 0) await query("ALTER TABLE `reg_workers` DROP INDEX `uq_reg_worker_campaign_username`");
+  } catch (e) {
+    console.error("[registration] relaxUsernameUnique:", e?.message || e);
+  }
+}
+
 async function ensureIndex(table, indexName, columns, unique = false) {
   try {
     const rows = await query(`SHOW INDEX FROM \`${table}\``);
