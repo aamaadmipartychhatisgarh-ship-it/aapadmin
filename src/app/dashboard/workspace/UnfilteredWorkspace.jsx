@@ -10,6 +10,7 @@ import Avatar from "@/components/Avatar";
 import ProfilePhoto from "@/components/ProfilePhoto";
 import DesignationWingRows from "@/components/contacts/DesignationWingRows";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
+import { usePageAccess } from "@/components/usePageAccess";
 
 // My Workspace → Unfiltered Calls. The same workspace layout and calling
 // workflow as Regular Calls (queue on the left, the blue "Calling" card, previous
@@ -38,6 +39,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const router = useRouter();
+  const pageAccess = usePageAccess();
   const timerRef = useRef(null);
   const submitLock = useRef(false);        // synchronous guard: two quick clicks can't both pass before state updates
   const attemptedRef = useRef(new Set());  // calls already worked this session (kept pending after e.g. Busy): never offered as "next" again
@@ -246,8 +248,9 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       if (!r.ok) { setError(d.message || "Failed to save"); if (r.status === 404 || r.status === 409) { setActive(null); load(); } return; }
       const savedId = active.id;
       const savedDuration = elapsed;
-      // Wrong Number: the call (with its reason) is already saved - go straight to the Wrong Number page, no extra step.
-      if (isWrongNo) {
+      // Wrong Number: the call (with its reason) is already saved. A user who may open the Wrong Number page goes straight
+      // there; anyone else (e.g. a Caller) stays in the workspace and moves on to the next call - never an Access Denied page.
+      if (isWrongNo && pageAccess.has("wrong_numbers")) {
         setActive(null);
         router.push("/dashboard/admin/wrong-numbers?tab=wrong");
         return;
@@ -262,7 +265,7 @@ export default function UnfilteredWorkspace({ statuses, onCounts, onBusy }) {
       const nextCall = (fresh?.calls || []).find((c) => !attemptedRef.current.has(c.id));
       const retryLeft = (fresh?.calls || []).length;
       const added = d.contact_sync?.action === "created" ? " Added to the Contact List." : d.contact_sync?.action === "updated" ? " Contact List record updated." : d.contact_sync?.action === "skipped" ? ` Not added to the Contact List (${d.contact_sync.reason}).` : "";
-      setMessage(`Saved (${savedDuration}s) — ${d.completed ? "call completed" : form.follow_up_date && isBusy ? `follow-up scheduled for ${form.follow_up_date}${form.follow_up_time ? ` at ${form.follow_up_time}` : ""}` : "kept pending for a retry"}.${added}${!fresh ? " Could not refresh the queue." : nextCall ? " Next call ready." : retryLeft ? ` No more new calls - ${retryLeft} kept pending for a retry (use Start Next Call).` : " No more pending Unfiltered Calls."}`);
+      setMessage(`Saved (${savedDuration}s) — ${isWrongNo ? "marked as Wrong Number" : d.completed ? "call completed" : form.follow_up_date && isBusy ? `follow-up scheduled for ${form.follow_up_date}${form.follow_up_time ? ` at ${form.follow_up_time}` : ""}` : "kept pending for a retry"}.${added}${!fresh ? " Could not refresh the queue." : nextCall ? " Next call ready." : retryLeft ? ` No more new calls - ${retryLeft} kept pending for a retry (use Start Next Call).` : " No more pending Unfiltered Calls."}`);
       if (nextCall) start(nextCall, { keepMessage: true });
     } finally {
       submitLock.current = false;

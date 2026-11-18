@@ -20,6 +20,7 @@ import { ACTIVE_STATUS_LABEL, ACTIVE_STATUS_OPTIONS } from "@/lib/activeStatus";
 import { formatDurationHrMinSec } from "@/lib/callDuration";
 import UnfilteredWorkspace from "./UnfilteredWorkspace";
 import { parseContactId } from "@/lib/contactId";
+import { usePageAccess } from "@/components/usePageAccess";
 
 // Friendly labels for who assigned a contact.
 const ROLE_LABELS = { super_admin: "Super Admin", supervisor: "Supervisor", caller: "Caller" };
@@ -89,6 +90,7 @@ export default function WorkspacePage() {
 
 function WorkspaceBody({ previewingCaller, viewAsCaller }) {
   const router = useRouter();
+  const pageAccess = usePageAccess();
   // The signed-in session — needed for role checks in this body (e.g. whether a
   // caller may remove a contact photo). Without this, `isOversight(session)`
   // below referenced an undefined `session` and threw a ReferenceError at render,
@@ -736,11 +738,12 @@ function WorkspaceBody({ previewingCaller, viewAsCaller }) {
       const savedDuration = elapsed;
       const scheduledFor = payload.is_follow_up_required && payload.follow_up_date ? payload.follow_up_date : null;
       const followMsg = scheduledFor ? ` Reminder set for ${scheduledFor}${payload.follow_up_time ? ` at ${payload.follow_up_time}` : ""}.` : "";
-      // Member outcomes that move the contact to the Wrong Number / Not Interested page: go straight there (already saved).
+      // Member outcomes that move the contact to the Wrong Number / Not Interested page: a user who may open that page goes
+      // straight there (already saved); anyone else (e.g. a Caller) stays here and gets the next contact - never Access Denied.
       if (isMember) {
         const goWrong = statusNameNow === "Wrong Number" || (isPicked && (memberSentiment === "wrong_number" || memberSentiment === "member_opponent"));
         const goNI = isPicked && memberSentiment === "not_interested";
-        if (goWrong || goNI) {
+        if ((goWrong || goNI) && pageAccess.has("wrong_numbers") && !previewingCaller) {
           setActive(null); setForm(initialForm()); setElapsed(0);
           router.push(goWrong ? "/dashboard/admin/wrong-numbers?tab=wrong" : "/dashboard/admin/wrong-numbers?tab=not_interested");
           return;
