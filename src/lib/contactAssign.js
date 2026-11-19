@@ -91,11 +91,14 @@ export async function selfAssignContacts(session, zoneId, contactIds, designatio
   const me = Number(session.user.id);
   // Designation-wise pull: when a designation is chosen, only contacts that actually HOLD it (their designation set in
   // contact_designations, else the single legacy designation) are assigned - validated here, not trusted from the page.
-  const desig = designationId ? Number(designationId) : null;
-  if (designationId && (!Number.isInteger(desig) || desig <= 0)) return { status: 400, message: "Invalid designation." };
+  // One id, or a list (a Designation filter entry covers every id of the same post — e.g. its Wing copies).
+  const rawDes = Array.isArray(designationId) ? designationId : designationId ? [designationId] : [];
+  const desIds = [...new Set(rawDes.map(Number))];
+  if (desIds.some((n) => !Number.isInteger(n) || n <= 0)) return { status: 400, message: "Invalid designation." };
+  const desig = desIds.length ? desIds : null;
   if (desig) {
-    const [d] = await query("SELECT id FROM designations WHERE id = ?", [desig]);
-    if (!d) return { status: 400, message: "That designation does not exist." };
+    const found = await query(`SELECT id FROM designations WHERE id IN (${desig.map(() => "?").join(",")})`, desig);
+    if (!found.length) return { status: 400, message: "That designation does not exist." };
   }
   const stampAt = await contactsHaveAssignedAt();
   const stampBy = await contactsHaveAssignedBy();
@@ -113,8 +116,8 @@ export async function selfAssignContacts(session, zoneId, contactIds, designatio
     let holdSet = null;
     if (desig) {
       const [holders] = await conn.query(
-        `SELECT c.id FROM contacts c WHERE c.id IN (${ph}) AND (c.designation_id = ? OR EXISTS (SELECT 1 FROM contact_designations cd WHERE cd.contact_id = c.id AND cd.designation_id = ?))`,
-        [...ids, desig, desig]
+        `SELECT c.id FROM contacts c WHERE c.id IN (${ph}) AND (c.designation_id IN (${desig.map(() => "?").join(",")}) OR EXISTS (SELECT 1 FROM contact_designations cd WHERE cd.contact_id = c.id AND cd.designation_id IN (${desig.map(() => "?").join(",")})))`,
+        [...ids, ...desig, ...desig]
       );
       holdSet = new Set(holders.map((r) => r.id));
     }

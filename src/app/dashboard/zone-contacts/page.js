@@ -9,6 +9,8 @@ import Avatar from "@/components/Avatar";
 import PersonDetailModal from "@/components/PersonDetailModal";
 import { usePageGuard } from "@/components/usePageGuard";
 import { isCaller } from "@/lib/permissions";
+import FilterMultiSelect from "@/components/FilterMultiSelect";
+import { groupDesignationsForFilter, expandDesignationFilterIds } from "@/lib/designationFilterGroups";
 
 // Caller → Contacts: every contact of the caller's CURRENT Zone, read-only.
 // The list comes from the SAME /api/contacts endpoint the Contacts module uses
@@ -45,7 +47,9 @@ export default function ZoneContactsPage() {
   const [lokSabhaId, setLokSabhaId] = useState("");
   const [districtId, setDistrictId] = useState("");
   const [assemblyId, setAssemblyId] = useState("");
-  const [designationId, setDesignationId] = useState("");
+  // Designation filter: the SAME list as the Contacts page — Level-wise then Rank-wise, each post once (its Wing copies /
+  // spelling variants merged into one entry that covers all their ids). designationIds = the picked entries.
+  const [designationIds, setDesignationIds] = useState([]);
   const [statusF, setStatusF] = useState("");
   const [sortKey, setSortKey] = useState("");
   const [sortDir, setSortDir] = useState("asc");
@@ -55,6 +59,8 @@ export default function ZoneContactsPage() {
   const [districts, setDistricts] = useState([]);
   const [assemblies, setAssemblies] = useState([]);
   const [designations, setDesignations] = useState([]);
+  const designationGroups = useMemo(() => groupDesignationsForFilter(designations), [designations]);
+  const designationQueryIds = useMemo(() => expandDesignationFilterIds(designationIds, designationGroups), [designationIds, designationGroups]);
   const [viewing, setViewing] = useState(null);
   // Self-assign: eligible = unassigned (pool), whatever its calling status (Completed included). Selection spans the current filter/page.
   const [picked, setPicked] = useState(() => new Set());
@@ -76,8 +82,8 @@ export default function ZoneContactsPage() {
   }, [status, ready, allowed, router]);
 
   useEffect(() => { const t = setTimeout(() => setSearch(searchInput.trim()), 400); return () => clearTimeout(t); }, [searchInput]);
-  useEffect(() => { setPicked(new Set()); setPickedMine(new Set()); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, wingF]);
-  useEffect(() => { setPage(1); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, wingF, pageSize, sortKey, sortDir]);
+  useEffect(() => { setPicked(new Set()); setPickedMine(new Set()); }, [search, lokSabhaId, districtId, assemblyId, designationIds, statusF, wingF]);
+  useEffect(() => { setPage(1); }, [search, lokSabhaId, districtId, assemblyId, designationIds, statusF, wingF, pageSize, sortKey, sortDir]);
 
   const qs = useMemo(() => {
     const p = new URLSearchParams();
@@ -85,14 +91,14 @@ export default function ZoneContactsPage() {
     if (lokSabhaId) p.set("lok_sabha_id", lokSabhaId);
     if (districtId) p.set("district_id", districtId);
     if (assemblyId) p.set("assembly_ids", assemblyId);
-    if (designationId) p.set("designation_ids", designationId);
+    if (designationQueryIds.length) p.set("designation_ids", designationQueryIds.join(","));
     if (statusF) p.set("status", statusF);
     if (wingF) p.set("wings", wingF);
     if (sortKey) { p.set("sort", sortKey); p.set("dir", sortDir); }
     p.set("page", String(page));
     p.set("page_size", String(pageSize));
     return p.toString();
-  }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, wingF, sortKey, sortDir, page, pageSize]);
+  }, [search, lokSabhaId, districtId, assemblyId, designationQueryIds, statusF, wingF, sortKey, sortDir, page, pageSize]);
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -149,11 +155,11 @@ export default function ZoneContactsPage() {
   const togglePick = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   async function assignToMe() {
     if (assigning || !picked.size) return;
-    const dName = designationId ? designations.find((d) => String(d.id) === String(designationId))?.name : null;
+    const dName = designationIds.length ? designationGroups.filter((d) => designationIds.includes(d.id)).map((d) => d.name).join(", ") : null;
     if (!confirm(`Assign ${picked.size} selected contact${picked.size === 1 ? "" : "s"}${dName ? ` (${dName})` : ""} to yourself?`)) return;
     setAssigning(true); setNotice(null);
     try {
-      const r = await fetch("/api/zone-contacts/self-assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contact_ids: [...picked], designation_id: designationId || undefined }) });
+      const r = await fetch("/api/zone-contacts/self-assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contact_ids: [...picked], designation_id: designationQueryIds.length ? designationQueryIds : undefined }) });
       const d = await r.json().catch(() => ({}));
       setNotice({ err: !r.ok || !d.assigned, text: d.message || (r.ok ? "Done." : "Could not assign the contacts.") });
       setPicked(new Set());
@@ -222,8 +228,8 @@ export default function ZoneContactsPage() {
   }
   const selectedCount = new Set([...picked, ...pickedMine]).size;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const anyFilter = !!(search || lokSabhaId || districtId || assemblyId || designationId || statusF || wingF);
-  const clear = () => { setSearchInput(""); setSearch(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setDesignationId(""); setStatusF(""); setWingF(""); };
+  const anyFilter = !!(search || lokSabhaId || districtId || assemblyId || designationIds.length || statusF || wingF);
+  const clear = () => { setSearchInput(""); setSearch(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setDesignationIds([]); setStatusF(""); setWingF(""); };
   const sortBy = (k) => { if (!k) return; if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(k); setSortDir("asc"); } };
   const sel = "h-10 rounded-lg border border-gray-200 text-sm px-2 bg-white";
 
@@ -266,10 +272,9 @@ export default function ZoneContactsPage() {
             <option value="">{districtId ? "All Assemblies" : "Pick a district"}</option>
             {assemblies.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
-          <select aria-label="Designation" className={sel} value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
-            <option value="">All Designations</option>
-            {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          <div className="[&>button]:h-10 [&>button]:w-full [&>button]:justify-between" data-testid="zc-designation">
+            <FilterMultiSelect label="designations" items={designationGroups} selected={designationIds} onChange={setDesignationIds} searchable />
+          </div>
           <select aria-label="Wing" data-testid="zc-wing-filter" className={sel} value={wingF} onChange={(e) => setWingF(e.target.value)}>
             <option value="">All Wings</option>
             {wingList.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}
