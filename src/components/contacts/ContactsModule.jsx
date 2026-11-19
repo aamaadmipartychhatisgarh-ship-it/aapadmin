@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Upload, Plus, Search, Loader2, CheckCircle2, Trash2, ClipboardList, UserCheck, UserPlus, UserMinus, MapPin, Download, X, FileSpreadsheet, FileText, AlertTriangle, Camera, Network, Printer, Link2, Copy, Share2 } from "lucide-react";
 import { shareGenerated, offerFile, responseToFile } from "@/components/pdfShare/fileShare";
 import PageHeader from "@/components/PageHeader";
@@ -13,6 +13,7 @@ import { vehicleLabel } from "@/lib/vehicleOptions";
 import ActionBar from "@/components/ActionBar";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
+import { groupDesignationsForFilter, expandDesignationFilterIds } from "@/lib/designationFilterGroups";
 import { usePageAccess } from "@/components/usePageAccess";
 import { contactSourceLabel } from "@/lib/sourceLabel";
 import WingMultiSelect from "@/components/WingMultiSelect";
@@ -140,6 +141,10 @@ export default function ContactsModule({ session, mode }) {
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [designationIds, setDesignationIds] = useState([]);
+  // Designation filter entries: Level-wise then Rank-wise, each post ONCE (its Wing copies / spelling variants merged).
+  // designationIds holds the picked entries; designationQueryIds every designation id they cover (what the server gets).
+  const designationGroups = useMemo(() => groupDesignationsForFilter(designations), [designations]);
+  const designationQueryIds = useMemo(() => expandDesignationFilterIds(designationIds, designationGroups), [designationIds, designationGroups]);
   // Wings filter — options come from Master Data (/api/wings); selecting wing(s)
   // narrows the list to contacts whose designation belongs to those wings.
   const [wingOptions, setWingOptions] = useState([]); // [{value,label}]
@@ -300,7 +305,7 @@ export default function ContactsModule({ session, mode }) {
     if (lokSabhaId) base.set("lok_sabha_id", lokSabhaId);
     if (districtId) base.set("district_id", districtId);
     if (assemblyIds.length) base.set("assembly_ids", assemblyIds.join(","));
-    if (designationIds.length) base.set("designation_ids", designationIds.join(","));
+    if (designationIds.length) base.set("designation_ids", designationQueryIds.join(","));
     // Caller-wise counts too (§8): the status counts must reflect the SAME
     // caller + designation scope the list uses, so the badge count can never
     // differ from the actual filtered/pooled records.
@@ -397,7 +402,7 @@ export default function ContactsModule({ session, mode }) {
       ? `${perCaller} contacts each to ${bulkCallers.length} caller(s): ${names}`
       : `evenly across ${bulkCallers.length} caller(s): ${names}`;
     const hasSelection = selectedIds.size > 0;
-    const desigNames = designations.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
+    const desigNames = designationGroups.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
     const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
     const skipNote = !hasSelection && filter === "pending" ? " (Already-called contacts are excluded — you're viewing Pending only.)" : "";
     const targetDesc = hasSelection
@@ -422,7 +427,7 @@ export default function ContactsModule({ session, mode }) {
             lok_sabha_id: lokSabhaId || undefined,
             district_id: districtId || undefined,
             assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
-            designation_ids: designationIds.length ? designationIds.join(",") : undefined,
+            designation_ids: designationIds.length ? designationQueryIds.join(",") : undefined,
             search: search || undefined,
           }),
         }),
@@ -457,7 +462,7 @@ export default function ContactsModule({ session, mode }) {
   async function bulkRecall() {
     setMessage(""); setError("");
     const hasSelection = selectedIds.size > 0;
-    const desigNames = designations.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
+    const desigNames = designationGroups.filter((d) => designationIds.includes(d.id)).map((d) => d.name);
     const desigLabel = desigNames.length ? ` with designation ${desigNames.map((n) => `"${n}"`).join(", ")}` : "";
     const callerLabel = bulkCallers.length > 0
       ? `${bulkCallers.length} selected caller(s)`
@@ -480,7 +485,7 @@ export default function ContactsModule({ session, mode }) {
             lok_sabha_id: lokSabhaId || undefined,
             district_id: districtId || undefined,
             assembly_ids: assemblyIds.length ? assemblyIds.join(",") : undefined,
-            designation_ids: designationIds.length ? designationIds.join(",") : undefined,
+            designation_ids: designationIds.length ? designationQueryIds.join(",") : undefined,
             search: search || undefined,
           }),
         }),
@@ -558,7 +563,7 @@ export default function ContactsModule({ session, mode }) {
     if (lokSabhaId) params.set("lok_sabha_id", lokSabhaId);
     if (districtId) params.set("district_id", districtId);
     if (assemblyIds.length) params.set("assembly_ids", assemblyIds.join(","));
-    if (designationIds.length) params.set("designation_ids", designationIds.join(","));
+    if (designationIds.length) params.set("designation_ids", designationQueryIds.join(","));
     // Wings filter → the server resolves the selected wing NAMES to their member
     // designations (designations.wing), unioned with any explicitly-picked
     // designations above. A wing with no designations correctly matches nothing.
@@ -994,7 +999,7 @@ export default function ContactsModule({ session, mode }) {
           />
         )}
         <FilterMultiSelect
-          label="designations" items={designations} selected={designationIds} onChange={setDesignationIds}
+          label="designations" items={designationGroups} selected={designationIds} onChange={setDesignationIds}
         />
         <WingMultiSelect options={wingOptions} value={wingSel} onChange={setWingSel} placeholder="All wings" className="min-w-[160px]" />
         <FilterMultiSelect
@@ -1011,7 +1016,7 @@ export default function ContactsModule({ session, mode }) {
             ))}
             {designationIds.map((id) => (
               <span key={`d${id}`} data-testid="chip-designation" className="inline-flex items-center gap-1 text-xs bg-violet-50 text-violet-700 border border-violet-200 rounded-full pl-2 pr-1 py-0.5">
-                Designation: {designations.find((d) => String(d.id) === String(id))?.name || id}
+                Designation: {designationGroups.find((d) => String(d.id) === String(id))?.name || id}
                 <button type="button" aria-label="Remove designation" onClick={() => setDesignationIds(designationIds.filter((x) => String(x) !== String(id)))} className="hover:bg-violet-100 rounded-full px-1">×</button>
               </span>
             ))}

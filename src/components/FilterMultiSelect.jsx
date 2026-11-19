@@ -38,11 +38,17 @@ export default function FilterMultiSelect({ label, items, selected, onChange, di
           </div>
           {items.length === 0 ? (
             <div className="px-2 py-3 text-xs text-gray-400">No {label} available.</div>
-          ) : items.map((i) => (
-            <label key={i.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm">
-              <input type="checkbox" checked={selected.includes(i.id)} onChange={() => toggle(i.id)} className="accent-[#164FA3]" />
-              <span className="text-gray-700">{i.name}</span>
-            </label>
+          ) : items.map((i, idx) => (
+            <div key={i.id}>
+              {/* Optional section heading (e.g. the designation Level) whenever an item's `group` changes. */}
+              {i.group && i.group !== items[idx - 1]?.group && (
+                <div data-testid="fms-group" className="px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">{i.group}</div>
+              )}
+              <label className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm">
+                <input type="checkbox" checked={selected.includes(i.id)} onChange={() => toggle(i.id)} className="accent-[#164FA3]" />
+                <span className="text-gray-700">{i.name}</span>
+              </label>
+            </div>
           ))}
         </div>
       </FloatingPopover>
