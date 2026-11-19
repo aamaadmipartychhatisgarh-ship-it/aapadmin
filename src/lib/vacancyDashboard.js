@@ -1,4 +1,5 @@
 import { fetchIncompleteDesignation } from "@/lib/incompleteDesignations";
+import { fixedDesignationOrder } from "@/lib/vacancyDesignationList";
 import {
   TEAM_LEVELS, loadLocationIndex, loadResponsibleHolders,
   ancestryOf, resolveResponsible,
@@ -123,7 +124,7 @@ export async function buildVacancyDataset(session, filters = {}) {
   const unmappedHolders = [];
   for (const level of levels) {
     // eslint-disable-next-line no-await-in-loop
-    const data = await fetchIncompleteDesignation(session, { level, status: "all" });
+    const data = await fetchIncompleteDesignation(session, { level, status: "all", fixedVacancyList: true });
     // A truncated holder list would turn filled positions into false vacancies —
     // fail closed instead of reporting them.
     if (data.capped) throw new Error(`Too many ${LEVEL_LABEL[level]} designation holders to compute vacancies safely`);
@@ -197,9 +198,8 @@ export async function buildVacancyDataset(session, filters = {}) {
     seenDes.add(k);
     designationOptions.push({ id: r.designation_id, name: r.designation_name, wing: r.designation_wing || null, wings: r.designation_wings || [], level: r.level, level_label: r.level_label });
   }
-  // Options follow the Designation Master order: organisational Level, then global Rank / Designation Order.
-  const hasRankCol = (await query("SHOW COLUMNS FROM designations LIKE 'rank'")).length > 0;
-  const optRank = new Map((await query(`SELECT id FROM designations ORDER BY ${hasRankCol ? "(`rank` IS NULL), `rank`, " : ""}(sort_order IS NULL), sort_order, name, id`)).map((r, i) => [r.id, i]));
+  // Options follow the FIXED vacancy list's order (Level, then the Rank frozen with the list — lib/vacancyDesignationList).
+  const optRank = await fixedDesignationOrder();
   const optLevel = (l) => { const i = VACANCY_LEVELS.indexOf(l); return i < 0 ? 99 : i; };
   designationOptions.sort((a, b) => (optLevel(a.level) - optLevel(b.level)) || ((optRank.get(a.id) ?? 1e9) - (optRank.get(b.id) ?? 1e9)));
   // A Designation that is not valid for the current Wing / Level / area (e.g. left
@@ -336,9 +336,8 @@ export async function buildVacancyDataset(session, filters = {}) {
   // location, whatever the status of each post.
   // The Designation Master's order: global Rank first (as the Designation Master lists them), then
   // sort_order, then name.
-  const hasRank = (await query("SHOW COLUMNS FROM designations LIKE 'rank'")).length > 0;
-  const rankRows = await query(`SELECT id FROM designations ORDER BY ${hasRank ? "(`rank` IS NULL), `rank`, " : ""}(sort_order IS NULL), sort_order, name, id`);
-  const rankOf = new Map(rankRows.map((r, i) => [r.id, i]));
+  // The fixed vacancy list's order (frozen with the list, independent of later Master Data changes).
+  const rankOf = await fixedDesignationOrder();
   const levelIdx = (l) => { const i = VACANCY_LEVELS.indexOf(l); return i < 0 ? 99 : i; };
   const seenRow = new Set();
   tableRows = tableRows

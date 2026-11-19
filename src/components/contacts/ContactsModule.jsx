@@ -530,20 +530,23 @@ export default function ContactsModule({ session, mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lokSabhaId, territory]);
 
-  // Assembly (Vidhan Sabha) options: if a district is picked, narrow to it;
-  // otherwise if a Lok Sabha is picked, show ALL of its assemblies directly.
+  // Assembly (Vidhan Sabha) options: if a district is picked, narrow to it; otherwise a picked Lok Sabha's, else a picked
+  // Zone's assemblies; with NOTHING picked, every assembly — the dropdown always opens (and is searchable), no Zone / Lok Sabha /
+  // District needed first.
   useEffect(() => {
     // Locked only for a CONFIGURED assembly-level supervisor; unconfigured cascades.
     if (cfg.territoryScoped && territory && territory.level === "assembly") return; // already at the finest grain
     let url = null;
     if (districtId) url = `/api/locations?parent_id=${districtId}`;
     else if (lokSabhaId) url = `/api/locations?assemblies_of_lok_sabha=${lokSabhaId}`;
-    if (url) {
-      fetch(url).then((r) => r.json()).then((d) => setAssemblies((d.locations || []).filter((l) => l.type === "assembly")));
-    } else setAssemblies([]);
+    else if (zoneId) url = `/api/locations?assemblies_of_zone=${zoneId}`;
+    else url = "/api/locations?type=assembly";
+    let alive = true;
+    fetch(url).then((r) => r.json()).then((d) => { if (alive) setAssemblies((d.locations || []).filter((l) => l.type === "assembly")); }).catch(() => {});
     setAssemblyIds([]);
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [districtId, lokSabhaId, territory]);
+  }, [districtId, lokSabhaId, zoneId, territory]);
 
   // Shared by the main table load AND the Edit modal's "jump to the next/prev
   // page's first/last contact" boundary crossing — both must query the exact
@@ -994,8 +997,7 @@ export default function ContactsModule({ session, mode }) {
           </select>
         ) : (
           <FilterMultiSelect
-            label="assemblies" items={assemblies} selected={assemblyIds} onChange={setAssemblyIds}
-            disabled={!districtId && !lokSabhaId} disabledLabel={cfg.territoryScoped && territory ? "Pick district" : "Pick Lok Sabha"}
+            label="assemblies" items={assemblies} selected={assemblyIds} onChange={setAssemblyIds} searchable
           />
         )}
         <FilterMultiSelect

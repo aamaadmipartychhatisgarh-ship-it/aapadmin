@@ -125,6 +125,12 @@ export async function PATCH(req, { params }) {
     if (effType === "worker" && !effBlock) {
       return NextResponse.json({ message: "A worker registration needs a Block (ward name)." }, { status: 400, headers: NO_STORE });
     }
+    // The Worker Rating is mandatory for a worker (sent value, else the saved one).
+    const [cur3] = await query("SELECT worker_rating FROM reg_people WHERE id = ?", [id]);
+    const effRating = d.worker_rating !== undefined ? (d.worker_rating === null || d.worker_rating === "" ? null : parseInt(d.worker_rating, 10)) : cur3?.worker_rating;
+    if (effType === "worker" && !(Number(effRating) >= 1 && Number(effRating) <= 10)) {
+      return NextResponse.json({ message: "Please select the Worker Rating (1 to 10) — it is required." }, { status: 400, headers: NO_STORE });
+    }
 
     await query(`UPDATE reg_people SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);
     const [person] = await query(`SELECT * FROM reg_people WHERE id = ?`, [id]);

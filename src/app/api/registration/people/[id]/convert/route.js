@@ -7,7 +7,7 @@ import { convertRegistrationToContact } from "@/lib/registrationConvert";
 
 export const dynamic = "force-dynamic";
 
-// POST — "Convert to Contact" for an eligible Worker registration (rated 6/10+,
+// POST — "Convert to Contact" for an eligible Worker registration (rated 8/10+,
 // counted, not yet converted). Needs BOTH the Registration module and the right
 // to create Contacts (same rule as the Contacts module's own add). Eligibility,
 // mandatory fields, duplicates and "already converted" are all re-checked here,

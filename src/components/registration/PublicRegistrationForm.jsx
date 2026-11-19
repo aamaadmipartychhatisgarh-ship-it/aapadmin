@@ -85,7 +85,7 @@ const STRINGS = {
     name: "नाम", namePh: "पूरा नाम",
     mobile: "मोबाइल नंबर", mobilePh: "10 अंकों का नंबर",
     address: "पूरा पता", addressPh: "मकान नं., मोहल्ला, शहर",
-    workerRating: "Worker रेटिंग", workerRatingHint: "1 से 10 तक रेटिंग चुनें",
+    workerRating: "Worker रेटिंग", workerRatingHint: "1 से 10 तक रेटिंग चुनें (अनिवार्य)", errRating: "कृपया Worker रेटिंग (1 से 10) चुनें — यह अनिवार्य है।",
     autoTime: "पंजीयन दिनांक व समय स्वतः दर्ज होगा",
     submit: "सबमिट करें", saving: "सहेजा जा रहा है…",
     footer: "आम आदमी पार्टी छत्तीसगढ़",
@@ -159,7 +159,7 @@ const STRINGS = {
     name: "Name", namePh: "Full name",
     mobile: "Mobile Number", mobilePh: "10-digit number",
     address: "Full Address", addressPh: "House no., locality, city",
-    workerRating: "User Rating", workerRatingHint: "Select a rating from 1 to 10",
+    workerRating: "User Rating", workerRatingHint: "Select a rating from 1 to 10 (required)", errRating: "Please select the Worker Rating (1 to 10) — it is required.",
     autoTime: "Registration date & time are recorded automatically",
     submit: "Submit", saving: "Saving…",
     footer: "Aam Aadmi Party Chhattisgarh",
@@ -262,13 +262,14 @@ export default function PublicRegistrationForm({ token }) {
 
   // Person being registered. There is deliberately no collector state: who gets
   // the credit is a property of the link, not something this form collects.
-  const [personType, setPersonType] = useState("voter");
+  // Worker Registration only (Voter Registration was removed): every entry is a worker.
+  const [personType, setPersonType] = useState("worker");
   // The FIRST step: what is being registered — Worker or Voter. It gates the
   // whole form (no field is shown until it is chosen), so the record type is a
   // deliberate up-front choice, not a buried Yes/No. Kept in sessionStorage so a
   // refresh mid-session cannot silently flip Worker↔Voter (§7); browser
   // back/forward never touch it because it is pure client state, not the URL (§8).
-  const [regType, setRegType] = useState(null); // null | "worker" | "voter"
+  const [regType, setRegType] = useState("worker"); // always "worker" — the Worker / Voter choice step is gone
   const [workerRating, setWorkerRating] = useState("");
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -372,7 +373,7 @@ export default function PublicRegistrationForm({ token }) {
     // Restore a type chosen earlier in this session so a refresh keeps the same
     // form (§7). The data fetch below keeps the loader up until it resolves, so
     // this synchronous restore lands before the selection/form choice is drawn.
-    try { const rt = sessionStorage.getItem(REGTYPE_KEY); if (rt === "worker" || rt === "voter") { setRegType(rt); setPersonType(rt); } } catch { /* storage off */ }
+    try { sessionStorage.removeItem(REGTYPE_KEY); } catch { /* storage off */ }
     const tick = () => setNow(new Date());
     tick();
     const id = setInterval(tick, 30000);
@@ -432,7 +433,7 @@ export default function PublicRegistrationForm({ token }) {
   function resetPerson() {
     // Block selection is cleared for the next person; the Block LIST is kept because
     // the constituency is retained (below), so the same assembly's blocks stay ready.
-    setPersonType("voter"); setWorkerRating(""); setBlockId("");
+    setPersonType("worker"); setWorkerRating(""); setBlockId("");
     setName(""); setMobile(""); setAddress("");
     setPhotoUrl(""); setPhotoPreview(""); setPhotoErr(""); setContactPhoto(null);
     setOtpStage("idle"); setOtpCode(""); setOtpFor(""); setOtpNote("");
@@ -586,6 +587,8 @@ export default function PublicRegistrationForm({ token }) {
     // Ward Name is mandatory only on the worker branch; a voter is never blocked
     // by it (§3, §6). Hidden worker fields are never validated.
     if (isWorker && !blockId) { setErr(t.errBlockName); return; }
+    // The Worker Rating (1-10) is mandatory.
+    if (isWorker && !(Number(workerRating) >= 1 && Number(workerRating) <= 10)) { setErr(t.errRating); return; }
     if (photoBusy) { setErr(t.uploading); return; }
     // The registrant's own number must be proven when the drive demands it.
     if (otpRequired && !otpDone) { setErr(t.verifyFirst); return; }
@@ -836,7 +839,6 @@ export default function PublicRegistrationForm({ token }) {
               {personType === "worker" ? <UserPlus size={16} style={{ color: ACCENT }} /> : <Vote size={16} style={{ color: ACCENT }} />}
               {personType === "worker" ? t.worker : t.voter}
             </span>
-            <button type="button" onClick={backToSelection} className="text-[12px] font-semibold text-[#164FA3] underline">{t.changeType}</button>
           </div>
 
           {/* Worker identity — the matched Contact's photo alongside the worker's
@@ -999,7 +1001,7 @@ export default function PublicRegistrationForm({ token }) {
           {/* Karyakarta Rating (1–10) — worker branch only. Green scale, darker as
               the rating rises; the selected value is highlighted in its shade. */}
           {personType === "worker" && (
-            <RatingField label={t.workerRating}>
+            <RatingField label={<>{t.workerRating} <span className="text-red-600">*</span></>}>
               <RatingScale value={workerRating} onChange={setWorkerRating} />
               <p className="text-[11px] text-gray-500 mt-1.5">{t.workerRatingHint}</p>
             </RatingField>
@@ -1031,7 +1033,7 @@ export default function PublicRegistrationForm({ token }) {
         </form>
 
         {/* View the list of people already registered through this link. */}
-        <button type="button" onClick={() => setListMode("voter")}
+        <button type="button" onClick={() => setListMode("worker")}
                 className="w-full min-h-[48px] rounded-xl border-2 border-gray-300 bg-white text-gray-800 text-sm font-bold flex items-center justify-center gap-2 hover:bg-gray-50">
           <ListIcon size={18} /> {t.list}
         </button>
@@ -1046,7 +1048,7 @@ export default function PublicRegistrationForm({ token }) {
 // from a token-scoped endpoint: the server derives ownership from the link and
 // returns only this link's people, so no client-supplied id can widen the scope.
 function PublicList({ token, t, lang, constituencies, initial, onBack, toggleLang }) {
-  const [type, setType] = useState(initial === "worker" ? "worker" : "voter");
+  const [type] = useState("worker"); // Worker Registration only
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -1068,13 +1070,6 @@ function PublicList({ token, t, lang, constituencies, initial, onBack, toggleLan
     return () => { alive = false; };
   }, [token, type, t.listLoadErr, reloadKey]);
 
-  const Tab = ({ value, label }) => (
-    <button type="button" onClick={() => setType(value)}
-            className={`flex-1 h-11 rounded-xl border-2 text-sm font-semibold ${type === value ? "text-white border-transparent" : "bg-white text-gray-700 border-gray-300"}`}
-            style={type === value ? { background: ACCENT } : undefined}>
-      {label}
-    </button>
-  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1090,10 +1085,6 @@ function PublicList({ token, t, lang, constituencies, initial, onBack, toggleLan
       </header>
 
       <main className="max-w-xl mx-auto px-4 py-5 space-y-4">
-        <div className="flex gap-2">
-          <Tab value="voter" label={t.myVoters} />
-          <Tab value="worker" label={t.myWorkers} />
-        </div>
 
         <div className="flex items-baseline justify-between px-1">
           <span className="text-sm font-semibold text-gray-700">{type === "worker" ? t.totalWorkers : t.totalVoters}</span>
@@ -1214,6 +1205,7 @@ function EditRegistration({ record, token, t, lang, constituencies, onCancel, on
     if (!name.trim()) { setError(t.errName); return; }
     if (String(mobile).replace(/\D/g, "").length < 10) { setError(t.errMobile); return; }
     if (isWorker && !blockId) { setError(t.errBlockName); return; }
+    if (isWorker && !(Number(rating) >= 1 && Number(rating) <= 10)) { setError(t.errRating); return; }
     setSaving(true); setError("");
     try {
       const url = token ? `/api/public/registration/${encodeURIComponent(token)}` : "/api/public/registration";

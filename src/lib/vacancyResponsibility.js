@@ -4,6 +4,7 @@ import { ensureContactWingsSchema } from "@/lib/contactWings";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 import { ensureLocationSortOrder } from "@/lib/locationOrder";
 import { notWrongNumberClause, notPendingClause } from "@/lib/contactExtras";
+import { vacancyDesignationList } from "@/lib/vacancyDesignationList";
 
 // VACANCY RESPONSIBILITY — who must fill a vacant organizational designation.
 //
@@ -190,18 +191,22 @@ export async function loadResponsibleHolders() {
   // The Main Wing's names (Wing master is_main), plus the plain "Main" / "Main Organisation" spellings.
   const mainNames = new Set((await query("SELECT name FROM wings WHERE is_main = 1").catch(() => [])).map((w) => normName(w.name)));
   const isMainWing = (w) => w != null && (mainNames.has(normName(w)) || /^main(\s+organi[sz]ations?)?$/i.test(String(w).trim()));
+  // The leadership posts are recognised from the FIXED vacancy list (its frozen names / levels — lib/vacancyDesignationList), so a
+  // designation renamed or moved in Master Data later keeps its responsibility exactly as the Vacancies list shows it.
+  await vacancyDesignationList();
   const holders = new Map();
   for (const level of ["state", "lok_sabha", "district", "assembly"]) {
     // eslint-disable-next-line no-await-in-loop
     const rows = await query(
-      `SELECT ${level === "state" ? "0" : RESP_LOC_EXPR[level]} AS loc_id, c.id AS contact_id, c.person_name, c.phone_number, d.name AS dname,
+      `SELECT ${level === "state" ? "0" : RESP_LOC_EXPR[level]} AS loc_id, c.id AS contact_id, c.person_name, c.phone_number, vdl.name AS dname,
               ${effectiveWingSql("cd", "d")} AS eff_wing,
               (EXISTS (SELECT 1 FROM designation_wings mdw JOIN wings mw ON mw.is_main = 1 AND ${WING_COLLATE("mw.name")} = ${WING_COLLATE("mdw.wing")}
                         WHERE mdw.designation_id = cd.designation_id)
                OR EXISTS (SELECT 1 FROM wings mw2 WHERE mw2.is_main = 1 AND ${WING_COLLATE("mw2.name")} = ${WING_COLLATE("NULLIF(TRIM(d.wing), '')")})) AS main_mapped
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
-         JOIN designations d ON d.id = cd.designation_id AND d.level = ?
+         JOIN vacancy_designation_list vdl ON vdl.designation_id = cd.designation_id AND vdl.level = ?
+         LEFT JOIN designations d ON d.id = cd.designation_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lls ON lls.id = ld.parent_id
         WHERE 1=1 ${live}

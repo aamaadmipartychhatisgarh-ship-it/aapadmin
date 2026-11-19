@@ -144,7 +144,7 @@ export default function ImportEditModal({ onClose, onApplied }) {
                     return (
                       <div key={r.row} className="px-3 py-2 text-xs">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-gray-400">Row {r.row}</span>
+                          <span className="font-mono text-gray-400">{r.rows && r.rows.length > 1 ? `Rows ${r.rows.join(", ")} (combined)` : `Row ${r.row}`}</span>
                           <span className="font-semibold text-gray-800 truncate">{r.name || "—"}{r.contact_id ? <span className="text-gray-400 font-normal"> · #{r.contact_id}</span> : null}</span>
                           <span className={`ml-auto shrink-0 border rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>{label}</span>
                         </div>

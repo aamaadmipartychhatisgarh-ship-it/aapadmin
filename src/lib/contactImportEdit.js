@@ -173,14 +173,62 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
     }
     parsed.push(rec);
   }
-  // Duplicate identifiers inside the file are ambiguous: NONE of those rows is applied.
-  const seen = new Map();
-  for (const r of parsed) if (r.ident) { const k = `${r.ident.kind}:${r.ident.value}`; if (!seen.has(k)) seen.set(k, []); seen.get(k).push(r.row); }
-  for (const r of parsed) {
-    if (!r.ident) continue;
-    const k = `${r.ident.kind}:${r.ident.value}`;
-    if (seen.get(k).length > 1) { r.status = "duplicate_identifier"; r.errors.push(`${r.ident.kind === "id" ? "Contact ID" : "Phone"} ${r.ident.kind === "id" ? r.ident.value : r.ident.raw} appears on rows ${seen.get(k).join(", ")} — not applied`); }
+  // The SAME person on several rows (same Contact ID / phone) — e.g. one row per Designation, several of them in the same Wing:
+  //   Rahul Kumar | Youth Wing | President
+  //   Rahul Kumar | Youth Wing | Secretary
+  // The rows are COMBINED into one update: every row's Designations (each paired with its own row's Wing) are applied together.
+  // Every other column must agree across the rows (blank = no value); only a real conflict — two different values for the same
+  // field — leaves the whole group unapplied, because it is then ambiguous which value is meant.
+  const groups = new Map();
+  for (const r of parsed) if (r.ident) { const k = `${r.ident.kind}:${r.ident.value}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  const dropped = new Set();
+  for (const grp of groups.values()) {
+    if (grp.length < 2) continue;
+    const first = grp[0];
+    const rowsList = grp.map((r) => r.row).join(", ");
+    const merged = [...first.raw];
+    const conflicts = [];
+    // Not compared: the identifier column (equal by construction) and Designation / Wing (combined below).
+    const skip = new Set([byId ? idx.id : idx.phone, idx.designation, idx.wing].filter((x) => x !== undefined));
+    const width = Math.max(...grp.map((r) => r.raw.length));
+    for (let c = 0; c < width; c++) {
+      if (skip.has(c)) continue;
+      const vals = [...new Set(grp.map((r) => cellStr(r.raw[c])).filter(Boolean))];
+      if (vals.length > 1) conflicts.push(`"${String(rows[0][c] ?? "").trim() || `column ${c + 1}`}" (${vals.slice(0, 3).join(" / ")})`);
+      merged[c] = vals[0] ?? "";
+    }
+    if (idx.designation !== undefined) {
+      // Designations of all rows, in row order; each keeps its own row's Wing (one Wing cell for several designations on a row
+      // applies to each of them). A designation listed twice is kept once (its first Wing).
+      const dn = [], wn = [];
+      let anyWing = false;
+      for (const r of grp) {
+        const names = splitNameList(cellStr(r.raw[idx.designation]), desigKnown);
+        if (!names.length) continue;
+        const wcell = idx.wing !== undefined ? cellStr(r.raw[idx.wing]) : "";
+        const wl = wcell ? wcell.split(/[;,|]/).map((x) => x.trim()) : [];
+        if (wcell) anyWing = true;
+        names.forEach((n, i) => {
+          if (dn.some((x) => x.toLowerCase() === n.toLowerCase())) return;
+          dn.push(n);
+          wn.push(wl.length === 1 ? wl[0] : (wl[i] || ""));
+        });
+      }
+      merged[idx.designation] = dn.join(", ");
+      if (idx.wing !== undefined) merged[idx.wing] = anyWing ? wn.join(", ") : "";
+    }
+    if (conflicts.length) {
+      for (const r of grp) {
+        r.status = "duplicate_identifier";
+        r.errors.push(`${r.ident.kind === "id" ? "Contact ID" : "Phone"} ${r.ident.kind === "id" ? r.ident.value : r.ident.raw} is on rows ${rowsList} with different values for ${conflicts.join(", ")} — not applied`);
+      }
+      continue;
+    }
+    first.raw = merged;
+    first.merged_rows = grp.map((r) => r.row);
+    for (const r of grp.slice(1)) dropped.add(r);
   }
+  if (dropped.size) { const keep = parsed.filter((r) => !dropped.has(r)); parsed.length = 0; parsed.push(...keep); }
 
   // ---- 2. look up the existing contacts ---------------------------------------------
   const scopeSql = scope?.where ? ` ${scope.where.replace(/^\s*AND\s*/i, "AND ")}` : "";
@@ -275,7 +323,7 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
     rec.update = {};     // column -> new value
     let newDesigIds = null;
 
-    const get = (f) => rows[rec.row - 1][idx[f]];
+    const get = (f) => rec.raw[idx[f]];   // rec.raw = the sheet row (or the combined row of a person listed on several rows)
     for (const f of editable) {
       if (f === "phone") {
         const v = cellStr(rec.raw[phoneCol]);

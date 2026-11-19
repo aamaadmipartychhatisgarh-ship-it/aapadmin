@@ -18,9 +18,8 @@ export const WORKER_PERFORMANCE_COLUMNS = [
   { key: "mobile", screen: false, pdf: false, w: 0, label: "Mobile", value: (r) => r.mobile || "", pdfFlex: 1.15 },
   { key: "lok_sabha", w: 16, label: "Lok Sabha", value: (r) => r.lok_sabha_name || "", pdfFlex: 1.5 },
   { key: "assembly", w: 20, label: "Assembly", value: (r) => r.assembly_name || "", pdfFlex: 1.55 },
-  { key: "workers", w: 12, label: "Workers", value: (r) => r.new_workers ?? 0, pdfFlex: 0.85, numeric: true },
-  { key: "voters", w: 10, label: "Voters", value: (r) => r.voters ?? 0, pdfFlex: 0.8, numeric: true },
-  { key: "total", w: 10, label: "Total", value: (r) => r.total ?? 0, display: "total", pdfFlex: 0.7, bold: true, numeric: true },
+  // Voter Registration was removed: the count is Workers only (no Voters / Total columns — Total would equal Workers).
+  { key: "workers", w: 32, label: "Workers", value: (r) => r.new_workers ?? 0, display: "total", pdfFlex: 0.85, bold: true, numeric: true },
 ];
 
 // The PDF's columns: the displayed ones, minus those flagged pdf:false (the phone number is not printed in the PDF).

@@ -21,6 +21,7 @@ const COLS = [
   { key: "name", label: "Name" },
   { key: "phone", label: "Mobile" },
   { key: "designation", label: "Designation" },
+  { key: null, label: "Wings" },
   { key: "lok_sabha", label: "Lok Sabha" },
   { key: "district", label: "District" },
   { key: "assembly", label: "Assembly" },
@@ -62,6 +63,12 @@ export default function ZoneContactsPage() {
   // Remove Assignment: contacts assigned to THIS caller that are ticked for removal (separate from the pool selection above).
   const [pickedMine, setPickedMine] = useState(() => new Set());
   const [removing, setRemoving] = useState(false);
+  // Wings (Master Data list, the same one the Contact section uses): filter by Wing, and add / remove a Wing on the selected contacts.
+  const [wingList, setWingList] = useState([]);
+  const [wingF, setWingF] = useState("");
+  const [wingPick, setWingPick] = useState("");
+  const [wingBusy, setWingBusy] = useState(false);
+  const [selectingAllMine, setSelectingAllMine] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -69,8 +76,8 @@ export default function ZoneContactsPage() {
   }, [status, ready, allowed, router]);
 
   useEffect(() => { const t = setTimeout(() => setSearch(searchInput.trim()), 400); return () => clearTimeout(t); }, [searchInput]);
-  useEffect(() => { setPicked(new Set()); setPickedMine(new Set()); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF]);
-  useEffect(() => { setPage(1); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, pageSize, sortKey, sortDir]);
+  useEffect(() => { setPicked(new Set()); setPickedMine(new Set()); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, wingF]);
+  useEffect(() => { setPage(1); }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, wingF, pageSize, sortKey, sortDir]);
 
   const qs = useMemo(() => {
     const p = new URLSearchParams();
@@ -80,11 +87,12 @@ export default function ZoneContactsPage() {
     if (assemblyId) p.set("assembly_ids", assemblyId);
     if (designationId) p.set("designation_ids", designationId);
     if (statusF) p.set("status", statusF);
+    if (wingF) p.set("wings", wingF);
     if (sortKey) { p.set("sort", sortKey); p.set("dir", sortDir); }
     p.set("page", String(page));
     p.set("page_size", String(pageSize));
     return p.toString();
-  }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, sortKey, sortDir, page, pageSize]);
+  }, [search, lokSabhaId, districtId, assemblyId, designationId, statusF, wingF, sortKey, sortDir, page, pageSize]);
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -112,6 +120,7 @@ export default function ZoneContactsPage() {
   useEffect(() => {
     if (!allowed) return;
     fetch("/api/designations").then((r) => (r.ok ? r.json() : { designations: [] })).then((d) => setDesignations(d.designations || [])).catch(() => {});
+    fetch("/api/wings", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { wings: [] })).then((d) => setWingList(d.wings || [])).catch(() => {});
   }, [allowed]);
   useEffect(() => {
     if (!zoneId) { setLokSabhas([]); setDistricts([]); return; }
@@ -170,9 +179,51 @@ export default function ZoneContactsPage() {
     } catch { setNotice({ err: true, text: "Could not remove the assignments — network error." }); }
     finally { setRemoving(false); }
   }
+  // Select ALL contacts assigned to me that match the current filters — every page, not just this one (at most 500, the
+  // Remove Assignment limit). Read from the same list endpoint with the same filters, narrowed to my own assignment.
+  async function selectAllMine() {
+    if (selectingAllMine) return;
+    setSelectingAllMine(true); setNotice(null);
+    try {
+      const base = new URLSearchParams(qs);
+      base.set("assigned_to", String(session?.user?.id || ""));
+      base.set("page_size", "200");
+      const ids = [];
+      for (let pg = 1; pg <= 3 && ids.length < 500; pg++) {
+        base.set("page", String(pg));
+        // eslint-disable-next-line no-await-in-loop
+        const r = await fetch(`/api/contacts?${base}`, { cache: "no-store" });
+        if (!r.ok) throw new Error();
+        // eslint-disable-next-line no-await-in-loop
+        const d = await r.json();
+        const list = (d.contacts || []).filter(isMine);
+        ids.push(...list.map((c) => c.id));
+        if ((d.contacts || []).length < 200) break;
+      }
+      const capped = ids.slice(0, 500);
+      setPickedMine(new Set(capped));
+      setNotice({ err: ids.length > 500, text: ids.length ? `${capped.length} contact${capped.length === 1 ? "" : "s"} assigned to you selected${ids.length > 500 ? " (the first 500 — remove these, then select again)" : ""}.` : "No contacts assigned to you match these filters." });
+    } catch { setNotice({ err: true, text: "Could not select your contacts — please try again." }); }
+    finally { setSelectingAllMine(false); }
+  }
+  // Add / remove the chosen Wing on every selected contact (pool + mine).
+  async function changeWing(action) {
+    const ids = [...new Set([...picked, ...pickedMine])];
+    if (wingBusy || !ids.length || !wingPick) return;
+    if (!confirm(`${action === "add" ? "Add" : "Remove"} ${ids.length} selected contact${ids.length === 1 ? "" : "s"} ${action === "add" ? "to" : "from"} ${wingPick}?`)) return;
+    setWingBusy(true); setNotice(null);
+    try {
+      const r = await fetch("/api/zone-contacts/wings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contact_ids: ids, wing: wingPick, action }) });
+      const d = await r.json().catch(() => ({}));
+      setNotice({ err: !r.ok || !(d.changed_ids || []).length || (d.skipped || []).length > 0, text: d.message || (r.ok ? "Done." : "Could not update the Wings.") });
+      await load();
+    } catch { setNotice({ err: true, text: "Could not update the Wings — network error." }); }
+    finally { setWingBusy(false); }
+  }
+  const selectedCount = new Set([...picked, ...pickedMine]).size;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const anyFilter = !!(search || lokSabhaId || districtId || assemblyId || designationId || statusF);
-  const clear = () => { setSearchInput(""); setSearch(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setDesignationId(""); setStatusF(""); };
+  const anyFilter = !!(search || lokSabhaId || districtId || assemblyId || designationId || statusF || wingF);
+  const clear = () => { setSearchInput(""); setSearch(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setDesignationId(""); setStatusF(""); setWingF(""); };
   const sortBy = (k) => { if (!k) return; if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(k); setSortDir("asc"); } };
   const sel = "h-10 rounded-lg border border-gray-200 text-sm px-2 bg-white";
 
@@ -197,7 +248,7 @@ export default function ZoneContactsPage() {
       )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
           <label className="relative lg:col-span-2">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search name or mobile…" aria-label="Search"
@@ -218,6 +269,10 @@ export default function ZoneContactsPage() {
           <select aria-label="Designation" className={sel} value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
             <option value="">All Designations</option>
             {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+          <select aria-label="Wing" data-testid="zc-wing-filter" className={sel} value={wingF} onChange={(e) => setWingF(e.target.value)}>
+            <option value="">All Wings</option>
+            {wingList.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}
           </select>
           <select aria-label="Status" className={sel} value={statusF} onChange={(e) => setStatusF(e.target.value)}>
             <option value="">All statuses</option>
@@ -245,7 +300,29 @@ export default function ZoneContactsPage() {
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed">
             {removing ? <Loader2 size={15} className="animate-spin" /> : null} Remove Assignment{pickedMine.size ? ` (${pickedMine.size})` : ""}
           </button>
-          {mineRows.length > 0 && <button type="button" onClick={() => setPickedMine(pickedMine.size === mineRows.length ? new Set() : new Set(mineRows.map((c) => c.id)))} className="text-xs text-gray-500 hover:underline" data-testid="zc-mine-all">{pickedMine.size === mineRows.length ? "Clear my selection" : `Select my ${mineRows.length} assigned on this page`}</button>}
+          {mineRows.length > 0 && <button type="button" onClick={() => setPickedMine(mineRows.every((c) => pickedMine.has(c.id)) ? new Set() : new Set([...pickedMine, ...mineRows.map((c) => c.id)]))} className="text-xs text-gray-500 hover:underline" data-testid="zc-mine-all">{mineRows.every((c) => pickedMine.has(c.id)) ? "Clear my selection" : `Select my ${mineRows.length} assigned on this page`}</button>}
+          <button type="button" onClick={selectAllMine} disabled={selectingAllMine} className="text-xs font-semibold text-[#164FA3] hover:underline disabled:opacity-50" data-testid="zc-mine-all-pages">
+            {selectingAllMine ? "Selecting…" : "Select all assigned to me (all pages)"}
+          </button>
+          {pickedMine.size > 0 && <button type="button" onClick={() => setPickedMine(new Set())} className="text-xs text-gray-500 hover:underline" data-testid="zc-mine-clear">Clear</button>}
+        </div>
+      )}
+      {zone?.zone_id && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="zc-wing-bar">
+          <span className="text-sm font-semibold text-gray-700">Wings:</span>
+          <select aria-label="Wing to add or remove" data-testid="zc-wing-pick" className="h-9 rounded-lg border border-gray-200 text-sm px-2 bg-white" value={wingPick} onChange={(e) => setWingPick(e.target.value)}>
+            <option value="">Choose a Wing…</option>
+            {wingList.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}
+          </select>
+          <button type="button" onClick={() => changeWing("add")} disabled={!wingPick || !selectedCount || wingBusy} data-testid="zc-wing-add"
+            className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-[#164FA3] text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed">
+            {wingBusy ? <Loader2 size={14} className="inline animate-spin" /> : null} Add to Wing{selectedCount ? ` (${selectedCount})` : ""}
+          </button>
+          <button type="button" onClick={() => changeWing("remove")} disabled={!wingPick || !selectedCount || wingBusy} data-testid="zc-wing-remove"
+            className="px-3 py-1.5 text-sm font-semibold rounded-lg border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+            Remove from Wing
+          </button>
+          <span className="text-xs text-gray-500">Tick contacts (in the pool or assigned to you), choose a Wing, then add them to it or remove them from it.</span>
         </div>
       )}
 
@@ -287,6 +364,7 @@ export default function ZoneContactsPage() {
                   </td>
                   <td className="px-3 py-2.5 font-mono text-xs text-gray-700">{c.phone_number}</td>
                   <td className="px-3 py-2.5 text-gray-700">{c.designation_name || "—"}</td>
+                  <td className="px-3 py-2.5 text-gray-600" data-testid="zc-wings">{c.wings || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.lok_sabha_name || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.district_name || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.assembly_name || "—"}</td>

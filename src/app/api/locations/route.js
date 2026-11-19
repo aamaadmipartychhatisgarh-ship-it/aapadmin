@@ -23,6 +23,21 @@ export async function GET(req) {
     // Fetch all assemblies under a Lok Sabha (2 levels: lok_sabha → district → assembly).
     const assembliesOfLokSabha = searchParams.get("assemblies_of_lok_sabha");
 
+    // Every assembly under a Zone (zone → lok_sabha → district → assembly).
+    const assembliesOfZone = searchParams.get("assemblies_of_zone");
+    if (assembliesOfZone) {
+      const rows = await query(
+        `SELECT a.id, a.type, a.name, a.parent_id
+           FROM locations a
+           JOIN locations d ON d.id = a.parent_id AND d.type = 'district'
+           JOIN locations ls ON ls.id = d.parent_id AND ls.type = 'lok_sabha'
+          WHERE a.type = 'assembly' AND ls.parent_id = ?
+          ORDER BY a.name ASC`,
+        [assembliesOfZone]
+      );
+      return Response.json({ locations: rows }, { status: 200 });
+    }
+
     if (assembliesOfLokSabha) {
       const rows = await query(
         `SELECT a.id, a.type, a.name, a.parent_id

@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { buildVacancyTree } from "@/lib/vacancyTree";
 import { normalizeIndianMobile } from "@/lib/phoneLinks";
+import { fixedDesignationNames } from "@/lib/vacancyDesignationList";
 
 // ONE consolidated Hindi WhatsApp message per RESPONSIBLE PERSON on Designation Vacancies (Tree Map).
 //
@@ -81,7 +82,13 @@ export async function buildResponsibleMessage(session, contactId) {
   found.sort((a, b) => (LEVEL_ORDER.indexOf(a.p.level) - LEVEL_ORDER.indexOf(b.p.level)) || (a.order - b.order));
   // Each designation's approved name, read from the Designation Master by id (the tree's own label as a fallback only).
   const ids = [...new Set(found.map(({ p }) => Number(p.designation_id)).filter((n) => Number.isInteger(n) && n > 0))];
-  const master = new Map(ids.length ? (await query(`SELECT id, name FROM designations WHERE id IN (${ids.map(() => "?").join(",")})`, ids)).map((d) => [Number(d.id), d.name]) : []);
+  // Names as FIXED in the Designation Vacancies list (independent of later Master Data edits); master by id only as a fallback.
+  const fixedNames = await fixedDesignationNames();
+  const missingIds = ids.filter((i) => !fixedNames.has(i));
+  const master = new Map([
+    ...(missingIds.length ? (await query(`SELECT id, name FROM designations WHERE id IN (${missingIds.map(() => "?").join(",")})`, missingIds)).map((d) => [Number(d.id), d.name]) : []),
+    ...[...fixedNames].filter(([i]) => ids.includes(i)),
+  ]);
   const notEnglish = new Set();
   const lines = [];
   const used = new Set();

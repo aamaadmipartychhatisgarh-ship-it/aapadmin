@@ -4,7 +4,7 @@ import { buildRegistrationPdf, registrationPdfFilename } from "@/lib/registratio
 import { MARKS_ORDER_SQL } from "@/lib/registrationStats";
 import { UNCONTACTED_FIRST_SQL, normalizeContactAction, recordContactAction } from "@/lib/registrationContactAction";
 import {
-  ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow, PERSON_TYPES,
+  ensureRegistrationSchema, normalizeMobile, normalizeWard, regNow,
 } from "@/lib/registrationSchema";
 import { readRegSession, resolveCampaignWorkerById } from "@/lib/regLinkAuth";
 import { blockBelongsToAssembly } from "@/lib/politicalLocation";
@@ -217,7 +217,7 @@ export async function publicOwnList(req, token, type) {
       }
       listWorkerId = s.rwid;
     }
-    const personType = type === "worker" ? "worker" : "voter";
+    const personType = "worker"; // Worker Registration only — the own list shows workers (voter records are no longer listed)
     const where = ["p.campaign_id = ?", "p.status = 'active'", "p.person_type = ?", "p.worker_id = ?"];
     const params = [link.campaign_id, personType, listWorkerId];
 
@@ -301,7 +301,12 @@ async function validateRegistrationFields(d, link, { fixedType = null } = {}) {
   }
 
   // On edit the record's type is fixed (fixedType); a new registration takes it from the form.
-  const personType = fixedType || (PERSON_TYPES.includes(d.person_type) ? d.person_type : "voter");
+  // Worker Registration only: Voter Registration was removed, so a NEW registration is always a worker (an old client that
+  // still sends "voter" is refused rather than silently saved as something else). Saved voter records keep their type.
+  if (!fixedType && d.person_type && d.person_type !== "worker") {
+    return { error: NextResponse.json({ message: "Voter Registration is no longer available. Only Workers can be registered." }, { status: 400, headers: NO_STORE }) };
+  }
+  const personType = fixedType || "worker";
   // "Wants to become a worker" is the person type itself; the explicit Yes/No
   // and the role are only meaningful on that branch.
   const wantsWorker = personType === "worker" ? 1 : 0;
@@ -309,6 +314,10 @@ async function validateRegistrationFields(d, link, { fixedType = null } = {}) {
   // voter) stores NULL so a bad/absent value never becomes a fake rating.
   const ratingNum = parseInt(d.worker_rating, 10);
   const workerRating = wantsWorker && Number.isInteger(ratingNum) && ratingNum >= 1 && ratingNum <= 10 ? ratingNum : null;
+  // The Worker Rating is MANDATORY for a worker.
+  if (wantsWorker && workerRating == null) {
+    return { error: NextResponse.json({ message: "Please select the Worker Rating (1 to 10) — it is required." }, { status: 400, headers: NO_STORE }) };
+  }
 
   const clip = (v, n) => { const s = String(v ?? "").trim(); return s ? s.slice(0, n) : null; };
   const ward = normalizeWard(d.ward_number) || normalizeWard(link.worker_ward || link.campaign_ward);

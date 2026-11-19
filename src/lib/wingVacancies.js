@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { contactPhotoMap } from "@/lib/contactPhotos";
 import { fetchIncompleteDesignation } from "@/lib/incompleteDesignations";
+import { vacancyDesignationList } from "@/lib/vacancyDesignationList";
 import { ensureWingSchema, listWings } from "@/lib/wingDesignations";
 import { wingsMapFor } from "@/lib/designationWings";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
@@ -140,14 +141,10 @@ const asId = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n
 // same post is never shown twice with two different responsible people.
 export async function wingPositionDesignationIds() {
   await ensureWingSchema();
-  const rows = await query(
-    `SELECT d.id, d.level, d.wing, wd.base_name FROM designations d
-       JOIN wing_designations wd ON wd.id = d.wing_base_id
-      WHERE d.wing_base_id IS NOT NULL AND d.level IN (${WING_VACANCY_LEVELS.map(() => "?").join(",")})`,
-    WING_VACANCY_LEVELS
-  );
+  // From the FIXED vacancy list (lib/vacancyDesignationList), never the live master.
+  const { list } = await vacancyDesignationList();
   const ids = new Set();
-  for (const r of rows) if (otherWingOf(r.wing) && owAllowed(r.level, owRoleOfBase(r.base_name))) ids.add(r.id);
+  for (const r of list) if (r.base_name && WING_VACANCY_LEVELS.includes(r.level) && otherWingOf(r.wing) && owAllowed(r.level, owRoleOfBase(r.base_name))) ids.add(r.id);
   return ids;
 }
 
@@ -170,20 +167,21 @@ export async function buildWingVacancyDataset(session, filters = {}) {
   const allWings = await listWings();
   const wings = [];
   const seenWing = new Set();
+  // The Wings come from the FIXED vacancy list (the Wings its designations were captured under), in the fixed Other-Wing order —
+  // a Wing renamed / disabled in Master Data later keeps its vacancy posts.
+  const fixedList = (await vacancyDesignationList()).list;
   for (const ow of OTHER_WINGS) {
-    const w = allWings.find((x) => Number(x.is_main) !== 1 && otherWingOf(x.name) === ow.name && (x.enabled == null || Number(x.enabled) === 1));
-    if (!w || seenWing.has(norm(w.name))) continue;
-    seenWing.add(norm(w.name));
-    wings.push(w.name);
+    const d = fixedList.find((x) => x.base_name && otherWingOf(x.wing) === ow.name);
+    if (!d || seenWing.has(norm(d.wing))) continue;
+    seenWing.add(norm(d.wing));
+    wings.push(d.wing);
   }
   const knownWings = new Set(allWings.map((w) => norm(w.name)));
   const wingByNorm = new Map(wings.map((w) => [norm(w), w]));
 
   // Base roles of generated designations (wing_base_id → wing_designations.base_name).
-  const baseRows = await query(
-    `SELECT d.id, wd.base_name FROM designations d JOIN wing_designations wd ON wd.id = d.wing_base_id WHERE d.wing_base_id IS NOT NULL`
-  );
-  const baseOf = new Map(baseRows.map((r) => [r.id, r.base_name]));
+  // (from the fixed vacancy list, captured with it)
+  const baseOf = new Map(fixedList.filter((r) => r.base_name).map((r) => [r.id, r.base_name]));
 
   const index = await loadLocationIndex();
   // The MAIN Wing's State Prabhari — the responsible person for every Other Wing State post (the only cross-Wing rule).
@@ -199,7 +197,7 @@ export async function buildWingVacancyDataset(session, filters = {}) {
   // responsible person sits one level up.
   for (const level of WING_VACANCY_LEVELS) {
     // eslint-disable-next-line no-await-in-loop
-    const data = await fetchIncompleteDesignation(session, { level, status: "all" });
+    const data = await fetchIncompleteDesignation(session, { level, status: "all", fixedVacancyList: true });
     // A truncated holder list would turn filled positions into false vacancies.
     if (data.capped) throw new Error(`Too many ${LEVEL_LABEL[level]} designation holders to compute wing vacancies safely`);
 

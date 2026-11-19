@@ -336,7 +336,7 @@ export default function RegistrationApp() {
   const TABS = [
     ...(canManage ? [["dashboard", "Dashboard", BarChart3]] : []),
     ["workers", canManage ? "Workers & Links" : "Worker Registration", Link2],
-    ["people", canManage ? "Registrations" : "Voter Registration", Users],
+    ["people", "Registrations", Users],
   ];
 
   return (
@@ -475,11 +475,10 @@ function DashboardTab({ filterQs, onWard, onError }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {/* Worker first, Voter second — the same order everywhere on this dashboard. */}
+      {/* Worker Registration only (Voter Registration removed — no Total Voters Added card). */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Stat icon={UserPlus} label="Total New Workers" value={p.new_workers.toLocaleString("en-IN")} sub={`${s.lifetime.new_workers.toLocaleString("en-IN")} all time`} tone="green" />
-        <Stat icon={Vote} label="Total Voters Added" value={p.voters.toLocaleString("en-IN")} sub={`${s.lifetime.voters.toLocaleString("en-IN")} all time`} />
-        <Stat icon={BarChart3} label="Total Registrations" value={p.total.toLocaleString("en-IN")} sub={`${s.lifetime.total.toLocaleString("en-IN")} all time`} tone="amber" />
+        <Stat icon={BarChart3} label="Total Worker Registrations" value={p.total.toLocaleString("en-IN")} sub={`${s.lifetime.total.toLocaleString("en-IN")} all time`} tone="amber" />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -487,7 +486,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
           <div key={k} className={`${cardCls} p-3`}>
             <p className="text-xs text-gray-500">{label}</p>
             <p className="text-xl font-bold text-gray-900">{s.buckets[k].total.toLocaleString("en-IN")}</p>
-            <p className="text-[11px] text-gray-500">{s.buckets[k].new_workers} workers · {s.buckets[k].voters} voters</p>
+            <p className="text-[11px] text-gray-500">{s.buckets[k].new_workers} workers</p>
           </div>
         ))}
       </div>
@@ -499,7 +498,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
             <p className="text-xs text-gray-500">Top Performing Worker</p>
             <p className="font-bold text-gray-900 truncate">{s.top_worker?.name || "—"}</p>
             <p className="text-xs text-gray-500">
-              {s.top_worker ? `${s.top_worker.total} total · ${s.top_worker.new_workers} workers · ${s.top_worker.voters} voters` : "No registrations yet"}
+              {s.top_worker ? `${s.top_worker.new_workers} workers` : "No registrations yet"}
             </p>
           </div>
         </div>
@@ -509,7 +508,7 @@ function DashboardTab({ filterQs, onWard, onError }) {
             <p className="text-xs text-gray-500">Best Performing Block</p>
             <p className="font-bold text-gray-900 truncate">{topBlock ? topBlock.block : "—"}</p>
             <p className="text-xs text-gray-500">
-              {topBlock ? `${topBlock.total} total · ${topBlock.new_workers} workers · ${topBlock.voters} voters` : "No registrations yet"}
+              {topBlock ? `${topBlock.new_workers} workers` : "No registrations yet"}
             </p>
           </div>
         </div>
@@ -541,10 +540,8 @@ function DashboardTab({ filterQs, onWard, onError }) {
           )}
           meta={data.worker_totals ? (
             <p className="px-4 py-2 text-xs text-gray-600 border-b border-gray-100 bg-gray-50/60" data-testid="wp-totals">
-              <span className="font-semibold text-gray-900">{data.worker_totals.workers}</span> worker{data.worker_totals.workers === 1 ? "" : "s"} · Workers added{" "}
-              <span className="font-semibold text-gray-900">{data.worker_totals.new_workers}</span> · Voters{" "}
-              <span className="font-semibold text-gray-900">{data.worker_totals.voters}</span> · Total{" "}
-              <span className="font-semibold text-gray-900">{data.worker_totals.total}</span>
+              <span className="font-semibold text-gray-900">{data.worker_totals.workers}</span> user{data.worker_totals.workers === 1 ? "" : "s"} · Workers added{" "}
+              <span className="font-semibold text-gray-900">{data.worker_totals.new_workers}</span>
             </p>
           ) : null}
           testId="worker-performance"
@@ -573,12 +570,11 @@ function DashboardTab({ filterQs, onWard, onError }) {
           title="Block-wise Performance"
           subtitle={`Top ${Math.min(100, (data.blocks || []).length)}`}
           exportHref={`/api/registration/export?${filterQs({ report: "blocks" })}`}
-          head={["Rank", "Block", "Workers", "Voters", "Total"]}
+          head={["Rank", "Block", "Workers"]}
           rows={(data.blocks || []).map((b) => [
             <RankBadge key="r" rank={b.rank} />,
             <span key="b" className="font-semibold text-gray-900">{b.block}</span>,
-            b.new_workers, b.voters,
-            <span key="t" className="font-bold text-gray-900">{b.total}</span>,
+            <span key="t" className="font-bold text-gray-900">{b.new_workers}</span>,
           ])}
           empty="No block data yet."
         />
@@ -603,7 +599,7 @@ function AssemblyRegistrationGraph({ assemblies }) {
     <div className={`${cardCls} p-4`}>
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <h3 className="text-sm font-bold text-gray-900">Assembly-wise Registrations</h3>
-        <span className="text-xs text-gray-500">{rows.length} assembl{rows.length === 1 ? "y" : "ies"} · Workers vs Voters</span>
+        <span className="text-xs text-gray-500">{rows.length} assembl{rows.length === 1 ? "y" : "ies"} · Workers</span>
       </div>
       <div className="overflow-x-auto">
         <BarChart width={width} height={340} data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 96 }} barGap={2}>
@@ -615,7 +611,6 @@ function AssemblyRegistrationGraph({ assemblies }) {
           <Tooltip cursor={{ fill: "rgba(22,79,163,0.05)" }} itemSorter={null} />
           <Legend itemSorter={null} />
           <Bar dataKey="workers" name="Workers" fill="#FCB712" radius={[3, 3, 0, 0]} />
-          <Bar dataKey="voters" name="Voters" fill="#164FA3" radius={[3, 3, 0, 0]} />
         </BarChart>
       </div>
     </div>
@@ -834,16 +829,16 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 bg-gray-50">
-                {["#", "User", "Mobile", "Ward / Area", "Voters", "New workers", "Total", "Login username", "Status", ""].map((h) => (
+                {["#", "User", "Mobile", "Ward / Area", "New workers", "Login username", "Status", ""].map((h) => (
                   <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-500">{created ? `No workers were created ${rangeWords(created).includes("–") ? "between" : "on"} ${rangeWords(created).replace("–", "and")}.` : "No user links yet. Generate one to start crediting registrations."}</td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500">{created ? `No workers were created ${rangeWords(created).includes("–") ? "between" : "on"} ${rangeWords(created).replace("–", "and")}.` : "No user links yet. Generate one to start crediting registrations."}</td></tr>
               ) : rows.map((w) => (
                 <tr key={w.id} className="border-t border-gray-100 hover:bg-gray-50/60">
                   <td className="px-3 py-2.5"><RankBadge rank={w.rank} /></td>
@@ -861,9 +856,7 @@ function WorkersTab({ filterQs, campaignId, campaigns, onError, canDelete = fals
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">{w.mobile || "—"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">{[w.ward_number, w.area_booth].filter(Boolean).join(" · ") || "—"}</td>
-                  <td className="px-3 py-2.5">{w.voters}</td>
-                  <td className="px-3 py-2.5">{w.new_workers}</td>
-                  <td className="px-3 py-2.5 font-bold text-gray-900">{w.total}</td>
+                  <td className="px-3 py-2.5 font-bold text-gray-900">{w.new_workers}</td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1.5">
                       <code className="text-[11px] bg-gray-100 rounded px-2 py-1 max-w-[190px] truncate" title={w.username || w.name}>{w.username || w.name}</code>
@@ -1252,6 +1245,35 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, p
     }
   }
 
+  // BULK Convert to Contact — the selected eligible Workers (rating 8-10) in one go. The server converts them one by one with
+  // the SAME rules as the single button (eligibility, duplicates, already converted) and reports each result.
+  const [convSel, setConvSel] = useState(() => new Set());
+  const [bulkConverting, setBulkConverting] = useState(false);
+  const eligibleRows = rows.filter((p) => p.convert_eligible && !p.converted_contact_id);
+  useEffect(() => { setConvSel(new Set()); }, [rows]);
+  async function bulkConvert() {
+    const ids = [...convSel];
+    if (!ids.length || bulkConverting) return;
+    if (!confirm(`Convert ${ids.length} selected worker${ids.length === 1 ? "" : "s"} to Contacts?\nEach registration is kept and linked to its Contact.`)) return;
+    setBulkConverting(true);
+    try {
+      const r = await fetch("/api/registration/people/convert", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) onError(d.message || "Could not convert the selected workers.");
+      else {
+        const failed = (d.results || []).filter((x) => !x.ok);
+        setOkMsg(d.message || "Converted."); setTimeout(() => setOkMsg(""), 5000);
+        if (failed.length) onError(`${failed.length} not converted: ${failed.slice(0, 5).map((x) => `${x.name || `#${x.id}`} — ${x.message}`).join("; ")}${failed.length > 5 ? " …" : ""}`);
+      }
+      setConvSel(new Set());
+      load();
+    } catch {
+      onError("Could not convert the selected workers — network error.");
+    } finally {
+      setBulkConverting(false);
+    }
+  }
+
   async function setRowStatus(id, next) {
     try {
       const r = await fetch(`/api/registration/people/${id}`, {
@@ -1298,11 +1320,6 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, p
           <datalist id="added-by-options">{addedByOpts.map((w) => <option key={w.id} value={addedByLabel(w)} />)}</datalist>
           {addedByText ? <button type="button" aria-label="Clear Added By" data-testid="added-by-clear" onClick={() => pickAddedBy("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">×</button> : null}
         </div>
-        <select className={inputCls} value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
-          <option value="">All types</option>
-          <option value="voter">Voters</option>
-          <option value="worker">Wants to be a worker</option>
-        </select>
         <select className={inputCls} value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }}>
           <option value="">All sources</option>
           <option value="worker">Through a user link</option>
@@ -1313,6 +1330,12 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, p
           <option value="duplicate">Duplicates</option>
           <option value="rejected">Rejected</option>
         </select>
+        {canConvert && convSel.size > 0 && (
+          <button type="button" onClick={bulkConvert} disabled={bulkConverting} data-testid="bulk-convert-btn"
+                  className={`${btnCls} text-white disabled:opacity-60`} style={{ background: BRAND }}>
+            {bulkConverting ? <Loader2 size={16} className="animate-spin" /> : <UserCheck size={16} />}Bulk Convert to Contact ({convSel.size})
+          </button>
+        )}
         <span className="text-sm text-gray-500" data-testid="registrations-total">{total.toLocaleString("en-IN")} record{total === 1 ? "" : "s"}{regRange ? ` · ${rangeWords(regRange)}` : ""}</span>
         {okMsg ? <span className="text-sm font-semibold text-green-700 inline-flex items-center gap-1"><Check size={15} />{okMsg}</span> : null}
         <a href={`/api/registration/export?${qs({ report: "registrations", format: "xlsx" })}`} data-testid="registrations-xlsx" className={`${btnCls} ml-auto border border-gray-300 text-gray-700 bg-white`}>
@@ -1337,7 +1360,15 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, p
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-gray-500 bg-gray-50">
-                {["Date & time", "Type", "Photo", "Name", "Mobile", "Constituency", "Ward / Area", "Address", "Added by", "Status"].map((h) => (
+                {/* Bulk Convert to Contact: select the eligible Workers (rating 8-10, counted, not converted yet). */}
+                <th className="px-3 py-2 w-8">
+                  {canConvert && eligibleRows.length > 0 && (
+                    <input type="checkbox" aria-label="Select all eligible workers on this page" data-testid="convert-select-all" className="accent-[#164FA3]"
+                      checked={eligibleRows.every((p) => convSel.has(p.id))}
+                      onChange={(e) => setConvSel(e.target.checked ? new Set(eligibleRows.map((p) => p.id)) : new Set())} />
+                  )}
+                </th>
+                {["Date & time", "Rating", "Photo", "Name", "Mobile", "Constituency", "Ward / Area", "Address", "Added by", "Status"].map((h) => (
                   <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                 ))}
                 <th className="px-3 py-2 font-semibold whitespace-nowrap text-right">Action</th>
@@ -1345,22 +1376,25 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, p
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={11} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
+                <tr><td colSpan={12} className="px-4 py-10 text-center"><Loader2 className="animate-spin inline" style={{ color: BRAND }} size={22} /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-500">No registrations for these filters yet.</td></tr>
+                <tr><td colSpan={12} className="px-4 py-10 text-center text-gray-500">No registrations for these filters yet.</td></tr>
               ) : rows.map((p) => (
                 <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50/60 align-top">
+                  <td className="px-3 py-2.5">
+                    {canConvert && p.convert_eligible && !p.converted_contact_id ? (
+                      <input type="checkbox" aria-label={`Select ${p.name}`} data-testid="convert-select" className="accent-[#164FA3]"
+                        checked={convSel.has(p.id)}
+                        onChange={(e) => setConvSel((prev) => { const n = new Set(prev); if (e.target.checked) n.add(p.id); else n.delete(p.id); return n; })} />
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">
                     {new Date(p.registered_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                     {/* Entries from 6 pm IST onwards count for the next day (the reporting day). */}
                     {reportingDayAfterCutoff(p.registered_at) ? <span className="block text-[11px] text-amber-700" data-testid="counts-for">Counts for {reportingDayAfterCutoff(p.registered_at)}</span> : null}
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className={`text-[11px] font-semibold px-2 py-1 rounded-md border ${
-                      p.person_type === "worker" ? "bg-green-50 text-green-700 border-green-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}>
-                      {p.person_type === "worker" ? "New worker" : "Voter"}
-                    </span>
-                    {p.worker_rating != null && p.worker_rating !== "" ? <span className="block mt-1"><RatingBadge value={p.worker_rating} /></span> : null}
+                    {p.worker_rating != null && p.worker_rating !== "" ? <RatingBadge value={p.worker_rating} /> : <span className="text-gray-400">—</span>}
                   </td>
                   {/* Photo — the record's OWN uploaded photo (reg_people.photo_url),
                       resolved by Avatar (served via /api/media for the signed-in admin).
@@ -1516,6 +1550,7 @@ function EditPersonDialog({ person, onClose, onSaved, onError }) {
     if (!String(f.name).trim()) { onError("Name is required."); return; }
     if (!f.assembly_id) { onError("Select the assembly."); return; }
     if (f.person_type === "worker" && !f.block_id) { onError("Select the Block (ward name) for a worker."); return; }
+    if (f.person_type === "worker" && !(Number(f.worker_rating) >= 1 && Number(f.worker_rating) <= 10)) { onError("Please select the Worker Rating (1 to 10) — it is required."); return; }
     setSaving(true);
     try {
       const body = {
@@ -1563,16 +1598,19 @@ function EditPersonDialog({ person, onClose, onSaved, onError }) {
           <div><label className={lbl}>Name *</label><input className={inp} value={f.name} onChange={(e) => set("name", e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={lbl}>Mobile</label><input className={inp} value={f.mobile} onChange={(e) => set("mobile", e.target.value)} inputMode="numeric" /></div>
-            <div>
-              <label className={lbl}>Type</label>
-              <select className={inp} value={f.person_type} onChange={(e) => set("person_type", e.target.value)}>
-                <option value="voter">Voter</option>
-                <option value="worker">New worker</option>
-              </select>
-            </div>
+            {/* Worker Registration only: the Type can only move an OLD voter record to Worker, never back. */}
+            {person.person_type === "voter" ? (
+              <div>
+                <label className={lbl}>Type</label>
+                <select className={inp} value={f.person_type} onChange={(e) => set("person_type", e.target.value)}>
+                  <option value="voter">Voter (old record)</option>
+                  <option value="worker">Worker</option>
+                </select>
+              </div>
+            ) : <div />}
           </div>
           {f.person_type === "worker" && (
-            <div><label className={lbl}>User Rating (1–10)</label>
+            <div><label className={lbl}>User Rating (1–10) *</label>
               <input type="number" min="1" max="10" className={inp} value={f.worker_rating} onChange={(e) => set("worker_rating", e.target.value)} /></div>
           )}
           <div className="grid grid-cols-2 gap-3">

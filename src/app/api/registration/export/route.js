@@ -115,8 +115,8 @@ export async function GET(req) {
       // old link still resolves to the same Block report.
       const rows = await getBlockRanking({ ...f, limit: 500, scope });
       csv = toCsv(
-        ["Rank", "Block (Area/Booth)", "Workers Added", "Voters Added", "Total"],
-        rows.map((r) => [r.rank, r.block, r.new_workers, r.voters, r.total])
+        ["Rank", "Block (Area/Booth)", "Workers Added"],
+        rows.map((r) => [r.rank, r.block, r.new_workers])
       );
       filename = `AAP_Block_Performance_${stamp}.csv`;
     } else {
@@ -133,19 +133,18 @@ export async function GET(req) {
       if (searchParams.get("format") === "pdf") {
         const criteria = describeFilters(searchParams, session, f);
         criteria.push(`${all.length.toLocaleString("en-IN")} matching record${all.length === 1 ? "" : "s"}`);
-        const buf = await buildRegistrationPdf(all, { title: "Worker & Voter Registrations", criteria });
+        const buf = await buildRegistrationPdf(all, { title: "Worker Registrations", criteria });
         return new NextResponse(new Uint8Array(buf), {
           status: 200,
           headers: { ...NO_STORE, "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${registrationPdfFilename()}"` },
         });
       }
-      const regHead = ["Registration Date & Time", "Type", "Name", "Mobile", "Address", "Constituency", "Ward", "Area/Booth",
-         "Wants to be Worker", "User Rating", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"];
+      const regHead = ["Registration Date & Time", "Name", "Mobile", "Address", "Constituency", "Ward", "Area/Booth",
+         "User Rating", "Added By (Worker)", "Worker Mobile", "Worker ID", "Status"];
       const regRows = all.map((p) => [
           fmtDateTime(p.registered_at),
-          p.person_type === "worker" ? "Wants to be Worker" : "Voter",
           p.name, p.mobile, p.address, p.assembly_name, p.effective_ward || p.ward_number, p.area_booth,
-          p.wants_worker ? "Yes" : "No", p.worker_rating != null ? String(p.worker_rating) : "",
+          p.worker_rating != null ? String(p.worker_rating) : "",
           // No karyakarta = arrived through the general /join link.
           p.worker_name || "Direct (/join)", p.worker_mobile, p.worker_code, p.status,
         ]);

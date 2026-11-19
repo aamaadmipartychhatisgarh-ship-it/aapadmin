@@ -6,6 +6,7 @@ import { listWings } from "@/lib/wingDesignations";
 import { ensureDesignationLevelColumn } from "@/lib/designationLevels";
 import { wingsMapFor } from "@/lib/designationWings";
 import { ensureContactWingsSchema } from "@/lib/contactWings";
+import { fixedLevelDesignations } from "@/lib/vacancyDesignationList";
 
 // CONTACTS → INCOMPLETE DESIGNATION — shared data layer.
 //
@@ -111,13 +112,28 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
   // a DB where the Wings feature hasn't been provisioned yet.
   const hasWing = (await query("SHOW COLUMNS FROM designations LIKE 'wing'")).length > 0;
   const wingSelect = hasWing ? "wing" : "NULL AS wing";
-  const levelDesignations = await query(
-    `SELECT id, name, ${wingSelect} FROM designations WHERE level = ? ${enabledClause} ORDER BY (sort_order IS NULL), sort_order, name`,
-    [level]
-  );
+  // Designation Vacancies passes fixedVacancyList: the level's designations then come from the FIXED vacancy list
+  // (lib/vacancyDesignationList — names, Wings and order frozen, independent of later Master Data changes), and holders are
+  // matched by those ids only. Everything else (this page, exports) keeps reading the live master.
+  const fixed = opts.fixedVacancyList ? await fixedLevelDesignations(level) : null;
+  const levelDesignations = fixed
+    ? fixed.map((d) => ({ id: d.id, name: d.name, wing: d.wing, wings: d.wings }))
+    : await query(
+      `SELECT id, name, ${wingSelect} FROM designations WHERE level = ? ${enabledClause} ORDER BY (sort_order IS NULL), sort_order, name`,
+      [level]
+    );
   // Every wing of each designation (one entry can carry many); `wing` stays the first.
-  const wingsMap = await wingsMapFor(levelDesignations);
-  for (const d of levelDesignations) d.wings = wingsMap.get(d.id) || [];
+  if (!fixed) {
+    const wingsMap = await wingsMapFor(levelDesignations);
+    for (const d of levelDesignations) d.wings = wingsMap.get(d.id) || [];
+  }
+  const fixedIds = fixed ? fixed.map((d) => Number(d.id)) : null;
+  // Holder join: the live master level, or (fixed list) exactly the fixed ids — a designation since renamed, moved to another
+  // level, disabled or deleted in the master still counts its holders for its fixed post.
+  const desJoin = (lvlSql) => (fixedIds
+    ? `LEFT JOIN designations d ON d.id = cd.designation_id`
+    : `JOIN designations d ON d.id = cd.designation_id AND d.level = ${lvlSql}`);
+  const fixedWhere = fixedIds ? (fixedIds.length ? ` AND cd.designation_id IN (${fixedIds.join(",")})` : " AND 1 = 0") : "";
   // Optional wing filter: a set of stored wing names. When present, only
   // designations belonging to one of those wings are kept (empty set of matches →
   // no rows, never "all"). The wing list itself always comes from Master Data.
@@ -191,10 +207,10 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
               lac.name AS assembly_name${effWingCol}
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
-         JOIN designations d ON d.id = cd.designation_id AND d.level = 'state'
+         ${desJoin("'state'")}
          LEFT JOIN workers w ON w.id = c.worker_id
          LEFT JOIN locations lac ON lac.id = c.assembly_id
-        WHERE 1=1 ${notWrong} ${scope.where}
+        WHERE 1=1${fixedWhere} ${notWrong} ${scope.where}
         ORDER BY c.person_name
         LIMIT ${MAX_PEOPLE}`,
       [...scope.params]
@@ -208,16 +224,16 @@ export async function fetchIncompleteDesignation(session, opts = {}) {
               c.lok_sabha_id AS raw_lok_sabha_id, c.district_id AS raw_district_id, c.assembly_id AS raw_assembly_id${effWingCol}
          FROM contacts c
          JOIN contact_designations cd ON cd.contact_id = c.id
-         JOIN designations d ON d.id = cd.designation_id AND d.level = ?
+         ${desJoin("?")}
          LEFT JOIN workers w ON w.id = c.worker_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations lls ON lls.id = ld.parent_id
          LEFT JOIN locations lz ON lz.id = lls.parent_id
          LEFT JOIN locations lac ON lac.id = c.assembly_id
-        WHERE 1=1 ${notWrong} ${scope.where}
+        WHERE 1=1${fixedWhere} ${notWrong} ${scope.where}
         ORDER BY c.person_name
         LIMIT ${MAX_PEOPLE}`,
-      [level, ...scope.params]
+      fixedIds ? [...scope.params] : [level, ...scope.params]
     );
   }
 

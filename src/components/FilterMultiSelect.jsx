@@ -8,8 +8,11 @@ import FloatingPopover from "@/components/FloatingPopover";
 // so it stays fully on-screen instead of clipping on mobile or inside a
 // scrolled filter bar. Shared by the Contacts page and the Administration
 // Contact Distribution panel — do not fork a second copy of this.
-export default function FilterMultiSelect({ label, items, selected, onChange, disabled, disabledLabel }) {
+export default function FilterMultiSelect({ label, items, selected, onChange, disabled, disabledLabel, searchable = false }) {
   const [open, setOpen] = useState(false);
+  // Optional search box (searchable): narrows the list by name; Select all then picks the matching items only.
+  const [q, setQ] = useState("");
+  const shown = searchable && q.trim() ? items.filter((i) => String(i.name || "").toLowerCase().includes(q.trim().toLowerCase())) : items;
   const triggerRef = useRef(null);
 
   const toggle = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
@@ -32,16 +35,21 @@ export default function FilterMultiSelect({ label, items, selected, onChange, di
       </button>
       <FloatingPopover anchorRef={triggerRef} open={open && !disabled} onClose={() => setOpen(false)} width={224} estimatedHeight={280}>
         <div className="max-h-72 overflow-y-auto p-2">
+          {searchable && (
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${label}…`} aria-label={`Search ${label}`}
+              data-testid="fms-search" autoFocus
+              className="w-full mb-2 px-2 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-[#164FA3]/30" />
+          )}
           <div className="flex items-center justify-between px-1 pb-2 mb-1 border-b border-gray-100">
-            <button type="button" onClick={() => onChange(items.map((i) => i.id))} className="text-[11px] font-semibold text-[#164FA3] hover:underline">Select all</button>
+            <button type="button" onClick={() => onChange(searchable && q.trim() ? [...new Set([...selected, ...shown.map((i) => i.id)])] : items.map((i) => i.id))} className="text-[11px] font-semibold text-[#164FA3] hover:underline">Select all</button>
             <button type="button" onClick={() => onChange([])} className="text-[11px] font-semibold text-gray-500 hover:underline">Clear</button>
           </div>
-          {items.length === 0 ? (
-            <div className="px-2 py-3 text-xs text-gray-400">No {label} available.</div>
-          ) : items.map((i, idx) => (
+          {shown.length === 0 ? (
+            <div className="px-2 py-3 text-xs text-gray-400">{q.trim() ? `No ${label} match "${q.trim()}".` : `No ${label} available.`}</div>
+          ) : shown.map((i, idx) => (
             <div key={i.id}>
               {/* Optional section heading (e.g. the designation Level) whenever an item's `group` changes. */}
-              {i.group && i.group !== items[idx - 1]?.group && (
+              {i.group && i.group !== shown[idx - 1]?.group && (
                 <div data-testid="fms-group" className="px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">{i.group}</div>
               )}
               <label className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm">

@@ -3,6 +3,7 @@ import { contactPhotoMap } from "@/lib/contactPhotos";
 import { buildVacancyDataset } from "@/lib/vacancyDashboard";
 import { normalizeIndianMobile } from "@/lib/phoneLinks";
 import { TOTAL_LEVELS, levelConfig } from "@/lib/designationApprovals";
+import { fixedDesignationNames } from "@/lib/vacancyDesignationList";
 
 // DESIGNATION VACANCIES — TREE MAP.
 //
@@ -150,10 +151,9 @@ export async function buildVacancyTree(session, { wing } = {}) {
 
   const photo = await contactPhotoMap(posts.flatMap((p) => (p.holders || []).map((h) => Number(h.contact_id))));
   const proposals = await loadProposals(posts.filter((p) => p.status !== "filled").map((p) => Number(p.designation_id)));
-  // The approved (English) name of each vacant post's designation, read from the Designation Master by id — used in the proposed
-  // person's WhatsApp message, so it never carries a translated / snapshot name.
-  const vacIds = [...new Set(posts.filter((p) => p.status !== "filled").map((p) => Number(p.designation_id)).filter((n) => Number.isInteger(n) && n > 0))];
-  const masterName = new Map(vacIds.length ? (await query(`SELECT id, name FROM designations WHERE id IN (${vacIds.map(() => "?").join(",")})`, vacIds)).map((d) => [Number(d.id), d.name]) : []);
+  // The name of each vacant post's designation as fixed in the Designation Vacancies list (by id) — used in the proposed person's
+  // WhatsApp message; Master Data renames after the list was fixed do not change it.
+  const masterName = await fixedDesignationNames();
 
   const nodes = new Map();
   const root = { id: "state", level: "state", level_label: levelLabel.state || "State", location_id: 0, name: "State Level", posts: [], children: [], parent: null };

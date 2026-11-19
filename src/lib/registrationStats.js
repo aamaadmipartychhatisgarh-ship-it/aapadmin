@@ -29,7 +29,9 @@ const PEOPLE_FROM = "FROM reg_people p LEFT JOIN reg_workers w ON w.id = p.worke
 
 // WHERE fragment shared by every people-side query.
 function peopleFilters({ campaignId, from, to, ward, workerId, personType, status, search, source, scope }) {
-  const cond = ["p.status = ?"];
+  // Worker Registration only: Voter Registration was removed, so every count, list, ranking and export reads WORKER records
+  // only. Old voter records stay in the database untouched — they are just no longer shown or counted.
+  const cond = ["p.status = ?", "p.person_type = 'worker'"];
   const params = [status || "active"];
   // Zone-wise access control: a caller is restricted to their territory's
   // assemblies (scope.cond); admins/supervisors pass an empty cond. Applied here so
@@ -138,7 +140,7 @@ function workerCreatedConds(col, createdFrom, createdTo) {
 // they are always computed over exactly the same workers. `workerIds` (from workerIdsForLocation) is the Lok Sabha / Assembly
 // filter: null = no location filter, [] = nothing matches.
 function workerRankingParts({ campaignId, from, to, ward, search, workerScope, workerIds, createdFrom, createdTo }) {
-  const on = ["p.worker_id = w.id", "p.status = 'active'"];
+  const on = ["p.worker_id = w.id", "p.status = 'active'", "p.person_type = 'worker'"];   // workers only (Voter Registration removed)
   const params = [];
   { const bd = regDayBounds(from, to);   // reporting days, 6 pm IST cut-off
     if (bd.start) { on.push("p.registered_at >= ?"); params.push(bd.start); }

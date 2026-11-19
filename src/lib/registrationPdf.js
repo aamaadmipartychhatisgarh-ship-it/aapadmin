@@ -20,7 +20,6 @@ const dash = (v) => (v == null || String(v).trim() === "" ? "—" : cleanPdfText
 const COLS = [
   { key: "n", label: "#", flex: 0.35, get: (r, i) => String(i + 1) },
   { key: "name", label: "Name", flex: 1.6, get: (r) => dash(r.name), bold: true },
-  { key: "type", label: "Type", flex: 0.75, get: (r) => (r.person_type === "worker" ? "Worker" : "Voter") },
   { key: "mobile", label: "Mobile", flex: 0.95, get: (r) => dash(r.mobile) },
   { key: "asm", label: "Constituency", flex: 1.1, get: (r) => dash(r.assembly_name) },
   { key: "ward", label: "Ward / Block", flex: 1.05, get: (r) => dash(r.ward_name || r.effective_ward || r.ward_number) },
@@ -64,7 +63,7 @@ function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols
   const al = (c) => (c.align ? { textAlign: c.align } : null);
   const T = (style, children, extra = {}) => React.createElement(Text, { style: [u, ...[].concat(style)], ...extra }, children);
   const footer = () => React.createElement(View, { style: styles.footer, fixed: true },
-    T([], "Aam Aadmi Party, Chhattisgarh — Worker & Voter Registration"),
+    T([], "Aam Aadmi Party, Chhattisgarh — Worker Registration"),
     T([], null, { render: ({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}` }));
   // Optional first section: overall totals in their own box, then the per-group (Lok Sabha / Assembly) counts. It is a page of its own,
   // so the worker table that follows keeps exactly its layout and pagination.
@@ -75,7 +74,7 @@ function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols
     criteria?.length ? React.createElement(View, { style: styles.criteria }, criteria.map((c, i) => T(styles.chip, cleanPdfText(c), { key: i }))) : null,
     // Overall totals - a separate summary section.
     React.createElement(View, { style: styles.statRow, wrap: false },
-      [["Overall Total Worker Count", summary.totals.new_workers], ["Overall Total Voter Count", summary.totals.voters], ["Total Registrations", summary.totals.total], [summary.groupLabel === "Assembly" ? "Assemblies" : `${summary.groupLabel}s`, summary.groups.length]].map(([l, v], i) =>
+      [["Overall Total Worker Count", summary.totals.new_workers], [summary.groupLabel === "Assembly" ? "Assemblies" : `${summary.groupLabel}s`, summary.groups.length]].map(([l, v], i) =>
         React.createElement(View, { key: i, style: styles.stat }, T(styles.statLabel, l), T(styles.statValue, Number(v).toLocaleString("en-IN"))))),
     React.createElement(View, { style: styles.headerRow, fixed: true }, summary.cols.map((c) => T([styles.hcell, { flex: c.flex }, al(c)].filter(Boolean), c.label, { key: c.key }))),
     summary.groups.length === 0
@@ -84,7 +83,7 @@ function RegistrationPdfDoc({ rows, title, subtitle, criteria, headerPhoto, cols
           summary.cols.map((c) => T([styles.cell, { flex: c.flex }, al(c), c.bold ? styles.bold : null].filter(Boolean), fit(c, c.get(g, i)), { key: c.key })))),
     // Grand-total row: the sum of the groups above (it equals the sum of the worker table that follows).
     summary.groups.length ? React.createElement(View, { style: styles.totalRow, wrap: false }, summary.cols.map((c) => T([styles.cell, { flex: c.flex }, al(c), styles.bold].filter(Boolean), c.total(summary.totals, summary.groups), { key: c.key }))) : null,
-    T(styles.note, `Workers and Voters are the registrations added by the users mapped to each ${summary.groupLabel}, i.e. the same figures as the Workers and Voters columns of the worker table that follows. Users = number of workers listed.`),
+    T(styles.note, `Workers are the registrations added by the users mapped to each ${summary.groupLabel}, i.e. the same figures as the Workers column of the worker table that follows. Users = number of workers listed.`),
     footer())] : [];
   return React.createElement(Document, { title },
     ...summaryPages,
@@ -112,8 +111,7 @@ export function uniqueById(rows) {
 
 export async function buildRegistrationPdf(rows, { title = "Registrations", criteria = [] } = {}) {
   const list = uniqueById(rows);
-  const workers = list.filter((r) => r.person_type === "worker").length;
-  const subtitle = `${list.length} record${list.length === 1 ? "" : "s"} (${workers} worker${workers === 1 ? "" : "s"} · ${list.length - workers} voter${list.length - workers === 1 ? "" : "s"}) · exported ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}`;
+  const subtitle = `${list.length} worker${list.length === 1 ? "" : "s"} · exported ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata" })}`;
   const headerPhoto = await loadPdfHeaderPhoto();
   return renderToBuffer(React.createElement(RegistrationPdfDoc, { rows: list, title, subtitle, criteria, headerPhoto }));
 }
@@ -154,8 +152,6 @@ export async function buildWorkerPerformancePdf(rows, { criteria = [], group = n
         { key: "label", label: groupLabel, flex: 3, bold: true, get: (g) => dash(g.label), total: () => "Overall Total" },
         { key: "karyakartas", label: "Users", flex: 1.1, align: "center", get: (g) => num(g.karyakartas), total: (t) => num(t.karyakartas) },
         { key: "workers", label: "Worker Count", flex: 1.1, align: "center", get: (g) => num(g.new_workers), total: (t) => num(t.new_workers) },
-        { key: "voters", label: "Voter Count", flex: 1.1, align: "center", get: (g) => num(g.voters), total: (t) => num(t.voters) },
-        { key: "total", label: "Total", flex: 1, align: "center", bold: true, get: (g) => num(g.total), total: (t) => num(t.total) },
       ],
     };
   }

@@ -16,7 +16,7 @@ import { hasApprovalStatusColumn } from "@/lib/contactExtras";
 //   contacts.source_registration_id  — UNIQUE: one Contact per Registration, ever
 //   reg_people.converted_contact_id / converted_at / converted_by
 // The Registration itself (and its history) is never deleted or altered otherwise.
-export const MIN_CONVERT_RATING = 6;
+export const MIN_CONVERT_RATING = 8;   // the top 3 ratings (8, 9, 10)
 
 export function isConvertEligible(p) {
   return !!p && p.person_type === "worker" && p.status === "active"
