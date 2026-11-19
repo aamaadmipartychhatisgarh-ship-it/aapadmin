@@ -10,6 +10,8 @@ import PersonDetailModal from "@/components/PersonDetailModal";
 import { usePageGuard } from "@/components/usePageGuard";
 import { isCaller } from "@/lib/permissions";
 import FilterMultiSelect from "@/components/FilterMultiSelect";
+import WingMultiSelect from "@/components/WingMultiSelect";
+import { wingShortLabel } from "@/lib/wingLabel";
 import { groupDesignationsForFilter, expandDesignationFilterIds } from "@/lib/designationFilterGroups";
 
 // Caller → Contacts: every contact of the caller's CURRENT Zone, read-only.
@@ -71,7 +73,10 @@ export default function ZoneContactsPage() {
   const [removing, setRemoving] = useState(false);
   // Wings (Master Data list, the same one the Contact section uses): filter by Wing, and add / remove a Wing on the selected contacts.
   const [wingList, setWingList] = useState([]);
-  const [wingF, setWingF] = useState("");
+  const wingOptions = useMemo(() => wingList.map((w) => ({ value: w.name, label: wingShortLabel(w.name, !!w.is_main) })), [wingList]);
+  const wingLabelOf = (name) => wingOptions.find((o) => o.value === name)?.label || wingShortLabel(name);
+  // Wing filter: the SAME multi-select + short labels (Main, SC, Youth, महिला …) as the Contacts page.
+  const [wingF, setWingF] = useState(() => new Set());
   const [wingPick, setWingPick] = useState("");
   const [wingBusy, setWingBusy] = useState(false);
   const [selectingAllMine, setSelectingAllMine] = useState(false);
@@ -93,7 +98,7 @@ export default function ZoneContactsPage() {
     if (assemblyId) p.set("assembly_ids", assemblyId);
     if (designationQueryIds.length) p.set("designation_ids", designationQueryIds.join(","));
     if (statusF) p.set("status", statusF);
-    if (wingF) p.set("wings", wingF);
+    if (wingF.size) p.set("wings", [...wingF].join(","));
     if (sortKey) { p.set("sort", sortKey); p.set("dir", sortDir); }
     p.set("page", String(page));
     p.set("page_size", String(pageSize));
@@ -228,8 +233,8 @@ export default function ZoneContactsPage() {
   }
   const selectedCount = new Set([...picked, ...pickedMine]).size;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const anyFilter = !!(search || lokSabhaId || districtId || assemblyId || designationIds.length || statusF || wingF);
-  const clear = () => { setSearchInput(""); setSearch(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setDesignationIds([]); setStatusF(""); setWingF(""); };
+  const anyFilter = !!(search || lokSabhaId || districtId || assemblyId || designationIds.length || statusF || wingF.size);
+  const clear = () => { setSearchInput(""); setSearch(""); setLokSabhaId(""); setDistrictId(""); setAssemblyId(""); setDesignationIds([]); setStatusF(""); setWingF(new Set()); };
   const sortBy = (k) => { if (!k) return; if (sortKey === k) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(k); setSortDir("asc"); } };
   const sel = "h-10 rounded-lg border border-gray-200 text-sm px-2 bg-white";
 
@@ -275,10 +280,9 @@ export default function ZoneContactsPage() {
           <div className="[&>button]:h-10 [&>button]:w-full [&>button]:justify-between" data-testid="zc-designation">
             <FilterMultiSelect label="designations" items={designationGroups} selected={designationIds} onChange={setDesignationIds} searchable />
           </div>
-          <select aria-label="Wing" data-testid="zc-wing-filter" className={sel} value={wingF} onChange={(e) => setWingF(e.target.value)}>
-            <option value="">All Wings</option>
-            {wingList.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}
-          </select>
+          <div data-testid="zc-wing-filter">
+            <WingMultiSelect options={wingOptions} value={wingF} onChange={setWingF} placeholder="All wings" className="w-full" />
+          </div>
           <select aria-label="Status" className={sel} value={statusF} onChange={(e) => setStatusF(e.target.value)}>
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
@@ -317,7 +321,7 @@ export default function ZoneContactsPage() {
           <span className="text-sm font-semibold text-gray-700">Wings:</span>
           <select aria-label="Wing to add or remove" data-testid="zc-wing-pick" className="h-9 rounded-lg border border-gray-200 text-sm px-2 bg-white" value={wingPick} onChange={(e) => setWingPick(e.target.value)}>
             <option value="">Choose a Wing…</option>
-            {wingList.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}
+            {wingOptions.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
           </select>
           <button type="button" onClick={() => changeWing("add")} disabled={!wingPick || !selectedCount || wingBusy} data-testid="zc-wing-add"
             className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-[#164FA3] text-white hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -369,7 +373,7 @@ export default function ZoneContactsPage() {
                   </td>
                   <td className="px-3 py-2.5 font-mono text-xs text-gray-700">{c.phone_number}</td>
                   <td className="px-3 py-2.5 text-gray-700">{c.designation_name || "—"}</td>
-                  <td className="px-3 py-2.5 text-gray-600" data-testid="zc-wings">{c.wings || "—"}</td>
+                  <td className="px-3 py-2.5 text-gray-600" data-testid="zc-wings">{c.wings ? String(c.wings).split(",").map((w) => wingLabelOf(w.trim())).join(", ") : "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.lok_sabha_name || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.district_name || "—"}</td>
                   <td className="px-3 py-2.5 text-gray-600">{c.assembly_name || "—"}</td>
