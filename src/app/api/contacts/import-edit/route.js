@@ -80,7 +80,7 @@ export async function POST(req) {
     }
 
     const out = parsed.rows.slice(0, PREVIEW_ROWS).map((r) => ({
-      row: r.row, rows: r.merged_rows || null, status: r.status, contact_id: r.contact_id, name: r.name, changes: r.changes, errors: r.errors,
+      row: r.row, rows: r.merged_rows || null, notes: r.notes || [], status: r.status, contact_id: r.contact_id, name: r.name, changes: r.changes, errors: r.errors,
     }));
     return NextResponse.json({
       dry_run: dryRun,

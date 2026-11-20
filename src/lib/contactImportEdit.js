@@ -9,6 +9,8 @@ import { EDUCATION_LEVELS } from "@/lib/qualificationOptions";
 import { currentRowsFor, validateRows } from "@/lib/contactDesignationRows";
 import { sameRows } from "@/lib/designationRows";
 import { assignSingleContact } from "@/lib/contactAssign";
+import { wingsMapFor } from "@/lib/designationWings";
+import { wingShortLabel } from "@/lib/wingLabel";
 
 // "Import Edit" — update EXISTING contacts in bulk from a spreadsheet. It never
 // inserts a contact. A row is matched to ONE existing contact by Contact ID (preferred)
@@ -122,7 +124,7 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
   const [districtRows, assemblyRows, desigRows, zoneRows, wardRows, callerRows] = await Promise.all([
     query("SELECT id, name, parent_id FROM locations WHERE type = 'district'"),
     query("SELECT id, name, parent_id FROM locations WHERE type = 'assembly'"),
-    query("SELECT id, name FROM designations"),
+    query("SHOW COLUMNS FROM designations LIKE 'wing'").then((c) => query(`SELECT id, name, ${c.length ? "wing" : "NULL AS wing"} FROM designations`)),
     query("SELECT id, name FROM locations WHERE type = 'zone'"),
     query("SELECT id, name, parent_id FROM locations WHERE type = 'ward'"),
     editable.includes("assigned_caller") ? query("SELECT id, username FROM users WHERE role = 'caller' AND (is_active IS NULL OR is_active = 1)") : Promise.resolve([]),
@@ -147,7 +149,25 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
   const zoneName = new Map(zoneRows.map((r) => [r.id, r.name]));
   const districtLs = new Map(districtRows.map((r) => [r.id, lsZone.has(r.parent_id) ? r.parent_id : null]));
   const assemblyName = new Map(assemblyRows.map((r) => [r.id, r.name]));
-  const desigByName = new Map(desigRows.map((r) => [String(r.name).trim().toLowerCase(), r]));
+  // Names are matched case- and spacing-insensitively ("State  General Secretary" = "State General Secretary").
+  const nameKey = (x) => String(x ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  const desigByName = new Map(desigRows.map((r) => [nameKey(r.name), r]));
+  // Wings: the master's Wings, read by full name, by the short label the Contact List / export show ("Youth", "Main",
+  // "Mahila"), with or without "Wing" — so a file exported from Contacts imports back as it is.
+  const wingMasterRows = await query("SELECT name, is_main FROM wings").catch(() => []);
+  const mainWingName = (wingMasterRows.find((w) => Number(w.is_main) === 1) || {}).name || "Main Organisation";
+  const wingByAny = new Map();
+  for (const w of wingMasterRows) {
+    const isMainW = Number(w.is_main) === 1;
+    for (const k of [w.name, wingShortLabel(w.name, isMainW), String(w.name).replace(/\s*wing$/i, ""), `${wingShortLabel(w.name, isMainW)} Wing`]) {
+      if (k && !wingByAny.has(nameKey(k))) wingByAny.set(nameKey(k), w.name);
+    }
+  }
+  for (const k of ["main", "main organisation", "main organization", "main wing"]) if (!wingByAny.has(k)) wingByAny.set(k, mainWingName);
+  const canonWing = (w) => wingByAny.get(nameKey(w)) || String(w || "").trim();
+  const isMainName = (w) => nameKey(canonWing(w)) === nameKey(mainWingName);
+  // Each designation's master Wing(s) (a designation of no Wing = Main).
+  const desigWings = await wingsMapFor(desigRows);
   const desigKnown = new Set(desigByName.keys());
   const desigNameById = new Map(desigRows.map((r) => [r.id, r.name]));
 
@@ -262,6 +282,8 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
   }
   // Current designation names per matched contact (for from → to display + no-change test).
   const curDesig = new Map();
+  const curShown = new Map();   // contact id -> designation names as the Contact List / export show them
+  const curDesigRowsFor = new Set(); // contacts that hold designation rows of their own (contact_designations)
   const matchedIds = new Set([...liveIds.keys(), ...[...byPhone.values()].flat().map((r) => r.id)]);
   if (matchedIds.size && editable.includes("designation")) {
     const mids = [...matchedIds];
@@ -269,7 +291,7 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
       const chunk = mids.slice(i, i + 500);
       // eslint-disable-next-line no-await-in-loop
       const rs = await query(`SELECT cd.contact_id, d.id, d.name FROM contact_designations cd JOIN designations d ON d.id = cd.designation_id WHERE cd.contact_id IN (${chunk.map(() => "?").join(",")}) ORDER BY cd.id`, chunk).catch(() => []);
-      for (const r of rs) { if (!curDesig.has(r.contact_id)) curDesig.set(r.contact_id, []); curDesig.get(r.contact_id).push({ id: r.id, name: r.name }); }
+      for (const r of rs) { curDesigRowsFor.add(r.contact_id); if (!curDesig.has(r.contact_id)) curDesig.set(r.contact_id, []); curDesig.get(r.contact_id).push({ id: r.id, name: r.name }); }
     }
     // A contact with no designation-set rows but a legacy primary designation_id IS holding
     // that designation (the Contact List / export show it) — treat it as the current value so
@@ -277,6 +299,21 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
     const desigById = new Map(desigRows.map((d) => [d.id, d]));
     for (const c of [...liveIds.values(), ...[...byPhone.values()].flat()]) {
       if (!curDesig.has(c.id) && c.designation_id && desigById.has(c.designation_id)) curDesig.set(c.id, [{ id: c.designation_id, name: desigById.get(c.designation_id).name }]);
+    }
+    // What the Contact List / export SHOW as the contact's designation(s): its designation rows, else the old worker
+    // "position" text, else the legacy designation (the same COALESCE the export uses).
+    for (let i = 0; i < mids.length; i += 500) {
+      const chunk = mids.slice(i, i + 500);
+      // eslint-disable-next-line no-await-in-loop
+      const rs = await query(
+        `SELECT c.id, COALESCE(NULLIF(TRIM(w.position), ''), dsg.name) AS legacy FROM contacts c
+           LEFT JOIN workers w ON w.id = c.worker_id LEFT JOIN designations dsg ON dsg.id = c.designation_id
+          WHERE c.id IN (${chunk.map(() => "?").join(",")})`, chunk
+      ).catch(() => []);
+      for (const r of rs) {
+        const own = (curDesig.get(r.id) || []).map((d) => d.name);
+        curShown.set(r.id, own.length ? own : splitNameList(r.legacy || "", desigKnown));
+      }
     }
   }
 
@@ -365,7 +402,15 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
         if (!v) continue;
         if (isClear(v)) { rec.errors.push("Designation cannot be cleared"); continue; }
         const names = [...new Set(splitNameList(v, desigKnown))];
-        const found = names.map((n) => desigByName.get(n.toLowerCase()));
+        // The cell says exactly what the contact already shows (as the export writes it — incl. an old worker "position"
+        // that is not a Master Data designation): nothing to change, never an error.
+        // A contact with no designation rows of its own (an old worker "position" / legacy designation): a cell that says exactly
+        // what the Contact List shows for it is "no change" — never an error, never a phantom new designation.
+        if (!curDesigRowsFor.has(cur.id)) {
+          const shown = (curShown.get(cur.id) || []).map(nameKey);
+          if (shown.length && names.length === shown.length && names.every((n) => shown.includes(nameKey(n)))) continue;
+        }
+        const found = names.map((n) => desigByName.get(nameKey(n)));
         const missing = names.filter((_, i) => !found[i]);
         if (missing.length) { rec.errors.push(`Unknown designation: ${missing.join(", ")}`); continue; }
         const idsNew = found.map((d) => d.id);
@@ -376,17 +421,33 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
         let target;
         if (wcell) {
           if (isClear(wcell)) { rec.errors.push("Wing cannot be cleared here — set it to Main Organisation instead"); continue; }
-          const wl = wcell.split(/[;,|]/).map((x) => x.trim()).filter((x, i, arr) => x !== "" || i < names.length);
-          if (wl.length < names.length) { rec.errors.push(`Wing list has ${wl.length} entr${wl.length === 1 ? "y" : "ies"} but there ${names.length === 1 ? "is 1 designation" : `are ${names.length} designations`} — give one Wing per designation (Main Organisation for none)`); continue; }
-          const mainLc = "main organisation";
-          const rowsT = idsNew.map((id, i) => ({ designation_id: id, wing: wl[i] && wl[i].toLowerCase() !== mainLc ? wl[i] : "" }));
-          const extras = wl.slice(names.length).filter(Boolean).filter((w) => w.toLowerCase() !== mainLc).map((w) => ({ designation_id: null, wing: w }));
+          let wl = wcell.split(/[;,|]/).map((x) => x.trim()).filter((x, i, arr) => x !== "" || i < names.length).map((x) => (x ? canonWing(x) : x));
+          const unknownW = wl.filter((x) => x && !wingByAny.has(nameKey(x)));
+          if (unknownW.length) { rec.errors.push(`"${unknownW[0]}" is not a Wing in Master Data.`); continue; }
+          // One Wing per designation, in order — OR (as the Contact export writes it) each Wing listed once: every designation then
+          // takes the listed Wing it belongs to in the master; Wings no designation takes are the contact's own Wing tags.
+          let perDes;
+          const fits = (id, w) => { const dw = (desigWings.get(id) || []).filter(Boolean); return dw.length ? dw.some((x) => nameKey(x) === nameKey(w)) : isMainName(w); };
+          if (wl.length >= names.length && idsNew.every((id, i) => !wl[i] || fits(id, wl[i]))) perDes = wl.slice(0, names.length);
+          else {
+            const listed = [...new Set(wl.filter(Boolean))];
+            perDes = idsNew.map((id) => { const m = listed.filter((w) => fits(id, w)); return m.length === 1 ? m[0] : ""; });
+            const used = new Set(perDes.filter(Boolean).map(nameKey));
+            wl = [...perDes, ...listed.filter((w) => !used.has(nameKey(w)))];
+            if (perDes.some((w, i) => !w && (desigWings.get(idsNew[i]) || []).filter(Boolean).length > 1)) {
+              rec.errors.push("Give one Wing per designation, in the same order (a designation here belongs to several Wings)"); continue;
+            }
+          }
+          const rowsT = idsNew.map((id, i) => ({ designation_id: id, wing: perDes[i] && !isMainName(perDes[i]) ? perDes[i] : "" }));
+          const extras = wl.slice(names.length).filter(Boolean).filter((w) => !isMainName(w)).map((w) => ({ designation_id: null, wing: w }));
           target = [...rowsT, ...(extras.length ? extras : curRows.filter((r) => !r.designation_id))];
         } else {
           // keep each retained designation's current Wing; keep standalone Wing tags
           target = [...idsNew.map((id) => ({ designation_id: id, wing: curRows.find((r) => r.designation_id === id)?.wing || "" })), ...curRows.filter((r) => !r.designation_id)];
         }
-        if (sameRows(target, curRows)) continue; // same set + Wings
+        // Same set + Wings (Main written as its name or left blank is the same Main).
+        const mainBlank = (rows) => rows.map((r) => ({ ...r, wing: r.wing && isMainName(r.wing) ? "" : r.wing }));
+        if (sameRows(mainBlank(target), mainBlank(curRows))) continue;
         const vr = await validateRows(target, curRows);
         if (vr.error) { rec.errors.push(vr.error); continue; }
         newDesigIds = idsNew;
@@ -445,7 +506,8 @@ export async function parseImportEdit(rows, scope = null, opts = {}) {
         if (sr.unchanged) continue;
         if (sr.error) { rec.errors.push(sr.error); continue; }
         if (Number(cur.is_completed || 0) === sr.is_completed) continue;
-        if (!opts.canSetStatus) { rec.errors.push("You are not allowed to change a contact's Status"); continue; }
+        // Not allowed to change it: the Status is left as it is (a note, never an error that blocks the row's other updates).
+        if (!opts.canSetStatus) { (rec.notes ||= []).push(`Status not changed (${cur.is_completed ? "Done" : "Pending"} kept) — only an Admin can change Status`); continue; }
         rec.update.is_completed = sr.is_completed;
         rec.changes.push({ field: "is_completed", label: LABEL.is_completed, from: cur.is_completed ? "Done" : "Pending", to: sr.is_completed ? "Done" : "Pending" });
       } else if (f === "zone" || f === "lok_sabha" || f === "block") {

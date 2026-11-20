@@ -156,6 +156,7 @@ export default function ImportEditModal({ onClose, onApplied }) {
                           </ul>
                         )}
                         {(r.errors || []).map((e, i) => <div key={i} className="mt-0.5 text-red-600">{e}</div>)}
+                        {(r.notes || []).map((e, i) => <div key={`n${i}`} className="mt-0.5 text-amber-700">{e}</div>)}
                       </div>
                     );
                   })}
