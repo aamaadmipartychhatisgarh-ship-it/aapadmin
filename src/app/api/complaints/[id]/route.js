@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
-import { isOversight, isCaller, scopeFilterSync } from "@/lib/permissions";
+import { isOversight, isCaller } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureComplaintColumns } from "../route";
 import { resolveComplaintLocation, assembliesForPhones } from "@/lib/complaintWorker";
 import { phoneKey } from "@/lib/phone";
+import { complaintScope, complaintVisible, assignableComplaintUsers, logComplaintAssignment } from "@/lib/complaintAccess";
 
 // GET /api/complaints/[id] — ONE complaint with every detail, looked up by its
 // unique id (never by name, so duplicate complainant names cannot open the wrong
@@ -23,11 +24,15 @@ export async function GET(_req, { params }) {
     const { id } = await params;
     const cid = Number(id);
     if (!Number.isInteger(cid) || cid <= 0) return NextResponse.json({ message: "Complaint not found." }, { status: 404 });
-    const scope = scopeFilterSync(session.user, "c", { cols: ["district_id", "assembly_id"] });
+    // Caller → only a complaint assigned to them (session user id); others → their geographic scope. Anything else: not found.
+    const scope = complaintScope(session, "c");
     const [c] = await query(
       `SELECT c.*, ld.name AS district_name, la.name AS assembly_name, t.name AS team_name, dg.name AS designation_name,
+              au.username AS assigned_user_name, cu.username AS created_by_name,
               TIMESTAMPDIFF(HOUR, c.created_at, NOW()) AS age_hours
          FROM complaints c
+         LEFT JOIN users au ON au.id = c.assigned_user_id
+         LEFT JOIN users cu ON cu.id = c.created_by_user_id
          LEFT JOIN locations ld ON ld.id = c.district_id
          LEFT JOIN locations la ON la.id = c.assembly_id
          LEFT JOIN teams t ON t.id = c.assigned_team_id
@@ -54,11 +59,7 @@ export async function GET(_req, { params }) {
 // Seeing a complaint (list/search) never grants the right to act on it: every change re-checks, on the server and by the
 // complaint's own id, that it lies inside this user's geographic scope - the same scope the list and GET apply.
 async function inScope(session, id) {
-  const cid = Number(id);
-  if (!Number.isInteger(cid) || cid <= 0) return false;
-  const scope = scopeFilterSync(session.user, "c", { cols: ["district_id", "assembly_id"] });
-  const [r] = await query(`SELECT c.id FROM complaints c WHERE c.id = ? ${scope.where || ""} LIMIT 1`, [cid, ...scope.params]);
-  return !!r;
+  return complaintVisible(session, id);   // the same rule as the list (lib/complaintAccess)
 }
 
 export async function PUT(req, { params }) {
@@ -74,6 +75,23 @@ export async function PUT(req, { params }) {
     const fields = ["citizen_name", "citizen_phone", "citizen_address", "district_id", "status", "assigned_team_id", "resolution_notes", "type", "description", "designation_id"];
     const sets = [], vals = [];
     for (const f of fields) if (f in d) { sets.push(`${f} = ?`); vals.push(d[f] === "" ? null : d[f]); }
+    // Assign / reassign / unassign to a Caller (Admin / Supervisor only — this route is oversight-only). The target must be an
+    // active Caller, checked here by id; the change is recorded in the assignment history.
+    let assignChange = null;
+    if ("assigned_user_id" in d) {
+      const to = d.assigned_user_id === "" || d.assigned_user_id == null ? null : Number(d.assigned_user_id);
+      if (to !== null) {
+        if (!Number.isInteger(to) || to <= 0) return NextResponse.json({ message: "Invalid user." }, { status: 400 });
+        const ok = (await assignableComplaintUsers()).some((u) => Number(u.id) === to);
+        if (!ok) return NextResponse.json({ message: "Complaints can only be assigned to an active Caller." }, { status: 400 });
+      }
+      const [cur] = await query("SELECT assigned_user_id FROM complaints WHERE id = ?", [id]);
+      const from = cur?.assigned_user_id ?? null;
+      if (Number(from || 0) !== Number(to || 0)) {
+        sets.push("assigned_user_id = ?", "assigned_at = NOW()"); vals.push(to);
+        assignChange = { from, to };
+      }
+    }
     // The Assembly follows the Worker behind the complaint's mobile number. It is
     // re-derived ONLY when the phone number actually changes (or a worker is chosen
     // explicitly), so editing any other field never alters the saved Assembly, and a
@@ -89,9 +107,11 @@ export async function PUT(req, { params }) {
       }
     }
     if (d.status === "resolved" || d.status === "closed") sets.push("resolved_at = NOW()");
+    if (!sets.length && "assigned_user_id" in d) return NextResponse.json({ ok: true, unchanged: true });   // same assignee again
     if (!sets.length) return NextResponse.json({ message: "No fields" }, { status: 400 });
     vals.push(id);
     await query(`UPDATE complaints SET ${sets.join(", ")} WHERE id = ?`, vals);
+    if (assignChange) await logComplaintAssignment(Number(id), assignChange.from, assignChange.to, Number(session.user.id)).catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("complaint PUT error:", err);

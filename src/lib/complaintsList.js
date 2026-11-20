@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { scopeFilterSync } from "@/lib/permissions";
+import { complaintScope } from "@/lib/complaintAccess";
 import { assembliesForPhones } from "@/lib/complaintWorker";
 import { phoneKey } from "@/lib/phone";
 
@@ -36,7 +36,8 @@ export function complaintSearchClause(raw) {
 }
 
 export async function loadComplaintRows(session, searchParams) {
-  const scope = scopeFilterSync(session.user, "c", { cols: ["district_id", "assembly_id"] });
+  // Caller → ONLY complaints assigned to their own user id (from the session); everyone else → their usual geographic scope.
+  const scope = complaintScope(session, "c");
   const statusF = searchParams.get("status");
   const typeF = searchParams.get("type");
   const districtId = searchParams.get("district_id");
@@ -53,8 +54,11 @@ export async function loadComplaintRows(session, searchParams) {
 
   const rows = await query(
     `SELECT c.*, ld.name AS district_name, la.name AS assembly_name, t.name AS team_name, dg.name AS designation_name,
+            au.username AS assigned_user_name, cu.username AS created_by_name,
             TIMESTAMPDIFF(HOUR, c.created_at, NOW()) AS age_hours
        FROM complaints c
+       LEFT JOIN users au ON au.id = c.assigned_user_id
+       LEFT JOIN users cu ON cu.id = c.created_by_user_id
        LEFT JOIN locations ld ON ld.id = c.district_id
        LEFT JOIN locations la ON la.id = c.assembly_id
        LEFT JOIN teams t ON t.id = c.assigned_team_id

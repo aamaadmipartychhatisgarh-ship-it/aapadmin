@@ -24,6 +24,7 @@ const STATUS = {
   resolved: "bg-emerald-100 text-emerald-700", closed: "bg-gray-100 text-gray-500",
 };
 const STATUS_OPTS = ["open", "in_progress", "resolved", "closed"];
+const fmtDt = (v) => (v ? new Date(v).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
 // Caller-facing complaints page: log a complaint heard during a call and
 // track its status. Resolution is handled by admins on the admin page.
@@ -88,7 +89,7 @@ function Body({ previewingCaller, viewAsCaller }) {
       <div className="flex justify-between items-end gap-4 flex-wrap">
         <div>
           <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Complaints</h1>
-          <p className="text-gray-500 mt-2 font-medium">Log citizen civic issues you hear on calls.</p>
+          <p className="text-gray-500 mt-2 font-medium">Log citizen civic issues you hear on calls. This list shows only the complaints assigned to you.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <CommonPrintButton title="Complaints" />
@@ -142,7 +143,7 @@ function Body({ previewingCaller, viewAsCaller }) {
         {loading ? (
           <div className="p-12 text-center text-gray-400"><Loader2 className="inline animate-spin" /></div>
         ) : data.complaints.length === 0 ? (
-          <div className="p-12 text-center text-gray-400"><MessageSquare size={36} className="mx-auto text-gray-300 mb-3" />No complaints yet. Log the first one.</div>
+          <div className="p-12 text-center text-gray-400"><MessageSquare size={36} className="mx-auto text-gray-300 mb-3" />{filter || search || typeFilter || districtId ? "No complaints assigned to you match these filters." : "No complaints are assigned to you yet. Complaints you log, or that are assigned to you, appear here."}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -153,8 +154,12 @@ function Body({ previewingCaller, viewAsCaller }) {
                   <th className="px-4 py-3 font-semibold text-gray-600">Designation</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
+                  <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Description</th>
                   <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
+                  <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
+                  <th className="px-4 py-3 font-semibold text-gray-600">Registered</th>
+                  <th className="px-4 py-3 font-semibold text-gray-600">Last Updated</th>
                 </tr>
               </thead>
               <tbody>
@@ -169,8 +174,12 @@ function Body({ previewingCaller, viewAsCaller }) {
                       <td className="px-4 py-3 text-gray-600">{cm.designation_name || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600">{cm.district_name || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{cm.assembly_name || "—"}</td>
+                      <td className="px-4 py-3 text-gray-600">{(TYPE_META[cm.type] || TYPE_META.other).label}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-xs"><div className="line-clamp-2 whitespace-pre-wrap">{cm.description || <span className="text-gray-300">—</span>}</div></td>
                       <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span></td>
+                      <td className="px-4 py-3 text-gray-600" data-testid="cm-assigned">{cm.assigned_user_name || "—"}</td>
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap text-xs">{fmtDt(cm.created_at)}</td>
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap text-xs">{fmtDt(cm.updated_at || cm.created_at)}</td>
                     </tr>
                 ))}
               </tbody>

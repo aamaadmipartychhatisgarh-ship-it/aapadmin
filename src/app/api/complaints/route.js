@@ -8,6 +8,7 @@ import { createHash } from "crypto";
 import { phoneKey, last10Sql } from "@/lib/phone";
 import { resolveComplaintLocation, contactDesignationId } from "@/lib/complaintWorker";
 import { loadComplaintRows } from "@/lib/complaintsList";
+import { ensureComplaintAssignmentSchema, isCallerOnly, logComplaintAssignment } from "@/lib/complaintAccess";
 
 // Callers log complaints (heard live on calls); oversight roles review and
 // monitor them. Both can view (callers stay geo-scoped).
@@ -45,6 +46,8 @@ export async function ensureComplaintColumns() {
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complaints' AND COLUMN_NAME = 'citizen_address'`
     );
     if (Number(addr[0]?.n || 0) === 0) await query("ALTER TABLE complaints ADD COLUMN citizen_address TEXT NULL");
+    // Assigned user + created by + last updated + assignment history (lib/complaintAccess).
+    await ensureComplaintAssignmentSchema();
     ensuredDesignation = true;
   } catch (e) {
     console.error("[complaints] ensureComplaintColumns:", e?.message || e);
@@ -82,7 +85,10 @@ export async function GET(req) {
        FROM complaints c ${scope.where ? `WHERE ${scope.where.replace(/^AND /, "")}` : ""}`,
       scope.params
     ).then((r) => [r]);
-    const byType = await query(`SELECT type, COUNT(*) AS n FROM complaints GROUP BY type`);
+    // A Caller's type breakdown covers only their own complaints (same rule as the list); other roles keep the overall one.
+    const byType = isCallerOnly(session)
+      ? await query(`SELECT type, COUNT(*) AS n FROM complaints c WHERE 1=1 ${scope.where} GROUP BY type`, scope.params)
+      : await query(`SELECT type, COUNT(*) AS n FROM complaints GROUP BY type`);
     return NextResponse.json({ complaints, counts, byType, slaHours: COMPLAINT_SLA_HOURS });
   } catch (err) {
     console.error("complaints GET error:", err);
@@ -124,8 +130,11 @@ export async function POST(req) {
     const pKey = phoneKey(d.citizen_phone);
     const subject = normSubject(d.description);
     const params = [d.citizen_name, d.citizen_phone || null, String(d.citizen_address || "").trim().slice(0, 1000) || null, type, d.description || null, designationId, d.district_id || loc.district_id || null, loc.assembly_id];
-    const insertSql = `INSERT INTO complaints (citizen_name, citizen_phone, citizen_address, type, description, designation_id, district_id, assembly_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`;
+    // The Caller who logs it is its creator and its assigned user (Admins / Supervisors can reassign it later).
+    const me = Number(session.user.id);
+    params.push(me, me);
+    const insertSql = `INSERT INTO complaints (citizen_name, citizen_phone, citizen_address, type, description, designation_id, district_id, assembly_id, status, created_by_user_id, assigned_user_id, assigned_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, NOW(), NOW())`;
 
     // Check + insert happen under a per-combination database lock, so two simultaneous submissions of the same
     // combination are serialised: the second one sees the first and is refused. Other combinations never wait.
@@ -155,6 +164,7 @@ export async function POST(req) {
     } else {
       res = await query(insertSql, params);
     }
+    await logComplaintAssignment(res.insertId, null, me, me).catch(() => {});
     return NextResponse.json({ id: res.insertId, assembly_id: loc.assembly_id }, { status: 201 });
   } catch (err) {
     console.error("complaints POST error:", err);

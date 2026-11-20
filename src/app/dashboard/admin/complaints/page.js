@@ -44,6 +44,7 @@ export default function Page() {
 function Body() {
   const [data, setData] = useState({ complaints: [], counts: {}, byType: [] });
   const [loading, setLoading] = useState(true);
+  const [assignees, setAssignees] = useState([]);   // active Callers a complaint can be assigned to
   const [filter, setFilter] = useState("");
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -54,7 +55,15 @@ function Body() {
 
   useEffect(() => {
     fetch("/api/locations?type=district").then((r) => r.json()).then((d) => setDistricts(d.locations || []));
+    fetch("/api/complaints/assignees", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { users: [] })).then((d) => setAssignees(d.users || [])).catch(() => {});
   }, []);
+  // Assign / reassign / unassign a complaint to a Caller (they then see it in their own Complaint List; the previous Caller no
+  // longer does). The server checks the target is an active Caller and records the change in the assignment history.
+  async function assignTo(id, userId) {
+    const r = await fetch(`/api/complaints/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assigned_user_id: userId || null }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.message || "Could not assign this complaint."); }
+    load();
+  }
 
   useEffect(() => {
     const t = setTimeout(load, search ? 300 : 0);
@@ -161,6 +170,7 @@ function Body() {
                 <th className="px-4 py-3 font-semibold text-gray-600">District</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Assembly</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
+                <th className="px-4 py-3 font-semibold text-gray-600">Assigned To</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Update</th>
               </tr>
             </thead>
@@ -182,6 +192,15 @@ function Body() {
                     <td className="px-4 py-3">
                       <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span>
                       <div className="mt-1"><SlaBadge cm={cm} /></div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <select value={cm.assigned_user_id || ""} onChange={(e) => assignTo(cm.id, e.target.value)} aria-label={`Assign complaint #${cm.id}`} data-testid="cm-assign"
+                        className="text-xs border border-gray-200 rounded px-2 py-1 bg-white max-w-[10rem]">
+                        <option value="">Unassigned</option>
+                        {cm.assigned_user_id && !assignees.some((u) => Number(u.id) === Number(cm.assigned_user_id)) && <option value={cm.assigned_user_id}>{cm.assigned_user_name || `User #${cm.assigned_user_id}`}</option>}
+                        {assignees.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+                      </select>
+                      {cm.updated_at && <div className="text-[10px] text-gray-400 mt-1">Updated {new Date(cm.updated_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short" })}</div>}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">

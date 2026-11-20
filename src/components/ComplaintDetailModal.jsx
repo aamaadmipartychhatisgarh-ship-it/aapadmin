@@ -87,7 +87,9 @@ export default function ComplaintDetailModal({ id, onClose }) {
               <Field label="Assembly">{c.assembly_name}</Field>
               <Field label="District">{c.district_name}</Field>
               <Field label="Department / Assigned team">{c.team_name}</Field>
+              <Field label="Assigned to">{c.assigned_user_name}</Field>
               <Field label="Logged on">{fmt(c.created_at)}</Field>
+              <Field label="Last updated">{fmt(c.updated_at || c.created_at)}</Field>
               <Field label="Resolved on">{fmt(c.resolved_at)}</Field>
             </div>
 
