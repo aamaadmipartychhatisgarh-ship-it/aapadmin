@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
 import { defaultPeopleSort, getPeoplePage } from "@/lib/registrationStats";
 import { peopleScopeCond } from "@/lib/registrationScope";
+import { runAutoConvertBackfill } from "@/lib/registrationConvert";
 
 // The full registration list — "complete details of which worker added which
 // person". Every row carries its collecting worker's name and User ID, so
@@ -14,6 +15,9 @@ export async function GET(req) {
   try {
     const { session, error } = await requireRegistrationAccess();
     if (error) return error;
+    // One-time backfill of automatic Contact conversion (Rank >= 10) for workers registered before it existed — runs once,
+    // resumable; waited for briefly so the list already shows the result, never longer than a few seconds.
+    await Promise.race([runAutoConvertBackfill(), new Promise((r) => setTimeout(r, 8000))]);
     const { searchParams } = new URL(req.url);
     const filters = parseRegFilters(searchParams);
     if (filters.dateError) return NextResponse.json({ message: filters.dateError }, { status: 400, headers: NO_STORE });

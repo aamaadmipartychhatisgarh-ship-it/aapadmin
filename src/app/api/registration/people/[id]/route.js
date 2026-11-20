@@ -5,6 +5,7 @@ import { canManageRegistration } from "@/lib/permissions";
 import { assemblyInCallerScope } from "@/lib/registrationScope";
 import { ensureRegistrationSchema, normalizeMobile, PERSON_TYPES, PERSON_STATUSES } from "@/lib/registrationSchema";
 import { isAssembly, blockBelongsToAssembly } from "@/lib/politicalLocation";
+import { afterRegistrationSaved } from "@/lib/registrationConvert";
 
 // Correct or triage one registration. Marking a row 'duplicate' / 'rejected'
 // removes it from every count and ranking without erasing the record — the
@@ -34,6 +35,7 @@ export async function PATCH(req, { params }) {
     }
     const d = await req.json().catch(() => null);
     if (!d || typeof d !== "object") return NextResponse.json({ message: "Invalid request." }, { status: 400, headers: NO_STORE });
+    const [before] = await query("SELECT * FROM reg_people WHERE id = ?", [id]);   // for the linked-Contact partial sync
 
     const sets = [];
     const vals = [];
@@ -128,14 +130,18 @@ export async function PATCH(req, { params }) {
     // The Worker Rating is mandatory for a worker (sent value, else the saved one).
     const [cur3] = await query("SELECT worker_rating FROM reg_people WHERE id = ?", [id]);
     const effRating = d.worker_rating !== undefined ? (d.worker_rating === null || d.worker_rating === "" ? null : parseInt(d.worker_rating, 10)) : cur3?.worker_rating;
-    if (effType === "worker" && !(Number(effRating) >= 1 && Number(effRating) <= 10)) {
+    // Mandatory = a Rank is set (1 or more). A new value is still limited to 1-10 above; a stored Rank above 10 stays editable.
+    if (effType === "worker" && !(Number(effRating) >= 1)) {
       return NextResponse.json({ message: "Please select the Worker Rating (1 to 10) — it is required." }, { status: 400, headers: NO_STORE });
     }
 
     await query(`UPDATE reg_people SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);
+    // Linked Contact kept in step (changed, non-blank fields only); a Rank raised to 10+ (or a record made counted again)
+    // is converted automatically by the backend.
+    const auto = await afterRegistrationSaved(Number(id), { before, userId: session.user.id, source: "admin_edit" });
     const [person] = await query(`SELECT * FROM reg_people WHERE id = ?`, [id]);
     if (!person) return NextResponse.json({ message: "Not found." }, { status: 404, headers: NO_STORE });
-    return NextResponse.json({ person }, { headers: NO_STORE });
+    return NextResponse.json({ person, auto_convert: auto?.outcome || null }, { headers: NO_STORE });
   } catch (e) {
     console.error("[registration] person PATCH error:", e);
     return NextResponse.json({ message: "Internal server error" }, { status: 500, headers: NO_STORE });

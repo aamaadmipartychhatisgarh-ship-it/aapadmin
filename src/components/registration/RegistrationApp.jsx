@@ -1441,7 +1441,7 @@ function PeopleTab({ filterQs, onError, canDelete = false, canConvert = false, p
                     {p.converted_contact_id ? (
                       <span className="inline-flex items-center gap-1 mr-1 text-[11px] font-semibold px-2 py-1 rounded-md border bg-emerald-50 text-emerald-700 border-emerald-200"
                             title={`Converted${p.converted_at ? ` on ${new Date(p.converted_at).toLocaleString("en-IN")}` : ""} — Contact #${p.converted_contact_id}`} data-testid="converted-badge">
-                        <UserCheck size={12} />Converted · Contact #{p.converted_contact_id}
+                        <UserCheck size={12} />{p.convert_mode === "auto" ? "Auto-converted" : "Converted"} · Contact #{p.converted_contact_id}
                       </span>
                     ) : p.convert_eligible && canConvert ? (
                       <button onClick={() => convertToContact(p)} disabled={!!converting} data-testid="convert-btn"

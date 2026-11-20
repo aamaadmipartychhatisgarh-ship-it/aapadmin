@@ -12,6 +12,7 @@ import { phoneKey, last10Sql } from "@/lib/phone";
 import { ALREADY_A_WORKER, findExistingWorker, findContactByPhoneKey, withNamedLock, regPhoneKey } from "@/lib/registrationMatch";
 import { isMobileVerified, consumeVerification, otpConfigured } from "@/lib/registrationOtp";
 import { toPublicRegistrationPhoto, fromPublicRegistrationPhoto } from "@/lib/regPhotoUrl";
+import { afterRegistrationSaved } from "@/lib/registrationConvert";
 
 // The ONLY unauthenticated surface of the Voter & Worker Registration module.
 // Both public routes are thin wrappers over the two handlers at the bottom of
@@ -466,8 +467,8 @@ export async function submitPublicRegistration(req, token) {
       const insertArgs = [link.campaign_id, workerId, personType, name.slice(0, 160), mobile, address,
          assemblyId, assemblyName, ward, wardName, blockId, areaBooth, wantsWorker, workerRating, photoUrl,
          verificationId ? 1 : 0, ip, regNow(), contact?.id || null];
-      await query(`INSERT INTO reg_people (${insertCols}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?)`, insertArgs);
-      return { verificationId, contactId: contact?.id || null };
+      const ins = await query(`INSERT INTO reg_people (${insertCols}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?, ?, ?)`, insertArgs);
+      return { verificationId, contactId: contact?.id || null, newId: ins?.insertId || null };
     });
     if (locked.busy) {
       return NextResponse.json({ message: "Another entry for this number is being saved. Please try again in a moment." }, { status: 409, headers: NO_STORE });
@@ -489,6 +490,8 @@ export async function submitPublicRegistration(req, token) {
     // Spend the proof so one verification cannot be replayed to push a second
     // person through on the same number.
     await consumeVerification(verificationId);
+    // AUTOMATIC Contact conversion (Rank >= 10): done by the backend right after the save — never blocks or fails it.
+    if (out.newId) await afterRegistrationSaved(out.newId, { source: "registration" });
 
     // Just an acknowledgement — no counts, for the same reason the bootstrap
     // returns none: whoever is holding this link is a member of the public.
@@ -575,6 +578,8 @@ export async function updateOwnRegistration(req, token) {
        id, workerId, link.campaign_id]
     );
     if (verificationId) await consumeVerification(verificationId);
+    // Keep the linked Contact in step (changed, non-blank fields only) / convert if the Rank is now 10 or more.
+    await afterRegistrationSaved(id, { before: rec, source: "edit" });
 
     const [row] = await query(
       `SELECT id, person_type, name, mobile, photo_url, address, assembly_id, assembly_name,

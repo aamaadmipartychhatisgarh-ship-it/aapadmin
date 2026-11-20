@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireRegistrationAccess, NO_STORE, parseRegFilters } from "@/lib/registrationGuard";
 import { getRegSummary, getWorkerRanking, getWorkerPerformanceTotals, workerIdsForLocation, getBlockRanking, getWardOptions, getAssemblyRegistrationCounts } from "@/lib/registrationStats";
 import { peopleScopeCond, workerScopeCond } from "@/lib/registrationScope";
+import { runAutoConvertBackfill } from "@/lib/registrationConvert";
 
 // One payload for the whole dashboard — KPIs, the Top 10 worker ranking, the
 // ward ranking and the ward filter options. Sending them together keeps every
@@ -15,6 +16,9 @@ export async function GET(req) {
   try {
     const { session, error } = await requireRegistrationAccess();
     if (error) return error;
+    // One-time backfill of automatic Contact conversion (Rank >= 10) for workers registered before it existed — runs once,
+    // resumable; waited for briefly so the list already shows the result, never longer than a few seconds.
+    await Promise.race([runAutoConvertBackfill(), new Promise((r) => setTimeout(r, 8000))]);
     const { searchParams } = new URL(req.url);
     const f = parseRegFilters(searchParams);
     if (f.dateError) return NextResponse.json({ message: f.dateError }, { status: 400, headers: NO_STORE });
