@@ -1960,13 +1960,11 @@ function ProgressPanel({ refreshKey = 0 }) {
 }
 
 // Quick complaint capture — prefilled from the contact the caller is talking to.
-const COMPLAINT_TYPES = { water: "Water", roads: "Roads", electricity: "Electricity", ration: "Ration", other: "Other" };
 
 function ComplaintModal({ contact, districts, designations = [], onClose, onSaved }) {
   const [form, setForm] = useState({
     citizen_name: contact?.person_name || "",
     citizen_phone: contact?.phone_number || "",
-    type: "water",
     description: "",
     district_id: contact?.district_id || "",
   });
@@ -1985,11 +1983,11 @@ function ComplaintModal({ contact, districts, designations = [], onClose, onSave
 
   async function save() {
     setSaving(true); setError("");
-    const { citizen_name, citizen_phone, type, description, district_id } = form;
+    const { citizen_name, citizen_phone, description, district_id } = form;
     const r = await fetch("/api/complaints", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ citizen_name, citizen_phone, type, description, district_id, contact_id: linked ? contact.id : undefined, designation_from_contact: true }),
+      body: JSON.stringify({ citizen_name, citizen_phone, description, district_id, contact_id: linked ? contact.id : undefined, designation_from_contact: true }),
     });
     if (r.ok) { onSaved(); return; }
     const d = await r.json().catch(() => ({}));
@@ -2014,9 +2012,6 @@ function ComplaintModal({ contact, districts, designations = [], onClose, onSave
           <span className="text-gray-400 text-xs mr-1">Designation:</span>
           {designationName || <span className="text-gray-400">{linked ? "No designation" : "—"}</span>}
         </div>
-        <select className={inp} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-          {Object.entries(COMPLAINT_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
         <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
           <option value="">District</option>
           {districts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}

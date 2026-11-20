@@ -46,6 +46,13 @@ export async function ensureComplaintColumns() {
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complaints' AND COLUMN_NAME = 'citizen_address'`
     );
     if (Number(addr[0]?.n || 0) === 0) await query("ALTER TABLE complaints ADD COLUMN citizen_address TEXT NULL");
+    // Type of Complaint was removed from the registration form: the column becomes OPTIONAL (NULL = no type). Its allowed values
+    // and every existing complaint's saved type are kept exactly as they are — only the NOT NULL / default 'other' goes.
+    const [tc] = await query(
+      `SELECT IS_NULLABLE AS n, COLUMN_TYPE AS t FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complaints' AND COLUMN_NAME = 'type'`
+    );
+    if (tc && tc.n === "NO") await query(`ALTER TABLE complaints MODIFY COLUMN \`type\` ${tc.t} NULL DEFAULT NULL`);
     // Assigned user + created by + last updated + assignment history (lib/complaintAccess).
     await ensureComplaintAssignmentSchema();
     ensuredDesignation = true;
@@ -98,8 +105,9 @@ export async function GET(req) {
 
 // DUPLICATE RULE: a complaint is refused only when Phone number (last 10 digits, so +91 / 0 / spaces / dashes do not
 // matter) + Department + Subject ALL match a complaint registered within the previous 7 days. In this data model the
-// Department is the complaint's Type and the Subject is its Description (trimmed, spaces collapsed, case-insensitive).
+// Department is the complaint's Type (now optional — no type matches no type) and the Subject is its Description (trimmed, spaces collapsed, case-insensitive).
 // Nothing else blocks a registration; with no phone number or no description there is nothing to compare, so it is allowed.
+const COMPLAINT_TYPES = ["water", "roads", "electricity", "ration", "other"];
 const DUPLICATE_COMPLAINT_MESSAGE = "Complaint already registered within the last 1 week.";
 const DUPLICATE_WINDOW_DAYS = 7;
 const normSubject = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
@@ -126,7 +134,9 @@ export async function POST(req) {
     // ignored (no contact / number not owned by it → no designation).
     let designationId = d.designation_id || null;
     if (d.designation_from_contact) designationId = d.contact_id ? await contactDesignationId(loc.contact_id) : null;
-    const type = d.type || "other";
+    // Type of Complaint is no longer asked: a complaint is registered without one (NULL). An older client that still sends a valid
+    // type has it saved; anything else is ignored rather than failing the registration.
+    const type = COMPLAINT_TYPES.includes(d.type) ? d.type : null;
     const pKey = phoneKey(d.citizen_phone);
     const subject = normSubject(d.description);
     const params = [d.citizen_name, d.citizen_phone || null, String(d.citizen_address || "").trim().slice(0, 1000) || null, type, d.description || null, designationId, d.district_id || loc.district_id || null, loc.assembly_id];
@@ -140,7 +150,7 @@ export async function POST(req) {
     // combination are serialised: the second one sees the first and is refused. Other combinations never wait.
     let res;
     if (pKey && subject) {
-      const lockName = "cmpl:" + createHash("md5").update(`${pKey}|${type}|${subject.toLowerCase()}`).digest("hex");
+      const lockName = "cmpl:" + createHash("md5").update(`${pKey}|${type ?? ""}|${subject.toLowerCase()}`).digest("hex");
       const conn = await getPool().getConnection();
       let locked = false;
       try {
@@ -150,7 +160,7 @@ export async function POST(req) {
         // created_at and NOW() are both the database's own clock/time zone, so the 7-day window is consistent.
         const [dup] = await conn.query(
           `SELECT id FROM complaints
-            WHERE ${last10Sql("citizen_phone")} = ? AND type = ? AND ${SUBJECT_SQL} = ?
+            WHERE ${last10Sql("citizen_phone")} = ? AND type <=> ? AND ${SUBJECT_SQL} = ?
               AND created_at >= NOW() - INTERVAL ${DUPLICATE_WINDOW_DAYS} DAY
             LIMIT 1`,
           [pKey, type, subject]

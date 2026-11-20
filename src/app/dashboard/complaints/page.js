@@ -174,7 +174,7 @@ function Body({ previewingCaller, viewAsCaller }) {
                       <td className="px-4 py-3 text-gray-600">{cm.designation_name || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600">{cm.district_name || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{cm.assembly_name || "—"}</td>
-                      <td className="px-4 py-3 text-gray-600">{(TYPE_META[cm.type] || TYPE_META.other).label}</td>
+                      <td className="px-4 py-3 text-gray-600">{cm.type ? (TYPE_META[cm.type] || TYPE_META.other).label : <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-gray-600 max-w-xs"><div className="line-clamp-2 whitespace-pre-wrap">{cm.description || <span className="text-gray-300">—</span>}</div></td>
                       <td className="px-4 py-3"><span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS[cm.status]}`}>{cm.status.replace("_", " ")}</span></td>
                       <td className="px-4 py-3 text-gray-600" data-testid="cm-assigned">{cm.assigned_user_name || "—"}</td>
@@ -204,7 +204,7 @@ function SumCard({ label, value, accent, danger }) {
 }
 
 function AddModal({ onClose, onSaved }) {
-  const [form, setForm] = useState({ citizen_name: "", citizen_phone: "", citizen_address: "", type: "water", designation_id: "", description: "", district_id: "" });
+  const [form, setForm] = useState({ citizen_name: "", citizen_phone: "", citizen_address: "", designation_id: "", description: "", district_id: "" });
   const [districts, setDistricts] = useState([]);
   const [designations, setDesignations] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -238,9 +238,6 @@ function AddModal({ onClose, onSaved }) {
         <select className={inp} value={form.designation_id} onChange={(e) => setForm({ ...form, designation_id: e.target.value })}>
           <option value="">Designation (optional)</option>
           {designations.map((dg) => <option key={dg.id} value={dg.id}>{dg.name}</option>)}
-        </select>
-        <select className={inp} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-          {Object.entries(TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
         <select className={inp} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value })}>
           <option value="">District</option>
