@@ -4,8 +4,11 @@ import { authOptions } from "@/lib/auth";
 import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
+import { REMOVED_MASTER_OPTIONS, removedMasterOption } from "@/lib/masterDataRemoved";
 
 export async function PUT(req, { params }) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.call_status) return removedMasterOption("call_status");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {
@@ -27,6 +30,8 @@ export async function PUT(req, { params }) {
 }
 
 export async function DELETE(req, { params }) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.call_status) return removedMasterOption("call_status");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {

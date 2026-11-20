@@ -8,6 +8,7 @@ import { ensureDesignationLevelColumn, isValidDesignationLevel } from "@/lib/des
 import { ensureWingSchema } from "@/lib/wingDesignations";
 import { ensureDesignationWingsSchema, setDesignationWings } from "@/lib/designationWings";
 import { logMasterDataChange } from "@/lib/audit";
+import { REMOVED_MASTER_OPTIONS, removedMasterOption } from "@/lib/masterDataRemoved";
 
 // POST /api/designations/[id]/wings  { name?, level?, wings: [wingName, ...] }
 //
@@ -15,6 +16,8 @@ import { logMasterDataChange } from "@/lib/audit";
 // full set of Wings it belongs to (designation_wings). No sibling per-wing rows are
 // created or deleted — the entry keeps its id, rank and assignments.
 export async function POST(req, { params }) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.designation) return removedMasterOption("designation");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {

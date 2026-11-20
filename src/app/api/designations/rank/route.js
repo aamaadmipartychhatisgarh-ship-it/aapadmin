@@ -6,6 +6,7 @@ import { pageAllowed } from "@/lib/pageAccess";
 import { query, withConnection } from "@/lib/db";
 import { ensureWingSchema } from "@/lib/wingDesignations";
 import { logMasterDataChange } from "@/lib/audit";
+import { REMOVED_MASTER_OPTIONS, removedMasterOption } from "@/lib/masterDataRemoved";
 
 // POST /api/designations/rank
 //   { id, rank }        → set ONE designation's GLOBAL rank (1-based), re-sequencing
@@ -40,6 +41,8 @@ async function resequence(ids) {
 }
 
 export async function POST(req) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.designation_rank) return removedMasterOption("designation_rank");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {

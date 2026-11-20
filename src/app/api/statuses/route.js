@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/permissions";
 import { pageAllowed } from "@/lib/pageAccess";
 import { query } from "@/lib/db";
 import { ensureRepeatOffSchema } from "@/lib/repeatOff";
+import { REMOVED_MASTER_OPTIONS, removedMasterOption } from "@/lib/masterDataRemoved";
 
 export async function GET() {
   try {
@@ -31,6 +32,8 @@ export async function GET() {
 }
 
 export async function POST(req) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.call_status) return removedMasterOption("call_status");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {

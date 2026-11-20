@@ -9,6 +9,7 @@ import { ensureDesignationLevelColumn, isValidDesignationLevel } from "@/lib/des
 import { ensureDesignationWingsSchema, wingsMapFor, setDesignationWings } from "@/lib/designationWings";
 import { ensureWingSchema } from "@/lib/wingDesignations";
 import { logMasterDataChange } from "@/lib/audit";
+import { REMOVED_MASTER_OPTIONS, removedMasterOption } from "@/lib/masterDataRemoved";
 
 // L3 — the list read feature-detects three optional columns on every GET. Cache a
 // TRUE result for the process lifetime (a column, once present, never disappears);
@@ -87,6 +88,8 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.designation) return removedMasterOption("designation");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {

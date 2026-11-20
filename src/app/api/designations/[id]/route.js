@@ -8,8 +8,11 @@ import { logAudit, logMasterDataChange } from "@/lib/audit";
 import { ensureDesignationLevelColumn, isValidDesignationLevel } from "@/lib/designationLevels";
 import { ensureWingSchema } from "@/lib/wingDesignations";
 import { ensureDesignationWingsSchema, setDesignationWings } from "@/lib/designationWings";
+import { REMOVED_MASTER_OPTIONS, removedMasterOption } from "@/lib/masterDataRemoved";
 
 export async function PUT(req, { params }) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.designation) return removedMasterOption("designation");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {
@@ -55,6 +58,8 @@ export async function PUT(req, { params }) {
 }
 
 export async function DELETE(req, { params }) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.designation) return removedMasterOption("designation");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {

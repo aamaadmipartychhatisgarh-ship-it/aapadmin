@@ -7,6 +7,7 @@ import { withConnection } from "@/lib/db";
 import { isValidDesignationLevel, designationLevelLabel } from "@/lib/designationLevels";
 import { ensureWingSchema } from "@/lib/wingDesignations";
 import { logMasterDataChange } from "@/lib/audit";
+import { REMOVED_MASTER_OPTIONS, removedMasterOption } from "@/lib/masterDataRemoved";
 
 // POST /api/designations/reorder  { level, wing, orderedIds: [id, ...] }
 //
@@ -19,6 +20,8 @@ import { logMasterDataChange } from "@/lib/audit";
 //  - Each UPDATE is scoped to the (level, wing) bucket with null-safe matching, so
 //    an id from a different bucket is ignored and a row can never jump buckets.
 export async function POST(req) {
+  // Removed from Master Data — management only; the records stay (lib/masterDataRemoved).
+  if (REMOVED_MASTER_OPTIONS.designation_rank) return removedMasterOption("designation_rank");
   try {
     const session = await getServerSession(authOptions);
     if (!(await pageAllowed(session, "master_data", session && isAdmin(session)))) {
